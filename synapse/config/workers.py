@@ -22,7 +22,7 @@
 
 import argparse
 import logging
-from typing import Any, Union
+from typing import Any
 
 import attr
 
@@ -119,7 +119,7 @@ class InstanceUnixLocationConfig(ParseModel):
         return f"{self.path}"
 
 
-InstanceLocationConfig = Union[InstanceTcpLocationConfig, InstanceUnixLocationConfig]
+InstanceLocationConfig = InstanceTcpLocationConfig | InstanceUnixLocationConfig
 
 
 @attr.s
@@ -341,7 +341,7 @@ class WorkerConfig(Config):
                     % MAIN_PROCESS_INSTANCE_MAP_NAME
                 )
 
-        # type-ignore: the expression `Union[A, B]` is not a Type[Union[A, B]] currently
+        # type-ignore: the expression `A | B` is not a `type[A | B]` currently
         self.instance_map: dict[str, InstanceLocationConfig] = (
             parse_and_validate_mapping(
                 instance_map,

@@ -21,7 +21,6 @@ from typing import (
     Literal,
     Mapping,
     MutableMapping,
-    Union,
     cast,
 )
 
@@ -80,7 +79,7 @@ logger = logging.getLogger(__name__)
 
 # Helper definition for the types that we might return. We do this to avoid
 # copying data between types (which can be expensive for many rooms).
-RoomsForUserType = Union[RoomsForUserStateReset, RoomsForUser, RoomsForUserSlidingSync]
+RoomsForUserType = RoomsForUserStateReset | RoomsForUser | RoomsForUserSlidingSync
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)

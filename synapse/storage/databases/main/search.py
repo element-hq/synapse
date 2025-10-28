@@ -28,7 +28,6 @@ from typing import (
     Any,
     Collection,
     Iterable,
-    Union,
     cast,
 )
 
@@ -816,7 +815,7 @@ class SearchToken(enum.Enum):
     And = enum.auto()
 
 
-Token = Union[str, Phrase, SearchToken]
+Token = str | Phrase | SearchToken
 TokenList = list[Token]
 
 

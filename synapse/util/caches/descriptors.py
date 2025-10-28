@@ -33,7 +33,6 @@ from typing import (
     Protocol,
     Sequence,
     TypeVar,
-    Union,
     cast,
 )
 from weakref import WeakValueDictionary
@@ -52,7 +51,7 @@ from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
-CacheKey = Union[tuple, Any]
+CacheKey = tuple | Any
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -470,7 +469,7 @@ class _CacheContext:
     on a lower level.
     """
 
-    Cache = Union[DeferredCache, LruCache]
+    Cache = DeferredCache | LruCache
 
     _cache_context_objects: """WeakValueDictionary[
         tuple["_CacheContext.Cache", CacheKey], "_CacheContext"

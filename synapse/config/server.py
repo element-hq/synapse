@@ -25,7 +25,7 @@ import logging
 import os.path
 import urllib.parse
 from textwrap import indent
-from typing import Any, Iterable, TypedDict, Union
+from typing import Any, Iterable, TypedDict
 from urllib.request import getproxies_environment
 
 import attr
@@ -279,7 +279,7 @@ class UnixListenerConfig:
         return False
 
 
-ListenerConfig = Union[TCPListenerConfig, UnixListenerConfig]
+ListenerConfig = TCPListenerConfig | UnixListenerConfig
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)

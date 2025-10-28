@@ -85,8 +85,8 @@ MutableStateMap = MutableMapping[StateKey, T]
 
 # JSON types. These could be made stronger, but will do for now.
 # A "simple" (canonical) JSON value.
-SimpleJsonValue = Optional[str | int | bool]
-JsonValue = Union[list[SimpleJsonValue], tuple[SimpleJsonValue, ...], SimpleJsonValue]
+SimpleJsonValue = str | int | bool | None
+JsonValue = list[SimpleJsonValue] | tuple[SimpleJsonValue, ...] | SimpleJsonValue
 # A JSON-serialisable dict.
 JsonDict = dict[str, Any]
 # A JSON-serialisable mapping; roughly speaking an immutable JSONDict.
@@ -101,12 +101,12 @@ JsonSerializable = object
 #
 # StrCollection is an unordered collection of strings. If ordering is important,
 # StrSequence can be used instead.
-StrCollection = Union[tuple[str, ...], list[str], AbstractSet[str]]
+StrCollection = tuple[str, ...] | list[str] | AbstractSet[str]
 # Sequence[str] that does not include str itself; str being a Sequence[str]
 # is very misleading and results in bugs.
 #
 # Unlike StrCollection, StrSequence is an ordered collection of strings.
-StrSequence = Union[tuple[str, ...], list[str]]
+StrSequence = tuple[str, ...] | list[str]
 
 
 # Note that this seems to require inheriting *directly* from Interface in order

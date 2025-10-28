@@ -35,7 +35,6 @@ from typing import (
     Generic,
     Iterable,
     TypeVar,
-    Union,
 )
 
 import attr
@@ -163,7 +162,7 @@ class _UpdateCurrentStateTask:
         return isinstance(task, _UpdateCurrentStateTask)
 
 
-_EventPersistQueueTask = Union[_PersistEventsTask, _UpdateCurrentStateTask]
+_EventPersistQueueTask = _PersistEventsTask | _UpdateCurrentStateTask
 _PersistResult = TypeVar("_PersistResult")
 
 

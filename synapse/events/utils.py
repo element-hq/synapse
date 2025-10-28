@@ -30,7 +30,6 @@ from typing import (
     Mapping,
     Match,
     MutableMapping,
-    Union,
 )
 
 import attr
@@ -754,7 +753,7 @@ class EventClientSerializer:
         self._add_extra_fields_to_unsigned_client_event_callbacks.append(callback)
 
 
-_PowerLevel = Union[str, int]
+_PowerLevel = str | int
 PowerLevelsContent = Mapping[str, _PowerLevel | Mapping[str, _PowerLevel]]
 
 

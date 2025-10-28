@@ -26,14 +26,13 @@ from typing import (
     Mapping,
     Protocol,
     Sequence,
-    Union,
 )
 
 """
 Some very basic protocol definitions for the DB-API2 classes specified in PEP-249
 """
 
-SQLQueryParameters = Union[Sequence[Any], Mapping[str, Any]]
+SQLQueryParameters = Sequence[Any] | Mapping[str, Any]
 
 
 class Cursor(Protocol):

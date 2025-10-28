@@ -104,7 +104,7 @@ class DictProperty(Generic[T]):
         self,
         instance: _DictPropertyInstance | None,
         owner: type[_DictPropertyInstance] | None = None,
-    ) -> Union[T, "DictProperty"]:
+    ) -> T | "DictProperty":
         # if the property is accessed as a class property rather than an instance
         # property, return the property itself rather than the value
         if instance is None:
@@ -170,7 +170,7 @@ class DefaultDictProperty(DictProperty, Generic[T]):
         self,
         instance: _DictPropertyInstance | None,
         owner: type[_DictPropertyInstance] | None = None,
-    ) -> Union[T, "DefaultDictProperty"]:
+    ) -> T | "DefaultDictProperty":
         if instance is None:
             return self
         assert isinstance(instance, EventBase)
@@ -209,7 +209,7 @@ class EventBase(metaclass=abc.ABCMeta):
     hashes: DictProperty[dict[str, str]] = DictProperty("hashes")
     origin_server_ts: DictProperty[int] = DictProperty("origin_server_ts")
     sender: DictProperty[str] = DictProperty("sender")
-    # TODO state_key should be Optional[str]. This is generally asserted in Synapse
+    # TODO state_key should be str | None. This is generally asserted in Synapse
     # by calling is_state() first (which ensures it is not None), but it is hard (not possible?)
     # to properly annotate that calling is_state() asserts that state_key exists
     # and is non-None. It would be better to replace such direct references with

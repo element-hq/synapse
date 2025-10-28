@@ -18,10 +18,10 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Iterable, Mapping, Union
+from typing import Iterable, Mapping
 
 # the type of the query params, to be passed into `urlencode` with `doseq=True`.
-QueryParamValue = Union[str, bytes, Iterable[str | bytes]]
-QueryParams = Union[Mapping[str, QueryParamValue], Mapping[bytes, QueryParamValue]]
+QueryParamValue = str | bytes | Iterable[str | bytes]
+QueryParams = Mapping[str, QueryParamValue] | Mapping[bytes, QueryParamValue]
 
 __all__ = ["QueryParams"]

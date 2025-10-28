@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import attr
@@ -61,7 +61,7 @@ BASE_URL = "https://synapse/"
 class FakeAuthnResponse:
     ava = attr.ib(type=dict)
     assertions = attr.ib(type=list, factory=list)
-    in_response_to = attr.ib(type=Optional[str], default=None)
+    in_response_to = attr.ib(type=(str | None), default=None)
 
 
 class TestMappingProvider:

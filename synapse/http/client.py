@@ -29,7 +29,6 @@ from typing import (
     Callable,
     Mapping,
     Protocol,
-    Union,
 )
 
 import attr
@@ -117,7 +116,7 @@ incoming_responses_counter = Counter(
 # the type of the headers map, to be passed to the t.w.h.Headers.
 #
 # The actual type accepted by Twisted is
-#   Mapping[Union[str, bytes], Sequence[Union[str, bytes]] ,
+#   Mapping[str | bytes], Sequence[str | bytes] ,
 # allowing us to mix and match str and bytes freely. However: any str is also a
 # Sequence[str]; passing a header string value which is a
 # standalone str is interpreted as a sequence of 1-codepoint strings. This is a disastrous footgun.
@@ -125,17 +124,17 @@ incoming_responses_counter = Counter(
 #
 # We also simplify the keys to be either all str or all bytes. This helps because
 # Dict[K, V] is invariant in K (and indeed V).
-RawHeaders = Union[Mapping[str, "RawHeaderValue"], Mapping[bytes, "RawHeaderValue"]]
+RawHeaders = Mapping[str, "RawHeaderValue"] | Mapping[bytes, "RawHeaderValue"]
 
 # the value actually has to be a List, but List is invariant so we can't specify that
 # the entries can either be Lists or bytes.
-RawHeaderValue = Union[
-    StrSequence,
-    list[bytes],
-    list[str | bytes],
-    tuple[bytes, ...],
-    tuple[str | bytes, ...],
-]
+RawHeaderValue = (
+    StrSequence |
+    list[bytes] |
+    list[str | bytes] |
+    tuple[bytes, ...] |
+    tuple[str | bytes, ...]
+)
 
 
 def _is_ip_blocked(

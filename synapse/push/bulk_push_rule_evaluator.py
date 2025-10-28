@@ -26,7 +26,6 @@ from typing import (
     Collection,
     Mapping,
     Sequence,
-    Union,
     cast,
 )
 
@@ -554,7 +553,7 @@ class BulkPushRuleEvaluator:
 MemberMap = dict[str, EventIdMembership | None]
 Rule = dict[str, dict]
 RulesByUser = dict[str, list[Rule]]
-StateGroup = Union[object, int]
+StateGroup = object | int
 
 
 def _is_simple_value(value: Any) -> bool:

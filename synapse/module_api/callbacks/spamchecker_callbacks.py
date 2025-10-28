@@ -30,7 +30,6 @@ from typing import (
     Callable,
     Collection,
     Literal,
-    Union,
     cast,
 )
 
@@ -84,26 +83,26 @@ USER_MAY_SEND_3PID_INVITE_CALLBACK = Callable[
         Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool
     ],
 ]
-USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE = Union[
-    Literal["NOT_SPAM"],
-    Codes,
+USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE = (
+    Literal["NOT_SPAM"] |
+    Codes |
     # Highly experimental, not officially part of the spamchecker API, may
     # disappear without warning depending on the results of ongoing
     # experiments.
     # Use this to return additional information as part of an error.
-    tuple[Codes, JsonDict],
+    tuple[Codes, JsonDict] |
     # Deprecated
-    bool,
-]
-USER_MAY_CREATE_ROOM_CALLBACK = Union[
+    bool
+)
+USER_MAY_CREATE_ROOM_CALLBACK = (
     Callable[
         [str, JsonDict],
         Awaitable[USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE],
-    ],
+    ] |
     Callable[  # Single argument variant for backwards compatibility
         [str], Awaitable[USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE]
-    ],
-]
+    ]
+)
 USER_MAY_CREATE_ROOM_ALIAS_CALLBACK = Callable[
     [str, RoomAlias],
     Awaitable[
@@ -122,10 +121,10 @@ USER_MAY_SEND_STATE_EVENT_CALLBACK = Callable[
         Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict]
     ],
 ]
-CHECK_USERNAME_FOR_SPAM_CALLBACK = Union[
-    Callable[[UserProfile], Awaitable[bool]],
-    Callable[[UserProfile, str], Awaitable[bool]],
-]
+CHECK_USERNAME_FOR_SPAM_CALLBACK = (
+    Callable[[UserProfile], Awaitable[bool]] |
+    Callable[[UserProfile, str], Awaitable[bool]]
+)
 LEGACY_CHECK_REGISTRATION_FOR_SPAM_CALLBACK = Callable[
     [
         dict | None,
@@ -908,7 +907,7 @@ class SpamCheckerModuleApiCallbacks:
 
             async def check_media_file_for_spam(
                 self, file: ReadableFileWrapper, file_info: FileInfo
-            ) -> Union[Codes, Literal["NOT_SPAM"]]:
+            ) -> Codes | Literal["NOT_SPAM"]:
                 buffer = BytesIO()
                 await file.write_chunks_to(buffer.write)
 
