@@ -1,1 +1,0 @@
-Fix users being unable to log in if their password, or the server's configured pepper, was too long.

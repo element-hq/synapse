@@ -1,3 +1,12 @@
+# Synapse 1.141.0rc2 (2025-10-28)
+
+## Bugfixes
+
+- Fix users being unable to log in if their password, or the server's configured pepper, was too long. ([\#19101](https://github.com/element-hq/synapse/issues/19101))
+
+
+
+
 # Synapse 1.141.0rc1 (2025-10-21)
 
 ## Deprecation of MacOS Python wheels
