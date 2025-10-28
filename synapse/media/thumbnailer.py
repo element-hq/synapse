@@ -97,16 +97,7 @@ class Thumbnailer:
         self.transpose_method = None
         try:
             # We don't use ImageOps.exif_transpose since it crashes with big EXIF
-            #
-            # Ignore safety: Pillow seems to acknowledge that this method is
-            # "private, experimental, but generally widely used". Pillow 6
-            # includes a public getexif() method (no underscore) that we might
-            # consider using instead when we can bump that dependency.
-            #
-            # At the time of writing, Debian buster (currently oldstable)
-            # provides version 5.4.1. It's expected to EOL in mid-2022, see
-            # https://wiki.debian.org/DebianReleases#Production_Releases
-            image_exif = self.image._getexif()  # type: ignore
+            image_exif = self.image.getexif()
             if image_exif is not None:
                 image_orientation = image_exif.get(EXIF_ORIENTATION_TAG)
                 assert type(image_orientation) is int  # noqa: E721

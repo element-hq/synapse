@@ -99,24 +99,24 @@ set_output("trial_test_matrix", test_matrix)
 
 # First calculate the various sytest jobs.
 #
-# For each type of test we only run on bullseye on PRs
+# For each type of test we only run on bookworm on PRs
 
 
 sytest_tests = [
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "bookworm",
     },
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "bookworm",
         "postgres": "postgres",
     },
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "bookworm",
         "postgres": "multi-postgres",
         "workers": "workers",
     },
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "bookworm",
         "postgres": "multi-postgres",
         "workers": "workers",
         "reactor": "asyncio",
@@ -127,11 +127,11 @@ if not IS_PR:
     sytest_tests.extend(
         [
             {
-                "sytest-tag": "bullseye",
+                "sytest-tag": "bookworm",
                 "reactor": "asyncio",
             },
             {
-                "sytest-tag": "bullseye",
+                "sytest-tag": "bookworm",
                 "postgres": "postgres",
                 "reactor": "asyncio",
             },

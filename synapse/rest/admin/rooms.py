@@ -63,6 +63,50 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class AdminRoomHierarchy(RestServlet):
+    """
+    Given a room, returns room details on that room and any space children of
+    the provided room. Does not reach out over federation to fetch information about
+    any remote rooms which the server is not currently participating in
+    """
+
+    PATTERNS = admin_patterns("/rooms/(?P<room_id>[^/]*)/hierarchy$")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self._room_summary_handler = hs.get_room_summary_handler()
+        self._store = hs.get_datastores().main
+        self._storage_controllers = hs.get_storage_controllers()
+
+    async def on_GET(
+        self, request: SynapseRequest, room_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self._auth.get_user_by_req(request)
+        await assert_user_is_admin(self._auth, requester)
+
+        max_depth = parse_integer(request, "max_depth")
+        limit = parse_integer(request, "limit")
+
+        room_entry_summary = await self._room_summary_handler.get_room_hierarchy(
+            requester,
+            room_id,
+            # We omit details about remote rooms because we only care
+            # about managing rooms local to the homeserver. This
+            # also immensely helps with the response time of the
+            # endpoint since we don't need to reach out over federation.
+            # There is a trade-off as this will leave holes where
+            # information about public/peekable remote rooms the
+            # server is not participating in will be omitted.
+            omit_remote_room_hierarchy=True,
+            admin_skip_room_visibility_check=True,
+            max_depth=max_depth,
+            limit=limit,
+            from_token=parse_string(request, "from"),
+        )
+
+        return HTTPStatus.OK, room_entry_summary
+
+
 class RoomRestV2Servlet(RestServlet):
     """Delete a room from server asynchronously with a background task.
 
