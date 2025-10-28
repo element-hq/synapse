@@ -25,14 +25,12 @@ from synapse.app.homeserver import SynapseHomeServer
 from synapse.logging.context import LoggingContext
 from synapse.storage.background_updates import UpdaterStatus
 
-from tests.unittest import TestCase, logcontext_clean
-
 from tests.server import (
     cleanup_test_reactor_system_event_triggers,
     get_clock,
     setup_test_homeserver,
 )
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, logcontext_clean
 
 
 class HomeserverCleanShutdownTestCase(HomeserverTestCase):

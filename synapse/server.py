@@ -51,7 +51,6 @@ from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
 from twisted.web.resource import Resource
 
-from synapse.logging.context import PreserveLoggingContext
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.auth.mas import MasDelegatedAuth
@@ -144,6 +143,7 @@ from synapse.http.client import (
     SimpleHttpClient,
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
+from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import (
     all_later_gauges_to_clean_up_on_shutdown,
