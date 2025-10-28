@@ -21,7 +21,7 @@
 
 import itertools
 import logging
-from typing import TYPE_CHECKING, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable
 
 import attr
 from unpaddedbase64 import decode_base64, encode_base64
@@ -117,7 +117,7 @@ class SearchHandler:
         return historical_room_ids
 
     async def search(
-        self, requester: Requester, content: JsonDict, batch: Optional[str] = None
+        self, requester: Requester, content: JsonDict, batch: str | None = None
     ) -> JsonDict:
         """Performs a full text search for a user.
 
@@ -226,18 +226,18 @@ class SearchHandler:
     async def _search(
         self,
         requester: Requester,
-        batch_group: Optional[str],
-        batch_group_key: Optional[str],
-        batch_token: Optional[str],
+        batch_group: str | None,
+        batch_group_key: str | None,
+        batch_token: str | None,
         search_term: str,
         keys: list[str],
         filter_dict: JsonDict,
         order_by: str,
         include_state: bool,
         group_keys: list[str],
-        event_context: Optional[bool],
-        before_limit: Optional[int],
-        after_limit: Optional[int],
+        event_context: bool | None,
+        before_limit: int | None,
+        after_limit: int | None,
         include_profile: bool,
     ) -> JsonDict:
         """Performs a full text search for a user.
@@ -307,7 +307,7 @@ class SearchHandler:
                 }
             }
 
-        sender_group: Optional[dict[str, JsonDict]]
+        sender_group: dict[str, JsonDict] | None
 
         if order_by == "rank":
             search_result, sender_group = await self._search_by_rank(
@@ -517,10 +517,10 @@ class SearchHandler:
         search_term: str,
         keys: Iterable[str],
         search_filter: Filter,
-        batch_group: Optional[str],
-        batch_group_key: Optional[str],
-        batch_token: Optional[str],
-    ) -> tuple[_SearchResult, Optional[str]]:
+        batch_group: str | None,
+        batch_group_key: str | None,
+        batch_token: str | None,
+    ) -> tuple[_SearchResult, str | None]:
         """
         Performs a full text search for a user ordering by recent.
 

@@ -15,7 +15,7 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -29,7 +29,7 @@ from ._base import Config, ConfigError
 class TransportConfigModel(ParseModel):
     type: StrictStr
 
-    livekit_service_url: Optional[StrictStr] = Field(default=None)
+    livekit_service_url: StrictStr | None = Field(default=None)
     """An optional livekit service URL. Only required if type is "livekit"."""
 
     @validator("livekit_service_url", always=True)

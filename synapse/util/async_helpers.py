@@ -40,9 +40,7 @@ from typing import (
     Hashable,
     Iterable,
     Literal,
-    Optional,
     TypeVar,
-    Union,
     overload,
 )
 
@@ -104,8 +102,8 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
     __slots__ = ["_deferred", "_observers", "_result"]
 
     _deferred: "defer.Deferred[_T]"
-    _observers: Union[list["defer.Deferred[_T]"], tuple[()]]
-    _result: Union[None, tuple[Literal[True], _T], tuple[Literal[False], Failure]]
+    _observers: list["defer.Deferred[_T]"] | tuple[()]
+    _result: None | tuple[Literal[True], _T] | tuple[Literal[False], Failure]
 
     def __init__(self, deferred: "defer.Deferred[_T]", consumeErrors: bool = False):
         object.__setattr__(self, "_deferred", deferred)
@@ -132,7 +130,7 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
                     )
             return r
 
-        def errback(f: Failure) -> Optional[Failure]:
+        def errback(f: Failure) -> Failure | None:
             object.__setattr__(self, "_result", (False, f))
 
             # once we have set _result, no more entries will be added to _observers,
@@ -187,7 +185,7 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
     def has_succeeded(self) -> bool:
         return self._result is not None and self._result[0] is True
 
-    def get_result(self) -> Union[_T, Failure]:
+    def get_result(self) -> _T | Failure:
         if self._result is None:
             raise ValueError(f"{self!r} has no result yet")
         return self._result[1]
@@ -402,80 +400,80 @@ def gather_results(  # type: ignore[misc]
 
 @overload
 async def gather_optional_coroutines(
-    *coroutines: Unpack[tuple[Optional[Coroutine[Any, Any, T1]]]],
-) -> tuple[Optional[T1]]: ...
+    *coroutines: Unpack[tuple[Coroutine[Any, Any, T1] | None]],
+) -> tuple[T1 | None]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
         tuple[
-            Optional[Coroutine[Any, Any, T1]],
-            Optional[Coroutine[Any, Any, T2]],
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
         ]
     ],
-) -> tuple[Optional[T1], Optional[T2]]: ...
+) -> tuple[T1 | None, T2 | None]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
         tuple[
-            Optional[Coroutine[Any, Any, T1]],
-            Optional[Coroutine[Any, Any, T2]],
-            Optional[Coroutine[Any, Any, T3]],
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
+            Coroutine[Any, Any, T3] | None,
         ]
     ],
-) -> tuple[Optional[T1], Optional[T2], Optional[T3]]: ...
+) -> tuple[T1 | None, T2 | None, T3 | None]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
         tuple[
-            Optional[Coroutine[Any, Any, T1]],
-            Optional[Coroutine[Any, Any, T2]],
-            Optional[Coroutine[Any, Any, T3]],
-            Optional[Coroutine[Any, Any, T4]],
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
+            Coroutine[Any, Any, T3] | None,
+            Coroutine[Any, Any, T4] | None,
         ]
     ],
-) -> tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4]]: ...
+) -> tuple[T1 | None, T2 | None, T3 | None, T4 | None]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
         tuple[
-            Optional[Coroutine[Any, Any, T1]],
-            Optional[Coroutine[Any, Any, T2]],
-            Optional[Coroutine[Any, Any, T3]],
-            Optional[Coroutine[Any, Any, T4]],
-            Optional[Coroutine[Any, Any, T5]],
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
+            Coroutine[Any, Any, T3] | None,
+            Coroutine[Any, Any, T4] | None,
+            Coroutine[Any, Any, T5] | None,
         ]
     ],
-) -> tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5]]: ...
+) -> tuple[T1 | None, T2 | None, T3 | None, T4 | None, T5 | None]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
         tuple[
-            Optional[Coroutine[Any, Any, T1]],
-            Optional[Coroutine[Any, Any, T2]],
-            Optional[Coroutine[Any, Any, T3]],
-            Optional[Coroutine[Any, Any, T4]],
-            Optional[Coroutine[Any, Any, T5]],
-            Optional[Coroutine[Any, Any, T6]],
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
+            Coroutine[Any, Any, T3] | None,
+            Coroutine[Any, Any, T4] | None,
+            Coroutine[Any, Any, T5] | None,
+            Coroutine[Any, Any, T6] | None,
         ]
     ],
 ) -> tuple[
-    Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5], Optional[T6]
+    T1 | None, T2 | None, T3 | None, T4 | None, T5 | None, T6 | None
 ]: ...
 
 
 async def gather_optional_coroutines(
-    *coroutines: Unpack[tuple[Optional[Coroutine[Any, Any, T1]], ...]],
-) -> tuple[Optional[T1], ...]:
+    *coroutines: Unpack[tuple[Coroutine[Any, Any, T1] | None, ...]],
+) -> tuple[T1 | None, ...]:
     """Helper function that allows waiting on multiple coroutines at once.
 
     The return value is a tuple of the return values of the coroutines in order.
@@ -865,7 +863,7 @@ class DoneAwaitable(Awaitable[R]):
         return self.value
 
 
-def maybe_awaitable(value: Union[Awaitable[R], R]) -> Awaitable[R]:
+def maybe_awaitable(value: Awaitable[R] | R) -> Awaitable[R]:
     """Convert a value to an awaitable if not already an awaitable."""
     if inspect.isawaitable(value):
         return value

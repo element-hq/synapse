@@ -30,7 +30,6 @@ from typing import (
     Hashable,
     Iterable,
     Mapping,
-    Optional,
     Protocol,
     Sequence,
     TypeVar,
@@ -76,10 +75,10 @@ class _CacheDescriptorBase:
     def __init__(
         self,
         orig: Callable[..., Any],
-        num_args: Optional[int],
-        uncached_args: Optional[Collection[str]] = None,
+        num_args: int | None,
+        uncached_args: Collection[str] | None = None,
         cache_context: bool = False,
-        name: Optional[str] = None,
+        name: str | None = None,
     ):
         self.orig = orig
         self.name = name or orig.__name__
@@ -216,13 +215,13 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         *,
         orig: Callable[..., Any],
         max_entries: int = 1000,
-        num_args: Optional[int] = None,
-        uncached_args: Optional[Collection[str]] = None,
+        num_args: int | None = None,
+        uncached_args: Collection[str] | None = None,
         tree: bool = False,
         cache_context: bool = False,
         iterable: bool = False,
         prune_unread_entries: bool = True,
-        name: Optional[str] = None,
+        name: str | None = None,
     ):
         super().__init__(
             orig,
@@ -243,7 +242,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         self.prune_unread_entries = prune_unread_entries
 
     def __get__(
-        self, obj: Optional[HasServerNameAndClock], owner: Optional[type]
+        self, obj: HasServerNameAndClock | None, owner: type | None
     ) -> Callable[..., "defer.Deferred[Any]"]:
         # We need access to instance-level `obj.server_name` attribute
         assert obj is not None, (
@@ -331,8 +330,8 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
         orig: Callable[..., Awaitable[dict]],
         cached_method_name: str,
         list_name: str,
-        num_args: Optional[int] = None,
-        name: Optional[str] = None,
+        num_args: int | None = None,
+        name: str | None = None,
     ):
         """
         Args:
@@ -359,7 +358,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             )
 
     def __get__(
-        self, obj: Optional[Any], objtype: Optional[type] = None
+        self, obj: Any | None, objtype: type | None = None
     ) -> Callable[..., "defer.Deferred[dict[Hashable, Any]]"]:
         cached_method = getattr(obj, self.cached_method_name)
         cache: DeferredCache[CacheKey, Any] = cached_method.cache
@@ -508,13 +507,13 @@ class _CachedFunctionDescriptor:
     plugin."""
 
     max_entries: int
-    num_args: Optional[int]
-    uncached_args: Optional[Collection[str]]
+    num_args: int | None
+    uncached_args: Collection[str] | None
     tree: bool
     cache_context: bool
     iterable: bool
     prune_unread_entries: bool
-    name: Optional[str]
+    name: str | None
 
     def __call__(self, orig: F) -> CachedFunction[F]:
         d = DeferredCacheDescriptor(
@@ -534,13 +533,13 @@ class _CachedFunctionDescriptor:
 def cached(
     *,
     max_entries: int = 1000,
-    num_args: Optional[int] = None,
-    uncached_args: Optional[Collection[str]] = None,
+    num_args: int | None = None,
+    uncached_args: Collection[str] | None = None,
     tree: bool = False,
     cache_context: bool = False,
     iterable: bool = False,
     prune_unread_entries: bool = True,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> _CachedFunctionDescriptor:
     return _CachedFunctionDescriptor(
         max_entries=max_entries,
@@ -561,8 +560,8 @@ class _CachedListFunctionDescriptor:
 
     cached_method_name: str
     list_name: str
-    num_args: Optional[int] = None
-    name: Optional[str] = None
+    num_args: int | None = None
+    name: str | None = None
 
     def __call__(self, orig: F) -> CachedFunction[F]:
         d = DeferredCacheListDescriptor(
@@ -579,8 +578,8 @@ def cachedList(
     *,
     cached_method_name: str,
     list_name: str,
-    num_args: Optional[int] = None,
-    name: Optional[str] = None,
+    num_args: int | None = None,
+    name: str | None = None,
 ) -> _CachedListFunctionDescriptor:
     """Creates a descriptor that wraps a function in a `DeferredCacheListDescriptor`.
 

@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, Sequence
 
 import attr
 
@@ -40,7 +40,7 @@ class RoomAliasMapping:
 class DirectoryWorkerStore(CacheInvalidationWorkerStore):
     async def get_association_from_room_alias(
         self, room_alias: RoomAlias
-    ) -> Optional[RoomAliasMapping]:
+    ) -> RoomAliasMapping | None:
         """Gets the room_id and server list for a given room_alias
 
         Args:
@@ -94,7 +94,7 @@ class DirectoryWorkerStore(CacheInvalidationWorkerStore):
         room_alias: RoomAlias,
         room_id: str,
         servers: Iterable[str],
-        creator: Optional[str] = None,
+        creator: str | None = None,
     ) -> None:
         """Creates an association between a room alias and room_id/servers
 
@@ -136,7 +136,7 @@ class DirectoryWorkerStore(CacheInvalidationWorkerStore):
                 409, "Room alias %s already exists" % room_alias.to_string()
             )
 
-    async def delete_room_alias(self, room_alias: RoomAlias) -> Optional[str]:
+    async def delete_room_alias(self, room_alias: RoomAlias) -> str | None:
         room_id = await self.db_pool.runInteraction(
             "delete_room_alias", self._delete_room_alias_txn, room_alias
         )
@@ -145,7 +145,7 @@ class DirectoryWorkerStore(CacheInvalidationWorkerStore):
 
     def _delete_room_alias_txn(
         self, txn: LoggingTransaction, room_alias: RoomAlias
-    ) -> Optional[str]:
+    ) -> str | None:
         txn.execute(
             "SELECT room_id FROM room_aliases WHERE room_alias = ?",
             (room_alias.to_string(),),
@@ -174,7 +174,7 @@ class DirectoryWorkerStore(CacheInvalidationWorkerStore):
         self,
         old_room_id: str,
         new_room_id: str,
-        creator: Optional[str] = None,
+        creator: str | None = None,
     ) -> None:
         """Repoint all of the aliases for a given room, to a different room.
 

@@ -20,7 +20,7 @@
 #
 
 import urllib.parse
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 from unittest.mock import AsyncMock, patch
 
 from twisted.internet.testing import MemoryReactor
@@ -79,10 +79,10 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         self,
         relation_type: str,
         event_type: str,
-        key: Optional[str] = None,
-        content: Optional[dict] = None,
-        access_token: Optional[str] = None,
-        parent_id: Optional[str] = None,
+        key: str | None = None,
+        content: dict | None = None,
+        access_token: str | None = None,
+        parent_id: str | None = None,
         expected_response_code: int = 200,
     ) -> FakeChannel:
         """Helper function to send a relation pointing at `self.parent_id`
@@ -845,7 +845,7 @@ class RelationPaginationTestCase(BaseRelationsTestCase):
             )
             expected_event_ids.append(channel.json_body["event_id"])
 
-        prev_token: Optional[str] = ""
+        prev_token: str | None = ""
         found_event_ids: list[str] = []
         for _ in range(20):
             from_token = ""
@@ -1085,7 +1085,7 @@ class BundledAggregationsTestCase(BaseRelationsTestCase):
         relation_type: str,
         assertion_callable: Callable[[JsonDict], None],
         expected_db_txn_for_event: int,
-        access_token: Optional[str] = None,
+        access_token: str | None = None,
     ) -> None:
         """
         Makes requests to various endpoints which should include bundled aggregations

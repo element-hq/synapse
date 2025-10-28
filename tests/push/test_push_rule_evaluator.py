@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
 
 from twisted.internet.testing import MemoryReactor
 
@@ -148,7 +148,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         self,
         content: JsonMapping,
         *,
-        related_events: Optional[JsonDict] = None,
+        related_events: JsonDict | None = None,
         msc4210: bool = False,
         msc4306: bool = False,
     ) -> PushRuleEvaluator:
@@ -165,7 +165,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         )
         room_member_count = 0
         sender_power_level = 0
-        power_levels: dict[str, Union[int, dict[str, int]]] = {}
+        power_levels: dict[str, int | dict[str, int]] = {}
         return PushRuleEvaluator(
             _flatten_dict(event),
             False,
@@ -205,13 +205,13 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         self.assertTrue(evaluator.matches(condition, "@user:test", "foo bar"))
 
     def _assert_matches(
-        self, condition: JsonDict, content: JsonMapping, msg: Optional[str] = None
+        self, condition: JsonDict, content: JsonMapping, msg: str | None = None
     ) -> None:
         evaluator = self._get_evaluator(content)
         self.assertTrue(evaluator.matches(condition, "@user:test", "display_name"), msg)
 
     def _assert_not_matches(
-        self, condition: JsonDict, content: JsonDict, msg: Optional[str] = None
+        self, condition: JsonDict, content: JsonDict, msg: str | None = None
     ) -> None:
         evaluator = self._get_evaluator(content)
         self.assertFalse(
@@ -588,7 +588,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         This tests the behaviour of tweaks_for_actions.
         """
 
-        actions: list[Union[dict[str, str], str]] = [
+        actions: list[dict[str, str] | str] = [
             {"set_tweak": "sound", "value": "default"},
             {"set_tweak": "highlight"},
             "notify",

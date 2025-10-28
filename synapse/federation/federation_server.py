@@ -28,8 +28,6 @@ from typing import (
     Callable,
     Collection,
     Mapping,
-    Optional,
-    Union,
 )
 
 from prometheus_client import Counter, Gauge, Histogram
@@ -176,7 +174,7 @@ class FederationServer(FederationBase):
 
         # We cache responses to state queries, as they take a while and often
         # come in waves.
-        self._state_resp_cache: ResponseCache[tuple[str, Optional[str]]] = (
+        self._state_resp_cache: ResponseCache[tuple[str, str | None]] = (
             ResponseCache(
                 clock=hs.get_clock(),
                 name="state_resp",
@@ -666,7 +664,7 @@ class FederationServer(FederationBase):
 
     async def on_pdu_request(
         self, origin: str, event_id: str
-    ) -> tuple[int, Union[JsonDict, str]]:
+    ) -> tuple[int, JsonDict | str]:
         pdu = await self.handler.get_persisted_pdu(origin, event_id)
 
         if pdu:
@@ -763,7 +761,7 @@ class FederationServer(FederationBase):
         prev_state_ids = await context.get_prev_state_ids()
 
         state_event_ids: Collection[str]
-        servers_in_room: Optional[Collection[str]]
+        servers_in_room: Collection[str] | None
         if caller_supports_partial_state:
             summary = await self.store.get_room_summary(room_id)
             state_event_ids = _get_event_ids_for_partial_state_join(
@@ -1126,7 +1124,7 @@ class FederationServer(FederationBase):
 
         return {"events": serialize_and_filter_pdus(missing_events, time_now)}
 
-    async def on_openid_userinfo(self, token: str) -> Optional[str]:
+    async def on_openid_userinfo(self, token: str) -> str | None:
         ts_now_ms = self._clock.time_msec()
         return await self.store.get_user_id_for_open_id_token(token, ts_now_ms)
 
@@ -1205,7 +1203,7 @@ class FederationServer(FederationBase):
 
     async def _get_next_nonspam_staged_event_for_room(
         self, room_id: str, room_version: RoomVersion
-    ) -> Optional[tuple[str, EventBase]]:
+    ) -> tuple[str, EventBase] | None:
         """Fetch the first non-spam event from staging queue.
 
         Args:
@@ -1246,8 +1244,8 @@ class FederationServer(FederationBase):
         room_id: str,
         room_version: RoomVersion,
         lock: Lock,
-        latest_origin: Optional[str] = None,
-        latest_event: Optional[EventBase] = None,
+        latest_origin: str | None = None,
+        latest_event: EventBase | None = None,
     ) -> None:
         """Process events in the staging area for the given room.
 

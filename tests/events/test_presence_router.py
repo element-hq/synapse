@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Iterable, Optional, Union
+from typing import Iterable
 from unittest.mock import AsyncMock, Mock
 
 import attr
@@ -63,7 +63,7 @@ class LegacyPresenceRouterTestModule:
         }
         return users_to_state
 
-    async def get_interested_users(self, user_id: str) -> Union[set[str], str]:
+    async def get_interested_users(self, user_id: str) -> set[str] | str:
         if user_id in self._config.users_who_should_receive_all_presence:
             return PresenceRouter.ALL_USERS
 
@@ -113,7 +113,7 @@ class PresenceRouterTestModule:
         }
         return users_to_state
 
-    async def get_interested_users(self, user_id: str) -> Union[set[str], str]:
+    async def get_interested_users(self, user_id: str) -> set[str] | str:
         if user_id in self._config.users_who_should_receive_all_presence:
             return PresenceRouter.ALL_USERS
 
@@ -482,7 +482,7 @@ def send_presence_update(
     user_id: str,
     access_token: str,
     presence_state: str,
-    status_message: Optional[str] = None,
+    status_message: str | None = None,
 ) -> JsonDict:
     # Build the presence body
     body = {"presence": presence_state}
@@ -510,7 +510,7 @@ def generate_request_key() -> SyncRequestKey:
 def sync_presence(
     testcase: HomeserverTestCase,
     user_id: str,
-    since_token: Optional[StreamToken] = None,
+    since_token: StreamToken | None = None,
 ) -> tuple[list[UserPresenceState], StreamToken]:
     """Perform a sync request for the given user and return the user presence updates
     they've received, as well as the next_batch token.

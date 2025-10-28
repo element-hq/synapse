@@ -25,7 +25,7 @@
 
 import json
 from http import HTTPStatus
-from typing import Any, Iterable, Literal, Optional, Union
+from typing import Any, Iterable, Literal
 from unittest.mock import AsyncMock, Mock, call, patch
 from urllib import parse as urlparse
 
@@ -74,7 +74,7 @@ PATH_PREFIX = b"/_matrix/client/api/v1"
 
 
 class RoomBase(unittest.HomeserverTestCase):
-    rmcreator_id: Optional[str] = None
+    rmcreator_id: str | None = None
 
     servlets = [room.register_servlets, room.register_deprecated_servlets]
 
@@ -1351,7 +1351,7 @@ class RoomJoinTestCase(RoomBase):
         """
 
         # Register a dummy callback. Make it allow all room joins for now.
-        return_value: Union[Literal["NOT_SPAM"], tuple[Codes, dict], Codes] = (
+        return_value: Literal["NOT_SPAM"] | tuple[Codes, dict] | Codes = (
             synapse.module_api.NOT_SPAM
         )
 
@@ -1359,7 +1359,7 @@ class RoomJoinTestCase(RoomBase):
             userid: str,
             room_id: str,
             is_invited: bool,
-        ) -> Union[Literal["NOT_SPAM"], tuple[Codes, dict], Codes]:
+        ) -> Literal["NOT_SPAM"] | tuple[Codes, dict] | Codes:
             return return_value
 
         # `spec` argument is needed for this function mock to have `__qualname__`, which
@@ -1848,20 +1848,20 @@ class RoomMessagesTestCase(RoomBase):
     def test_spam_checker_check_event_for_spam(
         self,
         name: str,
-        value: Union[str, bool, Codes, tuple[Codes, JsonDict]],
+        value: str | bool | Codes | tuple[Codes, JsonDict],
         expected_code: int,
         expected_fields: dict,
     ) -> None:
         class SpamCheck:
-            mock_return_value: Union[str, bool, Codes, tuple[Codes, JsonDict], bool] = (
+            mock_return_value: str | bool | Codes | tuple[Codes, JsonDict] | bool = (
                 "NOT_SPAM"
             )
-            mock_content: Optional[JsonDict] = None
+            mock_content: JsonDict | None = None
 
             async def check_event_for_spam(
                 self,
                 event: synapse.events.EventBase,
-            ) -> Union[str, Codes, tuple[Codes, JsonDict], bool]:
+            ) -> str | Codes | tuple[Codes, JsonDict] | bool:
                 self.mock_content = event.content
                 return self.mock_return_value
 
@@ -2707,8 +2707,8 @@ class PublicRoomsRoomTypeFilterTestCase(unittest.HomeserverTestCase):
 
     def make_public_rooms_request(
         self,
-        room_types: Optional[list[Union[str, None]]],
-        instance_id: Optional[str] = None,
+        room_types: list[str | None] | None,
+        instance_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         body: JsonDict = {"filter": {PublicRoomsFilterFields.ROOM_TYPES: room_types}}
         if instance_id:
@@ -4532,7 +4532,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         original_events: list[EventBase],
         pulled_events: list[JsonDict],
         expect_redaction: bool,
-        reason: Optional[str] = None,
+        reason: str | None = None,
     ) -> None:
         """
         Checks a set of original events against a second set of the same events, pulled

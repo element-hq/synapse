@@ -20,7 +20,6 @@ from typing import (
     ChainMap,
     Mapping,
     MutableMapping,
-    Optional,
     Sequence,
     cast,
 )
@@ -86,7 +85,7 @@ class SlidingSyncExtensionHandler:
         actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
+        from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions:
         """Handle extension requests.
 
@@ -202,8 +201,8 @@ class SlidingSyncExtensionHandler:
 
     def find_relevant_room_ids_for_extension(
         self,
-        requested_lists: Optional[StrCollection],
-        requested_room_ids: Optional[StrCollection],
+        requested_lists: StrCollection | None,
+        requested_room_ids: StrCollection | None,
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: AbstractSet[str],
     ) -> set[str]:
@@ -246,7 +245,7 @@ class SlidingSyncExtensionHandler:
         if requested_lists is not None:
             for list_key in requested_lists:
                 # Just some typing because we share the variable name in multiple places
-                actual_list: Optional[SlidingSyncResult.SlidingWindowList] = None
+                actual_list: SlidingSyncResult.SlidingWindowList | None = None
 
                 # A wildcard means we process rooms from all lists
                 if list_key == "*":
@@ -277,7 +276,7 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         to_device_request: SlidingSyncConfig.Extensions.ToDeviceExtension,
         to_token: StreamToken,
-    ) -> Optional[SlidingSyncResult.Extensions.ToDeviceExtension]:
+    ) -> SlidingSyncResult.Extensions.ToDeviceExtension | None:
         """Handle to-device extension (MSC3885)
 
         Args:
@@ -352,8 +351,8 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         e2ee_request: SlidingSyncConfig.Extensions.E2eeExtension,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.E2eeExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.E2eeExtension | None:
         """Handle E2EE device extension (MSC3884)
 
         Args:
@@ -369,7 +368,7 @@ class SlidingSyncExtensionHandler:
         if not e2ee_request.enabled:
             return None
 
-        device_list_updates: Optional[DeviceListUpdates] = None
+        device_list_updates: DeviceListUpdates | None = None
         if from_token is not None:
             # TODO: This should take into account the `from_token` and `to_token`
             device_list_updates = await self.device_handler.get_user_ids_changed(
@@ -407,8 +406,8 @@ class SlidingSyncExtensionHandler:
         actual_room_ids: set[str],
         account_data_request: SlidingSyncConfig.Extensions.AccountDataExtension,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.AccountDataExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.AccountDataExtension | None:
         """Handle Account Data extension (MSC3959)
 
         Args:
@@ -640,8 +639,8 @@ class SlidingSyncExtensionHandler:
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         receipts_request: SlidingSyncConfig.Extensions.ReceiptsExtension,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.ReceiptsExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.ReceiptsExtension | None:
         """Handle Receipts extension (MSC3960)
 
         Args:
@@ -844,8 +843,8 @@ class SlidingSyncExtensionHandler:
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         typing_request: SlidingSyncConfig.Extensions.TypingExtension,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.TypingExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.TypingExtension | None:
         """Handle Typing Notification extension (MSC3961)
 
         Args:
@@ -905,8 +904,8 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         thread_subscriptions_request: SlidingSyncConfig.Extensions.ThreadSubscriptionsExtension,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.ThreadSubscriptionsExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.ThreadSubscriptionsExtension | None:
         """Handle Thread Subscriptions extension (MSC4308)
 
         Args:

@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -170,7 +170,7 @@ class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
-    ) -> tuple[int, dict[str, Optional[JsonMapping]]]:
+    ) -> tuple[int, dict[str, JsonMapping | None]]:
         user_ids: list[str] = content["user_ids"]
 
         logger.info("Resync for %r", user_ids)

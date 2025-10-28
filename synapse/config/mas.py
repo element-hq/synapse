@@ -13,7 +13,7 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
 from synapse._pydantic_compat import (
     AnyHttpUrl,
@@ -34,8 +34,8 @@ from ._base import Config, ConfigError, RootConfig
 class MasConfigModel(ParseModel):
     enabled: StrictBool = False
     endpoint: AnyHttpUrl = Field(default="http://localhost:8080")
-    secret: Optional[StrictStr] = Field(default=None)
-    secret_path: Optional[FilePath] = Field(default=None)
+    secret: StrictStr | None = Field(default=None)
+    secret_path: FilePath | None = Field(default=None)
 
     @validator("secret")
     def validate_secret_is_set_if_enabled(cls, v: Any, values: dict) -> Any:

@@ -36,9 +36,7 @@ from typing import (
     Iterable,
     Iterator,
     MutableMapping,
-    Optional,
     TypeVar,
-    Union,
 )
 
 import attr
@@ -60,7 +58,7 @@ class ConfigError(Exception):
            the problem lies.
     """
 
-    def __init__(self, msg: str, path: Optional[StrSequence] = None):
+    def __init__(self, msg: str, path: StrSequence | None = None):
         self.msg = msg
         self.path = path
 
@@ -175,7 +173,7 @@ class Config:
         )
 
     @staticmethod
-    def parse_size(value: Union[str, int]) -> int:
+    def parse_size(value: str | int) -> int:
         """Interpret `value` as a number of bytes.
 
         If an integer is provided it is treated as bytes and is unchanged.
@@ -202,7 +200,7 @@ class Config:
             raise TypeError(f"Bad byte size {value!r}")
 
     @staticmethod
-    def parse_duration(value: Union[str, int]) -> int:
+    def parse_duration(value: str | int) -> int:
         """Convert a duration as a string or integer to a number of milliseconds.
 
         If an integer is provided it is treated as milliseconds and is unchanged.
@@ -270,7 +268,7 @@ class Config:
         return path_exists(file_path)
 
     @classmethod
-    def check_file(cls, file_path: Optional[str], config_name: str) -> str:
+    def check_file(cls, file_path: str | None, config_name: str) -> str:
         if file_path is None:
             raise ConfigError("Missing config for %s." % (config_name,))
         try:
@@ -318,7 +316,7 @@ class Config:
     def read_templates(
         self,
         filenames: list[str],
-        custom_template_directories: Optional[Iterable[str]] = None,
+        custom_template_directories: Iterable[str] | None = None,
     ) -> list[jinja2.Template]:
         """Load a list of template files from disk using the given variables.
 
@@ -465,11 +463,11 @@ class RootConfig:
         data_dir_path: str,
         server_name: str,
         generate_secrets: bool = False,
-        report_stats: Optional[bool] = None,
+        report_stats: bool | None = None,
         open_private_ports: bool = False,
-        listeners: Optional[list[dict]] = None,
-        tls_certificate_path: Optional[str] = None,
-        tls_private_key_path: Optional[str] = None,
+        listeners: list[dict] | None = None,
+        tls_certificate_path: str | None = None,
+        tls_private_key_path: str | None = None,
     ) -> str:
         """
         Build a default configuration file
@@ -655,7 +653,7 @@ class RootConfig:
     @classmethod
     def load_or_generate_config(
         cls: type[TRootConfig], description: str, argv_options: list[str]
-    ) -> Optional[TRootConfig]:
+    ) -> TRootConfig | None:
         """Parse the commandline and config files
 
         Supports generation of config files, so is used for the main homeserver app.
@@ -898,7 +896,7 @@ class RootConfig:
         :returns: the previous config object, which no longer has a reference to this
             RootConfig.
         """
-        existing_config: Optional[Config] = getattr(self, section_name, None)
+        existing_config: Config | None = getattr(self, section_name, None)
         if existing_config is None:
             raise ValueError(f"Unknown config section '{section_name}'")
         logger.info("Reloading config section '%s'", section_name)

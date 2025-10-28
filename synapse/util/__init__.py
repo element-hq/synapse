@@ -61,7 +61,7 @@ def unwrapFirstError(failure: Failure) -> Failure:
 
 def log_failure(
     failure: Failure, msg: str, consumeErrors: bool = True
-) -> Optional[Failure]:
+) -> Failure | None:
     """Creates a function suitable for passing to `Deferred.addErrback` that
     logs any failures that occur.
 

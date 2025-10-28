@@ -66,10 +66,10 @@ class ShutdownRoomParams(TypedDict):
             even if there are still users joined to the room.
     """
 
-    requester_user_id: Optional[str]
-    new_room_user_id: Optional[str]
-    new_room_name: Optional[str]
-    message: Optional[str]
+    requester_user_id: str | None
+    new_room_user_id: str | None
+    new_room_name: str | None
+    message: str | None
     block: bool
     purge: bool
     force_purge: bool
@@ -90,4 +90,4 @@ class ShutdownRoomResponse(TypedDict):
     kicked_users: list[str]
     failed_to_kick_users: list[str]
     local_aliases: list[str]
-    new_room_id: Optional[str]
+    new_room_id: str | None

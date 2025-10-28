@@ -20,7 +20,6 @@
 #
 
 import json
-from typing import Optional
 from unittest.mock import Mock
 
 import ijson.common
@@ -98,7 +97,7 @@ class SendJoinParserTestCase(TestCase):
     def test_servers_in_room(self) -> None:
         """Check that the servers_in_room field is correctly parsed"""
 
-        def parse(response: JsonDict) -> Optional[list[str]]:
+        def parse(response: JsonDict) -> list[str] | None:
             parser = SendJoinParser(RoomVersions.V1, False)
             serialised_response = json.dumps(response).encode()
 

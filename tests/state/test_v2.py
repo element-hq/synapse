@@ -23,7 +23,6 @@ from typing import (
     Collection,
     Iterable,
     Mapping,
-    Optional,
     TypeVar,
 )
 
@@ -79,7 +78,7 @@ class FakeEvent:
         id: str,
         sender: str,
         type: str,
-        state_key: Optional[str],
+        state_key: str | None,
         content: Mapping[str, object],
     ):
         self.node_id = id
@@ -1082,8 +1081,8 @@ class TestStateResolutionStore:
         self,
         room_id: str,
         auth_sets: list[set[str]],
-        conflicted_state: Optional[set[str]],
-        additional_backwards_reachable_conflicted_events: Optional[set[str]],
+        conflicted_state: set[str] | None,
+        additional_backwards_reachable_conflicted_events: set[str] | None,
     ) -> "defer.Deferred[StateDifference]":
         chains = [frozenset(self._get_auth_chain(a)) for a in auth_sets]
 

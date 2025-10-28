@@ -27,7 +27,6 @@ from typing import (
     Collection,
     Generator,
     Iterable,
-    Optional,
     Sequence,
     cast,
 )
@@ -129,7 +128,7 @@ class StateDifference:
     # The event IDs in the auth difference.
     auth_difference: set[str]
     # The event IDs in the conflicted state subgraph. Used in v2.1 only.
-    conflicted_subgraph: Optional[set[str]]
+    conflicted_subgraph: set[str] | None
 
 
 class _NoChainCoverIndex(Exception):
@@ -142,7 +141,7 @@ class EventFederationWorkerStore(
 ):
     # TODO: this attribute comes from EventPushActionWorkerStore. Should we inherit from
     # that store so that mypy can deduce this for itself?
-    stream_ordering_month_ago: Optional[int]
+    stream_ordering_month_ago: int | None
 
     def __init__(
         self,
@@ -494,8 +493,8 @@ class EventFederationWorkerStore(
         self,
         room_id: str,
         state_sets: list[set[str]],
-        conflicted_set: Optional[set[str]],
-        additional_backwards_reachable_conflicted_events: Optional[set[str]],
+        conflicted_set: set[str] | None,
+        additional_backwards_reachable_conflicted_events: set[str] | None,
     ) -> StateDifference:
         """ "Given sets of state events figure out the auth chain difference (as
         per state res v2 algorithm).
@@ -556,8 +555,8 @@ class EventFederationWorkerStore(
         txn: LoggingTransaction,
         room_id: str,
         state_sets: list[set[str]],
-        conflicted_set: Optional[set[str]] = None,
-        additional_backwards_reachable_conflicted_events: Optional[set[str]] = None,
+        conflicted_set: set[str] | None = None,
+        additional_backwards_reachable_conflicted_events: set[str] | None = None,
     ) -> StateDifference:
         """Calculates the auth chain difference using the chain index.
 
@@ -1341,7 +1340,7 @@ class EventFederationWorkerStore(
 
     async def get_max_depth_of(
         self, event_ids: Collection[str]
-    ) -> tuple[Optional[str], int]:
+    ) -> tuple[str | None, int]:
         """Returns the event ID and depth for the event that has the max depth from a set of event IDs
 
         Args:
@@ -1373,7 +1372,7 @@ class EventFederationWorkerStore(
 
             return max_depth_event_id, current_max_depth
 
-    async def get_min_depth_of(self, event_ids: list[str]) -> tuple[Optional[str], int]:
+    async def get_min_depth_of(self, event_ids: list[str]) -> tuple[str | None, int]:
         """Returns the event ID and depth for the event that has the min depth from a set of event IDs
 
         Args:
@@ -1491,7 +1490,7 @@ class EventFederationWorkerStore(
         )
         return frozenset(event_ids)
 
-    async def get_min_depth(self, room_id: str) -> Optional[int]:
+    async def get_min_depth(self, room_id: str) -> int | None:
         """For the given room, get the minimum depth we have seen for it."""
         return await self.db_pool.runInteraction(
             "get_min_depth", self._get_min_depth_interaction, room_id
@@ -1499,7 +1498,7 @@ class EventFederationWorkerStore(
 
     def _get_min_depth_interaction(
         self, txn: LoggingTransaction, room_id: str
-    ) -> Optional[int]:
+    ) -> int | None:
         min_depth = self.db_pool.simple_select_one_onecol_txn(
             txn,
             table="room_depth",
@@ -2034,7 +2033,7 @@ class EventFederationWorkerStore(
         self,
         origin: str,
         event_id: str,
-    ) -> Optional[int]:
+    ) -> int | None:
         """Remove the given event from the staging area.
 
         Returns:
@@ -2043,7 +2042,7 @@ class EventFederationWorkerStore(
 
         def _remove_received_event_from_staging_txn(
             txn: LoggingTransaction,
-        ) -> Optional[int]:
+        ) -> int | None:
             sql = """
                 DELETE FROM federation_inbound_events_staging
                 WHERE origin = ? AND event_id = ?
@@ -2051,7 +2050,7 @@ class EventFederationWorkerStore(
             """
 
             txn.execute(sql, (origin, event_id))
-            row = cast(Optional[tuple[int]], txn.fetchone())
+            row = cast(tuple[int] | None, txn.fetchone())
 
             if row is None:
                 return None
@@ -2067,7 +2066,7 @@ class EventFederationWorkerStore(
     async def get_next_staged_event_id_for_room(
         self,
         room_id: str,
-    ) -> Optional[tuple[str, str]]:
+    ) -> tuple[str, str] | None:
         """
         Get the next event ID in the staging area for the given room.
 
@@ -2077,7 +2076,7 @@ class EventFederationWorkerStore(
 
         def _get_next_staged_event_id_for_room_txn(
             txn: LoggingTransaction,
-        ) -> Optional[tuple[str, str]]:
+        ) -> tuple[str, str] | None:
             sql = """
                 SELECT origin, event_id
                 FROM federation_inbound_events_staging
@@ -2088,7 +2087,7 @@ class EventFederationWorkerStore(
 
             txn.execute(sql, (room_id,))
 
-            return cast(Optional[tuple[str, str]], txn.fetchone())
+            return cast(tuple[str, str] | None, txn.fetchone())
 
         return await self.db_pool.runInteraction(
             "get_next_staged_event_id_for_room", _get_next_staged_event_id_for_room_txn
@@ -2098,12 +2097,12 @@ class EventFederationWorkerStore(
         self,
         room_id: str,
         room_version: RoomVersion,
-    ) -> Optional[tuple[str, EventBase]]:
+    ) -> tuple[str, EventBase] | None:
         """Get the next event in the staging area for the given room."""
 
         def _get_next_staged_event_for_room_txn(
             txn: LoggingTransaction,
-        ) -> Optional[tuple[str, str, str]]:
+        ) -> tuple[str, str, str] | None:
             sql = """
                 SELECT event_json, internal_metadata, origin
                 FROM federation_inbound_events_staging
@@ -2113,7 +2112,7 @@ class EventFederationWorkerStore(
             """
             txn.execute(sql, (room_id,))
 
-            return cast(Optional[tuple[str, str, str]], txn.fetchone())
+            return cast(tuple[str, str, str] | None, txn.fetchone())
 
         row = await self.db_pool.runInteraction(
             "get_next_staged_event_for_room", _get_next_staged_event_for_room_txn
@@ -2258,7 +2257,7 @@ class EventFederationWorkerStore(
                 "SELECT min(received_ts) FROM federation_inbound_events_staging"
             )
 
-            (received_ts,) = cast(tuple[Optional[int]], txn.fetchone())
+            (received_ts,) = cast(tuple[int | None], txn.fetchone())
 
             # If there is nothing in the staging area default it to 0.
             age = 0

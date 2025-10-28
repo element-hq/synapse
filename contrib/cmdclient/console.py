@@ -33,7 +33,6 @@ import sys
 import time
 import urllib
 from http import TwistedHttpClient
-from typing import Optional
 
 import urlparse
 from signedjson.key import NACL_ED25519, decode_verify_key_bytes
@@ -726,7 +725,7 @@ class SynapseCmd(cmd.Cmd):
         method,
         path,
         data=None,
-        query_params: Optional[dict] = None,
+        query_params: dict | None = None,
         alt_text=None,
     ):
         """Runs an HTTP request and pretty prints the output.

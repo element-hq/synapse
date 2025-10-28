@@ -37,10 +37,8 @@ from typing import (
     Iterable,
     Mapping,
     NoReturn,
-    Optional,
     Protocol,
     TypeVar,
-    Union,
 )
 from unittest.mock import Mock, patch
 
@@ -274,7 +272,7 @@ class TestCase(unittest.TestCase):
         actual_items: AbstractSet[TV],
         expected_items: AbstractSet[TV],
         exact: bool = False,
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> None:
         """
         Assert that all of the `expected_items` are included in the `actual_items`.
@@ -570,17 +568,17 @@ class HomeserverTestCase(TestCase):
 
     def make_request(
         self,
-        method: Union[bytes, str],
-        path: Union[bytes, str],
-        content: Union[bytes, str, JsonDict] = b"",
-        access_token: Optional[str] = None,
+        method: bytes | str,
+        path: bytes | str,
+        content: bytes | str | JsonDict = b"",
+        access_token: str | None = None,
         request: type[Request] = SynapseRequest,
         shorthand: bool = True,
-        federation_auth_origin: Optional[bytes] = None,
-        content_type: Optional[bytes] = None,
+        federation_auth_origin: bytes | None = None,
+        content_type: bytes | None = None,
         content_is_form: bool = False,
         await_result: bool = True,
-        custom_headers: Optional[Iterable[CustomHeaderType]] = None,
+        custom_headers: Iterable[CustomHeaderType] | None = None,
         client_ip: str = "127.0.0.1",
     ) -> FakeChannel:
         """
@@ -633,10 +631,10 @@ class HomeserverTestCase(TestCase):
 
     def setup_test_homeserver(
         self,
-        server_name: Optional[str] = None,
-        config: Optional[JsonDict] = None,
-        reactor: Optional[ISynapseReactor] = None,
-        clock: Optional[Clock] = None,
+        server_name: str | None = None,
+        config: JsonDict | None = None,
+        reactor: ISynapseReactor | None = None,
+        clock: Clock | None = None,
         **extra_homeserver_attributes: Any,
     ) -> HomeServer:
         """
@@ -743,8 +741,8 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         password: str,
-        admin: Optional[bool] = False,
-        displayname: Optional[str] = None,
+        admin: bool | None = False,
+        displayname: str | None = None,
     ) -> str:
         """
         Register a user. Requires the Admin API be registered.
@@ -795,7 +793,7 @@ class HomeserverTestCase(TestCase):
         username: str,
         appservice_token: str,
         inhibit_login: bool = False,
-    ) -> tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Register an appservice user as an application service.
         Requires the client-facing registration API be registered.
 
@@ -826,9 +824,9 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         password: str,
-        device_id: Optional[str] = None,
-        additional_request_fields: Optional[dict[str, str]] = None,
-        custom_headers: Optional[Iterable[CustomHeaderType]] = None,
+        device_id: str | None = None,
+        additional_request_fields: dict[str, str] | None = None,
+        custom_headers: Iterable[CustomHeaderType] | None = None,
     ) -> str:
         """
         Log in a user, and get an access token. Requires the Login API be registered.
@@ -867,7 +865,7 @@ class HomeserverTestCase(TestCase):
         room_id: str,
         user: UserID,
         soft_failed: bool = False,
-        prev_event_ids: Optional[list[str]] = None,
+        prev_event_ids: list[str] | None = None,
     ) -> str:
         """
         Create and send an event.
@@ -968,9 +966,9 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
         self,
         method: str,
         path: str,
-        content: Optional[JsonDict] = None,
+        content: JsonDict | None = None,
         await_result: bool = True,
-        custom_headers: Optional[Iterable[CustomHeaderType]] = None,
+        custom_headers: Iterable[CustomHeaderType] | None = None,
         client_ip: str = "127.0.0.1",
     ) -> FakeChannel:
         """Make an inbound signed federation request to this server
@@ -1035,7 +1033,7 @@ def _auth_header_for_request(
     signing_key: signedjson.key.SigningKey,
     method: str,
     path: str,
-    content: Optional[JsonDict],
+    content: JsonDict | None,
 ) -> str:
     """Build a suitable Authorization header for an outgoing federation request"""
     request_description: JsonDict = {

@@ -47,8 +47,8 @@ class AuthenticationData(RequestBodyModel):
     class Config:
         extra = Extra.allow
 
-    session: Optional[StrictStr] = None
-    type: Optional[StrictStr] = None
+    session: StrictStr | None = None
+    type: StrictStr | None = None
 
 
 if TYPE_CHECKING:
@@ -65,15 +65,15 @@ else:
 
 class ThreepidRequestTokenBody(RequestBodyModel):
     client_secret: ClientSecretStr
-    id_server: Optional[StrictStr]
-    id_access_token: Optional[StrictStr]
-    next_link: Optional[StrictStr]
+    id_server: StrictStr | None
+    id_access_token: StrictStr | None
+    next_link: StrictStr | None
     send_attempt: StrictInt
 
     @validator("id_access_token", always=True)
     def token_required_for_identity_server(
-        cls, token: Optional[str], values: dict[str, object]
-    ) -> Optional[str]:
+        cls, token: str | None, values: dict[str, object]
+    ) -> str | None:
         if values.get("id_server") is not None and token is None:
             raise ValueError("id_access_token is required if an id_server is supplied.")
         return token
@@ -241,25 +241,23 @@ class SlidingSyncBody(RequestBodyModel):
                     list of favourite rooms again.
             """
 
-            is_dm: Optional[StrictBool] = None
-            spaces: Optional[list[StrictStr]] = None
-            is_encrypted: Optional[StrictBool] = None
-            is_invite: Optional[StrictBool] = None
-            room_types: Optional[list[Union[StrictStr, None]]] = None
-            not_room_types: Optional[list[Union[StrictStr, None]]] = None
-            room_name_like: Optional[StrictStr] = None
-            tags: Optional[list[StrictStr]] = None
-            not_tags: Optional[list[StrictStr]] = None
+            is_dm: StrictBool | None = None
+            spaces: list[StrictStr] | None = None
+            is_encrypted: StrictBool | None = None
+            is_invite: StrictBool | None = None
+            room_types: list[StrictStr | None] | None = None
+            not_room_types: list[StrictStr | None] | None = None
+            room_name_like: StrictStr | None = None
+            tags: list[StrictStr] | None = None
+            not_tags: list[StrictStr] | None = None
 
         # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
         if TYPE_CHECKING:
-            ranges: Optional[list[tuple[int, int]]] = None
+            ranges: list[tuple[int, int]] | None = None
         else:
-            ranges: Optional[
-                list[tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]
-            ] = None  # type: ignore[valid-type]
-        slow_get_all_rooms: Optional[StrictBool] = False
-        filters: Optional[Filters] = None
+            ranges: list[tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]] | None = None  # type: ignore[valid-type]
+        slow_get_all_rooms: StrictBool | None = False
+        filters: Filters | None = None
 
     class RoomSubscription(CommonRoomParameters):
         pass
@@ -282,14 +280,14 @@ class SlidingSyncBody(RequestBodyModel):
                 since: The `next_batch` from the previous sync response
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             limit: StrictInt = 100
-            since: Optional[StrictStr] = None
+            since: StrictStr | None = None
 
             @validator("since")
             def since_token_check(
-                cls, value: Optional[StrictStr]
-            ) -> Optional[StrictStr]:
+                cls, value: StrictStr | None
+            ) -> StrictStr | None:
                 # `since` comes in as an opaque string token but we know that it's just
                 # an integer representing the position in the device inbox stream. We
                 # want to pre-validate it to make sure it works fine in downstream code.
@@ -312,7 +310,7 @@ class SlidingSyncBody(RequestBodyModel):
                 enabled
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
 
         class AccountDataExtension(RequestBodyModel):
             """The Account Data extension (MSC3959)
@@ -325,11 +323,11 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[list[StrictStr]] = ["*"]
+            lists: list[StrictStr] | None = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[list[StrictStr]] = ["*"]
+            rooms: list[StrictStr] | None = ["*"]
 
         class ReceiptsExtension(RequestBodyModel):
             """The Receipts extension (MSC3960)
@@ -342,11 +340,11 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[list[StrictStr]] = ["*"]
+            lists: list[StrictStr] | None = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[list[StrictStr]] = ["*"]
+            rooms: list[StrictStr] | None = ["*"]
 
         class TypingExtension(RequestBodyModel):
             """The Typing Notification extension (MSC3961)
@@ -359,11 +357,11 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[list[StrictStr]] = ["*"]
+            lists: list[StrictStr] | None = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[list[StrictStr]] = ["*"]
+            rooms: list[StrictStr] | None = ["*"]
 
         class ThreadSubscriptionsExtension(RequestBodyModel):
             """The Thread Subscriptions extension (MSC4308)
@@ -373,34 +371,34 @@ class SlidingSyncBody(RequestBodyModel):
                 limit: maximum number of subscription changes to return (default 100)
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             limit: StrictInt = 100
 
-        to_device: Optional[ToDeviceExtension] = None
-        e2ee: Optional[E2eeExtension] = None
-        account_data: Optional[AccountDataExtension] = None
-        receipts: Optional[ReceiptsExtension] = None
-        typing: Optional[TypingExtension] = None
-        thread_subscriptions: Optional[ThreadSubscriptionsExtension] = Field(
+        to_device: ToDeviceExtension | None = None
+        e2ee: E2eeExtension | None = None
+        account_data: AccountDataExtension | None = None
+        receipts: ReceiptsExtension | None = None
+        typing: TypingExtension | None = None
+        thread_subscriptions: ThreadSubscriptionsExtension | None = Field(
             alias="io.element.msc4308.thread_subscriptions"
         )
 
-    conn_id: Optional[StrictStr]
+    conn_id: StrictStr | None
 
     # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
     if TYPE_CHECKING:
-        lists: Optional[dict[str, SlidingSyncList]] = None
+        lists: dict[str, SlidingSyncList] | None = None
     else:
-        lists: Optional[dict[constr(max_length=64, strict=True), SlidingSyncList]] = (
+        lists: dict[constr(max_length=64, strict=True), SlidingSyncList] | None = (
             None  # type: ignore[valid-type]
         )
-    room_subscriptions: Optional[dict[StrictStr, RoomSubscription]] = None
-    extensions: Optional[Extensions] = None
+    room_subscriptions: dict[StrictStr, RoomSubscription] | None = None
+    extensions: Extensions | None = None
 
     @validator("lists")
     def lists_length_check(
-        cls, value: Optional[dict[str, SlidingSyncList]]
-    ) -> Optional[dict[str, SlidingSyncList]]:
+        cls, value: dict[str, SlidingSyncList] | None
+    ) -> dict[str, SlidingSyncList] | None:
         if value is not None:
             assert len(value) <= 100, f"Max lists: 100 but saw {len(value)}"
         return value

@@ -13,7 +13,7 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
 from synapse._pydantic_compat import Field, StrictStr, ValidationError, validator
 from synapse.types import JsonDict
@@ -40,7 +40,7 @@ class MTextRepresentation(ParseModel):
     """
 
     body: StrictStr
-    mimetype: Optional[StrictStr]
+    mimetype: StrictStr | None
 
 
 class MTopic(ParseModel):
@@ -52,7 +52,7 @@ class MTopic(ParseModel):
     See `TopicContentBlock` in the Matrix specification.
     """
 
-    m_text: Optional[list[MTextRepresentation]] = Field(alias="m.text")
+    m_text: list[MTextRepresentation] | None = Field(alias="m.text")
     """
     An ordered array of textual representations in different mimetypes.
     """
@@ -63,7 +63,7 @@ class MTopic(ParseModel):
     @validator("m_text", pre=True)
     def ignore_invalid_representations(
         cls, m_text: Any
-    ) -> Optional[list[MTextRepresentation]]:
+    ) -> list[MTextRepresentation] | None:
         if not isinstance(m_text, list):
             raise ValueError("m.text must be a list")
         representations = []
@@ -85,7 +85,7 @@ class TopicContent(ParseModel):
     The topic in plain text.
     """
 
-    m_topic: Optional[MTopic] = Field(alias="m.topic")
+    m_topic: MTopic | None = Field(alias="m.topic")
     """
     Textual representation of the room topic in different mimetypes.
     """
@@ -93,14 +93,14 @@ class TopicContent(ParseModel):
     # We ignore invalid `m.topic` fields as we can always fall back to the plain-text
     # `topic` field.
     @validator("m_topic", pre=True)
-    def ignore_invalid_m_topic(cls, m_topic: Any) -> Optional[MTopic]:
+    def ignore_invalid_m_topic(cls, m_topic: Any) -> MTopic | None:
         try:
             return MTopic.parse_obj(m_topic)
         except ValidationError:
             return None
 
 
-def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
+def get_plain_text_topic_from_event_content(content: JsonDict) -> str | None:
     """
     Given the `content` of an `m.room.topic` event, returns the plain-text topic
     representation. Prefers pulling plain-text from the newer `m.topic` field if

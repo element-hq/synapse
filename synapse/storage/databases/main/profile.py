@@ -19,7 +19,7 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 
 from canonicaljson import encode_canonical_json
 
@@ -75,7 +75,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
         lower_bound_id = progress.get("lower_bound_id", "")
 
-        def _get_last_id(txn: LoggingTransaction) -> Optional[str]:
+        def _get_last_id(txn: LoggingTransaction) -> str | None:
             sql = """
                     SELECT user_id FROM profiles
                     WHERE user_id > ?
@@ -176,7 +176,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
         return ProfileInfo(avatar_url=profile[1], display_name=profile[0])
 
-    async def get_profile_displayname(self, user_id: UserID) -> Optional[str]:
+    async def get_profile_displayname(self, user_id: UserID) -> str | None:
         """
         Fetch the display name of a user.
 
@@ -193,7 +193,7 @@ class ProfileWorkerStore(SQLBaseStore):
             desc="get_profile_displayname",
         )
 
-    async def get_profile_avatar_url(self, user_id: UserID) -> Optional[str]:
+    async def get_profile_avatar_url(self, user_id: UserID) -> str | None:
         """
         Fetch the avatar URL of a user.
 
@@ -258,7 +258,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
                 # If value_type is None, then the value did not exist.
                 value_type, value = cast(
-                    tuple[Optional[str], JsonValue], txn.fetchone()
+                    tuple[str | None, JsonValue], txn.fetchone()
                 )
                 if not value_type:
                     raise StoreError(404, "No row found")
@@ -346,7 +346,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 # possible due to the grammar.
                 (f'$."{new_field_name}"', user_id.localpart),
             )
-        row = cast(tuple[Optional[int], Optional[int], Optional[int]], txn.fetchone())
+        row = cast(tuple[int | None, int | None, int | None], txn.fetchone())
 
         # The values return null if the column is null.
         total_bytes = (
@@ -373,7 +373,7 @@ class ProfileWorkerStore(SQLBaseStore):
             raise StoreError(400, "Profile too large", Codes.PROFILE_TOO_LARGE)
 
     async def set_profile_displayname(
-        self, user_id: UserID, new_displayname: Optional[str]
+        self, user_id: UserID, new_displayname: str | None
     ) -> None:
         """
         Set the display name of a user.
@@ -406,7 +406,7 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
     async def set_profile_avatar_url(
-        self, user_id: UserID, new_avatar_url: Optional[str]
+        self, user_id: UserID, new_avatar_url: str | None
     ) -> None:
         """
         Set the avatar of a user.

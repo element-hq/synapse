@@ -25,9 +25,7 @@ from typing import (
     Awaitable,
     Callable,
     Generic,
-    Optional,
     TypeVar,
-    Union,
 )
 
 from typing_extensions import ParamSpec
@@ -137,7 +135,7 @@ class Signal(Generic[P]):
         Returns a Deferred that will complete when all the observers have
         completed."""
 
-        async def do(observer: Callable[P, Union[R, Awaitable[R]]]) -> Optional[R]:
+        async def do(observer: Callable[P, R | Awaitable[R]]) -> R | None:
             try:
                 return await maybe_awaitable(observer(*args, **kwargs))
             except Exception as e:

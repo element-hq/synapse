@@ -26,9 +26,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Optional,
     TypedDict,
-    Union,
 )
 
 from synapse.api.constants import ApprovalNoticeMedium
@@ -67,12 +65,12 @@ logger = logging.getLogger(__name__)
 
 class LoginResponse(TypedDict, total=False):
     user_id: str
-    access_token: Optional[str]
+    access_token: str | None
     home_server: str
-    expires_in_ms: Optional[int]
-    refresh_token: Optional[str]
-    device_id: Optional[str]
-    well_known: Optional[dict[str, Any]]
+    expires_in_ms: int | None
+    refresh_token: str | None
+    device_id: str | None
+    well_known: dict[str, Any] | None
 
 
 class LoginRestServlet(RestServlet):
@@ -367,13 +365,13 @@ class LoginRestServlet(RestServlet):
         self,
         user_id: str,
         login_submission: JsonDict,
-        callback: Optional[Callable[[LoginResponse], Awaitable[None]]] = None,
+        callback: Callable[[LoginResponse], Awaitable[None]] | None = None,
         create_non_existent_users: bool = False,
-        default_display_name: Optional[str] = None,
+        default_display_name: str | None = None,
         ratelimit: bool = True,
-        auth_provider_id: Optional[str] = None,
+        auth_provider_id: str | None = None,
         should_issue_refresh_token: bool = False,
-        auth_provider_session_id: Optional[str] = None,
+        auth_provider_session_id: str | None = None,
         should_check_deactivated_or_locked: bool = True,
         *,
         request_info: RequestInfo,
@@ -623,7 +621,7 @@ class RefreshTokenServlet(RestServlet):
             token, access_valid_until_ms, refresh_valid_until_ms
         )
 
-        response: dict[str, Union[str, int]] = {
+        response: dict[str, str | int] = {
             "access_token": access_token,
             "refresh_token": refresh_token,
         }
@@ -653,7 +651,7 @@ class SsoRedirectServlet(RestServlet):
         self._public_baseurl = hs.config.server.public_baseurl
 
     async def on_GET(
-        self, request: SynapseRequest, idp_id: Optional[str] = None
+        self, request: SynapseRequest, idp_id: str | None = None
     ) -> None:
         if not self._public_baseurl:
             raise SynapseError(400, "SSO requires a valid public_baseurl")

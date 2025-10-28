@@ -20,7 +20,7 @@
 #
 import logging
 import re
-from typing import TYPE_CHECKING, Optional, Pattern, Sequence, cast
+from typing import TYPE_CHECKING, Pattern, Sequence, cast
 
 from synapse.appservice import (
     ApplicationService,
@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 def _make_exclusive_regex(
     services_cache: list[ApplicationService],
-) -> Optional[Pattern]:
+) -> Pattern | None:
     # We precompile a regex constructed from all the regexes that the AS's
     # have registered for exclusive users.
     exclusive_user_regexes = [
@@ -63,7 +63,7 @@ def _make_exclusive_regex(
     ]
     if exclusive_user_regexes:
         exclusive_user_regex = "|".join("(" + r + ")" for r in exclusive_user_regexes)
-        exclusive_user_pattern: Optional[Pattern] = re.compile(exclusive_user_regex)
+        exclusive_user_pattern: Pattern | None = re.compile(exclusive_user_regex)
     else:
         # We handle this case specially otherwise the constructed regex
         # will always match
@@ -116,7 +116,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
         else:
             return False
 
-    def get_app_service_by_user_id(self, user_id: str) -> Optional[ApplicationService]:
+    def get_app_service_by_user_id(self, user_id: str) -> ApplicationService | None:
         """Retrieve an application service from their user ID.
 
         All application services have associated with them a particular user ID.
@@ -134,7 +134,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
                 return service
         return None
 
-    def get_app_service_by_token(self, token: str) -> Optional[ApplicationService]:
+    def get_app_service_by_token(self, token: str) -> ApplicationService | None:
         """Get the application service with the given appservice token.
 
         Args:
@@ -147,7 +147,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
                 return service
         return None
 
-    def get_app_service_by_id(self, as_id: str) -> Optional[ApplicationService]:
+    def get_app_service_by_id(self, as_id: str) -> ApplicationService | None:
         """Get the application service with the given appservice ID.
 
         Args:
@@ -227,7 +227,7 @@ class ApplicationServiceTransactionWorkerStore(
 
     async def get_appservice_state(
         self, service: ApplicationService
-    ) -> Optional[ApplicationServiceState]:
+    ) -> ApplicationServiceState | None:
         """Get the application service state.
 
         Args:
@@ -347,7 +347,7 @@ class ApplicationServiceTransactionWorkerStore(
 
     async def get_oldest_unsent_txn(
         self, service: ApplicationService
-    ) -> Optional[AppServiceTransaction]:
+    ) -> AppServiceTransaction | None:
         """Get the oldest transaction which has not been sent for this service.
 
         Args:
@@ -358,7 +358,7 @@ class ApplicationServiceTransactionWorkerStore(
 
         def _get_oldest_unsent_txn(
             txn: LoggingTransaction,
-        ) -> Optional[tuple[int, str]]:
+        ) -> tuple[int, str] | None:
             # Monotonically increasing txn ids, so just select the smallest
             # one in the txns table (we delete them when they are sent)
             txn.execute(
@@ -366,7 +366,7 @@ class ApplicationServiceTransactionWorkerStore(
                 " ORDER BY txn_id ASC LIMIT 1",
                 (service.id,),
             )
-            return cast(Optional[tuple[int, str]], txn.fetchone())
+            return cast(tuple[int, str] | None, txn.fetchone())
 
         entry = await self.db_pool.runInteraction(
             "get_oldest_unsent_appservice_txn", _get_oldest_unsent_txn
@@ -447,7 +447,7 @@ class ApplicationServiceTransactionWorkerStore(
         )
 
     async def set_appservice_stream_type_pos(
-        self, service: ApplicationService, stream_type: str, pos: Optional[int]
+        self, service: ApplicationService, stream_type: str, pos: int | None
     ) -> None:
         if stream_type not in ("read_receipt", "presence", "to_device", "device_list"):
             raise ValueError(

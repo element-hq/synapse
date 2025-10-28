@@ -160,7 +160,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
 async def check_state_independent_auth_rules(
     store: _EventSourceStore,
     event: "EventBase",
-    batched_auth_events: Optional[Mapping[str, "EventBase"]] = None,
+    batched_auth_events: Mapping[str, "EventBase"] | None = None,
 ) -> None:
     """Check that an event complies with auth rules that are independent of room state
 
@@ -788,7 +788,7 @@ def _check_joined_room(
 
 
 def get_send_level(
-    etype: str, state_key: Optional[str], power_levels_event: Optional["EventBase"]
+    etype: str, state_key: str | None, power_levels_event: Optional["EventBase"]
 ) -> int:
     """Get the power level required to send an event of a given type
 
@@ -989,7 +989,7 @@ def _check_power_levels(
     user_level = get_user_power_level(event.user_id, auth_events)
 
     # Check other levels:
-    levels_to_check: list[tuple[str, Optional[str]]] = [
+    levels_to_check: list[tuple[str, str | None]] = [
         ("users_default", None),
         ("events_default", None),
         ("state_default", None),
@@ -1027,12 +1027,12 @@ def _check_power_levels(
             new_loc = new_loc.get(dir, {})
 
         if level_to_check in old_loc:
-            old_level: Optional[int] = int(old_loc[level_to_check])
+            old_level: int | None = int(old_loc[level_to_check])
         else:
             old_level = None
 
         if level_to_check in new_loc:
-            new_level: Optional[int] = int(new_loc[level_to_check])
+            new_level: int | None = int(new_loc[level_to_check])
         else:
             new_level = None
 

@@ -28,9 +28,7 @@ from typing import (
     Iterable,
     Literal,
     Mapping,
-    Optional,
     Sequence,
-    Union,
     cast,
     overload,
 )
@@ -71,12 +69,12 @@ if TYPE_CHECKING:
 class DeviceKeyLookupResult:
     """The type returned by get_e2e_device_keys_and_signatures"""
 
-    display_name: Optional[str]
+    display_name: str | None
 
     # the key data from e2e_device_keys_json. Typically includes fields like
     # "algorithm", "keys" (including the curve25519 identity key and the ed25519 signing
     # key) and "signatures" (a map from (user id) to (key id/device_id) to signature.)
-    keys: Optional[JsonDict]
+    keys: JsonDict | None
 
 
 class EndToEndKeyBackgroundStore(SQLBaseStore):
@@ -237,7 +235,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
     @cancellable
     async def get_e2e_device_keys_for_cs_api(
         self,
-        query_list: Collection[tuple[str, Optional[str]]],
+        query_list: Collection[tuple[str, str | None]],
         include_displaynames: bool = True,
     ) -> dict[str, dict[str, JsonDict]]:
         """Fetch a list of device keys, formatted suitably for the C/S API.
@@ -280,14 +278,14 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
     @overload
     async def get_e2e_device_keys_and_signatures(
         self,
-        query_list: Collection[tuple[str, Optional[str]]],
+        query_list: Collection[tuple[str, str | None]],
         include_all_devices: Literal[False] = False,
     ) -> dict[str, dict[str, DeviceKeyLookupResult]]: ...
 
     @overload
     async def get_e2e_device_keys_and_signatures(
         self,
-        query_list: Collection[tuple[str, Optional[str]]],
+        query_list: Collection[tuple[str, str | None]],
         include_all_devices: bool = False,
         include_deleted_devices: Literal[False] = False,
     ) -> dict[str, dict[str, DeviceKeyLookupResult]]: ...
@@ -295,22 +293,19 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
     @overload
     async def get_e2e_device_keys_and_signatures(
         self,
-        query_list: Collection[tuple[str, Optional[str]]],
+        query_list: Collection[tuple[str, str | None]],
         include_all_devices: Literal[True],
         include_deleted_devices: Literal[True],
-    ) -> dict[str, dict[str, Optional[DeviceKeyLookupResult]]]: ...
+    ) -> dict[str, dict[str, DeviceKeyLookupResult | None]]: ...
 
     @trace
     @cancellable
     async def get_e2e_device_keys_and_signatures(
         self,
-        query_list: Collection[tuple[str, Optional[str]]],
+        query_list: Collection[tuple[str, str | None]],
         include_all_devices: bool = False,
         include_deleted_devices: bool = False,
-    ) -> Union[
-        dict[str, dict[str, DeviceKeyLookupResult]],
-        dict[str, dict[str, Optional[DeviceKeyLookupResult]]],
-    ]:
+    ) -> dict[str, dict[str, DeviceKeyLookupResult]] | dict[str, dict[str, DeviceKeyLookupResult | None]]:
         """Fetch a list of device keys
 
         Any cross-signatures made on the keys by the owner of the device are also
@@ -384,10 +379,10 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
     async def _get_e2e_device_keys(
         self,
-        query_list: Collection[tuple[str, Optional[str]]],
+        query_list: Collection[tuple[str, str | None]],
         include_all_devices: bool = False,
         include_deleted_devices: bool = False,
-    ) -> dict[str, dict[str, Optional[DeviceKeyLookupResult]]]:
+    ) -> dict[str, dict[str, DeviceKeyLookupResult | None]]:
         """Get information on devices from the database
 
         The results include the device's keys and self-signatures, but *not* any
@@ -433,7 +428,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 query_clauses.append(user_device_id_in_list_clause)
                 query_params_list.append(user_device_args)
 
-        result: dict[str, dict[str, Optional[DeviceKeyLookupResult]]] = {}
+        result: dict[str, dict[str, DeviceKeyLookupResult | None]] = {}
 
         def get_e2e_device_keys_txn(
             txn: LoggingTransaction, query_clause: str, query_params: list
@@ -897,8 +892,8 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         )
 
     async def get_e2e_cross_signing_key(
-        self, user_id: str, key_type: str, from_user_id: Optional[str] = None
-    ) -> Optional[JsonMapping]:
+        self, user_id: str, key_type: str, from_user_id: str | None = None
+    ) -> JsonMapping | None:
         """Returns a user's cross-signing key.
 
         Args:
@@ -934,7 +929,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
     )
     async def _get_bare_e2e_cross_signing_keys_bulk(
         self, user_ids: Iterable[str]
-    ) -> Mapping[str, Optional[Mapping[str, JsonMapping]]]:
+    ) -> Mapping[str, Mapping[str, JsonMapping] | None]:
         """Returns the cross-signing keys for a set of users.  The output of this
         function should be passed to _get_e2e_cross_signing_signatures_txn if
         the signatures for the calling user need to be fetched.
@@ -1013,9 +1008,9 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
     def _get_e2e_cross_signing_signatures_txn(
         self,
         txn: LoggingTransaction,
-        keys: dict[str, Optional[dict[str, JsonDict]]],
+        keys: dict[str, dict[str, JsonDict] | None],
         from_user_id: str,
-    ) -> dict[str, Optional[dict[str, JsonDict]]]:
+    ) -> dict[str, dict[str, JsonDict] | None]:
         """Returns the cross-signing signatures made by a user on a set of keys.
 
         Args:
@@ -1096,8 +1091,8 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
     @cancellable
     async def get_e2e_cross_signing_keys_bulk(
-        self, user_ids: list[str], from_user_id: Optional[str] = None
-    ) -> Mapping[str, Optional[Mapping[str, JsonMapping]]]:
+        self, user_ids: list[str], from_user_id: str | None = None
+    ) -> Mapping[str, Mapping[str, JsonMapping] | None]:
         """Returns the cross-signing keys for a set of users.
 
         Args:
@@ -1114,7 +1109,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
         if from_user_id:
             result = cast(
-                dict[str, Optional[Mapping[str, JsonMapping]]],
+                dict[str, Mapping[str, JsonMapping] | None],
                 await self.db_pool.runInteraction(
                     "get_e2e_cross_signing_signatures",
                     self._get_e2e_cross_signing_signatures_txn,
@@ -1478,7 +1473,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
     async def get_master_cross_signing_key_updatable_before(
         self, user_id: str
-    ) -> tuple[bool, Optional[int]]:
+    ) -> tuple[bool, int | None]:
         """Get time before which a master cross-signing key may be replaced without UIA.
 
         (UIA means "User-Interactive Auth".)
@@ -1499,7 +1494,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
         """
 
-        def impl(txn: LoggingTransaction) -> tuple[bool, Optional[int]]:
+        def impl(txn: LoggingTransaction) -> tuple[bool, int | None]:
             # We want to distinguish between three cases:
             txn.execute(
                 """
@@ -1511,7 +1506,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             """,
                 (user_id,),
             )
-            row = cast(Optional[tuple[Optional[int]]], txn.fetchone())
+            row = cast(tuple[int | None] | None, txn.fetchone())
             if row is None:
                 return False, None
             return True, row[0]
@@ -1571,7 +1566,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
     async def allow_master_cross_signing_key_replacement_without_uia(
         self, user_id: str, duration_ms: int
-    ) -> Optional[int]:
+    ) -> int | None:
         """Mark this user's latest master key as being replaceable without UIA.
 
         Said replacement will only be permitted for a short time after calling this
@@ -1583,7 +1578,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         """
         timestamp = self.clock.time_msec() + duration_ms
 
-        def impl(txn: LoggingTransaction) -> Optional[int]:
+        def impl(txn: LoggingTransaction) -> int | None:
             txn.execute(
                 """
                 UPDATE e2e_cross_signing_keys

@@ -33,7 +33,6 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Optional,
     cast,
 )
 
@@ -198,7 +197,7 @@ class RoomCreationHandler:
         requester: Requester,
         old_room_id: str,
         new_version: RoomVersion,
-        additional_creators: Optional[list[str]],
+        additional_creators: list[str] | None,
         auto_member: bool = False,
         ratelimit: bool = True,
     ) -> str:
@@ -341,10 +340,8 @@ class RoomCreationHandler:
         new_version: RoomVersion,
         tombstone_event: EventBase,
         tombstone_context: synapse.events.snapshot.EventContext,
-        additional_creators: Optional[list[str]],
-        creation_event_with_context: Optional[
-            tuple[EventBase, synapse.events.snapshot.EventContext]
-        ] = None,
+        additional_creators: list[str] | None,
+        creation_event_with_context: tuple[EventBase, synapse.events.snapshot.EventContext] | None = None,
         auto_member: bool = False,
     ) -> str:
         """
@@ -434,7 +431,7 @@ class RoomCreationHandler:
         old_room_id: str,
         new_room_id: str,
         old_room_state: StateMap[str],
-        additional_creators: Optional[list[str]],
+        additional_creators: list[str] | None,
     ) -> None:
         """Send updated power levels in both rooms after an upgrade
 
@@ -524,9 +521,9 @@ class RoomCreationHandler:
     def _calculate_upgraded_room_creation_content(
         self,
         old_room_create_event: EventBase,
-        tombstone_event_id: Optional[str],
+        tombstone_event_id: str | None,
         new_room_version: RoomVersion,
-        additional_creators: Optional[list[str]],
+        additional_creators: list[str] | None,
     ) -> JsonDict:
         creation_content: JsonDict = {
             "room_version": new_room_version.identifier,
@@ -558,10 +555,8 @@ class RoomCreationHandler:
         new_room_id: str,
         new_room_version: RoomVersion,
         tombstone_event_id: str,
-        additional_creators: Optional[list[str]],
-        creation_event_with_context: Optional[
-            tuple[EventBase, synapse.events.snapshot.EventContext]
-        ] = None,
+        additional_creators: list[str] | None,
+        creation_event_with_context: tuple[EventBase, synapse.events.snapshot.EventContext] | None = None,
         auto_member: bool = False,
     ) -> None:
         """Populate a new room based on an old room
@@ -597,7 +592,7 @@ class RoomCreationHandler:
         initial_state: MutableStateMap = {}
 
         # Replicate relevant room events
-        types_to_copy: list[tuple[str, Optional[str]]] = [
+        types_to_copy: list[tuple[str, str | None]] = [
             (EventTypes.JoinRules, ""),
             (EventTypes.Name, ""),
             (EventTypes.Topic, ""),
@@ -1039,9 +1034,9 @@ class RoomCreationHandler:
         requester: Requester,
         config: JsonDict,
         ratelimit: bool = True,
-        creator_join_profile: Optional[JsonDict] = None,
+        creator_join_profile: JsonDict | None = None,
         ignore_forced_encryption: bool = False,
-    ) -> tuple[str, Optional[RoomAlias], int]:
+    ) -> tuple[str, RoomAlias | None, int]:
         """Creates a new room.
 
         Args:
@@ -1426,13 +1421,11 @@ class RoomCreationHandler:
         invite_list: list[str],
         initial_state: MutableStateMap,
         creation_content: JsonDict,
-        room_alias: Optional[RoomAlias] = None,
-        power_level_content_override: Optional[JsonDict] = None,
-        creator_join_profile: Optional[JsonDict] = None,
+        room_alias: RoomAlias | None = None,
+        power_level_content_override: JsonDict | None = None,
+        creator_join_profile: JsonDict | None = None,
         ignore_forced_encryption: bool = False,
-        creation_event_with_context: Optional[
-            tuple[EventBase, synapse.events.snapshot.EventContext]
-        ] = None,
+        creation_event_with_context: tuple[EventBase, synapse.events.snapshot.EventContext] | None = None,
     ) -> tuple[int, str, int]:
         """Sends the initial events into a new room. Sends the room creation, membership,
         and power level events into the room sequentially, then creates and batches up the
@@ -1813,7 +1806,7 @@ class RoomCreationHandler:
         self,
         users_map: dict[str, int],
         creator: str,
-        additional_creators: Optional[list[str]],
+        additional_creators: list[str] | None,
     ) -> None:
         creators = [creator]
         if additional_creators:
@@ -1880,9 +1873,9 @@ class RoomContextHandler:
         room_id: str,
         event_id: str,
         limit: int,
-        event_filter: Optional[Filter],
+        event_filter: Filter | None,
         use_admin_priviledge: bool = False,
-    ) -> Optional[EventContext]:
+    ) -> EventContext | None:
         """Retrieves events, pagination tokens and state around a given event
         in a room.
 
@@ -2168,7 +2161,7 @@ class RoomEventSource(EventSource[RoomStreamToken, EventBase]):
         limit: int,
         room_ids: StrCollection,
         is_guest: bool,
-        explicit_room_id: Optional[str] = None,
+        explicit_room_id: str | None = None,
     ) -> tuple[list[EventBase], RoomStreamToken]:
         # We just ignore the key for now.
 
@@ -2244,11 +2237,9 @@ class RoomShutdownHandler:
         self,
         room_id: str,
         params: ShutdownRoomParams,
-        result: Optional[ShutdownRoomResponse] = None,
-        update_result_fct: Optional[
-            Callable[[Optional[JsonMapping]], Awaitable[None]]
-        ] = None,
-    ) -> Optional[ShutdownRoomResponse]:
+        result: ShutdownRoomResponse | None = None,
+        update_result_fct: Callable[[JsonMapping | None], Awaitable[None]] | None = None,
+    ) -> ShutdownRoomResponse | None:
         """
         Shuts down a room. Moves all joined local users and room aliases automatically
         to a new room if `new_room_user_id` is set. Otherwise local users only

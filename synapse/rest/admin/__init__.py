@@ -153,7 +153,7 @@ class PurgeHistoryRestServlet(RestServlet):
         self.auth = hs.get_auth()
 
     async def on_POST(
-        self, request: SynapseRequest, room_id: str, event_id: Optional[str]
+        self, request: SynapseRequest, room_id: str, event_id: str | None
     ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 

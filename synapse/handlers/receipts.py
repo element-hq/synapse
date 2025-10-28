@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Iterable, Optional, Sequence
+from typing import TYPE_CHECKING, Iterable, Sequence
 
 from synapse.api.constants import EduTypes, ReceiptTypes
 from synapse.appservice import ApplicationService
@@ -180,7 +180,7 @@ class ReceiptsHandler:
         receipt_type: str,
         user_id: UserID,
         event_id: str,
-        thread_id: Optional[str],
+        thread_id: str | None,
     ) -> None:
         """Called when a client tells us a local user has read up to the given
         event_id in the room.
@@ -285,8 +285,8 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
         limit: int,
         room_ids: Iterable[str],
         is_guest: bool,
-        explicit_room_id: Optional[str] = None,
-        to_key: Optional[MultiWriterStreamToken] = None,
+        explicit_room_id: str | None = None,
+        to_key: MultiWriterStreamToken | None = None,
     ) -> tuple[list[JsonMapping], MultiWriterStreamToken]:
         """
         Find read receipts for given rooms (> `from_token` and <= `to_token`)

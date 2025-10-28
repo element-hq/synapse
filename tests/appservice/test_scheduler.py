@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional, Sequence
+from typing import Sequence
 from unittest.mock import AsyncMock, Mock
 
 from typing_extensions import TypeAlias
@@ -192,7 +192,7 @@ class ApplicationServiceSchedulerRecovererTestCase(unittest.HomeserverTestCase):
 
         def take_txn(
             *args: object, **kwargs: object
-        ) -> "defer.Deferred[Optional[Mock]]":
+        ) -> "defer.Deferred[Mock | None]":
             return defer.succeed(txns.pop(0))
 
         self.store.get_oldest_unsent_txn = Mock(side_effect=take_txn)
@@ -218,7 +218,7 @@ class ApplicationServiceSchedulerRecovererTestCase(unittest.HomeserverTestCase):
 
         def take_txn(
             *args: object, **kwargs: object
-        ) -> "defer.Deferred[Optional[Mock]]":
+        ) -> "defer.Deferred[Mock | None]":
             if pop_txn:
                 return defer.succeed(txns.pop(0))
             else:
@@ -256,7 +256,7 @@ class ApplicationServiceSchedulerRecovererTestCase(unittest.HomeserverTestCase):
 
         def take_txn(
             *args: object, **kwargs: object
-        ) -> "defer.Deferred[Optional[Mock]]":
+        ) -> "defer.Deferred[Mock | None]":
             if pop_txn:
                 return defer.succeed(txns.pop(0))
             else:
@@ -291,11 +291,11 @@ defer.Deferred[
     tuple[
         ApplicationService,
         Sequence[EventBase],
-        Optional[list[JsonDict]],
-        Optional[list[JsonDict]],
-        Optional[TransactionOneTimeKeysCount],
-        Optional[TransactionUnusedFallbackKeys],
-        Optional[DeviceListUpdates],
+        list[JsonDict] | None,
+        list[JsonDict] | None,
+        TransactionOneTimeKeysCount | None,
+        TransactionUnusedFallbackKeys | None,
+        DeviceListUpdates | None,
     ]
 ]
 """

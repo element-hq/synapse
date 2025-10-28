@@ -20,7 +20,7 @@
 #
 #
 import argparse
-from typing import Any, Optional
+from typing import Any
 
 from synapse.api.constants import RoomCreationPreset
 from synapse.config._base import Config, ConfigError, read_file
@@ -181,7 +181,7 @@ class RegistrationConfig(Config):
             refreshable_access_token_lifetime = self.parse_duration(
                 refreshable_access_token_lifetime
             )
-        self.refreshable_access_token_lifetime: Optional[int] = (
+        self.refreshable_access_token_lifetime: int | None = (
             refreshable_access_token_lifetime
         )
 
@@ -226,7 +226,7 @@ class RegistrationConfig(Config):
         refresh_token_lifetime = config.get("refresh_token_lifetime")
         if refresh_token_lifetime is not None:
             refresh_token_lifetime = self.parse_duration(refresh_token_lifetime)
-        self.refresh_token_lifetime: Optional[int] = refresh_token_lifetime
+        self.refresh_token_lifetime: int | None = refresh_token_lifetime
 
         if (
             self.session_lifetime is not None

@@ -13,7 +13,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 from synapse._pydantic_compat import (
@@ -73,11 +73,11 @@ class ServerMetadata(BaseModel):
 class IntrospectionResponse(BaseModel):
     retrieved_at_ms: StrictInt
     active: StrictBool
-    scope: Optional[StrictStr]
-    username: Optional[StrictStr]
-    sub: Optional[StrictStr]
-    device_id: Optional[StrictStr]
-    expires_in: Optional[StrictInt]
+    scope: StrictStr | None
+    username: StrictStr | None
+    sub: StrictStr | None
+    device_id: StrictStr | None
+    expires_in: StrictInt | None
 
     class Config:
         extra = Extra.allow

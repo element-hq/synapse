@@ -22,7 +22,7 @@ import base64
 import json
 import os
 import re
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence
 from urllib.parse import quote, urlencode
 
 from twisted.internet._resolver import HostResolution
@@ -135,7 +135,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
                 resolutionReceiver: IResolutionReceiver,
                 hostName: str,
                 portNumber: int = 0,
-                addressTypes: Optional[Sequence[type[IAddress]]] = None,
+                addressTypes: Sequence[type[IAddress]] | None = None,
                 transportSemantics: str = "TCP",
             ) -> IResolutionReceiver:
                 resolution = HostResolution(hostName)

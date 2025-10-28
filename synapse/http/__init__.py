@@ -75,7 +75,7 @@ def _get_requested_host(request: IRequest) -> bytes:
         return hostname
 
     # no Host header, use the address/port that the request arrived on
-    host: Union[address.IPv4Address, address.IPv6Address] = request.getHost()
+    host: address.IPv4Address | address.IPv6Address = request.getHost()
 
     hostname = host.host.encode("ascii")
 

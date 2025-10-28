@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.server import HttpServer
@@ -51,7 +51,7 @@ class RoomKeysServlet(RestServlet):
         self.e2e_room_keys_handler = hs.get_e2e_room_keys_handler()
 
     async def on_PUT(
-        self, request: SynapseRequest, room_id: Optional[str], session_id: Optional[str]
+        self, request: SynapseRequest, room_id: str | None, session_id: str | None
     ) -> tuple[int, JsonDict]:
         """
         Uploads one or more encrypted E2E room keys for backup purposes.
@@ -146,7 +146,7 @@ class RoomKeysServlet(RestServlet):
         return 200, ret
 
     async def on_GET(
-        self, request: SynapseRequest, room_id: Optional[str], session_id: Optional[str]
+        self, request: SynapseRequest, room_id: str | None, session_id: str | None
     ) -> tuple[int, JsonDict]:
         """
         Retrieves one or more encrypted E2E room keys for backup purposes.
@@ -233,7 +233,7 @@ class RoomKeysServlet(RestServlet):
         return 200, room_keys
 
     async def on_DELETE(
-        self, request: SynapseRequest, room_id: Optional[str], session_id: Optional[str]
+        self, request: SynapseRequest, room_id: str | None, session_id: str | None
     ) -> tuple[int, JsonDict]:
         """
         Deletes one or more encrypted E2E room keys for a user for backup purposes.

@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable
 
 from prometheus_client import Gauge
 
@@ -119,12 +119,12 @@ class PusherPool:
         app_display_name: str,
         device_display_name: str,
         pushkey: str,
-        lang: Optional[str],
+        lang: str | None,
         data: JsonDict,
         profile_tag: str = "",
         enabled: bool = True,
-        device_id: Optional[str] = None,
-    ) -> Optional[Pusher]:
+        device_id: str | None = None,
+    ) -> Pusher | None:
         """Creates a new pusher and adds it to the pool
 
         Returns:
@@ -330,7 +330,7 @@ class PusherPool:
 
     async def _get_pusher_config_for_user_by_app_id_and_pushkey(
         self, user_id: str, app_id: str, pushkey: str
-    ) -> Optional[PusherConfig]:
+    ) -> PusherConfig | None:
         resultlist = await self.store.get_pushers_by_app_id_and_pushkey(app_id, pushkey)
 
         pusher_config = None
@@ -342,7 +342,7 @@ class PusherPool:
 
     async def process_pusher_change_by_id(
         self, app_id: str, pushkey: str, user_id: str
-    ) -> Optional[Pusher]:
+    ) -> Pusher | None:
         """Look up the details for the given pusher, and either start it if its
         "enabled" flag is True, or try to stop it otherwise.
 
@@ -381,7 +381,7 @@ class PusherPool:
 
         logger.info("Started pushers")
 
-    async def _start_pusher(self, pusher_config: PusherConfig) -> Optional[Pusher]:
+    async def _start_pusher(self, pusher_config: PusherConfig) -> Pusher | None:
         """Start the given pusher
 
         Args:

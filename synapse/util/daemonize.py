@@ -27,7 +27,7 @@ import os
 import signal
 import sys
 from types import FrameType, TracebackType
-from typing import NoReturn, Optional
+from typing import NoReturn
 
 from synapse.logging.context import (
     LoggingContext,
@@ -121,7 +121,7 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
     def excepthook(
         type_: type[BaseException],
         value: BaseException,
-        traceback: Optional[TracebackType],
+        traceback: TracebackType | None,
     ) -> None:
         logger.critical("Unhanded exception", exc_info=(type_, value, traceback))
 
@@ -144,7 +144,7 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
         sys.exit(1)
 
     # write a log line on SIGTERM.
-    def sigterm(signum: int, frame: Optional[FrameType]) -> NoReturn:
+    def sigterm(signum: int, frame: FrameType | None) -> NoReturn:
         logger.warning("Caught signal %s. Stopping daemon.", signum)
         sys.exit(0)
 

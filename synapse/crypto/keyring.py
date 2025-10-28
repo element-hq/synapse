@@ -21,7 +21,7 @@
 
 import abc
 import logging
-from typing import TYPE_CHECKING, Callable, Iterable, Optional
+from typing import TYPE_CHECKING, Callable, Iterable
 
 import attr
 from signedjson.key import (
@@ -150,7 +150,7 @@ class Keyring:
     """
 
     def __init__(
-        self, hs: "HomeServer", key_fetchers: "Optional[Iterable[KeyFetcher]]" = None
+        self, hs: "HomeServer", key_fetchers: "Iterable[KeyFetcher] | None" = None
     ):
         self.server_name = hs.hostname
 

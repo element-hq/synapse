@@ -13,7 +13,7 @@
 #
 #
 #
-from typing import Mapping, Optional
+from typing import Mapping
 
 from twisted.internet.testing import MemoryReactor
 
@@ -42,17 +42,17 @@ class ScheduledTasksAdminApiTestCase(unittest.HomeserverTestCase):
         # create and schedule a few tasks
         async def _test_task(
             task: ScheduledTask,
-        ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+        ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
             return TaskStatus.ACTIVE, None, None
 
         async def _finished_test_task(
             task: ScheduledTask,
-        ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+        ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
             return TaskStatus.COMPLETE, None, None
 
         async def _failed_test_task(
             task: ScheduledTask,
-        ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+        ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
             return TaskStatus.FAILED, None, "Everything failed"
 
         self._task_scheduler.register_action(_test_task, "test_task")

@@ -18,7 +18,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import FrameType
-from typing import Collection, Optional, Sequence
+from typing import Collection, Sequence
 
 # These are expanded inside the dockerfile to be a fully qualified image name.
 # e.g. docker.io/library/debian:bookworm
@@ -49,7 +49,7 @@ class Builder:
     def __init__(
         self,
         redirect_stdout: bool = False,
-        docker_build_args: Optional[Sequence[str]] = None,
+        docker_build_args: Sequence[str] | None = None,
     ):
         self.redirect_stdout = redirect_stdout
         self._docker_build_args = tuple(docker_build_args or ())
@@ -167,7 +167,7 @@ class Builder:
 def run_builds(
     builder: Builder, dists: Collection[str], jobs: int = 1, skip_tests: bool = False
 ) -> None:
-    def sig(signum: int, _frame: Optional[FrameType]) -> None:
+    def sig(signum: int, _frame: FrameType | None) -> None:
         print("Caught SIGINT")
         builder.kill_containers()
 

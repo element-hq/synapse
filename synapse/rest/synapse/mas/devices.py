@@ -15,7 +15,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import NotFoundError
@@ -52,7 +52,7 @@ class MasUpsertDeviceResource(MasBaseResource):
     class PostBody(RequestBodyModel):
         localpart: StrictStr
         device_id: StrictStr
-        display_name: Optional[StrictStr]
+        display_name: StrictStr | None
 
     async def _async_render_POST(
         self, request: "SynapseRequest"

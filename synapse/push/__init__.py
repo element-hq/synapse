@@ -108,7 +108,7 @@ if TYPE_CHECKING:
 class PusherConfig:
     """Parameters necessary to configure a pusher."""
 
-    id: Optional[int]
+    id: int | None
     user_name: str
 
     profile_tag: str
@@ -118,18 +118,18 @@ class PusherConfig:
     device_display_name: str
     pushkey: str
     ts: int
-    lang: Optional[str]
-    data: Optional[JsonDict]
+    lang: str | None
+    data: JsonDict | None
     last_stream_ordering: int
-    last_success: Optional[int]
-    failing_since: Optional[int]
+    last_success: int | None
+    failing_since: int | None
     enabled: bool
-    device_id: Optional[str]
+    device_id: str | None
 
     # XXX(quenting): The access_token is not persisted anymore for new pushers, but we
     # keep it when reading from the database, so that we don't get stale pushers
     # while the "set_device_id_for_pushers" background update is running.
-    access_token: Optional[int]
+    access_token: int | None
 
     def as_dict(self) -> dict[str, Any]:
         """Information that can be retrieved about a pusher after creation."""

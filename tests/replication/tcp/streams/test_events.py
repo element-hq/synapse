@@ -18,7 +18,7 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
 from parameterized import parameterized
 
@@ -517,7 +517,7 @@ class EventsStreamTestCase(BaseStreamTestCase):
     event_count = 0
 
     def _inject_test_event(
-        self, body: Optional[str] = None, sender: Optional[str] = None, **kwargs: Any
+        self, body: str | None = None, sender: str | None = None, **kwargs: Any
     ) -> EventBase:
         if sender is None:
             sender = self.user_id
@@ -539,9 +539,9 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
     def _inject_state_event(
         self,
-        body: Optional[str] = None,
-        state_key: Optional[str] = None,
-        sender: Optional[str] = None,
+        body: str | None = None,
+        state_key: str | None = None,
+        sender: str | None = None,
     ) -> EventBase:
         if sender is None:
             sender = self.user_id

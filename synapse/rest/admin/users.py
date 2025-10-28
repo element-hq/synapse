@@ -23,7 +23,7 @@ import hmac
 import logging
 import secrets
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
 
 import attr
 
@@ -195,7 +195,7 @@ class UsersRestServletV2(RestServlet):
 
         return HTTPStatus.OK, ret
 
-    def _parse_parameter_deactivated(self, request: SynapseRequest) -> Optional[bool]:
+    def _parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
         """
         Return None (no filtering) if `deactivated` is `true`, otherwise return `False`
         (exclude deactivated users from the results).
@@ -208,7 +208,7 @@ class UsersRestServletV3(UsersRestServletV2):
 
     def _parse_parameter_deactivated(
         self, request: SynapseRequest
-    ) -> Union[bool, None]:
+    ) -> bool | None:
         return parse_boolean(request, "deactivated")
 
 
@@ -340,7 +340,7 @@ class UserRestServletV2(RestServlet):
                 HTTPStatus.BAD_REQUEST, "An user can't be deactivated and locked"
             )
 
-        approved: Optional[bool] = None
+        approved: bool | None = None
         if "approved" in body and self._msc3866_enabled:
             approved = body["approved"]
             if not isinstance(approved, bool):
@@ -920,7 +920,7 @@ class SearchUsersRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, target_user_id: str
-    ) -> tuple[int, Optional[list[JsonDict]]]:
+    ) -> tuple[int, list[JsonDict] | None]:
         """Get request to search user table for specific users according to
         search term.
         This needs user to have a administrator access in Synapse.
@@ -1476,9 +1476,9 @@ class RedactUser(RestServlet):
 
     class PostBody(RequestBodyModel):
         rooms: list[StrictStr]
-        reason: Optional[StrictStr]
-        limit: Optional[StrictInt]
-        use_admin: Optional[StrictBool]
+        reason: StrictStr | None
+        limit: StrictInt | None
+        use_admin: StrictBool | None
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str

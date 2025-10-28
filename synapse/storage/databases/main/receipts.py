@@ -26,7 +26,6 @@ from typing import (
     Collection,
     Iterable,
     Mapping,
-    Optional,
     Sequence,
     cast,
 )
@@ -67,7 +66,7 @@ class ReceiptInRoom:
     receipt_type: str
     user_id: str
     event_id: str
-    thread_id: Optional[str]
+    thread_id: str | None
     data: JsonMapping
 
     @staticmethod
@@ -176,7 +175,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         user_id: str,
         room_id: str,
         receipt_types: Collection[str],
-    ) -> Optional[tuple[str, int]]:
+    ) -> tuple[str, int] | None:
         """
         Fetch the event ID and stream_ordering for the latest unthreaded receipt
         in a room with one of the given receipt types.
@@ -208,7 +207,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         args.extend((user_id, room_id))
         txn.execute(sql, args)
 
-        return cast(Optional[tuple[str, int]], txn.fetchone())
+        return cast(tuple[str, int] | None, txn.fetchone())
 
     async def get_receipts_for_user(
         self, user_id: str, receipt_types: Iterable[str]
@@ -311,7 +310,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         self,
         room_ids: Iterable[str],
         to_key: MultiWriterStreamToken,
-        from_key: Optional[MultiWriterStreamToken] = None,
+        from_key: MultiWriterStreamToken | None = None,
     ) -> list[JsonMapping]:
         """Get receipts for multiple rooms for sending to clients.
 
@@ -343,7 +342,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         self,
         room_id: str,
         to_key: MultiWriterStreamToken,
-        from_key: Optional[MultiWriterStreamToken] = None,
+        from_key: MultiWriterStreamToken | None = None,
     ) -> Sequence[JsonMapping]:
         """Get receipts for a single room for sending to clients.
 
@@ -371,7 +370,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         self,
         room_id: str,
         to_key: MultiWriterStreamToken,
-        from_key: Optional[MultiWriterStreamToken] = None,
+        from_key: MultiWriterStreamToken | None = None,
     ) -> Sequence[JsonMapping]:
         """See get_linearized_receipts_for_room"""
 
@@ -425,7 +424,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         self,
         room_ids: Collection[str],
         to_key: MultiWriterStreamToken,
-        from_key: Optional[MultiWriterStreamToken] = None,
+        from_key: MultiWriterStreamToken | None = None,
     ) -> Mapping[str, Sequence[JsonMapping]]:
         if not room_ids:
             return {}
@@ -528,7 +527,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         def get_linearized_receipts_for_events_txn(
             txn: LoggingTransaction,
             room_id_event_id_tuples: Collection[tuple[str, str]],
-        ) -> list[tuple[str, str, str, str, Optional[str], str]]:
+        ) -> list[tuple[str, str, str, str, str | None, str]]:
             clause, args = make_tuple_in_list_sql_clause(
                 self.database_engine, ("room_id", "event_id"), room_id_event_id_tuples
             )
@@ -578,7 +577,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
     async def get_linearized_receipts_for_all_rooms(
         self,
         to_key: MultiWriterStreamToken,
-        from_key: Optional[MultiWriterStreamToken] = None,
+        from_key: MultiWriterStreamToken | None = None,
     ) -> Mapping[str, JsonMapping]:
         """Get receipts for all rooms between two stream_ids, up
         to a limit of the latest 100 read receipts.
@@ -655,7 +654,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         def get_linearized_receipts_for_user_in_rooms_txn(
             txn: LoggingTransaction,
             batch_room_ids: StrCollection,
-        ) -> list[tuple[str, str, str, str, Optional[str], str]]:
+        ) -> list[tuple[str, str, str, str, str | None, str]]:
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "room_id", batch_room_ids
             )
@@ -780,7 +779,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
     async def get_all_updated_receipts(
         self, instance_name: str, last_id: int, current_id: int, limit: int
     ) -> tuple[
-        list[tuple[int, tuple[str, str, str, str, Optional[str], JsonDict]]], int, bool
+        list[tuple[int, tuple[str, str, str, str, str | None, JsonDict]]], int, bool
     ]:
         """Get updates for receipts replication stream.
 
@@ -809,7 +808,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         def get_all_updated_receipts_txn(
             txn: LoggingTransaction,
         ) -> tuple[
-            list[tuple[int, tuple[str, str, str, str, Optional[str], JsonDict]]],
+            list[tuple[int, tuple[str, str, str, str, str | None, JsonDict]]],
             int,
             bool,
         ]:
@@ -824,7 +823,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
             txn.execute(sql, (last_id, current_id, instance_name, limit))
 
             updates = cast(
-                list[tuple[int, tuple[str, str, str, str, Optional[str], JsonDict]]],
+                list[tuple[int, tuple[str, str, str, str, str | None, JsonDict]]],
                 [(r[0], r[1:6] + (db_to_json(r[6]),)) for r in txn],
             )
 
@@ -884,10 +883,10 @@ class ReceiptsWorkerStore(SQLBaseStore):
         receipt_type: str,
         user_id: str,
         event_id: str,
-        thread_id: Optional[str],
+        thread_id: str | None,
         data: JsonDict,
         stream_id: int,
-    ) -> Optional[int]:
+    ) -> int | None:
         """Inserts a receipt into the database if it's newer than the current one.
 
         Returns:
@@ -1023,9 +1022,9 @@ class ReceiptsWorkerStore(SQLBaseStore):
         receipt_type: str,
         user_id: str,
         event_ids: list[str],
-        thread_id: Optional[str],
+        thread_id: str | None,
         data: dict,
-    ) -> Optional[PersistedPosition]:
+    ) -> PersistedPosition | None:
         """Insert a receipt, either from local client or remote server.
 
         Automatically does conversion between linearized and graph
@@ -1095,7 +1094,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         receipt_type: str,
         user_id: str,
         event_ids: list[str],
-        thread_id: Optional[str],
+        thread_id: str | None,
         data: JsonDict,
     ) -> None:
         assert self._can_write_to_receipts

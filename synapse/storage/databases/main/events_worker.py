@@ -31,7 +31,6 @@ from typing import (
     Literal,
     Mapping,
     MutableMapping,
-    Optional,
     cast,
     overload,
 )
@@ -146,7 +145,7 @@ class InvalidEventError(Exception):
 @attr.s(slots=True, auto_attribs=True)
 class EventCacheEntry:
     event: EventBase
-    redacted_event: Optional[EventBase]
+    redacted_event: EventBase | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -184,9 +183,9 @@ class _EventRow:
     instance_name: str
     json: str
     internal_metadata: str
-    format_version: Optional[int]
-    room_version_id: Optional[str]
-    rejected_reason: Optional[str]
+    format_version: int | None
+    room_version_id: str | None
+    rejected_reason: str | None
     redactions: list[str]
     outlier: bool
 
@@ -501,7 +500,7 @@ class EventsWorkerStore(SQLBaseStore):
         get_prev_content: bool = ...,
         allow_rejected: bool = ...,
         allow_none: Literal[False] = ...,
-        check_room_id: Optional[str] = ...,
+        check_room_id: str | None = ...,
     ) -> EventBase: ...
 
     @overload
@@ -512,8 +511,8 @@ class EventsWorkerStore(SQLBaseStore):
         get_prev_content: bool = ...,
         allow_rejected: bool = ...,
         allow_none: Literal[True] = ...,
-        check_room_id: Optional[str] = ...,
-    ) -> Optional[EventBase]: ...
+        check_room_id: str | None = ...,
+    ) -> EventBase | None: ...
 
     @cancellable
     async def get_event(
@@ -523,8 +522,8 @@ class EventsWorkerStore(SQLBaseStore):
         get_prev_content: bool = False,
         allow_rejected: bool = False,
         allow_none: bool = False,
-        check_room_id: Optional[str] = None,
-    ) -> Optional[EventBase]:
+        check_room_id: str | None = None,
+    ) -> EventBase | None:
         """Get an event from the database by event_id.
 
         Events for unknown room versions will also be filtered out.
@@ -1090,7 +1089,7 @@ class EventsWorkerStore(SQLBaseStore):
         self,
         context: EventContext,
         state_keys_to_include: StateFilter,
-        membership_user_id: Optional[str] = None,
+        membership_user_id: str | None = None,
     ) -> list[JsonDict]:
         """
         Retrieve the stripped state from a room, given an event context to retrieve state
@@ -1403,7 +1402,7 @@ class EventsWorkerStore(SQLBaseStore):
 
             room_version_id = row.room_version_id
 
-            room_version: Optional[RoomVersion]
+            room_version: RoomVersion | None
             if not room_version_id:
                 # this should only happen for out-of-band membership events which
                 # arrived before https://github.com/matrix-org/synapse/issues/6983
@@ -1653,7 +1652,7 @@ class EventsWorkerStore(SQLBaseStore):
         original_ev: EventBase,
         redactions: Iterable[str],
         event_map: dict[str, EventBase],
-    ) -> Optional[EventBase]:
+    ) -> EventBase | None:
         """Given an event object and a list of possible redacting event ids,
         determine whether to honour any of those redactions and if so return a redacted
         event.
@@ -2131,7 +2130,7 @@ class EventsWorkerStore(SQLBaseStore):
 
     async def get_senders_for_event_ids(
         self, event_ids: Collection[str]
-    ) -> dict[str, Optional[str]]:
+    ) -> dict[str, str | None]:
         """
         Given a sequence of event IDs, return the sender associated with each.
 
@@ -2147,7 +2146,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         def _get_senders_for_event_ids(
             txn: LoggingTransaction,
-        ) -> dict[str, Optional[str]]:
+        ) -> dict[str, str | None]:
             rows = self.db_pool.simple_select_many_txn(
                 txn=txn,
                 table="events",
@@ -2178,7 +2177,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         return int(res[0]), int(res[1])
 
-    async def get_next_event_to_expire(self) -> Optional[tuple[str, int]]:
+    async def get_next_event_to_expire(self) -> tuple[str, int] | None:
         """Retrieve the entry with the lowest expiry timestamp in the event_expiry
         table, or None if there's no more event to expire.
 
@@ -2190,7 +2189,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         def get_next_event_to_expire_txn(
             txn: LoggingTransaction,
-        ) -> Optional[tuple[str, int]]:
+        ) -> tuple[str, int] | None:
             txn.execute(
                 """
                 SELECT event_id, expiry_ts FROM event_expiry
@@ -2198,7 +2197,7 @@ class EventsWorkerStore(SQLBaseStore):
                 """
             )
 
-            return cast(Optional[tuple[str, int]], txn.fetchone())
+            return cast(tuple[str, int] | None, txn.fetchone())
 
         return await self.db_pool.runInteraction(
             desc="get_next_event_to_expire", func=get_next_event_to_expire_txn
@@ -2206,7 +2205,7 @@ class EventsWorkerStore(SQLBaseStore):
 
     async def get_event_id_from_transaction_id_and_device_id(
         self, room_id: str, user_id: str, device_id: str, txn_id: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Look up if we have already persisted an event for the transaction ID,
         returning the event ID if so.
         """
@@ -2427,7 +2426,7 @@ class EventsWorkerStore(SQLBaseStore):
 
     async def get_event_id_for_timestamp(
         self, room_id: str, timestamp: int, direction: Direction
-    ) -> Optional[str]:
+    ) -> str | None:
         """Find the closest event to the given timestamp in the given direction.
 
         Args:
@@ -2481,7 +2480,7 @@ class EventsWorkerStore(SQLBaseStore):
             LIMIT 1;
         """
 
-        def get_event_id_for_timestamp_txn(txn: LoggingTransaction) -> Optional[str]:
+        def get_event_id_for_timestamp_txn(txn: LoggingTransaction) -> str | None:
             txn.execute(
                 sql_template,
                 (room_id, timestamp),
@@ -2591,7 +2590,7 @@ class EventsWorkerStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         event_id: str,
-        rejection_reason: Optional[str],
+        rejection_reason: str | None,
     ) -> None:
         """Mark an event that was previously accepted as rejected, or vice versa
 
@@ -2640,8 +2639,8 @@ class EventsWorkerStore(SQLBaseStore):
         self.invalidate_get_event_cache_after_txn(txn, event_id)
 
     async def get_events_sent_by_user_in_room(
-        self, user_id: str, room_id: str, limit: int, filter: Optional[list[str]] = None
-    ) -> Optional[list[str]]:
+        self, user_id: str, room_id: str, limit: int, filter: list[str] | None = None
+    ) -> list[str] | None:
         """
         Get a list of event ids of events sent by the user in the specified room
 
@@ -2656,10 +2655,10 @@ class EventsWorkerStore(SQLBaseStore):
             txn: LoggingTransaction,
             user_id: str,
             room_id: str,
-            filter: Optional[list[str]],
+            filter: list[str] | None,
             batch_size: int,
             offset: int,
-        ) -> tuple[Optional[list[str]], int]:
+        ) -> tuple[list[str] | None, int]:
             if filter:
                 base_clause, args = make_in_list_sql_clause(
                     txn.database_engine, "type", filter
@@ -2767,7 +2766,7 @@ class EventsWorkerStore(SQLBaseStore):
     @cached(tree=True)
     async def get_metadata_for_event(
         self, room_id: str, event_id: str
-    ) -> Optional[EventMetadata]:
+    ) -> EventMetadata | None:
         row = await self.db_pool.simple_select_one(
             table="events",
             keyvalues={"room_id": room_id, "event_id": event_id},

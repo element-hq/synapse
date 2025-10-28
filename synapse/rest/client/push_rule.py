@@ -20,7 +20,7 @@
 #
 
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import (
     Codes,
@@ -240,7 +240,7 @@ def _rule_spec_from_path(path: list[str]) -> RuleSpec:
 
 def _rule_tuple_from_request_object(
     rule_template: str, rule_id: str, req_obj: JsonDict
-) -> tuple[list[JsonDict], list[Union[str, JsonDict]]]:
+) -> tuple[list[JsonDict], list[str | JsonDict]]:
     if rule_template == "postcontent":
         # postcontent is from MSC4306, which says that clients
         # cannot create their own postcontent rules right now.

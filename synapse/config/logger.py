@@ -26,7 +26,7 @@ import os
 import sys
 import threading
 from string import Template
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from zope.interface import implementer
@@ -199,7 +199,7 @@ class LoggingConfig(Config):
 
 
 def _setup_stdlib_logging(
-    config: "HomeServerConfig", log_config_path: Optional[str], logBeginner: LogBeginner
+    config: "HomeServerConfig", log_config_path: str | None, logBeginner: LogBeginner
 ) -> None:
     """
     Set up Python standard library logging.
@@ -302,7 +302,7 @@ def _load_logging_config(log_config_path: str) -> None:
     reset_logging_config()
 
 
-def _reload_logging_config(log_config_path: Optional[str]) -> None:
+def _reload_logging_config(log_config_path: str | None) -> None:
     """
     Reload the log configuration from the file and apply it.
     """

@@ -27,7 +27,6 @@ import time
 import urllib.parse
 from binascii import unhexlify
 from http import HTTPStatus
-from typing import Optional
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
@@ -643,10 +642,10 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         """Test that searching for a users works correctly"""
 
         def _search_test(
-            expected_user_id: Optional[str],
+            expected_user_id: str | None,
             search_term: str,
-            search_field: Optional[str] = "name",
-            expected_http_code: Optional[int] = 200,
+            search_field: str | None = "name",
+            expected_http_code: int | None = 200,
         ) -> None:
             """Search for a user and check that the returned user's id is a match
 
@@ -1185,7 +1184,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         )
 
         def test_user_type(
-            expected_user_ids: list[str], not_user_types: Optional[list[str]] = None
+            expected_user_ids: list[str], not_user_types: list[str] | None = None
         ) -> None:
             """Runs a test for the not_user_types param
             Args:
@@ -1262,7 +1261,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         )
 
         def test_user_type(
-            expected_user_ids: list[str], not_user_types: Optional[list[str]] = None
+            expected_user_ids: list[str], not_user_types: list[str] | None = None
         ) -> None:
             """Runs a test for the not_user_types param
             Args:
@@ -1374,8 +1373,8 @@ class UsersListTestCase(unittest.HomeserverTestCase):
     def _order_test(
         self,
         expected_user_list: list[str],
-        order_by: Optional[str],
-        dir: Optional[str] = None,
+        order_by: str | None,
+        dir: str | None = None,
     ) -> None:
         """Request the list of users in a certain order. Assert that order is what
         we expect
@@ -3116,7 +3115,7 @@ class UserRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual("@user:test", channel.json_body["name"])
         self.assertTrue(channel.json_body["admin"])
 
-    def set_user_type(self, user_type: Optional[str]) -> None:
+    def set_user_type(self, user_type: str | None) -> None:
         # Set to user_type
         channel = self.make_request(
             "PUT",
@@ -4213,8 +4212,8 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
     def _order_test(
         self,
         expected_media_list: list[str],
-        order_by: Optional[str],
-        dir: Optional[str] = None,
+        order_by: str | None,
+        dir: str | None = None,
     ) -> None:
         """Request the list of media in a certain order. Assert that order is what
         we expect

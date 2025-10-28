@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from twisted.internet.defer import CancelledError
 
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 CHECK_EVENT_ALLOWED_CALLBACK = Callable[
-    [EventBase, StateMap[EventBase]], Awaitable[tuple[bool, Optional[dict]]]
+    [EventBase, StateMap[EventBase]], Awaitable[tuple[bool, dict | None]]
 ]
 ON_CREATE_ROOM_CALLBACK = Callable[[Requester, dict, bool], Awaitable]
 CHECK_THREEPID_CAN_BE_INVITED_CALLBACK = Callable[
@@ -47,7 +47,7 @@ CHECK_VISIBILITY_CAN_BE_MODIFIED_CALLBACK = Callable[
     [str, StateMap[EventBase], str], Awaitable[bool]
 ]
 ON_NEW_EVENT_CALLBACK = Callable[[EventBase, StateMap[EventBase]], Awaitable]
-CHECK_CAN_SHUTDOWN_ROOM_CALLBACK = Callable[[Optional[str], str], Awaitable[bool]]
+CHECK_CAN_SHUTDOWN_ROOM_CALLBACK = Callable[[str | None, str], Awaitable[bool]]
 CHECK_CAN_DEACTIVATE_USER_CALLBACK = Callable[[str, bool], Awaitable[bool]]
 ON_PROFILE_UPDATE_CALLBACK = Callable[[str, ProfileInfo, bool, bool], Awaitable]
 ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK = Callable[[str, bool, bool], Awaitable]
@@ -77,7 +77,7 @@ def load_legacy_third_party_event_rules(hs: "HomeServer") -> None:
         "check_visibility_can_be_modified",
     }
 
-    def async_wrapper(f: Optional[Callable]) -> Optional[Callable[..., Awaitable]]:
+    def async_wrapper(f: Callable | None) -> Callable[..., Awaitable] | None:
         # f might be None if the callback isn't implemented by the module. In this
         # case we don't want to register a callback at all so we return None.
         if f is None:
@@ -93,7 +93,7 @@ def load_legacy_third_party_event_rules(hs: "HomeServer") -> None:
             async def wrap_check_event_allowed(
                 event: EventBase,
                 state_events: StateMap[EventBase],
-            ) -> tuple[bool, Optional[dict]]:
+            ) -> tuple[bool, dict | None]:
                 # Assertion required because mypy can't prove we won't change
                 # `f` back to `None`. See
                 # https://mypy.readthedocs.io/en/latest/common_issues.html#narrowing-and-inner-functions
@@ -188,28 +188,18 @@ class ThirdPartyEventRulesModuleApiCallbacks:
 
     def register_third_party_rules_callbacks(
         self,
-        check_event_allowed: Optional[CHECK_EVENT_ALLOWED_CALLBACK] = None,
-        on_create_room: Optional[ON_CREATE_ROOM_CALLBACK] = None,
-        check_threepid_can_be_invited: Optional[
-            CHECK_THREEPID_CAN_BE_INVITED_CALLBACK
-        ] = None,
-        check_visibility_can_be_modified: Optional[
-            CHECK_VISIBILITY_CAN_BE_MODIFIED_CALLBACK
-        ] = None,
-        on_new_event: Optional[ON_NEW_EVENT_CALLBACK] = None,
-        check_can_shutdown_room: Optional[CHECK_CAN_SHUTDOWN_ROOM_CALLBACK] = None,
-        check_can_deactivate_user: Optional[CHECK_CAN_DEACTIVATE_USER_CALLBACK] = None,
-        on_profile_update: Optional[ON_PROFILE_UPDATE_CALLBACK] = None,
-        on_user_deactivation_status_changed: Optional[
-            ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK
-        ] = None,
-        on_threepid_bind: Optional[ON_THREEPID_BIND_CALLBACK] = None,
-        on_add_user_third_party_identifier: Optional[
-            ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
-        ] = None,
-        on_remove_user_third_party_identifier: Optional[
-            ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
-        ] = None,
+        check_event_allowed: CHECK_EVENT_ALLOWED_CALLBACK | None = None,
+        on_create_room: ON_CREATE_ROOM_CALLBACK | None = None,
+        check_threepid_can_be_invited: CHECK_THREEPID_CAN_BE_INVITED_CALLBACK | None = None,
+        check_visibility_can_be_modified: CHECK_VISIBILITY_CAN_BE_MODIFIED_CALLBACK | None = None,
+        on_new_event: ON_NEW_EVENT_CALLBACK | None = None,
+        check_can_shutdown_room: CHECK_CAN_SHUTDOWN_ROOM_CALLBACK | None = None,
+        check_can_deactivate_user: CHECK_CAN_DEACTIVATE_USER_CALLBACK | None = None,
+        on_profile_update: ON_PROFILE_UPDATE_CALLBACK | None = None,
+        on_user_deactivation_status_changed: ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK | None = None,
+        on_threepid_bind: ON_THREEPID_BIND_CALLBACK | None = None,
+        on_add_user_third_party_identifier: ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK | None = None,
+        on_remove_user_third_party_identifier: ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK | None = None,
     ) -> None:
         """Register callbacks from modules for each hook."""
         if check_event_allowed is not None:
@@ -261,7 +251,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         self,
         event: EventBase,
         context: UnpersistedEventContextBase,
-    ) -> tuple[bool, Optional[dict]]:
+    ) -> tuple[bool, dict | None]:
         """Check if a provided event should be allowed in the given context.
 
         The module can return:
@@ -444,7 +434,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
                 )
 
     async def check_can_shutdown_room(
-        self, user_id: Optional[str], room_id: str
+        self, user_id: str | None, room_id: str
     ) -> bool:
         """Intercept requests to shutdown a room. If `False` is returned, the
          room must not be shut down.

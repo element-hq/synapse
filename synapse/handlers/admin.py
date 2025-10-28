@@ -25,7 +25,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Mapping,
-    Optional,
     Sequence,
 )
 
@@ -71,7 +70,7 @@ class AdminHandler:
 
         self.hs = hs
 
-    async def get_redact_task(self, redact_id: str) -> Optional[ScheduledTask]:
+    async def get_redact_task(self, redact_id: str) -> ScheduledTask | None:
         """Get the current status of an active redaction process
 
         Args:
@@ -99,9 +98,9 @@ class AdminHandler:
 
         return ret
 
-    async def get_user(self, user: UserID) -> Optional[JsonMapping]:
+    async def get_user(self, user: UserID) -> JsonMapping | None:
         """Function to get user details"""
-        user_info: Optional[UserInfo] = await self._store.get_user_by_id(
+        user_info: UserInfo | None = await self._store.get_user_by_id(
             user.to_string()
         )
         if user_info is None:
@@ -355,8 +354,8 @@ class AdminHandler:
         rooms: list,
         requester: JsonMapping,
         use_admin: bool,
-        reason: Optional[str],
-        limit: Optional[int],
+        reason: str | None,
+        limit: int | None,
     ) -> str:
         """
         Start a task redacting the events of the given user in the given rooms
@@ -408,7 +407,7 @@ class AdminHandler:
 
     async def _redact_all_events(
         self, task: ScheduledTask
-    ) -> tuple[TaskStatus, Optional[Mapping[str, Any]], Optional[str]]:
+    ) -> tuple[TaskStatus, Mapping[str, Any] | None, str | None]:
         """
         Task to redact all of a users events in the given rooms, tracking which, if any, events
         whose redaction failed

@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 class TransportLayerServer(JsonResource):
     """Handles incoming federation HTTP requests"""
 
-    def __init__(self, hs: "HomeServer", servlet_groups: Optional[list[str]] = None):
+    def __init__(self, hs: "HomeServer", servlet_groups: list[str] | None = None):
         """Initialize the TransportLayerServer
 
         Will by default register all servlets. For custom behaviour, pass in
@@ -135,7 +135,7 @@ class PublicRoomList(BaseFederationServlet):
         if not self.allow_access:
             raise FederationDeniedError(origin)
 
-        limit: Optional[int] = parse_integer_from_args(query, "limit", 0)
+        limit: int | None = parse_integer_from_args(query, "limit", 0)
         since_token = parse_string_from_args(query, "since", None)
         include_all_networks = parse_boolean_from_args(
             query, "include_all_networks", default=False
@@ -170,7 +170,7 @@ class PublicRoomList(BaseFederationServlet):
         if not self.allow_access:
             raise FederationDeniedError(origin)
 
-        limit: Optional[int] = int(content.get("limit", 100))
+        limit: int | None = int(content.get("limit", 100))
         since_token = content.get("since", None)
         search_filter = content.get("filter", None)
 
@@ -240,7 +240,7 @@ class OpenIdUserInfo(BaseFederationServlet):
 
     async def on_GET(
         self,
-        origin: Optional[str],
+        origin: str | None,
         content: Literal[None],
         query: dict[bytes, list[bytes]],
     ) -> tuple[int, JsonDict]:
@@ -281,7 +281,7 @@ def register_servlets(
     resource: HttpServer,
     authenticator: Authenticator,
     ratelimiter: FederationRateLimiter,
-    servlet_groups: Optional[Iterable[str]] = None,
+    servlet_groups: Iterable[str] | None = None,
 ) -> None:
     """Initialize and register servlet classes.
 

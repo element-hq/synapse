@@ -19,7 +19,7 @@
 #
 import logging
 import traceback
-from typing import Any, Coroutine, NoReturn, Optional, TypeVar
+from typing import Any, Coroutine, NoReturn, TypeVar
 
 from parameterized import parameterized_class
 
@@ -71,7 +71,7 @@ class ObservableDeferredTest(TestCase):
         observer1.addBoth(check_called_first)
 
         # store the results
-        results: list[Optional[int]] = [None, None]
+        results: list[int | None] = [None, None]
 
         def check_val(res: int, idx: int) -> int:
             results[idx] = res
@@ -102,7 +102,7 @@ class ObservableDeferredTest(TestCase):
         observer1.addBoth(check_called_first)
 
         # store the results
-        results: list[Optional[Failure]] = [None, None]
+        results: list[Failure | None] = [None, None]
 
         def check_failure(res: Failure, idx: int) -> None:
             results[idx] = res

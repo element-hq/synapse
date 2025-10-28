@@ -25,7 +25,7 @@ import logging
 import re
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Awaitable, Optional
+from typing import TYPE_CHECKING, Awaitable
 from urllib import parse as urlparse
 
 from prometheus_client.core import Histogram
@@ -294,7 +294,7 @@ class RoomStateEventRestServlet(RestServlet):
         room_id: str,
         event_type: str,
         state_key: str,
-        txn_id: Optional[str] = None,
+        txn_id: str | None = None,
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
@@ -407,7 +407,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         requester: Requester,
         room_id: str,
         event_type: str,
-        txn_id: Optional[str],
+        txn_id: str | None,
     ) -> tuple[int, JsonDict]:
         content = parse_json_object_from_request(request)
 
@@ -484,8 +484,8 @@ class RoomSendEventRestServlet(TransactionRestServlet):
 
 def _parse_request_delay(
     request: SynapseRequest,
-    max_delay: Optional[int],
-) -> Optional[int]:
+    max_delay: int | None,
+) -> int | None:
     """Parses from the request string the delay parameter for
         delayed event requests, and checks it for correctness.
 
@@ -544,7 +544,7 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
         request: SynapseRequest,
         requester: Requester,
         room_identifier: str,
-        txn_id: Optional[str],
+        txn_id: str | None,
     ) -> tuple[int, JsonDict]:
         content = parse_json_object_from_request(request, allow_empty_body=True)
 
@@ -623,7 +623,7 @@ class PublicRoomListRestServlet(RestServlet):
             if server:
                 raise e
 
-        limit: Optional[int] = parse_integer(request, "limit", 0)
+        limit: int | None = parse_integer(request, "limit", 0)
         since_token = parse_string(request, "since")
 
         if limit == 0:
@@ -658,7 +658,7 @@ class PublicRoomListRestServlet(RestServlet):
         server = parse_string(request, "server")
         content = parse_json_object_from_request(request)
 
-        limit: Optional[int] = int(content.get("limit", 100))
+        limit: int | None = int(content.get("limit", 100))
         since_token = content.get("since", None)
         search_filter = content.get("filter", None)
 
@@ -1118,7 +1118,7 @@ class RoomMembershipRestServlet(TransactionRestServlet):
         requester: Requester,
         room_id: str,
         membership_action: str,
-        txn_id: Optional[str],
+        txn_id: str | None,
     ) -> tuple[int, JsonDict]:
         if requester.is_guest and membership_action not in {
             Membership.JOIN,
@@ -1241,7 +1241,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
         requester: Requester,
         room_id: str,
         event_id: str,
-        txn_id: Optional[str],
+        txn_id: str | None,
     ) -> tuple[int, JsonDict]:
         content = parse_json_object_from_request(request)
 
@@ -1617,7 +1617,7 @@ class RoomSummaryRestServlet(ResolveRoomIdMixin, RestServlet):
     ) -> tuple[int, JsonDict]:
         try:
             requester = await self._auth.get_user_by_req(request, allow_guest=True)
-            requester_user_id: Optional[str] = requester.user.to_string()
+            requester_user_id: str | None = requester.user.to_string()
         except MissingClientTokenError:
             # auth is optional
             requester_user_id = None

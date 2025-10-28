@@ -24,7 +24,7 @@ can crop up, e.g the cache descriptors.
 """
 
 import enum
-from typing import Callable, Mapping, Optional, Union
+from typing import Callable, Mapping
 
 import attr
 import mypy.types
@@ -123,7 +123,7 @@ class ArgLocation:
     """
 
 
-prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]] = {
+prometheus_metric_fullname_to_label_arg_map: Mapping[str, ArgLocation | None] = {
     # `Collector` subclasses:
     "prometheus_client.metrics.MetricWrapperBase": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Counter": ArgLocation("labelnames", 2),
@@ -211,7 +211,7 @@ class SynapsePlugin(Plugin):
 
     def get_base_class_hook(
         self, fullname: str
-    ) -> Optional[Callable[[ClassDefContext], None]]:
+    ) -> Callable[[ClassDefContext], None] | None:
         def _get_base_class_hook(ctx: ClassDefContext) -> None:
             # Run any `get_base_class_hook` checks from other plugins first.
             #
@@ -232,7 +232,7 @@ class SynapsePlugin(Plugin):
 
     def get_function_signature_hook(
         self, fullname: str
-    ) -> Optional[Callable[[FunctionSigContext], FunctionLike]]:
+    ) -> Callable[[FunctionSigContext], FunctionLike] | None:
         # Strip off the unique identifier for classes that are dynamically created inside
         # functions. ex. `synapse.metrics.jemalloc.JemallocCollector@185` (this is the line
         # number)
@@ -262,7 +262,7 @@ class SynapsePlugin(Plugin):
 
     def get_method_signature_hook(
         self, fullname: str
-    ) -> Optional[Callable[[MethodSigContext], CallableType]]:
+    ) -> Callable[[MethodSigContext], CallableType] | None:
         if fullname.startswith(
             (
                 "synapse.util.caches.descriptors.CachedFunction.__call__",
@@ -721,7 +721,7 @@ def check_is_cacheable_wrapper(ctx: MethodSigContext) -> CallableType:
 
 def check_is_cacheable(
     signature: CallableType,
-    ctx: Union[MethodSigContext, FunctionSigContext],
+    ctx: MethodSigContext | FunctionSigContext,
 ) -> None:
     """
     Check if a callable returns a type which can be cached.
@@ -795,7 +795,7 @@ AT_CACHED_MUTABLE_RETURN = ErrorCode(
 
 def is_cacheable(
     rt: mypy.types.Type, signature: CallableType, verbose: bool
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """
     Check if a particular type is cachable.
 

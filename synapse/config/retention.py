@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import attr
 
@@ -35,8 +35,8 @@ class RetentionPurgeJob:
     """Object describing the configuration of the manhole"""
 
     interval: int
-    shortest_max_lifetime: Optional[int]
-    longest_max_lifetime: Optional[int]
+    shortest_max_lifetime: int | None
+    longest_max_lifetime: int | None
 
 
 class RetentionConfig(Config):

@@ -21,7 +21,7 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING, Mapping, Optional
+from typing import TYPE_CHECKING, Mapping
 
 from signedjson.sign import sign_json
 
@@ -51,7 +51,7 @@ class _KeyQueryCriteriaDataModel(RequestBodyModel):
     class Config:
         extra = Extra.allow
 
-    minimum_valid_until_ts: Optional[StrictInt]
+    minimum_valid_until_ts: StrictInt | None
 
 
 class RemoteKey(RestServlet):
@@ -143,7 +143,7 @@ class RemoteKey(RestServlet):
         )
 
     async def on_GET(
-        self, request: Request, server: str, key_id: Optional[str] = None
+        self, request: Request, server: str, key_id: str | None = None
     ) -> tuple[int, JsonDict]:
         if server and key_id:
             # Matrix 1.6 drops support for passing the key_id, this is incompatible
@@ -182,11 +182,11 @@ class RemoteKey(RestServlet):
     ) -> JsonDict:
         logger.info("Handling query for keys %r", query)
 
-        server_keys: dict[tuple[str, str], Optional[FetchKeyResultForRemote]] = {}
+        server_keys: dict[tuple[str, str], FetchKeyResultForRemote | None] = {}
         for server_name, key_ids in query.items():
             if key_ids:
                 results: Mapping[
-                    str, Optional[FetchKeyResultForRemote]
+                    str, FetchKeyResultForRemote | None
                 ] = await self.store.get_server_keys_json_for_remote(
                     server_name, key_ids
                 )

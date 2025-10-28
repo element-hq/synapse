@@ -15,7 +15,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from synapse._pydantic_compat import StrictBool, StrictStr, root_validator
 from synapse.api.errors import NotFoundError, SynapseError
@@ -51,8 +51,8 @@ class MasQueryUserResource(MasBaseResource):
 
     class Response(TypedDict):
         user_id: str
-        display_name: Optional[str]
-        avatar_url: Optional[str]
+        display_name: str | None
+        avatar_url: str | None
         is_suspended: bool
         is_deactivated: bool
 
@@ -64,7 +64,7 @@ class MasQueryUserResource(MasBaseResource):
         localpart = parse_string(request, "localpart", required=True)
         user_id = UserID(localpart, self.hostname)
 
-        user: Optional[UserInfo] = await self.store.get_user_by_id(user_id=str(user_id))
+        user: UserInfo | None = await self.store.get_user_by_id(user_id=str(user_id))
         if user is None:
             raise NotFoundError("User not found")
 
@@ -103,13 +103,13 @@ class MasProvisionUserResource(MasBaseResource):
         localpart: StrictStr
 
         unset_displayname: StrictBool = False
-        set_displayname: Optional[StrictStr] = None
+        set_displayname: StrictStr | None = None
 
         unset_avatar_url: StrictBool = False
-        set_avatar_url: Optional[StrictStr] = None
+        set_avatar_url: StrictStr | None = None
 
         unset_emails: StrictBool = False
-        set_emails: Optional[list[StrictStr]] = None
+        set_emails: list[StrictStr] | None = None
 
         @root_validator(pre=True)
         def validate_exclusive(cls, values: Any) -> Any:
@@ -163,7 +163,7 @@ class MasProvisionUserResource(MasBaseResource):
                     by_admin=True,
                 )
 
-            new_email_list: Optional[set[str]] = None
+            new_email_list: set[str] | None = None
             if body.unset_emails:
                 new_email_list = set()
             elif body.set_emails is not None:

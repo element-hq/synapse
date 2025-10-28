@@ -27,7 +27,6 @@ from typing import (
     Generator,
     Iterable,
     Optional,
-    Union,
     cast,
 )
 
@@ -48,7 +47,7 @@ _content_type_match = re.compile(r'.*; *charset="?(.*?)"?(;|$)', flags=re.I)
 ARIA_ROLES_TO_IGNORE = {"directory", "menu", "menubar", "toolbar"}
 
 
-def _normalise_encoding(encoding: str) -> Optional[str]:
+def _normalise_encoding(encoding: str) -> str | None:
     """Use the Python codec's name as the normalised entry."""
     try:
         return codecs.lookup(encoding).name
@@ -57,7 +56,7 @@ def _normalise_encoding(encoding: str) -> Optional[str]:
 
 
 def _get_html_media_encodings(
-    body: bytes, content_type: Optional[str]
+    body: bytes, content_type: str | None
 ) -> Iterable[str]:
     """
     Get potential encoding of the body based on the (presumably) HTML body or the content-type header.
@@ -119,7 +118,7 @@ def _get_html_media_encodings(
 
 
 def decode_body(
-    body: bytes, uri: str, content_type: Optional[str] = None
+    body: bytes, uri: str, content_type: str | None = None
 ) -> Optional["etree._Element"]:
     """
     This uses lxml to parse the HTML document.
@@ -186,8 +185,8 @@ def _get_meta_tags(
     tree: "etree._Element",
     property: str,
     prefix: str,
-    property_mapper: Optional[Callable[[str], Optional[str]]] = None,
-) -> dict[str, Optional[str]]:
+    property_mapper: Callable[[str], str | None] | None = None,
+) -> dict[str, str | None]:
     """
     Search for meta tags prefixed with a particular string.
 
@@ -204,7 +203,7 @@ def _get_meta_tags(
     """
     # This actually returns Dict[str, str], but the caller sets this as a variable
     # which is Dict[str, Optional[str]].
-    results: dict[str, Optional[str]] = {}
+    results: dict[str, str | None] = {}
     # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
     for tag in cast(
         list["etree._Element"],
@@ -233,7 +232,7 @@ def _get_meta_tags(
     return results
 
 
-def _map_twitter_to_open_graph(key: str) -> Optional[str]:
+def _map_twitter_to_open_graph(key: str) -> str | None:
     """
     Map a Twitter card property to the analogous Open Graph property.
 
@@ -253,7 +252,7 @@ def _map_twitter_to_open_graph(key: str) -> Optional[str]:
     return "og" + key[7:]
 
 
-def parse_html_to_open_graph(tree: "etree._Element") -> dict[str, Optional[str]]:
+def parse_html_to_open_graph(tree: "etree._Element") -> dict[str, str | None]:
     """
     Parse the HTML document into an Open Graph response.
 
@@ -387,7 +386,7 @@ def parse_html_to_open_graph(tree: "etree._Element") -> dict[str, Optional[str]]
     return og
 
 
-def parse_html_description(tree: "etree._Element") -> Optional[str]:
+def parse_html_description(tree: "etree._Element") -> str | None:
     """
     Calculate a text description based on an HTML document.
 
@@ -460,7 +459,7 @@ def _iterate_over_text(
 
     # This is a stack whose items are elements to iterate over *or* strings
     # to be returned.
-    elements: list[Union[str, "etree._Element"]] = [tree]
+    elements: list[str | "etree._Element"] = [tree]
     while elements:
         el = elements.pop()
 
@@ -496,7 +495,7 @@ def _iterate_over_text(
 
 def summarize_paragraphs(
     text_nodes: Iterable[str], min_size: int = 200, max_size: int = 500
-) -> Optional[str]:
+) -> str | None:
     """
     Try to get a summary respecting first paragraph and then word boundaries.
 

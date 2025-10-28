@@ -28,7 +28,6 @@ from typing import (
     Collection,
     Container,
     Iterable,
-    Optional,
     Sequence,
 )
 
@@ -1818,7 +1817,7 @@ class FederationEventHandler:
 
     @trace
     async def _check_event_auth(
-        self, origin: Optional[str], event: EventBase, context: EventContext
+        self, origin: str | None, event: EventBase, context: EventContext
     ) -> None:
         """
         Checks whether an event should be rejected (for failing auth checks).
@@ -2101,7 +2100,7 @@ class FederationEventHandler:
             event.internal_metadata.soft_failed = True
 
     async def _load_or_fetch_auth_events_for_event(
-        self, destination: Optional[str], event: EventBase
+        self, destination: str | None, event: EventBase
     ) -> Collection[EventBase]:
         """Fetch this event's auth_events, from database or remote
 

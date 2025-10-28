@@ -26,7 +26,6 @@ from typing import (
     Awaitable,
     Callable,
     Generator,
-    Optional,
     Protocol,
     TypeVar,
 )
@@ -136,7 +135,7 @@ class HasClockAndServerName(Protocol):
 
 
 def measure_func(
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Decorate an async method with a `Measure` context manager.
 
@@ -220,7 +219,7 @@ class Measure:
             server_name=self.server_name,
             parent_context=parent_context,
         )
-        self.start: Optional[float] = None
+        self.start: float | None = None
 
     def __enter__(self) -> "Measure":
         if self.start is not None:
@@ -236,9 +235,9 @@ class Measure:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         if self.start is None:
             raise RuntimeError("Measure() block exited without being entered")

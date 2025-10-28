@@ -21,7 +21,6 @@ from typing import (
     Literal,
     Mapping,
     MutableMapping,
-    Optional,
     Union,
     cast,
 )
@@ -184,7 +183,7 @@ class SlidingSyncRoomLists:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         to_token: StreamToken,
-        from_token: Optional[StreamToken],
+        from_token: StreamToken | None,
     ) -> SlidingSyncInterestedRooms:
         """Fetch the set of rooms that match the request"""
         has_lists = sync_config.lists is not None and len(sync_config.lists) > 0
@@ -221,7 +220,7 @@ class SlidingSyncRoomLists:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         to_token: StreamToken,
-        from_token: Optional[StreamToken],
+        from_token: StreamToken | None,
     ) -> SlidingSyncInterestedRooms:
         """Implementation of `compute_interested_rooms` using new sliding sync db tables."""
         user_id = sync_config.user.to_string()
@@ -620,7 +619,7 @@ class SlidingSyncRoomLists:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         to_token: StreamToken,
-        from_token: Optional[StreamToken],
+        from_token: StreamToken | None,
     ) -> SlidingSyncInterestedRooms:
         """Fallback code when the database background updates haven't completed yet."""
 
@@ -806,7 +805,7 @@ class SlidingSyncRoomLists:
     async def _filter_relevant_rooms_to_send(
         self,
         previous_connection_state: PerConnectionState,
-        from_token: Optional[StreamToken],
+        from_token: StreamToken | None,
         relevant_room_map: dict[str, RoomSyncConfig],
     ) -> dict[str, RoomSyncConfig]:
         """Filters the `relevant_room_map` down to those rooms that may have
@@ -879,7 +878,7 @@ class SlidingSyncRoomLists:
         user: UserID,
         rooms_for_user: Mapping[str, RoomsForUserType],
         to_token: StreamToken,
-    ) -> Mapping[str, Optional[RoomsForUser]]:
+    ) -> Mapping[str, RoomsForUser | None]:
         """
         Takes the current set of rooms for a user (retrieved after the given
         token), and returns the changes needed to "rewind" it to match the set of
@@ -962,7 +961,7 @@ class SlidingSyncRoomLists:
 
         # Otherwise we're about to make changes to `rooms_for_user`, so we turn
         # it into a mutable dict.
-        changes: dict[str, Optional[RoomsForUser]] = {}
+        changes: dict[str, RoomsForUser | None] = {}
 
         # Assemble a list of the first membership event after the `to_token` so we can
         # step backward to the previous membership that would apply to the from/to
@@ -1028,7 +1027,7 @@ class SlidingSyncRoomLists:
         self,
         user: UserID,
         to_token: StreamToken,
-        from_token: Optional[StreamToken],
+        from_token: StreamToken | None,
     ) -> tuple[dict[str, RoomsForUserType], AbstractSet[str], AbstractSet[str]]:
         """
         Fetch room IDs that the user has had membership in (the full room list including
@@ -1138,7 +1137,7 @@ class SlidingSyncRoomLists:
         self,
         user_id: str,
         to_token: StreamToken,
-        from_token: Optional[StreamToken],
+        from_token: StreamToken | None,
     ) -> tuple[AbstractSet[str], Mapping[str, RoomsForUserStateReset]]:
         """Fetch the sets of rooms that the user newly joined or left in the
         given token range.
@@ -1185,7 +1184,7 @@ class SlidingSyncRoomLists:
         self,
         user_id: str,
         to_token: StreamToken,
-        from_token: Optional[StreamToken],
+        from_token: StreamToken | None,
     ) -> tuple[AbstractSet[str], Mapping[str, RoomsForUserStateReset]]:
         """Fetch the sets of rooms that the user newly joined or left in the
         given token range.
@@ -1400,7 +1399,7 @@ class SlidingSyncRoomLists:
         room_id: str,
         room_membership_for_user_map: dict[str, RoomsForUserType],
         to_token: StreamToken,
-    ) -> Optional[RoomsForUserType]:
+    ) -> RoomsForUserType | None:
         """
         Check whether the user is allowed to see the room based on whether they have
         ever had membership in the room or if the room is `world_readable`.
@@ -1466,7 +1465,7 @@ class SlidingSyncRoomLists:
         self,
         room_ids: StrCollection,
         sync_room_map: dict[str, RoomsForUserType],
-    ) -> dict[str, Optional[StateMap[StrippedStateEvent]]]:
+    ) -> dict[str, StateMap[StrippedStateEvent] | None]:
         """
         Fetch stripped state for a list of room IDs. Stripped state is only
         applicable to invite/knock rooms. Other rooms will have `None` as their
@@ -1485,7 +1484,7 @@ class SlidingSyncRoomLists:
             event.
         """
         room_id_to_stripped_state_map: dict[
-            str, Optional[StateMap[StrippedStateEvent]]
+            str, StateMap[StrippedStateEvent] | None
         ] = {}
 
         # Fetch what we haven't before
@@ -1530,7 +1529,7 @@ class SlidingSyncRoomLists:
                     f"Unexpected membership {membership} (this is a problem with Synapse itself)"
                 )
 
-            stripped_state_map: Optional[MutableStateMap[StrippedStateEvent]] = None
+            stripped_state_map: MutableStateMap[StrippedStateEvent] | None = None
             # Scrutinize unsigned things. `raw_stripped_state_events` should be a list
             # of stripped events
             if raw_stripped_state_events is not None:
@@ -1565,9 +1564,9 @@ class SlidingSyncRoomLists:
         sync_room_map: dict[str, RoomsForUserType],
         to_token: StreamToken,
         room_id_to_stripped_state_map: dict[
-            str, Optional[StateMap[StrippedStateEvent]]
+            str, StateMap[StrippedStateEvent] | None
         ],
-    ) -> Mapping[str, Union[Optional[str], StateSentinel]]:
+    ) -> Mapping[str, str | None | StateSentinel]:
         """
         Get the given state event content for a list of rooms. First we check the
         current state of the room, then fallback to stripped state if available, then
@@ -1589,7 +1588,7 @@ class SlidingSyncRoomLists:
             the given state event (event_type, ""), otherwise `None`. Rooms unknown to
             this server will return `ROOM_UNKNOWN_SENTINEL`.
         """
-        room_id_to_content: dict[str, Union[Optional[str], StateSentinel]] = {}
+        room_id_to_content: dict[str, str | None | StateSentinel] = {}
 
         # As a bulk shortcut, use the current state if the server is particpating in the
         # room (meaning we have current state). Ideally, for leave/ban rooms, we would
@@ -1750,7 +1749,7 @@ class SlidingSyncRoomLists:
         user_id = user.to_string()
 
         room_id_to_stripped_state_map: dict[
-            str, Optional[StateMap[StrippedStateEvent]]
+            str, StateMap[StrippedStateEvent] | None
         ] = {}
 
         filtered_room_id_set = set(sync_room_map.keys())
@@ -2107,7 +2106,7 @@ class SlidingSyncRoomLists:
         self,
         sync_room_map: dict[str, RoomsForUserType],
         to_token: StreamToken,
-        limit: Optional[int] = None,
+        limit: int | None = None,
     ) -> list[RoomsForUserType]:
         """
         Sort by `stream_ordering` of the last event that the user should see in the

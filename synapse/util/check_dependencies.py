@@ -28,7 +28,7 @@ require. But this is probably just symptomatic of Python's package management.
 
 import logging
 from importlib import metadata
-from typing import Iterable, NamedTuple, Optional
+from typing import Iterable, NamedTuple
 
 from packaging.requirements import Requirement
 
@@ -124,7 +124,7 @@ def _dependencies_for_extra(extra: str) -> Iterable[Dependency]:
             yield Dependency(req, True)
 
 
-def _not_installed(requirement: Requirement, extra: Optional[str] = None) -> str:
+def _not_installed(requirement: Requirement, extra: str | None = None) -> str:
     if extra:
         return (
             f"Synapse {VERSION} needs {requirement.name} for {extra}, "
@@ -135,7 +135,7 @@ def _not_installed(requirement: Requirement, extra: Optional[str] = None) -> str
 
 
 def _incorrect_version(
-    requirement: Requirement, got: str, extra: Optional[str] = None
+    requirement: Requirement, got: str, extra: str | None = None
 ) -> str:
     if extra:
         return (
@@ -148,7 +148,7 @@ def _incorrect_version(
         )
 
 
-def _no_reported_version(requirement: Requirement, extra: Optional[str] = None) -> str:
+def _no_reported_version(requirement: Requirement, extra: str | None = None) -> str:
     if extra:
         return (
             f"Synapse {VERSION} needs {requirement} for {extra}, "
@@ -161,7 +161,7 @@ def _no_reported_version(requirement: Requirement, extra: Optional[str] = None) 
         )
 
 
-def check_requirements(extra: Optional[str] = None) -> None:
+def check_requirements(extra: str | None = None) -> None:
     """Check Synapse's dependencies are present and correctly versioned.
 
     If provided, `extra` must be the name of an pacakging extra (e.g. "saml2" in
