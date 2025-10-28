@@ -67,11 +67,13 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # we use in tests doesn't handle this properly (see doc comment)
         cleanup_test_reactor_system_event_triggers(self.reactor)
 
-        # Use a logcontext just to double-check that we don't mangle the logcontext
-        # during shutdown.
-        with LoggingContext(name="hs_shutdown", server_name=self.hs.hostname):
-            # Cleanup the homeserver.
-            self.get_success(self.hs.shutdown())
+        async def shutdown() -> None:
+            # Use a logcontext just to double-check that we don't mangle the logcontext
+            # during shutdown.
+            with LoggingContext(name="hs_shutdown", server_name=self.hs.hostname):
+                await self.hs.shutdown()
+
+        self.get_success(shutdown())
 
         # Cleanup the internal reference in our test case
         del self.hs
@@ -149,11 +151,13 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # Ensure the background updates are not complete.
         self.assertNotEqual(store.db_pool.updates.get_status(), UpdaterStatus.COMPLETE)
 
-        # Use a logcontext just to double-check that we don't mangle the logcontext
-        # during shutdown.
-        with LoggingContext(name="hs_shutdown", server_name=self.hs.hostname):
-            # Cleanup the homeserver.
-            self.get_success(self.hs.shutdown())
+        async def shutdown() -> None:
+            # Use a logcontext just to double-check that we don't mangle the logcontext
+            # during shutdown.
+            with LoggingContext(name="hs_shutdown", server_name=self.hs.hostname):
+                await self.hs.shutdown()
+
+        self.get_success(shutdown())
 
         # Cleanup the internal reference in our test case
         del self.hs
