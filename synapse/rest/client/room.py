@@ -548,7 +548,7 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
     ) -> tuple[int, JsonDict]:
         content = parse_json_object_from_request(request, allow_empty_body=True)
 
-        # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+        # twisted.web.server.Request.args is incorrectly defined as Any | None
         args: dict[bytes, list[bytes]] = request.args  # type: ignore
         # Prefer via over server_name (deprecated with MSC4156)
         remote_room_hosts = parse_strings_from_args(args, "via", required=False)
@@ -1572,7 +1572,7 @@ class RoomHierarchyRestServlet(RestServlet):
         max_depth = parse_integer(request, "max_depth")
         limit = parse_integer(request, "limit")
 
-        # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+        # twisted.web.server.Request.args is incorrectly defined as Any | None
         remote_room_hosts = None
         if self.msc4235_enabled:
             args: dict[bytes, list[bytes]] = request.args  # type: ignore
@@ -1622,7 +1622,7 @@ class RoomSummaryRestServlet(ResolveRoomIdMixin, RestServlet):
             # auth is optional
             requester_user_id = None
 
-        # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+        # twisted.web.server.Request.args is incorrectly defined as Any | None
         args: dict[bytes, list[bytes]] = request.args  # type: ignore
         remote_room_hosts = parse_strings_from_args(args, "via", required=False)
         room_id, remote_room_hosts = await self.resolve_room_id(

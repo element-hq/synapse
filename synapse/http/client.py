@@ -311,7 +311,7 @@ class BlocklistingAgentWrapper(Agent):
         h = urllib.parse.urlparse(uri.decode("ascii"))
 
         try:
-            # h.hostname is Optional[str], None raises an AddrFormatError, so
+            # h.hostname is str | None, None raises an AddrFormatError, so
             # this is safe even though IPAddress requires a str.
             ip_address = IPAddress(h.hostname)  # type: ignore[arg-type]
         except AddrFormatError:

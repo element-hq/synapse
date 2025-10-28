@@ -199,8 +199,8 @@ def _get_meta_tags(
     Returns:
         A map of tag name to value.
     """
-    # This actually returns Dict[str, str], but the caller sets this as a variable
-    # which is Dict[str, Optional[str]].
+    # This actually returns dict[str, str], but the caller sets this as a variable
+    # which is dict[str, str | None].
     results: dict[str, str | None] = {}
     # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
     for tag in cast(

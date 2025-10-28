@@ -163,7 +163,7 @@ class UsersRestServletV2(RestServlet):
 
         direction = parse_enum(request, "dir", Direction, default=Direction.FORWARDS)
 
-        # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+        # twisted.web.server.Request.args is incorrectly defined as Any | None
         args: dict[bytes, list[bytes]] = request.args  # type: ignore
         not_user_types = parse_strings_from_args(args, "not_user_type")
 

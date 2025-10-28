@@ -173,7 +173,7 @@ class PurgeHistoryRestServlet(RestServlet):
             if event.room_id != room_id:
                 raise SynapseError(HTTPStatus.BAD_REQUEST, "Event is for wrong room.")
 
-            # RoomStreamToken expects [int] not Optional[int]
+            # RoomStreamToken expects [int] not [int | None]
             assert event.internal_metadata.stream_ordering is not None
             room_token = RoomStreamToken(
                 topological=event.depth, stream=event.internal_metadata.stream_ordering

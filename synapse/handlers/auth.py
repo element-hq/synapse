@@ -1986,7 +1986,7 @@ def load_single_legacy_password_auth_provider(
             return wrapped_check_password
 
         # We need to wrap check_auth as in the old form it could return
-        # just a str, but now it must return Optional[tuple[str, Optional[Callable]]
+        # just a str, but now it must return tuple[str, Callable | None] | None
         if f.__name__ == "check_auth":
 
             async def wrapped_check_auth(
@@ -2007,7 +2007,7 @@ def load_single_legacy_password_auth_provider(
             return wrapped_check_auth
 
         # We need to wrap check_3pid_auth as in the old form it could return
-        # just a str, but now it must return Optional[tuple[str, Optional[Callable]]
+        # just a str, but now it must return tuple[str, Callable | None] | None
         if f.__name__ == "check_3pid_auth":
 
             async def wrapped_check_3pid_auth(
@@ -2232,14 +2232,14 @@ class PasswordAuthProvider:
                 continue
 
             if result is not None:
-                # Check that the callback returned a Tuple[str, Optional[Callable]]
+                # Check that the callback returned a tuple[str, Callable | None]
                 # "type: ignore[unreachable]" is used after some isinstance checks because mypy thinks
                 # result is always the right type, but as it is 3rd party code it might not be
 
                 if not isinstance(result, tuple) or len(result) != 2:
                     logger.warning(  # type: ignore[unreachable]
                         "Wrong type returned by module API callback %s: %s, expected"
-                        " Optional[tuple[str, Optional[Callable]]]",
+                        " tuple[str, Callable | None] | None",
                         callback,
                         result,
                     )
@@ -2252,24 +2252,24 @@ class PasswordAuthProvider:
                 if not isinstance(str_result, str):
                     logger.warning(  # type: ignore[unreachable]
                         "Wrong type returned by module API callback %s: %s, expected"
-                        " Optional[tuple[str, Optional[Callable]]]",
+                        " tuple[str, Callable | None] | None",
                         callback,
                         result,
                     )
                     continue
 
-                # the second should be Optional[Callable]
+                # the second should be Callable | None
                 if callback_result is not None:
                     if not callable(callback_result):
                         logger.warning(  # type: ignore[unreachable]
                             "Wrong type returned by module API callback %s: %s, expected"
-                            " Optional[tuple[str, Optional[Callable]]]",
+                            " tuple[str, Callable | None] | None",
                             callback,
                             result,
                         )
                         continue
 
-                # The result is a (str, Optional[callback]) tuple so return the successful result
+                # The result is a (str, callback | None) tuple so return the successful result
                 return result
 
         # If this point has been reached then none of the callbacks successfully authenticated
@@ -2295,14 +2295,14 @@ class PasswordAuthProvider:
                 continue
 
             if result is not None:
-                # Check that the callback returned a Tuple[str, Optional[Callable]]
+                # Check that the callback returned a tuple[str, Callable | None]
                 # "type: ignore[unreachable]" is used after some isinstance checks because mypy thinks
                 # result is always the right type, but as it is 3rd party code it might not be
 
                 if not isinstance(result, tuple) or len(result) != 2:
                     logger.warning(  # type: ignore[unreachable]
                         "Wrong type returned by module API callback %s: %s, expected"
-                        " Optional[tuple[str, Optional[Callable]]]",
+                        " tuple[str, Callable | None] | None",
                         callback,
                         result,
                     )
@@ -2315,24 +2315,24 @@ class PasswordAuthProvider:
                 if not isinstance(str_result, str):
                     logger.warning(  # type: ignore[unreachable]
                         "Wrong type returned by module API callback %s: %s, expected"
-                        " Optional[tuple[str, Optional[Callable]]]",
+                        " tuple[str, Callable | None] | None",
                         callback,
                         result,
                     )
                     continue
 
-                # the second should be Optional[Callable]
+                # the second should be Callable | None
                 if callback_result is not None:
                     if not callable(callback_result):
                         logger.warning(  # type: ignore[unreachable]
                             "Wrong type returned by module API callback %s: %s, expected"
-                            " Optional[tuple[str, Optional[Callable]]]",
+                            " tuple[str, Callable | None] | None",
                             callback,
                             result,
                         )
                         continue
 
-                # The result is a (str, Optional[callback]) tuple so return the successful result
+                # The result is a (str, callback | None) tuple so return the successful result
                 return result
 
         # If this point has been reached then none of the callbacks successfully authenticated

@@ -1686,7 +1686,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         """
 
         def _use_registration_token_txn(txn: LoggingTransaction) -> None:
-            # Normally, res is Optional[dict[str, Any]].
+            # Normally, res is dict[str, Any] | None.
             # Override type because the return type is only optional if
             # allow_none is True, and we don't want mypy throwing errors
             # about None not being indexable.

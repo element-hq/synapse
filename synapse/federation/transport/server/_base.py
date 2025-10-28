@@ -252,7 +252,7 @@ class BaseFederationServlet:
                 components as specified in the path match regexp.
 
         Returns:
-            Optional[tuple[int, object]]: either (response code, response object) to
+            tuple[int, object] | None: either (response code, response object) to
                  return a JSON response, or None if the request has already been handled.
 
         Raises:

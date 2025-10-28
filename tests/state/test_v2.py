@@ -524,7 +524,7 @@ class StateTestCase(unittest.TestCase):
             #    EventBuilder. But this is Hard because the relevant attributes are
             #    DictProperty[T] descriptors on EventBase but normal Ts on FakeEvent.
             # 2. Define a `GenericEvent` Protocol describing `FakeEvent` only, and
-            #    change this function to accept Union[Event, EventBase, EventBuilder].
+            #    change this function to accept Event | EventBase | EventBuilder.
             #    This seems reasonable to me, but mypy isn't happy. I think that's
             #    a mypy bug, see https://github.com/python/mypy/issues/5570
             # Instead, resort to a type-ignore.

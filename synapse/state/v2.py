@@ -545,7 +545,7 @@ def _seperate(
             conflicted_state[key] = event_ids
 
     # mypy doesn't understand that discarding None above means that conflicted
-    # state is StateMap[set[str]], not StateMap[set[Optional[Str]]].
+    # state is StateMap[set[str]], not StateMap[set[str | None]].
     return unconflicted_state, conflicted_state  # type: ignore[return-value]
 
 

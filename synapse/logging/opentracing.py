@@ -1119,7 +1119,7 @@ def trace_servlet(
             # with JsonResource).
             scope.span.set_operation_name(request.request_metrics.name)
 
-            # Mypy seems to think that start_context.tag below can be Optional[str], but
+            # Mypy seems to think that start_context.tag below can be str | None, but
             # that doesn't appear to be correct and works in practice.
 
             request_tags[SynapseTags.REQUEST_TAG] = (

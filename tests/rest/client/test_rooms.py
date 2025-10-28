@@ -959,7 +959,7 @@ class RoomsCreateTestCase(RoomBase):
         """Tests that the user_may_join_room spam checker callback is correctly bypassed
         when creating a new room.
 
-        In this test, we use the more recent API in which callbacks return a `Union[Codes, Literal["NOT_SPAM"]]`.
+        In this test, we use the more recent API in which callbacks return a `Codes | Literal["NOT_SPAM"]`.
         """
 
         async def user_may_join_room_codes(
@@ -3968,7 +3968,7 @@ class ThreepidInviteTestCase(unittest.HomeserverTestCase):
         """
         Test allowing/blocking threepid invites with a spam-check module.
 
-        In this test, we use the more recent API in which callbacks return a `Union[Codes, Literal["NOT_SPAM"]]`.
+        In this test, we use the more recent API in which callbacks return a `Codes | Literal["NOT_SPAM"]`.
         """
         # Mock a few functions to prevent the test from failing due to failing to talk to
         # a remote IS. We keep the mock for make_and_store_3pid_invite around so we
