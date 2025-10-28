@@ -7213,7 +7213,7 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <p><code>localdb_enabled</code> (boolean): Set to false to disable authentication against the local password database. This is ignored if <code>enabled</code> is false, and is only useful if you have other <code>password_providers</code>. Defaults to <code>true</code>.</p>
 </li>
 <li>
-<p><code>pepper</code> (string|null): Set the value here to a secret random string for extra security. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to <code>null</code>.</p>
+<p><code>pepper</code> (string|null): A secret random string that will be appended to user's passwords before they are hashed. This improves the security of short passwords. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to <code>null</code>.</p>
 </li>
 <li>
 <p><code>policy</code> (object): Define and enforce a password policy, such as minimum lengths for passwords, etc. This is an implementation of MSC2000.</p>

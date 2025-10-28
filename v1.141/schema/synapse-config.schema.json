@@ -3893,7 +3893,7 @@
             "string",
             "null"
           ],
-          "description": "Set the value here to a secret random string for extra security. DO NOT CHANGE THIS AFTER INITIAL SETUP!",
+          "description": "A secret random string that will be appended to user's passwords before they are hashed. This improves the security of short passwords. DO NOT CHANGE THIS AFTER INITIAL SETUP!",
           "default": null
         },
         "policy": {
