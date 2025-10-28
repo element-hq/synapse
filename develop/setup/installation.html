@@ -223,13 +223,10 @@ file when you upgrade the Debian package to a later version.</p>
 <p>Andrej Shadura maintains a
 <a href="https://packages.debian.org/sid/matrix-synapse"><code>matrix-synapse</code></a> package in
 the Debian repositories.
-For <code>bookworm</code> and <code>sid</code>, it can be installed simply with:</p>
+For <code>forky</code> (14) and <code>sid</code> (rolling release), it can be installed simply with:</p>
 <pre><code class="language-sh">sudo apt install matrix-synapse
 </code></pre>
-<p>Synapse is also available in <code>bullseye-backports</code>.  Please
-see the <a href="https://backports.debian.org/Instructions/">Debian documentation</a>
-for information on how to use backports.</p>
-<p><code>matrix-synapse</code> is no longer maintained for <code>buster</code> and older.</p>
+<p>The downstream Debian <code>matrix-synapse</code> package is not available for <code>trixie</code> (13) and older. Consider using the Matrix.org packages (above).</p>
 <h5 id="downstream-ubuntu-packages"><a class="header" href="#downstream-ubuntu-packages">Downstream Ubuntu packages</a></h5>
 <p>We do not recommend using the packages in the default Ubuntu repository
 at this time, as they are <a href="https://bugs.launchpad.net/ubuntu/+source/matrix-synapse/+bug/1848709">old and suffer from known security vulnerabilities</a>.
