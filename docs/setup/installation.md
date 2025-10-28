@@ -311,11 +311,16 @@ sudo dnf group install "Development Tools"
 
 ##### Red Hat Enterprise Linux / Rocky Linux / Oracle Linux
 
-*Note: The term "RHEL" below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux. The distributions are 1:1 binary compatible.*
+*Note: The term "RHEL" below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux.
+The distributions are 1:1 binary compatible.*
 
 It's recommended to use the latest Python versions.
 
-RHEL 8 & 9 in particular ship with Python 3.6 & 3.9 respectively by default which are EOL and therefore no longer supported by Synapse. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.
+RHEL 8 & 9 in particular ship with Python 3.6 & 3.9 respectively by default
+which are EOL and therefore no longer supported by Synapse.
+However, newer Python versions provide significant performance improvements
+and they're available in official distributions' repositories.
+Therefore it's recommended to use them.
 
 Python 3.11 and 3.12 are available for both RHEL 8 and 9.
 
