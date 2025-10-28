@@ -240,8 +240,9 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         txn.execute("SELECT event_id, should_delete FROM events_to_purge")
         event_rows = txn.fetchall()
 
-        if len(event_rows) == 0:
-            logger.info("[purge] no events found to purge")
+        deletable_events = sum(1 for e in event_rows if e[1])
+        if deletable_events == 0:
+            logger.info("[purge] no events found to delete")
 
             # For the sake of cleanliness: drop the temp table.
             # This will commit the txn in sqlite, so make sure to keep this actually last.
@@ -252,7 +253,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         logger.info(
             "[purge] found %i events before cutoff, of which %i can be deleted",
             len(event_rows),
-            sum(1 for e in event_rows if e[1]),
+            deletable_events,
         )
 
         logger.info("[purge] Finding new backward extremities")
