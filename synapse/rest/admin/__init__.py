@@ -35,7 +35,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.handlers.pagination import PURGE_HISTORY_ACTION_NAME

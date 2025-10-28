@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Generic, Optional, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.storage._base import SQLBaseStore

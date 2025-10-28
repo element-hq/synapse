@@ -19,7 +19,6 @@
 #
 #
 import re
-from typing import Union
 
 from twisted.internet import address, task
 from twisted.web.client import FileBodyProducer

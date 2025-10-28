@@ -94,7 +94,7 @@ The Pusher instance also calls out to various utilities for generating payloads
 """
 
 import abc
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import attr
 

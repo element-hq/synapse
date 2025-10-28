@@ -19,7 +19,7 @@
 #
 #
 from abc import ABC, abstractmethod
-from typing import Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
 from synapse.types import StrCollection, UserID
 

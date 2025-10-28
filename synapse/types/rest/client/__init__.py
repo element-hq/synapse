@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
 
 from synapse._pydantic_compat import (
     Extra,

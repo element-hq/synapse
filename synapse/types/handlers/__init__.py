@@ -19,7 +19,7 @@
 #
 
 
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 from synapse.api.constants import EventTypes
 

@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Callable, Iterable, Optional
+from typing import TYPE_CHECKING, Callable, Iterable
 
 from synapse.http.server import HttpServer, JsonResource
 from synapse.rest import admin

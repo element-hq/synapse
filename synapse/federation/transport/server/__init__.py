@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Iterable, Literal, Optional
+from typing import TYPE_CHECKING, Iterable, Literal
 
 from synapse.api.errors import FederationDeniedError, SynapseError
 from synapse.federation.transport.server._base import (

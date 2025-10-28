@@ -24,7 +24,7 @@ import logging
 import typing
 from enum import Enum, auto
 from sys import intern
-from typing import Any, Callable, Optional, Sized, TypeVar
+from typing import Any, Callable, Sized, TypeVar
 
 import attr
 from prometheus_client import REGISTRY

@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, cast
 
 import attr
 

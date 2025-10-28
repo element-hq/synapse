@@ -25,7 +25,6 @@ import typing
 from typing import (
     Iterator,
     Mapping,
-    Optional,
     Sequence,
     TypeVar,
 )

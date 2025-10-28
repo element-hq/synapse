@@ -28,7 +28,6 @@ from typing import (
     Generic,
     Iterable,
     Literal,
-    Optional,
     TypeVar,
     Union,
     overload,

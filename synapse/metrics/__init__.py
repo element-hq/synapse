@@ -31,10 +31,8 @@ from typing import (
     Generic,
     Iterable,
     Mapping,
-    Optional,
     Sequence,
     TypeVar,
-    Union,
     cast,
 )
 

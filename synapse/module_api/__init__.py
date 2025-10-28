@@ -29,9 +29,7 @@ from typing import (
     Generator,
     Iterable,
     Mapping,
-    Optional,
     TypeVar,
-    Union,
 )
 
 import attr

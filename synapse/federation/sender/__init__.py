@@ -138,7 +138,6 @@ from typing import (
     Hashable,
     Iterable,
     Literal,
-    Optional,
 )
 
 import attr

@@ -15,7 +15,7 @@
 import itertools
 import logging
 from itertools import chain
-from typing import TYPE_CHECKING, AbstractSet, Mapping, Optional
+from typing import TYPE_CHECKING, AbstractSet, Mapping
 
 from prometheus_client import Histogram
 from typing_extensions import assert_never
