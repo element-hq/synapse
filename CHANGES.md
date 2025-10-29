@@ -1,12 +1,5 @@
 # Synapse 1.141.0 (2025-10-29)
 
-No significant changes since 1.141.0rc2.
-
-
-
-
-# Synapse 1.141.0rc2 (2025-10-28)
-
 ## Deprecation of MacOS Python wheels
 
 The team has decided to deprecate and eventually stop publishing python wheels
@@ -19,6 +12,12 @@ do make use of these wheels downstream, please reach out to us in
 [#synapse-dev:matrix.org](https://matrix.to/#/#synapse-dev:matrix.org). We'd
 love to hear from you!
 
+No significant changes since 1.141.0rc2.
+
+
+
+
+# Synapse 1.141.0rc2 (2025-10-28)
 
 ## Bugfixes
 
