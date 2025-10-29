@@ -1881,7 +1881,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.140.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.141.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -1899,6 +1899,11 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11410"><a class="header" href="#upgrading-to-v11410">Upgrading to v1.141.0</a></h1>
+<h2 id="docker-images-now-based-on-debian-trixie-with-python-313"><a class="header" href="#docker-images-now-based-on-debian-trixie-with-python-313">Docker images now based on Debian <code>trixie</code> with Python 3.13</a></h2>
+<p>The Docker images are now based on Debian <code>trixie</code> and use Python 3.13. If you
+are using the Docker images as a base image you may need to e.g. adjust the
+paths you mount any additional Python packages at.</p>
 <h1 id="upgrading-to-v11400"><a class="header" href="#upgrading-to-v11400">Upgrading to v1.140.0</a></h1>
 <h2 id="users-of-synapse-s3-storage-provider-must-update-the-module-to-v160"><a class="header" href="#users-of-synapse-s3-storage-provider-must-update-the-module-to-v160">Users of <code>synapse-s3-storage-provider</code> must update the module to <code>v1.6.0</code></a></h2>
 <p>Deployments that make use of the
@@ -7208,7 +7213,7 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <p><code>localdb_enabled</code> (boolean): Set to false to disable authentication against the local password database. This is ignored if <code>enabled</code> is false, and is only useful if you have other <code>password_providers</code>. Defaults to <code>true</code>.</p>
 </li>
 <li>
-<p><code>pepper</code> (string|null): Set the value here to a secret random string for extra security. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to <code>null</code>.</p>
+<p><code>pepper</code> (string|null): A secret random string that will be appended to user's passwords before they are hashed. This improves the security of short passwords. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to <code>null</code>.</p>
 </li>
 <li>
 <p><code>policy</code> (object): Define and enforce a password policy, such as minimum lengths for passwords, etc. This is an implementation of MSC2000.</p>
