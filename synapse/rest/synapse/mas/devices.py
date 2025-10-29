@@ -177,7 +177,7 @@ class MasSyncDevicesResource(MasBaseResource):
 
     class PostBody(RequestBodyModel):
         localpart: StrictStr
-        devices: set[str]
+        devices: list[str]
 
     async def _async_render_POST(
         self, request: "SynapseRequest"
