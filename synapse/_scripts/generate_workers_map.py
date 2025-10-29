@@ -25,7 +25,7 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Pattern, Set, Tuple
+from typing import Iterable, Optional, Pattern
 
 import yaml
 
@@ -81,7 +81,7 @@ class EnumerationResource(HttpServer):
     """
 
     def __init__(self, is_worker: bool) -> None:
-        self.registrations: Dict[Tuple[str, str], EndpointDescription] = {}
+        self.registrations: dict[tuple[str, str], EndpointDescription] = {}
         self._is_worker = is_worker
 
     def register_paths(
@@ -115,7 +115,7 @@ class EnumerationResource(HttpServer):
 
 def get_registered_paths_for_hs(
     hs: HomeServer,
-) -> Dict[Tuple[str, str], EndpointDescription]:
+) -> dict[tuple[str, str], EndpointDescription]:
     """
     Given a homeserver, get all registered endpoints and their descriptions.
     """
@@ -142,7 +142,7 @@ def get_registered_paths_for_hs(
 
 def get_registered_paths_for_default(
     worker_app: Optional[str], base_config: HomeServerConfig
-) -> Dict[Tuple[str, str], EndpointDescription]:
+) -> dict[tuple[str, str], EndpointDescription]:
     """
     Given the name of a worker application and a base homeserver configuration,
     returns:
@@ -168,9 +168,9 @@ def get_registered_paths_for_default(
 
 
 def elide_http_methods_if_unconflicting(
-    registrations: Dict[Tuple[str, str], EndpointDescription],
-    all_possible_registrations: Dict[Tuple[str, str], EndpointDescription],
-) -> Dict[Tuple[str, str], EndpointDescription]:
+    registrations: dict[tuple[str, str], EndpointDescription],
+    all_possible_registrations: dict[tuple[str, str], EndpointDescription],
+) -> dict[tuple[str, str], EndpointDescription]:
     """
     Elides HTTP methods (by replacing them with `*`) if all possible registered methods
     can be handled by the worker whose registration map is `registrations`.
@@ -180,13 +180,13 @@ def elide_http_methods_if_unconflicting(
     """
 
     def paths_to_methods_dict(
-        methods_and_paths: Iterable[Tuple[str, str]],
-    ) -> Dict[str, Set[str]]:
+        methods_and_paths: Iterable[tuple[str, str]],
+    ) -> dict[str, set[str]]:
         """
         Given (method, path) pairs, produces a dict from path to set of methods
         available at that path.
         """
-        result: Dict[str, Set[str]] = {}
+        result: dict[str, set[str]] = {}
         for method, path in methods_and_paths:
             result.setdefault(path, set()).add(method)
         return result
@@ -210,8 +210,8 @@ def elide_http_methods_if_unconflicting(
 
 
 def simplify_path_regexes(
-    registrations: Dict[Tuple[str, str], EndpointDescription],
-) -> Dict[Tuple[str, str], EndpointDescription]:
+    registrations: dict[tuple[str, str], EndpointDescription],
+) -> dict[tuple[str, str], EndpointDescription]:
     """
     Simplify all the path regexes for the dict of endpoint descriptions,
     so that we don't use the Python-specific regex extensions
@@ -270,8 +270,8 @@ def main() -> None:
 
     # TODO SSO endpoints (pick_idp etc) NOT REGISTERED BY THIS SCRIPT
 
-    categories_to_methods_and_paths: Dict[
-        Optional[str], Dict[Tuple[str, str], EndpointDescription]
+    categories_to_methods_and_paths: dict[
+        Optional[str], dict[tuple[str, str], EndpointDescription]
     ] = defaultdict(dict)
 
     for (method, path), desc in elided_worker_paths.items():
@@ -283,7 +283,7 @@ def main() -> None:
 
 def print_category(
     category_name: Optional[str],
-    elided_worker_paths: Dict[Tuple[str, str], EndpointDescription],
+    elided_worker_paths: dict[tuple[str, str], EndpointDescription],
 ) -> None:
     """
     Prints out a category, in documentation page style.

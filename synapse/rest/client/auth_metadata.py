@@ -13,7 +13,7 @@
 # limitations under the License.
 import logging
 import typing
-from typing import Tuple, cast
+from typing import cast
 
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import Codes, SynapseError
@@ -48,7 +48,7 @@ class AuthIssuerServlet(RestServlet):
         self._config = hs.config
         self._auth = hs.get_auth()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if self._config.mas.enabled:
             assert isinstance(self._auth, MasDelegatedAuth)
             return 200, {"issuer": await self._auth.issuer()}
@@ -93,7 +93,7 @@ class AuthMetadataServlet(RestServlet):
         self._config = hs.config
         self._auth = hs.get_auth()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if self._config.mas.enabled:
             assert isinstance(self._auth, MasDelegatedAuth)
             return 200, await self._auth.auth_metadata()

@@ -22,13 +22,10 @@ import enum
 import logging
 import threading
 from typing import (
-    Dict,
     Generic,
     Iterable,
     Literal,
     Optional,
-    Set,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -65,8 +62,8 @@ class DictionaryEntry(Generic[DKT, DV]):
     """
 
     full: bool
-    known_absent: Set[DKT]
-    value: Dict[DKT, DV]
+    known_absent: set[DKT]
+    value: dict[DKT, DV]
 
     def __len__(self) -> int:
         return len(self.value)
@@ -160,8 +157,8 @@ class DictionaryCache(Generic[KT, DKT, DV]):
         #     * A key of `(KT, DKT)` has a value of `_PerKeyValue`
         #     * A key of `(KT, _FullCacheKey.KEY)` has a value of `Dict[DKT, DV]`
         self.cache: LruCache[
-            Tuple[KT, Union[DKT, Literal[_FullCacheKey.KEY]]],
-            Union[_PerKeyValue, Dict[DKT, DV]],
+            tuple[KT, Union[DKT, Literal[_FullCacheKey.KEY]]],
+            Union[_PerKeyValue, dict[DKT, DV]],
         ] = LruCache(
             max_size=max_entries,
             clock=clock,
@@ -297,7 +294,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
         self,
         sequence: int,
         key: KT,
-        value: Dict[DKT, DV],
+        value: dict[DKT, DV],
         fetched_keys: Optional[Iterable[DKT]] = None,
     ) -> None:
         """Updates the entry in the cache.
@@ -332,7 +329,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
                 self._update_subset(key, value, fetched_keys)
 
     def _update_subset(
-        self, key: KT, value: Dict[DKT, DV], fetched_keys: Iterable[DKT]
+        self, key: KT, value: dict[DKT, DV], fetched_keys: Iterable[DKT]
     ) -> None:
         """Add the given dictionary values as explicit keys in the cache.
 

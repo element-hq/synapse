@@ -18,7 +18,7 @@
 #
 #
 
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Optional
 
 import attr
 
@@ -109,7 +109,7 @@ class RoomVersion:
     # is not enough to mark it "supported": the push rule evaluator also needs to
     # support the flag. Unknown flags are ignored by the evaluator, making conditions
     # fail if used.
-    msc3931_push_features: Tuple[str, ...]  # values from PushRuleRoomFlag
+    msc3931_push_features: tuple[str, ...]  # values from PushRuleRoomFlag
     # MSC3757: Restricting who can overwrite a state event
     msc3757_enabled: bool
     # MSC4289: Creator power enabled
@@ -476,7 +476,7 @@ class RoomVersions:
     )
 
 
-KNOWN_ROOM_VERSIONS: Dict[str, RoomVersion] = {
+KNOWN_ROOM_VERSIONS: dict[str, RoomVersion] = {
     v.identifier: v
     for v in (
         RoomVersions.V1,

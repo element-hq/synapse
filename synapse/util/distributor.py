@@ -24,9 +24,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Generic,
-    List,
     Optional,
     TypeVar,
     Union,
@@ -69,8 +67,8 @@ class Distributor:
                 (this should be `hs.hostname`).
         """
         self.hs = hs
-        self.signals: Dict[str, Signal] = {}
-        self.pre_registration: Dict[str, List[Callable]] = {}
+        self.signals: dict[str, Signal] = {}
+        self.pre_registration: dict[str, list[Callable]] = {}
 
     def declare(self, name: str) -> None:
         if name in self.signals:
@@ -122,7 +120,7 @@ class Signal(Generic[P]):
 
     def __init__(self, name: str):
         self.name: str = name
-        self.observers: List[Callable[P, Any]] = []
+        self.observers: list[Callable[P, Any]] = []
 
     def observe(self, observer: Callable[P, Any]) -> None:
         """Adds a new callable to the observer list which will be invoked by
@@ -131,7 +129,7 @@ class Signal(Generic[P]):
         Each observer callable may return a Deferred."""
         self.observers.append(observer)
 
-    def fire(self, *args: P.args, **kwargs: P.kwargs) -> "defer.Deferred[List[Any]]":
+    def fire(self, *args: P.args, **kwargs: P.kwargs) -> "defer.Deferred[list[Any]]":
         """Invokes every callable in the observer list, passing in the args and
         kwargs. Exceptions thrown by observers are logged but ignored. It is
         not an error to fire a signal with no observers.

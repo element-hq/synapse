@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Iterable, Optional
 
 from canonicaljson import encode_canonical_json
 from parameterized import parameterized
@@ -244,13 +244,13 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         key: Optional[str] = None,
         internal: Optional[dict] = None,
         depth: Optional[int] = None,
-        prev_events: Optional[List[Tuple[str, dict]]] = None,
-        auth_events: Optional[List[str]] = None,
-        prev_state: Optional[List[str]] = None,
+        prev_events: Optional[list[tuple[str, dict]]] = None,
+        auth_events: Optional[list[str]] = None,
+        prev_state: Optional[list[str]] = None,
         redacts: Optional[str] = None,
         push_actions: Iterable = frozenset(),
         **content: object,
-    ) -> Tuple[EventBase, EventContext]:
+    ) -> tuple[EventBase, EventContext]:
         prev_events = prev_events or []
         auth_events = auth_events or []
         prev_state = prev_state or []

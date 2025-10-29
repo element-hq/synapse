@@ -24,13 +24,9 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
-    List,
     Mapping,
     Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 import attr
@@ -218,7 +214,7 @@ class AdminHandler:
             to_key = RoomStreamToken(stream=stream_ordering)
 
             # Events that we've processed in this room
-            written_events: Set[str] = set()
+            written_events: set[str] = set()
 
             # We need to track gaps in the events stream so that we can then
             # write out the state at those events. We do this by keeping track
@@ -231,7 +227,7 @@ class AdminHandler:
             # The reverse mapping to above, i.e. map from unseen event to events
             # that have the unseen event in their prev_events, i.e. the unseen
             # events "children".
-            unseen_to_child_events: Dict[str, Set[str]] = {}
+            unseen_to_child_events: dict[str, set[str]] = {}
 
             # We fetch events in the room the user could see by fetching *all*
             # events that we have and then filtering, this isn't the most
@@ -412,7 +408,7 @@ class AdminHandler:
 
     async def _redact_all_events(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[Mapping[str, Any]], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[Mapping[str, Any]], Optional[str]]:
         """
         Task to redact all of a users events in the given rooms, tracking which, if any, events
         whose redaction failed
@@ -518,7 +514,7 @@ class ExfiltrationWriter(metaclass=abc.ABCMeta):
     """Interface used to specify how to write exported data."""
 
     @abc.abstractmethod
-    def write_events(self, room_id: str, events: List[EventBase]) -> None:
+    def write_events(self, room_id: str, events: list[EventBase]) -> None:
         """Write a batch of events for a room."""
         raise NotImplementedError()
 

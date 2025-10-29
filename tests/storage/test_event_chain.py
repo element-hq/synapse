@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Dict, List, Set, Tuple, cast
+from typing import cast
 
 from parameterized import parameterized
 
@@ -420,7 +420,7 @@ class EventChainStoreTestCase(HomeserverTestCase):
 
     def persist(
         self,
-        events: List[EventBase],
+        events: list[EventBase],
     ) -> None:
         """Persist the given events and check that the links generated match
         those given.
@@ -464,11 +464,11 @@ class EventChainStoreTestCase(HomeserverTestCase):
         )
 
     def fetch_chains(
-        self, events: List[EventBase]
-    ) -> Tuple[Dict[str, Tuple[int, int]], _LinkMap]:
+        self, events: list[EventBase]
+    ) -> tuple[dict[str, tuple[int, int]], _LinkMap]:
         # Fetch the map from event ID -> (chain ID, sequence number)
         rows = cast(
-            List[Tuple[str, int, int]],
+            list[tuple[str, int, int]],
             self.get_success(
                 self.store.db_pool.simple_select_many_batch(
                     table="event_auth_chains",
@@ -487,7 +487,7 @@ class EventChainStoreTestCase(HomeserverTestCase):
 
         # Fetch all the links and pass them to the _LinkMap.
         auth_chain_rows = cast(
-            List[Tuple[int, int, int, int]],
+            list[tuple[int, int, int, int]],
             self.get_success(
                 self.store.db_pool.simple_select_many_batch(
                     table="event_auth_chain_links",
@@ -575,7 +575,7 @@ class EventChainBackgroundUpdateTestCase(HomeserverTestCase):
         self.token = self.login("foo", "pass")
         self.requester = create_requester(self.user_id)
 
-    def _generate_room(self) -> Tuple[str, List[Set[str]]]:
+    def _generate_room(self) -> tuple[str, list[set[str]]]:
         """Insert a room without a chain cover index."""
         room_id = self.helper.create_room_as(self.user_id, tok=self.token)
 

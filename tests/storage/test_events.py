@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Dict, List, Optional
+from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -54,7 +54,7 @@ class EventsTestCase(HomeserverTestCase):
     def test_get_senders_for_event_ids(self) -> None:
         """Tests the `get_senders_for_event_ids` storage function."""
 
-        users_and_tokens: Dict[str, str] = {}
+        users_and_tokens: dict[str, str] = {}
         for localpart_suffix in range(10):
             localpart = f"user_{localpart_suffix}"
             user_id = self.register_user(localpart, "rabbit")
@@ -70,7 +70,7 @@ class EventsTestCase(HomeserverTestCase):
         room_id = self.helper.create_room_as(
             room_creator_user_id, tok=room_creator_token
         )
-        event_ids_to_senders: Dict[str, str] = {}
+        event_ids_to_senders: dict[str, str] = {}
         for user_id, token in users_and_tokens.items():
             if user_id == room_creator_user_id:
                 continue
@@ -180,7 +180,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         )
         self.get_success(self._persistence.persist_event(event, context))
 
-    def assert_extremities(self, expected_extremities: List[str]) -> None:
+    def assert_extremities(self, expected_extremities: list[str]) -> None:
         """Assert the current extremities for the room"""
         extremities = self.get_success(
             self.store.get_prev_events_for_room(self.room_id)

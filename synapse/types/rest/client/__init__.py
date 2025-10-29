@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 from synapse._pydantic_compat import (
     Extra,
@@ -72,7 +72,7 @@ class ThreepidRequestTokenBody(RequestBodyModel):
 
     @validator("id_access_token", always=True)
     def token_required_for_identity_server(
-        cls, token: Optional[str], values: Dict[str, object]
+        cls, token: Optional[str], values: dict[str, object]
     ) -> Optional[str]:
         if values.get("id_server") is not None and token is None:
             raise ValueError("id_access_token is required if an id_server is supplied.")
@@ -144,7 +144,7 @@ class SlidingSyncBody(RequestBodyModel):
                 (Max 1000 messages)
         """
 
-        required_state: List[Tuple[StrictStr, StrictStr]]
+        required_state: list[tuple[StrictStr, StrictStr]]
         # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
         if TYPE_CHECKING:
             timeline_limit: int
@@ -242,21 +242,21 @@ class SlidingSyncBody(RequestBodyModel):
             """
 
             is_dm: Optional[StrictBool] = None
-            spaces: Optional[List[StrictStr]] = None
+            spaces: Optional[list[StrictStr]] = None
             is_encrypted: Optional[StrictBool] = None
             is_invite: Optional[StrictBool] = None
-            room_types: Optional[List[Union[StrictStr, None]]] = None
-            not_room_types: Optional[List[Union[StrictStr, None]]] = None
+            room_types: Optional[list[Union[StrictStr, None]]] = None
+            not_room_types: Optional[list[Union[StrictStr, None]]] = None
             room_name_like: Optional[StrictStr] = None
-            tags: Optional[List[StrictStr]] = None
-            not_tags: Optional[List[StrictStr]] = None
+            tags: Optional[list[StrictStr]] = None
+            not_tags: Optional[list[StrictStr]] = None
 
         # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
         if TYPE_CHECKING:
-            ranges: Optional[List[Tuple[int, int]]] = None
+            ranges: Optional[list[tuple[int, int]]] = None
         else:
             ranges: Optional[
-                List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]
+                list[tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]
             ] = None  # type: ignore[valid-type]
         slow_get_all_rooms: Optional[StrictBool] = False
         filters: Optional[Filters] = None
@@ -327,9 +327,9 @@ class SlidingSyncBody(RequestBodyModel):
 
             enabled: Optional[StrictBool] = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[List[StrictStr]] = ["*"]
+            lists: Optional[list[StrictStr]] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[List[StrictStr]] = ["*"]
+            rooms: Optional[list[StrictStr]] = ["*"]
 
         class ReceiptsExtension(RequestBodyModel):
             """The Receipts extension (MSC3960)
@@ -344,9 +344,9 @@ class SlidingSyncBody(RequestBodyModel):
 
             enabled: Optional[StrictBool] = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[List[StrictStr]] = ["*"]
+            lists: Optional[list[StrictStr]] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[List[StrictStr]] = ["*"]
+            rooms: Optional[list[StrictStr]] = ["*"]
 
         class TypingExtension(RequestBodyModel):
             """The Typing Notification extension (MSC3961)
@@ -361,9 +361,9 @@ class SlidingSyncBody(RequestBodyModel):
 
             enabled: Optional[StrictBool] = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[List[StrictStr]] = ["*"]
+            lists: Optional[list[StrictStr]] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[List[StrictStr]] = ["*"]
+            rooms: Optional[list[StrictStr]] = ["*"]
 
         class ThreadSubscriptionsExtension(RequestBodyModel):
             """The Thread Subscriptions extension (MSC4308)
@@ -389,18 +389,18 @@ class SlidingSyncBody(RequestBodyModel):
 
     # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
     if TYPE_CHECKING:
-        lists: Optional[Dict[str, SlidingSyncList]] = None
+        lists: Optional[dict[str, SlidingSyncList]] = None
     else:
-        lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]] = (
+        lists: Optional[dict[constr(max_length=64, strict=True), SlidingSyncList]] = (
             None  # type: ignore[valid-type]
         )
-    room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]] = None
+    room_subscriptions: Optional[dict[StrictStr, RoomSubscription]] = None
     extensions: Optional[Extensions] = None
 
     @validator("lists")
     def lists_length_check(
-        cls, value: Optional[Dict[str, SlidingSyncList]]
-    ) -> Optional[Dict[str, SlidingSyncList]]:
+        cls, value: Optional[dict[str, SlidingSyncList]]
+    ) -> Optional[dict[str, SlidingSyncList]]:
         if value is not None:
             assert len(value) <= 100, f"Max lists: 100 but saw {len(value)}"
         return value

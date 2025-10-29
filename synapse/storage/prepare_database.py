@@ -28,10 +28,8 @@ from typing import (
     Counter as CounterType,
     Generator,
     Iterable,
-    List,
     Optional,
     TextIO,
-    Tuple,
 )
 
 import attr
@@ -270,7 +268,7 @@ def _setup_new_database(
         for database in databases
     )
 
-    directory_entries: List[_DirectoryListing] = []
+    directory_entries: list[_DirectoryListing] = []
     for directory in directories:
         directory_entries.extend(
             _DirectoryListing(file_name, os.path.join(directory, file_name))
@@ -453,7 +451,7 @@ def _upgrade_existing_database(
         file_name_counter: CounterType[str] = Counter()
 
         # Now find which directories have anything of interest.
-        directory_entries: List[_DirectoryListing] = []
+        directory_entries: list[_DirectoryListing] = []
         for directory in directories:
             logger.debug("Looking for schema deltas in %s", directory)
             try:
@@ -593,7 +591,7 @@ def _apply_module_schema_files(
     cur: Cursor,
     database_engine: BaseDatabaseEngine,
     modname: str,
-    names_and_streams: Iterable[Tuple[str, TextIO]],
+    names_and_streams: Iterable[tuple[str, TextIO]],
 ) -> None:
     """Apply the module schemas for a single module
 

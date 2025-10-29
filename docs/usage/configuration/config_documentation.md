@@ -3815,7 +3815,7 @@ This setting has the following sub-options:
 
 * `localdb_enabled` (boolean): Set to false to disable authentication against the local password database. This is ignored if `enabled` is false, and is only useful if you have other `password_providers`. Defaults to `true`.
 
-* `pepper` (string|null): Set the value here to a secret random string for extra security. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
+* `pepper` (string|null): A secret random string that will be appended to user's passwords before they are hashed. This improves the security of short passwords. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
 
 * `policy` (object): Define and enforce a password policy, such as minimum lengths for passwords, etc. This is an implementation of MSC2000.
 

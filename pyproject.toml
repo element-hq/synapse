@@ -78,6 +78,12 @@ select = [
     "LOG",
     # flake8-logging-format
     "G",
+    # pyupgrade
+    "UP006",
+]
+extend-safe-fixes = [
+    # pyupgrade
+    "UP006"
 ]
 
 [tool.ruff.lint.isort]
@@ -101,7 +107,7 @@ module-name = "synapse.synapse_rust"
 
 [tool.poetry]
 name = "matrix-synapse"
-version = "1.141.0rc1"
+version = "1.141.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
 license = "AGPL-3.0-or-later OR LicenseRef-Element-Commercial"
@@ -319,7 +325,7 @@ all = [
     #   - systemd: this is a system-based requirement
 ]
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 # We pin development dependencies in poetry.lock so that our tests don't start
 # failing on new releases. Keeping lower bounds loose here means that dependabot
 # can bump versions without having to update the content-hash in the lockfile.
@@ -381,10 +387,10 @@ build-backend = "poetry.core.masonry.api"
 # Skip unsupported platforms (by us or by Rust).
 # See https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip for the list of build targets.
 # We skip:
-#  - CPython and PyPy 3.8: EOLed
+#  - CPython 3.8: EOLed
 #  - musllinux i686: excluded to reduce number of wheels we build.
 #    c.f. https://github.com/matrix-org/synapse/pull/12595#discussion_r963107677
-skip = "cp38* pp38* *-musllinux_i686"
+skip = "cp38* *-musllinux_i686"
 # Enable non-default builds.
 # "pypy" used to be included by default up until cibuildwheel 3.
 enable = "pypy"

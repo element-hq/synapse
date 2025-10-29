@@ -28,15 +28,10 @@ from typing import (
     Any,
     Callable,
     ContextManager,
-    DefaultDict,
-    Dict,
     Iterator,
-    List,
     Mapping,
     MutableSet,
     Optional,
-    Set,
-    Tuple,
 )
 from weakref import WeakSet
 
@@ -104,7 +99,7 @@ _rate_limiter_instances_lock = threading.Lock()
 
 def _get_counts_from_rate_limiter_instance(
     count_func: Callable[["FederationRateLimiter"], int],
-) -> Mapping[Tuple[str, ...], int]:
+) -> Mapping[tuple[str, ...], int]:
     """Returns a count of something (slept/rejected hosts) by (metrics_name)"""
     # Cast to a list to prevent it changing while the Prometheus
     # thread is collecting metrics
@@ -114,7 +109,7 @@ def _get_counts_from_rate_limiter_instance(
     # Map from (metrics_name,) -> int, the number of something like slept hosts
     # or rejected hosts. The key type is Tuple[str], but we leave the length
     # unspecified for compatability with LaterGauge's annotations.
-    counts: Dict[Tuple[str, ...], int] = {}
+    counts: dict[tuple[str, ...], int] = {}
     for rate_limiter_instance in rate_limiter_instances:
         # Only track metrics if they provided a `metrics_name` to
         # differentiate this instance of the rate limiter.
@@ -191,7 +186,7 @@ class FederationRateLimiter:
                 metrics_name=metrics_name,
             )
 
-        self.ratelimiters: DefaultDict[str, "_PerHostRatelimiter"] = (
+        self.ratelimiters: collections.defaultdict[str, "_PerHostRatelimiter"] = (
             collections.defaultdict(new_limiter)
         )
 
@@ -244,7 +239,7 @@ class _PerHostRatelimiter:
         self.concurrent_requests = config.concurrent
 
         # request_id objects for requests which have been slept
-        self.sleeping_requests: Set[object] = set()
+        self.sleeping_requests: set[object] = set()
 
         # map from request_id object to Deferred for requests which are ready
         # for processing but have been queued
@@ -253,11 +248,11 @@ class _PerHostRatelimiter:
         ] = collections.OrderedDict()
 
         # request id objects for requests which are in progress
-        self.current_processing: Set[object] = set()
+        self.current_processing: set[object] = set()
 
         # times at which we have recently (within the last window_size ms)
         # received requests.
-        self.request_times: List[int] = []
+        self.request_times: list[int] = []
 
     @contextlib.contextmanager
     def ratelimit(self, host: str) -> "Iterator[defer.Deferred[None]]":

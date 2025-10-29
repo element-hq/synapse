@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional, Sequence
 from unittest.mock import AsyncMock, Mock
 
 from typing_extensions import TypeAlias
@@ -288,11 +288,11 @@ class ApplicationServiceSchedulerRecovererTestCase(unittest.HomeserverTestCase):
 # Corresponds to synapse.appservice.scheduler._TransactionController.send
 TxnCtrlArgs: TypeAlias = """
 defer.Deferred[
-    Tuple[
+    tuple[
         ApplicationService,
         Sequence[EventBase],
-        Optional[List[JsonDict]],
-        Optional[List[JsonDict]],
+        Optional[list[JsonDict]],
+        Optional[list[JsonDict]],
         Optional[TransactionOneTimeKeysCount],
         Optional[TransactionUnusedFallbackKeys],
         Optional[DeviceListUpdates],

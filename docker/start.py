@@ -6,7 +6,7 @@ import os
 import platform
 import subprocess
 import sys
-from typing import Any, Dict, List, Mapping, MutableMapping, NoReturn, Optional
+from typing import Any, Mapping, MutableMapping, NoReturn, Optional
 
 import jinja2
 
@@ -69,7 +69,7 @@ def generate_config_from_template(
             )
 
     # populate some params from data files (if they exist, else create new ones)
-    environ: Dict[str, Any] = dict(os_environ)
+    environ: dict[str, Any] = dict(os_environ)
     secrets = {
         "registration": "SYNAPSE_REGISTRATION_SHARED_SECRET",
         "macaroon": "SYNAPSE_MACAROON_SECRET_KEY",
@@ -200,7 +200,7 @@ def run_generate_config(environ: Mapping[str, str], ownership: Optional[str]) ->
     subprocess.run(args, check=True)
 
 
-def main(args: List[str], environ: MutableMapping[str, str]) -> None:
+def main(args: list[str], environ: MutableMapping[str, str]) -> None:
     mode = args[1] if len(args) > 1 else "run"
 
     # if we were given an explicit user to switch to, do so
