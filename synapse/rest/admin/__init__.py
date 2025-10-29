@@ -74,6 +74,7 @@ from synapse.rest.admin.registration_tokens import (
     RegistrationTokenRestServlet,
 )
 from synapse.rest.admin.rooms import (
+    AdminRoomHierarchy,
     BlockRoomRestServlet,
     DeleteRoomStatusByDeleteIdRestServlet,
     DeleteRoomStatusByRoomIdRestServlet,
@@ -342,6 +343,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ExperimentalFeaturesRestServlet(hs).register(http_server)
     SuspendAccountRestServlet(hs).register(http_server)
     ScheduledTasksRestServlet(hs).register(http_server)
+    AdminRoomHierarchy(hs).register(http_server)
     EventRestServlet(hs).register(http_server)
 
 

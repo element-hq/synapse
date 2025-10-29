@@ -87,17 +87,13 @@ file when you upgrade the Debian package to a later version.
 Andrej Shadura maintains a
 [`matrix-synapse`](https://packages.debian.org/sid/matrix-synapse) package in
 the Debian repositories.
-For `bookworm` and `sid`, it can be installed simply with:
+For `forky` (14) and `sid` (rolling release), it can be installed simply with:
 
 ```sh
 sudo apt install matrix-synapse
 ```
 
-Synapse is also available in `bullseye-backports`.  Please
-see the [Debian documentation](https://backports.debian.org/Instructions/)
-for information on how to use backports.
-
-`matrix-synapse` is no longer maintained for `buster` and older.
+The downstream Debian `matrix-synapse` package is not available for `trixie` (13) and older. Consider using the Matrix.org packages (above).
 
 ##### Downstream Ubuntu packages
 
