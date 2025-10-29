@@ -1,3 +1,10 @@
+# Synapse 1.141.0 (2025-10-29)
+
+No significant changes since 1.141.0rc2.
+
+
+
+
 # Synapse 1.141.0rc2 (2025-10-28)
 
 ## Deprecation of MacOS Python wheels
