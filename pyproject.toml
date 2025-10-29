@@ -36,7 +36,7 @@
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 # See https://beta.ruff.rs/docs/rules/#error-e
@@ -107,7 +107,7 @@ module-name = "synapse.synapse_rust"
 
 [tool.poetry]
 name = "matrix-synapse"
-version = "1.141.0rc1"
+version = "1.141.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
 license = "AGPL-3.0-or-later OR LicenseRef-Element-Commercial"
@@ -165,7 +165,7 @@ synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
 update_synapse_database = "synapse._scripts.update_synapse_database:main"
 
 [tool.poetry.dependencies]
-python = "^3.9.0"
+python = "^3.10.0"
 
 # Mandatory Dependencies
 # ----------------------
@@ -201,7 +201,8 @@ bcrypt = ">=3.1.7"
 # Packagers that already took care of libwebp can lower that down to 5.4.0.
 Pillow = ">=10.0.1"
 # We use SortedDict.peekitem(), which was added in sortedcontainers 1.5.2.
-sortedcontainers = ">=1.5.2"
+# 2.0.5 updates collections.abc imports to avoid Python 3.10 incompatibility.
+sortedcontainers = ">=2.0.5"
 pymacaroons = ">=0.13.0"
 msgpack = ">=0.5.2"
 phonenumbers = ">=8.2.0"
@@ -217,7 +218,8 @@ netaddr = ">=0.7.18"
 # end up with a broken installation, with recent MarkupSafe but old Jinja, we
 # add a lower bound to the Jinja2 dependency.
 Jinja2 = ">=3.0"
-bleach = ">=1.4.3"
+# 3.2.0 updates collections.abc imports to avoid Python 3.10 incompatibility.
+bleach = ">=3.2.0"
 # We use `assert_never`, which were added in `typing-extensions` 4.1.
 typing-extensions = ">=4.1"
 # We enforce that we have a `cryptography` version that bundles an `openssl`
@@ -258,10 +260,12 @@ authlib = { version = ">=0.15.1", optional = true }
 # `contrib/systemd/log_config.yaml`.
 # Note: systemd-python 231 appears to have been yanked from pypi
 systemd-python = { version = ">=231", optional = true }
-lxml = { version = ">=4.5.2", optional = true }
+# 4.6.3 removes usage of _PyGen_Send which is unavailable in CPython as of Python 3.10.
+lxml = { version = ">=4.6.3", optional = true }
 sentry-sdk = { version = ">=0.7.2", optional = true }
 opentracing = { version = ">=2.2.0", optional = true }
-jaeger-client = { version = ">=4.0.0", optional = true }
+# 4.2.0 updates collections.abc imports to avoid Python 3.10 incompatibility.
+jaeger-client = { version = ">=4.2.0", optional = true }
 txredisapi = { version = ">=1.4.7", optional = true }
 hiredis = { version = "*", optional = true }
 Pympler = { version = "*", optional = true }

@@ -316,7 +316,10 @@ def _prepare() -> None:
     )
 
     print("Opening the changelog in your browser...")
-    print("Please ask #synapse-dev to give it a check.")
+    print(
+        "Please review it using the release notes review checklist: https://element-hq.github.io/synapse/develop/development/internal_documentation/release_notes_review_checklist.html"
+    )
+    print("And post it in #synapse-dev for cursory review from the team.")
     click.launch(
         f"https://github.com/element-hq/synapse/blob/{synapse_repo.active_branch.name}/CHANGES.md"
     )

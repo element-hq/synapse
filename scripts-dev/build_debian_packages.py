@@ -21,13 +21,12 @@ from types import FrameType
 from typing import Collection, Optional, Sequence
 
 # These are expanded inside the dockerfile to be a fully qualified image name.
-# e.g. docker.io/library/debian:bullseye
+# e.g. docker.io/library/debian:bookworm
 #
 # If an EOL is forced by a Python version and we're dropping support for it, make sure
-# to remove references to the distibution across Synapse (search for "bullseye" for
+# to remove references to the distibution across Synapse (search for "bookworm" for
 # example)
 DISTS = (
-    "debian:bullseye",  # (EOL ~2024-07) (our EOL forced by Python 3.9 is 2025-10-05)
     "debian:bookworm",  # (EOL 2026-06) (our EOL forced by Python 3.11 is 2027-10-24)
     "debian:sid",  # (rolling distro, no EOL)
     "ubuntu:jammy",  # 22.04 LTS (EOL 2027-04) (our EOL forced by Python 3.10 is 2026-10-04)
