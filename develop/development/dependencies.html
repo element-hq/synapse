@@ -216,17 +216,17 @@ phonenumbers = [
 ]
 </code></pre>
 <p>We can see this pinned version inside the docker image for that release:</p>
-<pre><code>$ docker pull vectorim/synapse:v1.97.0
+<pre><code>$ docker pull matrixdotorg/synapse:latest
 ...
-$ docker run --entrypoint pip vectorim/synapse:v1.97.0 show phonenumbers
+$ docker run --entrypoint pip matrixdotorg/synapse:latest show phonenumbers
 Name: phonenumbers
-Version: 8.12.44
+Version: 9.0.15
 Summary: Python version of Google's common library for parsing, formatting, storing and validating international phone numbers.
 Home-page: https://github.com/daviddrysdale/python-phonenumbers
 Author: David Drysdale
 Author-email: dmd@lurklurk.org
 License: Apache License 2.0
-Location: /usr/local/lib/python3.9/site-packages
+Location: /usr/local/lib/python3.12/site-packages
 Requires:
 Required-by: matrix-synapse
 </code></pre>

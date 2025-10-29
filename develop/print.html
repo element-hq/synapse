@@ -367,7 +367,7 @@ and mounting it to <code>/var/synapse</code> should be taken into consideration.
 <p>System requirements:</p>
 <ul>
 <li>POSIX-compliant system (tested on Linux &amp; OS X)</li>
-<li>Python 3.9 or later, up to Python 3.13.</li>
+<li>Python 3.10 or later, up to Python 3.13.</li>
 <li>At least 1GB of free RAM if you want to join large public rooms like #matrix:matrix.org</li>
 </ul>
 <p>If building on an uncommon architecture for which pre-built wheels are
@@ -439,9 +439,14 @@ header files for Python C extensions.</p>
 sudo dnf group install &quot;Development Tools&quot;
 </code></pre>
 <h5 id="red-hat-enterprise-linux--rocky-linux--oracle-linux"><a class="header" href="#red-hat-enterprise-linux--rocky-linux--oracle-linux">Red Hat Enterprise Linux / Rocky Linux / Oracle Linux</a></h5>
-<p><em>Note: The term &quot;RHEL&quot; below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux. The distributions are 1:1 binary compatible.</em></p>
+<p><em>Note: The term &quot;RHEL&quot; below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux.
+The distributions are 1:1 binary compatible.</em></p>
 <p>It's recommended to use the latest Python versions.</p>
-<p>RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ships with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.</p>
+<p>RHEL 8 &amp; 9 in particular ship with Python 3.6 &amp; 3.9 respectively by default
+which are EOL and therefore no longer supported by Synapse.
+However, newer Python versions provide significant performance improvements
+and they're available in official distributions' repositories.
+Therefore it's recommended to use them.</p>
 <p>Python 3.11 and 3.12 are available for both RHEL 8 and 9.</p>
 <p>These commands should be run as root user.</p>
 <p>Install new version of Python. You only need one of these:</p>
@@ -1896,6 +1901,13 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11420"><a class="header" href="#upgrading-to-v11420">Upgrading to v1.142.0</a></h1>
+<h2 id="minimum-supported-python-version"><a class="header" href="#minimum-supported-python-version">Minimum supported Python version</a></h2>
+<p>The minimum supported Python version has been increased from v3.9 to v3.10.
+You will need Python 3.10+ to run Synapse v1.142.0.</p>
+<p>If you use current versions of the
+<a href="setup/installation.html#docker-images-and-ansible-playbooks">matrixorg/synapse</a>
+Docker images, no action is required.</p>
 <h1 id="upgrading-to-v11410"><a class="header" href="#upgrading-to-v11410">Upgrading to v1.141.0</a></h1>
 <h2 id="docker-images-now-based-on-debian-trixie-with-python-313"><a class="header" href="#docker-images-now-based-on-debian-trixie-with-python-313">Docker images now based on Debian <code>trixie</code> with Python 3.13</a></h2>
 <p>The Docker images are now based on Debian <code>trixie</code> and use Python 3.13. If you
@@ -2042,7 +2054,7 @@ be compatible.</p>
 compatibility can still do so by manually configuring
 <code>enable_authenticated_media: False</code>.</p>
 <h1 id="upgrading-to-v11190"><a class="header" href="#upgrading-to-v11190">Upgrading to v1.119.0</a></h1>
-<h2 id="minimum-supported-python-version"><a class="header" href="#minimum-supported-python-version">Minimum supported Python version</a></h2>
+<h2 id="minimum-supported-python-version-1"><a class="header" href="#minimum-supported-python-version-1">Minimum supported Python version</a></h2>
 <p>The minimum supported Python version has been increased from v3.8 to v3.9.
 You will need Python 3.9+ to run Synapse v1.119.0 (due out Nov 7th, 2024).</p>
 <p>If you use current versions of the Matrix.org-distributed Docker images, no action is required.
@@ -2088,7 +2100,7 @@ The standard <code>username</code> property should be used instead. See the
 <a href="https://spec.matrix.org/v1.7/application-service-api/#server-admin-style-permissions">Application Service specification</a>
 for more information.</p>
 <h1 id="upgrading-to-v1880"><a class="header" href="#upgrading-to-v1880">Upgrading to v1.88.0</a></h1>
-<h2 id="minimum-supported-python-version-1"><a class="header" href="#minimum-supported-python-version-1">Minimum supported Python version</a></h2>
+<h2 id="minimum-supported-python-version-2"><a class="header" href="#minimum-supported-python-version-2">Minimum supported Python version</a></h2>
 <p>The minimum supported Python version has been increased from v3.7 to v3.8.
 You will need Python 3.8 to run Synapse v1.88.0 (due out July 18th, 2023).</p>
 <p>If you use current versions of the Matrix.org-distributed Debian
@@ -18857,17 +18869,17 @@ phonenumbers = [
 ]
 </code></pre>
 <p>We can see this pinned version inside the docker image for that release:</p>
-<pre><code>$ docker pull vectorim/synapse:v1.97.0
+<pre><code>$ docker pull matrixdotorg/synapse:latest
 ...
-$ docker run --entrypoint pip vectorim/synapse:v1.97.0 show phonenumbers
+$ docker run --entrypoint pip matrixdotorg/synapse:latest show phonenumbers
 Name: phonenumbers
-Version: 8.12.44
+Version: 9.0.15
 Summary: Python version of Google's common library for parsing, formatting, storing and validating international phone numbers.
 Home-page: https://github.com/daviddrysdale/python-phonenumbers
 Author: David Drysdale
 Author-email: dmd@lurklurk.org
 License: Apache License 2.0
-Location: /usr/local/lib/python3.9/site-packages
+Location: /usr/local/lib/python3.12/site-packages
 Requires:
 Required-by: matrix-synapse
 </code></pre>
