@@ -188,7 +188,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/abc",
             {"action": "oops"},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
@@ -202,7 +201,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/abc",
             {"action": action},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
 
@@ -240,7 +238,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/{delay_id}",
             {"action": "cancel"},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertListEqual([], self._get_delayed_events())
@@ -275,7 +272,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/{delay_ids.pop(0)}",
             {"action": "cancel"},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
@@ -283,7 +279,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/{delay_ids.pop(0)}",
             {"action": "cancel"},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
@@ -321,7 +316,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/{delay_id}",
             {"action": "send"},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertListEqual([], self._get_delayed_events())
@@ -352,7 +346,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/{delay_ids.pop(0)}",
             {"action": "send"},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
@@ -360,7 +353,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/{delay_ids.pop(0)}",
             {"action": "send"},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
@@ -398,7 +390,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/{delay_id}",
             {"action": "restart"},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
@@ -446,7 +437,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/{delay_ids.pop(0)}",
             {"action": "restart"},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
@@ -454,7 +444,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
             "POST",
             f"{PATH_PREFIX}/{delay_ids.pop(0)}",
             {"action": "restart"},
-            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
