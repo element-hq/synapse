@@ -155,15 +155,63 @@ class DelayedEventsTestCase(HomeserverTestCase):
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-    @parameterized.expand(["cancel", "restart", "send"])
-    def test_update_delayed_event_without_match(self, action: str) -> None:
+    def test_update_delayed_event_without_id(self) -> None:
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/abc/{action}",
+            f"{PATH_PREFIX}/",
         )
         self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
 
-    def test_cancel_delayed_state_event(self) -> None:
+    def test_update_delayed_event_without_body(self) -> None:
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/abc",
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.NOT_JSON,
+            channel.json_body["errcode"],
+        )
+
+    def test_update_delayed_event_without_action(self) -> None:
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/abc",
+            {},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.MISSING_PARAM,
+            channel.json_body["errcode"],
+        )
+
+    def test_update_delayed_event_with_invalid_action(self) -> None:
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/abc",
+            {"action": "oops"},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.INVALID_PARAM,
+            channel.json_body["errcode"],
+        )
+
+    @parameterized.expand(
+        [
+            (action, action_in_path)
+            for action in ("cancel", "restart", "send")
+            for action_in_path in (True, False)
+        ]
+    )
+    def test_update_delayed_event_without_match(
+        self, action: str, action_in_path: bool
+    ) -> None:
+        channel = self._update_delayed_event("abc", action, action_in_path)
+        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
+
+    @parameterized.expand((True, False))
+    def test_cancel_delayed_state_event(self, action_in_path: bool) -> None:
         state_key = "to_never_send"
 
         setter_key = "setter"
@@ -193,7 +241,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-        channel = self._update_delayed_event(delay_id, "cancel")
+        channel = self._update_delayed_event(delay_id, "cancel", action_in_path)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertListEqual([], self._get_delayed_events())
 
@@ -206,10 +254,11 @@ class DelayedEventsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
+    @parameterized.expand((True, False))
     @unittest.override_config(
         {"rc_delayed_event_mgmt": {"per_second": 0.5, "burst_count": 1}}
     )
-    def test_cancel_delayed_event_ratelimit(self) -> None:
+    def test_cancel_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
         for _ in range(2):
             channel = self.make_request(
@@ -223,13 +272,14 @@ class DelayedEventsTestCase(HomeserverTestCase):
             self.assertIsNotNone(delay_id)
             delay_ids.append(delay_id)
 
-        channel = self._update_delayed_event(delay_ids.pop(0), "cancel")
+        channel = self._update_delayed_event(delay_ids.pop(0), "cancel", action_in_path)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        channel = self._update_delayed_event(delay_ids.pop(0), "cancel")
+        channel = self._update_delayed_event(delay_ids.pop(0), "cancel", action_in_path)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
-    def test_send_delayed_state_event(self) -> None:
+    @parameterized.expand((True, False))
+    def test_send_delayed_state_event(self, action_in_path: bool) -> None:
         state_key = "to_send_on_request"
 
         setter_key = "setter"
@@ -259,7 +309,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-        channel = self._update_delayed_event(delay_id, "send")
+        channel = self._update_delayed_event(delay_id, "send", action_in_path)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertListEqual([], self._get_delayed_events())
         content = self.helper.get_state(
@@ -270,8 +320,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
+    @parameterized.expand((True, False))
     @unittest.override_config({"rc_message": {"per_second": 2.5, "burst_count": 3}})
-    def test_send_delayed_event_ratelimit(self) -> None:
+    def test_send_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
         for _ in range(2):
             channel = self.make_request(
@@ -285,13 +336,14 @@ class DelayedEventsTestCase(HomeserverTestCase):
             self.assertIsNotNone(delay_id)
             delay_ids.append(delay_id)
 
-        channel = self._update_delayed_event(delay_ids.pop(0), "send")
+        channel = self._update_delayed_event(delay_ids.pop(0), "send", action_in_path)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        channel = self._update_delayed_event(delay_ids.pop(0), "send")
+        channel = self._update_delayed_event(delay_ids.pop(0), "send", action_in_path)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
-    def test_restart_delayed_state_event(self) -> None:
+    @parameterized.expand((True, False))
+    def test_restart_delayed_state_event(self, action_in_path: bool) -> None:
         state_key = "to_send_on_restarted_timeout"
 
         setter_key = "setter"
@@ -321,7 +373,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-        channel = self._update_delayed_event(delay_id, "restart")
+        channel = self._update_delayed_event(delay_id, "restart", action_in_path)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         self.reactor.advance(1)
@@ -347,10 +399,11 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
+    @parameterized.expand((True, False))
     @unittest.override_config(
         {"rc_delayed_event_mgmt": {"per_second": 0.5, "burst_count": 1}}
     )
-    def test_restart_delayed_event_ratelimit(self) -> None:
+    def test_restart_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
         for _ in range(2):
             channel = self.make_request(
@@ -364,10 +417,14 @@ class DelayedEventsTestCase(HomeserverTestCase):
             self.assertIsNotNone(delay_id)
             delay_ids.append(delay_id)
 
-        channel = self._update_delayed_event(delay_ids.pop(0), "restart")
+        channel = self._update_delayed_event(
+            delay_ids.pop(0), "restart", action_in_path
+        )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        channel = self._update_delayed_event(delay_ids.pop(0), "restart")
+        channel = self._update_delayed_event(
+            delay_ids.pop(0), "restart", action_in_path
+        )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
     def test_delayed_state_is_not_cancelled_by_new_state_from_same_user(
@@ -474,11 +531,16 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         return content
 
-    def _update_delayed_event(self, delay_id: str, action: str) -> FakeChannel:
-        return self.make_request(
-            "POST",
-            f"{PATH_PREFIX}/{delay_id}/{action}",
-        )
+    def _update_delayed_event(
+        self, delay_id: str, action: str, action_in_path: bool
+    ) -> FakeChannel:
+        path = f"{PATH_PREFIX}/{delay_id}"
+        body = {}
+        if action_in_path:
+            path += f"/{action}"
+        else:
+            body["action"] = action
+        return self.make_request("POST", path, body)
 
 
 def _get_path_for_delayed_state(
