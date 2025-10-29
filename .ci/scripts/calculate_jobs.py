@@ -36,11 +36,11 @@ IS_PR = os.environ["GITHUB_REF"].startswith("refs/pull/")
 # First calculate the various trial jobs.
 #
 # For PRs, we only run each type of test with the oldest Python version supported (which
-# is Python 3.9 right now)
+# is Python 3.10 right now)
 
 trial_sqlite_tests = [
     {
-        "python-version": "3.9",
+        "python-version": "3.10",
         "database": "sqlite",
         "extras": "all",
     }
@@ -53,12 +53,12 @@ if not IS_PR:
             "database": "sqlite",
             "extras": "all",
         }
-        for version in ("3.10", "3.11", "3.12", "3.13")
+        for version in ("3.11", "3.12", "3.13")
     )
 
 trial_postgres_tests = [
     {
-        "python-version": "3.9",
+        "python-version": "3.10",
         "database": "postgres",
         "postgres-version": "13",
         "extras": "all",
@@ -77,7 +77,7 @@ if not IS_PR:
 
 trial_no_extra_tests = [
     {
-        "python-version": "3.9",
+        "python-version": "3.10",
         "database": "sqlite",
         "extras": "",
     }
