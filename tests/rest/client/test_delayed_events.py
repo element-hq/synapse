@@ -127,6 +127,10 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
+    def test_get_delayed_events_auth(self) -> None:
+        channel = self.make_request("GET", PATH_PREFIX)
+        self.assertEqual(HTTPStatus.UNAUTHORIZED, channel.code, channel.result)
+
     @unittest.override_config(
         {"rc_delayed_event_mgmt": {"per_second": 0.5, "burst_count": 1}}
     )
@@ -150,57 +154,11 @@ class DelayedEventsTestCase(HomeserverTestCase):
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-    def test_update_delayed_event_without_id(self) -> None:
-        channel = self.make_request(
-            "POST",
-            f"{PATH_PREFIX}/",
-            access_token=self.user1_access_token,
-        )
-        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
-
-    def test_update_delayed_event_without_body(self) -> None:
-        channel = self.make_request(
-            "POST",
-            f"{PATH_PREFIX}/abc",
-            access_token=self.user1_access_token,
-        )
-        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        self.assertEqual(
-            Codes.NOT_JSON,
-            channel.json_body["errcode"],
-        )
-
-    def test_update_delayed_event_without_action(self) -> None:
-        channel = self.make_request(
-            "POST",
-            f"{PATH_PREFIX}/abc",
-            {},
-            self.user1_access_token,
-        )
-        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        self.assertEqual(
-            Codes.MISSING_PARAM,
-            channel.json_body["errcode"],
-        )
-
-    def test_update_delayed_event_with_invalid_action(self) -> None:
-        channel = self.make_request(
-            "POST",
-            f"{PATH_PREFIX}/abc",
-            {"action": "oops"},
-        )
-        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        self.assertEqual(
-            Codes.INVALID_PARAM,
-            channel.json_body["errcode"],
-        )
-
     @parameterized.expand(["cancel", "restart", "send"])
     def test_update_delayed_event_without_match(self, action: str) -> None:
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/abc",
-            {"action": action},
+            f"{PATH_PREFIX}/abc/{action}",
         )
         self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
 
@@ -236,8 +194,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/{delay_id}",
-            {"action": "cancel"},
+            f"{PATH_PREFIX}/{delay_id}/cancel",
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertListEqual([], self._get_delayed_events())
@@ -270,15 +227,13 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/{delay_ids.pop(0)}",
-            {"action": "cancel"},
+            f"{PATH_PREFIX}/{delay_ids.pop(0)}/cancel",
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/{delay_ids.pop(0)}",
-            {"action": "cancel"},
+            f"{PATH_PREFIX}/{delay_ids.pop(0)}/cancel",
         )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
@@ -314,8 +269,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/{delay_id}",
-            {"action": "send"},
+            f"{PATH_PREFIX}/{delay_id}/send",
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertListEqual([], self._get_delayed_events())
@@ -344,15 +298,13 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/{delay_ids.pop(0)}",
-            {"action": "send"},
+            f"{PATH_PREFIX}/{delay_ids.pop(0)}/send",
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/{delay_ids.pop(0)}",
-            {"action": "send"},
+            f"{PATH_PREFIX}/{delay_ids.pop(0)}/send",
         )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
@@ -388,8 +340,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/{delay_id}",
-            {"action": "restart"},
+            f"{PATH_PREFIX}/{delay_id}/restart",
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
@@ -435,15 +386,13 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/{delay_ids.pop(0)}",
-            {"action": "restart"},
+            f"{PATH_PREFIX}/{delay_ids.pop(0)}/restart",
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         channel = self.make_request(
             "POST",
-            f"{PATH_PREFIX}/{delay_ids.pop(0)}",
-            {"action": "restart"},
+            f"{PATH_PREFIX}/{delay_ids.pop(0)}/restart",
         )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
