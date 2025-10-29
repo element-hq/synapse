@@ -226,7 +226,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         delay_id = channel.json_body.get("delay_id")
-        self.assertIsNotNone(delay_id)
+        assert delay_id is not None
 
         self.reactor.advance(1)
         events = self._get_delayed_events()
@@ -269,7 +269,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             )
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
             delay_id = channel.json_body.get("delay_id")
-            self.assertIsNotNone(delay_id)
+            assert delay_id is not None
             delay_ids.append(delay_id)
 
         channel = self._update_delayed_event(delay_ids.pop(0), "cancel", action_in_path)
@@ -294,7 +294,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         delay_id = channel.json_body.get("delay_id")
-        self.assertIsNotNone(delay_id)
+        assert delay_id is not None
 
         self.reactor.advance(1)
         events = self._get_delayed_events()
@@ -333,7 +333,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             )
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
             delay_id = channel.json_body.get("delay_id")
-            self.assertIsNotNone(delay_id)
+            assert delay_id is not None
             delay_ids.append(delay_id)
 
         channel = self._update_delayed_event(delay_ids.pop(0), "send", action_in_path)
@@ -358,7 +358,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         delay_id = channel.json_body.get("delay_id")
-        self.assertIsNotNone(delay_id)
+        assert delay_id is not None
 
         self.reactor.advance(1)
         events = self._get_delayed_events()
@@ -414,7 +414,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             )
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
             delay_id = channel.json_body.get("delay_id")
-            self.assertIsNotNone(delay_id)
+            assert delay_id is not None
             delay_ids.append(delay_id)
 
         channel = self._update_delayed_event(
