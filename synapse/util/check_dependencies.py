@@ -288,7 +288,9 @@ def check_requirements(extra: Optional[str] = None) -> None:
     errors = []
 
     if extra is None:
-        base_extra_candidates: Sequence[str] = ("", *sorted(RUNTIME_EXTRAS))
+        # Default to all mandatory dependencies (non-dev extras).
+        # "" means all dependencies that aren't conditional on an extra.
+        base_extra_candidates: Sequence[str] = ("", *RUNTIME_EXTRAS)
     else:
         base_extra_candidates = (extra,)
 
