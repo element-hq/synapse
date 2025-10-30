@@ -624,7 +624,8 @@ class LoggingContextFilter(logging.Filter):
 
         # Avoid overwriting an existing `server_name` on the record. This is running in
         # the context of a global log record filter so there may be 3rd-party code that
-        # adds their own `server_name` and we don't want to interfere with that.
+        # adds their own `server_name` and we don't want to interfere with that
+        # (clobber).
         if not hasattr(record, "server_name"):
             record.server_name = "unknown_server_from_no_logcontext"
 
