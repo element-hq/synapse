@@ -414,10 +414,7 @@ def setup(
     # Start the tracer
     init_tracer(hs)  # noqa
 
-    try:
-        hs.setup()
-    except Exception as e:
-        handle_startup_exception(e)
+    hs.setup()
 
     async def _start_when_reactor_running() -> None:
         # TODO: Feels like this should be moved somewhere else.
@@ -464,7 +461,10 @@ def main() -> None:
         # check base requirements
         check_requirements()
         hs = create_homeserver(homeserver_config)
-        setup(hs)
+        try:
+            setup(hs)
+        except Exception as e:
+            handle_startup_exception(e)
 
         # redirect stdio to the logs, if configured.
         if not hs.config.logging.no_redirect_stdio:
