@@ -179,7 +179,12 @@ LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later OR LicenseRef-Element
 COPY --from=runtime-deps /install-${TARGETARCH}/etc /etc
 COPY --from=runtime-deps /install-${TARGETARCH}/usr /usr
 COPY --from=runtime-deps /install-${TARGETARCH}/var /var
-COPY --from=builder /install /usr/local
+
+# Copy the installed python packages from the builder stage.
+#
+# uv will generate a `.lock` file when installing packages, which we don't want
+# to copy to the final image.
+COPY --from=builder  --exclude=.lock /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 

@@ -27,12 +27,12 @@ def build(setup_kwargs: dict[str, Any]) -> None:
     setup_kwargs["zip_safe"] = False
 
     # We look up the minimum supported Python version with
-    # `python_requires` (e.g. ">=3.9.0,<4.0.0") and finding the first Python
+    # `python_requires` (e.g. ">=3.10.0,<4.0.0") and finding the first Python
     # version that matches. We then convert that into the `py_limited_api` form,
-    # e.g. cp39 for Python 3.9.
+    # e.g. cp310 for Python 3.10.
     py_limited_api: str
     python_bounds = SpecifierSet(setup_kwargs["python_requires"])
-    for minor_version in itertools.count(start=8):
+    for minor_version in itertools.count(start=10):
         if f"3.{minor_version}.0" in python_bounds:
             py_limited_api = f"cp3{minor_version}"
             break

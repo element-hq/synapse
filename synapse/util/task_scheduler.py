@@ -53,8 +53,8 @@ running_tasks_gauge = LaterGauge(
 class TaskScheduler:
     """
     This is a simple task scheduler designed for resumable tasks. Normally,
-    you'd use `run_in_background` to start a background task or Twisted's
-    `deferLater` if you want to run it later.
+    you'd use `run_in_background` to start a background task or `clock.call_later`
+    if you want to run it later.
 
     The issue is that these tasks stop completely and won't resume if Synapse is
     shut down for any reason.
