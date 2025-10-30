@@ -341,6 +341,9 @@ def logcontext_clean(target: TV) -> TV:
     """
 
     def logcontext_error(msg: str) -> NoReturn:
+        # Log so we can still see it in the logs like normal
+        logger.warning(msg)
+        # But also fail the test
         raise AssertionError("logcontext error: %s" % (msg))
 
     patcher = patch("synapse.logging.context.logcontext_error", new=logcontext_error)
