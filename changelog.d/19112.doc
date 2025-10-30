@@ -1,0 +1,1 @@
+Add a `self` parameter to each method in the ModuleApi documentation to make them easier to copy-paste.
