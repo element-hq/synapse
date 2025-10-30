@@ -607,10 +607,10 @@ class LoggingContextFilter(logging.Filter):
         """
         Add each field from the logging context to the record.
 
-        Please be mindful of 3rd-party code outside of Synapse as this is running as a
-        global log record filter. Other code may have set their own attributes on the
-        record and the log record may not be relevant to Synapse at all so we should not
-        mangle it.
+        Please be mindful of 3rd-party code outside of Synapse (like in the case of
+        Synapse Pro for small hosts) as this is running as a global log record filter.
+        Other code may have set their own attributes on the record and the log record
+        may not be relevant to Synapse at all so we should not mangle it.
 
         We can have some defaults but we should avoid overwriting existing attributes on
         any log record unless we actually have a Synapse logcontext (not just the
