@@ -1,0 +1,1 @@
+Prevent duplicate logging setup when running multiple Synapse instances.
