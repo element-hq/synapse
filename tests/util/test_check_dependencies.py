@@ -29,7 +29,6 @@ from packaging.markers import default_environment as packaging_default_environme
 
 from synapse.util.check_dependencies import (
     DependencyException,
-    _marker_environment,
     check_requirements,
     metadata,
 )
@@ -87,8 +86,6 @@ class TestDependencyChecker(TestCase):
     def mock_python_version(self, version: str) -> Generator[None, None, None]:
         """Override the marker environment to report the supplied `python_version`."""
 
-        _marker_environment.cache_clear()
-
         def fake_default_environment() -> dict[str, str]:
             env = cast(dict[str, str], dict(packaging_default_environment()))
             env["python_version"] = version
@@ -99,10 +96,7 @@ class TestDependencyChecker(TestCase):
             "synapse.util.check_dependencies.default_environment",
             side_effect=fake_default_environment,
         ):
-            try:
-                yield
-            finally:
-                _marker_environment.cache_clear()
+            yield
 
     def test_mandatory_dependency(self) -> None:
         """Complain if a required package is missing or old."""
@@ -233,6 +227,8 @@ class TestDependencyChecker(TestCase):
             return_value=requirements,
         ):
             with self.mock_python_version("3.9"):
+                with self.mock_installed_package(DummyDistribution("2.12.3")):
+                    check_requirements()
                 with self.mock_installed_package(DummyDistribution("2.8.1")):
                     check_requirements()
                 with self.mock_installed_package(DummyDistribution("2.7.0")):
@@ -242,4 +238,6 @@ class TestDependencyChecker(TestCase):
                 with self.mock_installed_package(DummyDistribution("2.12.3")):
                     check_requirements()
                 with self.mock_installed_package(DummyDistribution("2.8.1")):
+                    self.assertRaises(DependencyException, check_requirements)
+                with self.mock_installed_package(DummyDistribution("2.7.0")):
                     self.assertRaises(DependencyException, check_requirements)
