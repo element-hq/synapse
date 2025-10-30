@@ -15,7 +15,7 @@
 
 """Contains *incomplete* type hints for txredisapi."""
 
-from typing import Any, List, Optional, Type, Union
+from typing import Any, Optional, Union
 
 from twisted.internet import protocol
 from twisted.internet.defer import Deferred
@@ -39,7 +39,7 @@ class RedisProtocol(protocol.Protocol):
 class SubscriberProtocol(RedisProtocol):
     def __init__(self, *args: object, **kwargs: object): ...
     password: Optional[str]
-    def subscribe(self, channels: Union[str, List[str]]) -> "Deferred[None]": ...
+    def subscribe(self, channels: Union[str, list[str]]) -> "Deferred[None]": ...
     def connectionMade(self) -> None: ...
     # type-ignore: twisted.internet.protocol.Protocol provides a default argument for
     # `reason`. txredisapi's LineReceiver Protocol doesn't. But that's fine: it's what's
@@ -69,7 +69,7 @@ class UnixConnectionHandler(ConnectionHandler): ...
 class RedisFactory(protocol.ReconnectingClientFactory):
     continueTrying: bool
     handler: ConnectionHandler
-    pool: List[RedisProtocol]
+    pool: list[RedisProtocol]
     replyTimeout: Optional[int]
     def __init__(
         self,
@@ -77,7 +77,7 @@ class RedisFactory(protocol.ReconnectingClientFactory):
         dbid: Optional[int],
         poolsize: int,
         isLazy: bool = False,
-        handler: Type = ConnectionHandler,
+        handler: type = ConnectionHandler,
         charset: str = "utf-8",
         password: Optional[str] = None,
         replyTimeout: Optional[int] = None,

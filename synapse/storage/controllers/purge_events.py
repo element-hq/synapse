@@ -26,7 +26,6 @@ from typing import (
     Collection,
     Mapping,
     Optional,
-    Set,
 )
 
 from synapse.logging.context import nested_logging_context
@@ -99,7 +98,7 @@ class PurgeEventsStorageController:
     async def _find_unreferenced_groups(
         self,
         state_groups: Collection[int],
-    ) -> Set[int]:
+    ) -> set[int]:
         """Used when purging history to figure out which state groups can be
         deleted.
 
@@ -316,7 +315,7 @@ class PurgeEventsStorageController:
         self,
         last_checked_state_group: int,
         batch_size: int,
-    ) -> tuple[Set[int], int, bool]:
+    ) -> tuple[set[int], int, bool]:
         """Used when deleting unreferenced state groups in the background to figure out
         which state groups can be deleted.
         To avoid increased DB usage due to de-deltaing state groups, this returns only

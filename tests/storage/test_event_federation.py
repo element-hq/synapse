@@ -21,14 +21,9 @@
 import datetime
 from typing import (
     Collection,
-    Dict,
-    FrozenSet,
     Iterable,
-    List,
     Mapping,
     NamedTuple,
-    Set,
-    Tuple,
     TypeVar,
     Union,
     cast,
@@ -74,7 +69,7 @@ import tests.utils
 #     |   |
 #     K   J
 
-AUTH_GRAPH: Dict[str, List[str]] = {
+AUTH_GRAPH: dict[str, list[str]] = {
     "a": ["e"],
     "b": ["e"],
     "c": ["g", "i"],
@@ -108,7 +103,7 @@ T = TypeVar("T")
 def get_all_topologically_sorted_orders(
     nodes: Iterable[T],
     graph: Mapping[T, Collection[T]],
-) -> List[List[T]]:
+) -> list[list[T]]:
     """Given a set of nodes and a graph, return all possible topological
     orderings.
     """
@@ -117,7 +112,7 @@ def get_all_topologically_sorted_orders(
     # we have a choice over which node to consider next.
 
     degree_map = dict.fromkeys(nodes, 0)
-    reverse_graph: Dict[T, Set[T]] = {}
+    reverse_graph: dict[T, set[T]] = {}
 
     for node, edges in graph.items():
         if node not in degree_map:
@@ -138,10 +133,10 @@ def get_all_topologically_sorted_orders(
 
 
 def _get_all_topologically_sorted_orders_inner(
-    reverse_graph: Dict[T, Set[T]],
-    zero_degree: List[T],
-    degree_map: Dict[T, int],
-) -> List[List[T]]:
+    reverse_graph: dict[T, set[T]],
+    zero_degree: list[T],
+    degree_map: dict[T, int],
+) -> list[list[T]]:
     new_paths = []
 
     # Rather than only choosing *one* item from the list of nodes with zero
@@ -175,7 +170,7 @@ def _get_all_topologically_sorted_orders_inner(
 def get_all_topologically_consistent_subsets(
     nodes: Iterable[T],
     graph: Mapping[T, Collection[T]],
-) -> Set[FrozenSet[T]]:
+) -> set[frozenset[T]]:
     """Get all subsets of the graph where if node N is in the subgraph, then all
     nodes that can reach that node (i.e. for all X there exists a path X -> N)
     are in the subgraph.
@@ -195,7 +190,7 @@ def get_all_topologically_consistent_subsets(
 @attr.s(auto_attribs=True, frozen=True, slots=True)
 class _BackfillSetupInfo:
     room_id: str
-    depth_map: Dict[str, int]
+    depth_map: dict[str, int]
 
 
 class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
@@ -573,7 +568,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         #     |   |
         #     K   J
 
-        auth_graph: Dict[str, List[str]] = {
+        auth_graph: dict[str, list[str]] = {
             "a": ["e"],
             "b": ["e"],
             "c": ["g", "i"],
@@ -756,11 +751,11 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             seq_num: int
 
         class TestLink(NamedTuple):
-            origin_chain_and_seq: Tuple[int, int]
-            target_chain_and_seq: Tuple[int, int]
+            origin_chain_and_seq: tuple[int, int]
+            target_chain_and_seq: tuple[int, int]
 
         # Map to chain IDs / seq nums
-        nodes: List[TestNode] = [
+        nodes: list[TestNode] = [
             TestNode("A1", 1, 1),
             TestNode("A2", 1, 2),
             TestNode("A3", 1, 3),
@@ -779,7 +774,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             TestNode("G1", 7, 1),
             TestNode("G2", 7, 2),
         ]
-        links: List[TestLink] = [
+        links: list[TestLink] = [
             TestLink((2, 1), (1, 2)),  # B1 -> A2
             TestLink((3, 1), (2, 2)),  # C1 -> B2
             TestLink((4, 1), (3, 1)),  # D1 -> C1
@@ -818,9 +813,9 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         # Define the test cases
         class TestCase(NamedTuple):
             name: str
-            conflicted: Set[str]
-            additional_backwards_reachable: Set[str]
-            want_conflicted_subgraph: Set[str]
+            conflicted: set[str]
+            additional_backwards_reachable: set[str]
+            want_conflicted_subgraph: set[str]
 
         # Reminder:
         # A1 <- A2 <- A3
@@ -936,7 +931,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
 
         room_id = "some_room_id"
 
-        def prev_event_format(prev_event_id: str) -> Union[Tuple[str, dict], str]:
+        def prev_event_format(prev_event_id: str) -> Union[tuple[str, dict], str]:
             """Account for differences in prev_events format across room versions"""
             if room_version.event_format == EventFormatVersions.ROOM_V1_V2:
                 return prev_event_id, {}
@@ -1034,7 +1029,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         #    |
         #    5 (newest)
 
-        event_graph: Dict[str, List[str]] = {
+        event_graph: dict[str, list[str]] = {
             "1": [],
             "2": ["1"],
             "3": ["2", "A"],
@@ -1050,7 +1045,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             "b6": ["3"],
         }
 
-        depth_map: Dict[str, int] = {
+        depth_map: dict[str, int] = {
             "1": 1,
             "2": 2,
             "b1": 3,
@@ -1070,7 +1065,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         # The rest are events in the room but not backfilled tet.
         our_server_events = {"5", "4", "B", "3", "A"}
 
-        complete_event_dict_map: Dict[str, JsonDict] = {}
+        complete_event_dict_map: dict[str, JsonDict] = {}
         stream_ordering = 0
         for event_id, prev_event_ids in event_graph.items():
             depth = depth_map[event_id]
@@ -1425,14 +1420,14 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
 class FakeEvent:
     event_id: str
     room_id: str
-    auth_events: List[str]
+    auth_events: list[str]
 
     type = "foo"
     state_key = "foo"
 
     internal_metadata = EventInternalMetadata({})
 
-    def auth_event_ids(self) -> List[str]:
+    def auth_event_ids(self) -> list[str]:
         return self.auth_events
 
     def is_state(self) -> bool:

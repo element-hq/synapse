@@ -25,15 +25,10 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Collection,
-    Dict,
-    FrozenSet,
     Iterable,
-    List,
     Mapping,
     MutableMapping,
     Optional,
-    Set,
-    Tuple,
     TypeVar,
     Union,
     cast,
@@ -199,7 +194,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     @trace
     async def get_metadata_for_events(
         self, event_ids: Collection[str]
-    ) -> Dict[str, EventMetadata]:
+    ) -> dict[str, EventMetadata]:
         """Get some metadata (room_id, type, state_key) for the given events.
 
         This method is a faster alternative than fetching the full events from
@@ -212,7 +207,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         def get_metadata_for_events_txn(
             txn: LoggingTransaction,
             batch_ids: Collection[str],
-        ) -> Dict[str, EventMetadata]:
+        ) -> dict[str, EventMetadata]:
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "e.event_id", batch_ids
             )
@@ -236,7 +231,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
                 for event_id, room_id, event_type, state_key, rejection_reason in txn
             }
 
-        result_map: Dict[str, EventMetadata] = {}
+        result_map: dict[str, EventMetadata] = {}
         for batch_ids in batch_iter(event_ids, 1000):
             result_map.update(
                 await self.db_pool.runInteraction(
@@ -329,7 +324,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     @cachedList(cached_method_name="get_room_type", list_name="room_ids")
     async def bulk_get_room_type(
-        self, room_ids: Set[str]
+        self, room_ids: set[str]
     ) -> Mapping[str, Union[Optional[str], Sentinel]]:
         """
         Bulk fetch room types for the given rooms (via current state).
@@ -408,7 +403,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     @cachedList(cached_method_name="get_room_encryption", list_name="room_ids")
     async def bulk_get_room_encryption(
-        self, room_ids: Set[str]
+        self, room_ids: set[str]
     ) -> Mapping[str, Union[Optional[str], Sentinel]]:
         """
         Bulk fetch room encryption for the given rooms (via current state).
@@ -469,7 +464,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         # If we haven't updated `room_stats_state` with the room yet, query the state
         # directly. This should happen only rarely so we don't mind if we do this in a
         # loop.
-        encryption_event_ids: List[str] = []
+        encryption_event_ids: list[str] = []
         for room_id in room_ids - results.keys():
             state_map = await self.get_partial_filtered_current_state_ids(
                 room_id,
@@ -541,7 +536,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     async def check_if_events_in_current_state(
         self, event_ids: StrCollection
-    ) -> FrozenSet[str]:
+    ) -> frozenset[str]:
         """Checks and returns which of the given events is part of the current state."""
         rows = await self.db_pool.simple_select_many_batch(
             table="current_state_events",
@@ -632,7 +627,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
              RuntimeError if the state is unknown at any of the given events
         """
         rows = cast(
-            List[Tuple[str, int]],
+            list[tuple[str, int]],
             await self.db_pool.simple_select_many_batch(
                 table="event_to_state_groups",
                 column="event_id",
@@ -651,7 +646,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     async def get_referenced_state_groups(
         self, state_groups: Iterable[int]
-    ) -> Set[int]:
+    ) -> set[int]:
         """Check if the state groups are referenced by events.
 
         Args:
@@ -662,7 +657,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         """
 
         rows = cast(
-            List[Tuple[int]],
+            list[tuple[int]],
             await self.db_pool.simple_select_many_batch(
                 table="event_to_state_groups",
                 column="state_group",
@@ -803,7 +798,7 @@ class MainStateBackgroundUpdateStore(RoomMemberWorkerStore):
 
         def _background_remove_left_rooms_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[bool, Set[str]]:
+        ) -> tuple[bool, set[str]]:
             # get a batch of room ids to consider
             sql = """
                 SELECT DISTINCT room_id FROM current_state_events
@@ -884,7 +879,7 @@ class MainStateBackgroundUpdateStore(RoomMemberWorkerStore):
             # server didn't share a room with the remote user and therefore may
             # have missed any device updates.
             rows = cast(
-                List[Tuple[str]],
+                list[tuple[str]],
                 self.db_pool.simple_select_many_txn(
                     txn,
                     table="current_state_events",
@@ -975,7 +970,7 @@ class StateStore(StateGroupWorkerStore, MainStateBackgroundUpdateStore):
 
 
 @attr.s(auto_attribs=True, slots=True)
-class StateMapWrapper(Dict[StateKey, str]):
+class StateMapWrapper(dict[StateKey, str]):
     """A wrapper around a StateMap[str] to ensure that we only query for items
     that were not filtered out.
 

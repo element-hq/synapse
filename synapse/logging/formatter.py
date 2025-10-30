@@ -23,7 +23,7 @@ import logging
 import traceback
 from io import StringIO
 from types import TracebackType
-from typing import Optional, Tuple, Type
+from typing import Optional
 
 
 class LogFormatter(logging.Formatter):
@@ -38,8 +38,8 @@ class LogFormatter(logging.Formatter):
 
     def formatException(
         self,
-        ei: Tuple[
-            Optional[Type[BaseException]],
+        ei: tuple[
+            Optional[type[BaseException]],
             Optional[BaseException],
             Optional[TracebackType],
         ],

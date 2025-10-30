@@ -21,7 +21,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
@@ -52,7 +52,7 @@ class PushersRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self._store = hs.get_datastores().main
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
 
@@ -85,7 +85,7 @@ class PushersSetRestServlet(RestServlet):
         self.pusher_pool = self.hs.get_pusherpool()
         self._store = hs.get_datastores().main
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
 

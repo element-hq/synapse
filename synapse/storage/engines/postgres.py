@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Any, Mapping, NoReturn, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Mapping, NoReturn, Optional, cast
 
 import psycopg2.extensions
 
@@ -79,11 +79,11 @@ class PostgresEngine(
     def single_threaded(self) -> bool:
         return False
 
-    def get_db_locale(self, txn: Cursor) -> Tuple[str, str]:
+    def get_db_locale(self, txn: Cursor) -> tuple[str, str]:
         txn.execute(
             "SELECT datcollate, datctype FROM pg_database WHERE datname = current_database()"
         )
-        collation, ctype = cast(Tuple[str, str], txn.fetchone())
+        collation, ctype = cast(tuple[str, str], txn.fetchone())
         return collation, ctype
 
     def check_database(
@@ -191,11 +191,6 @@ class PostgresEngine(
     @property
     def supports_using_any_list(self) -> bool:
         """Do we support using `a = ANY(?)` and passing a list"""
-        return True
-
-    @property
-    def supports_returning(self) -> bool:
-        """Do we support the `RETURNING` clause in insert/update/delete?"""
         return True
 
     def is_deadlock(self, error: Exception) -> bool:

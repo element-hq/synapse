@@ -34,11 +34,8 @@ from typing import (
     AsyncIterator,
     BinaryIO,
     Callable,
-    List,
     Optional,
     Sequence,
-    Tuple,
-    Type,
     Union,
     cast,
 )
@@ -205,7 +202,7 @@ class MediaStorage:
     @contextlib.asynccontextmanager
     async def store_into_file(
         self, file_info: FileInfo
-    ) -> AsyncIterator[Tuple[BinaryIO, str]]:
+    ) -> AsyncIterator[tuple[BinaryIO, str]]:
         """Async Context manager used to get a file like object to write into, as
         described by file_info.
 
@@ -423,7 +420,7 @@ class FileResponder(Responder):
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
@@ -674,7 +671,7 @@ class Header:
         self,
         name: bytes,
         value: Any,
-        params: Optional[List[Tuple[Any, Any]]] = None,
+        params: Optional[list[tuple[Any, Any]]] = None,
     ):
         self.name = name
         self.value = value
