@@ -186,23 +186,24 @@ def _extras_from_marker(marker: Optional[Marker]) -> set[str]:
 
 def _extras_to_consider_for_requirement(
     marker: Marker, base_candidates: Sequence[str]
-) -> Sequence[str]:
+) -> set[str]:
     """
     Augment `base_candidates` with extras explicitly mentioned in `marker`.
 
     Markers can mention extras (e.g. `extra == "saml2"`).
     """
 
-    extras = list(dict.fromkeys(base_candidates))
+    # Avoid modifying the input sequence.
+    # Use a set to efficiently avoid duplicate extras.
+    extras = set(base_candidates)
+
     for candidate in _extras_from_marker(marker):
-        if candidate not in extras:
-            extras.append(candidate)
+        extras.add(candidate)
+
     return extras
 
 
-def _marker_applies_for_any_extra(
-    requirement: Requirement, extras: Sequence[str]
-) -> bool:
+def _marker_applies_for_any_extra(requirement: Requirement, extras: set[str]) -> bool:
     """Check whether a requirement's marker matches any evaluated `extra`."""
 
     if requirement.marker is None:
