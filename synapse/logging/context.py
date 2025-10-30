@@ -605,7 +605,7 @@ class LoggingContextFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> Literal[True]:
         """
-        Add each fields from the logging contexts to the record.
+        Add each field from the logging context to the record.
 
         Please be mindful of 3rd-party code outside of Synapse as this is running as a
         global log record filter. Other code may have set their own attributes on the
