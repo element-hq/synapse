@@ -27,7 +27,6 @@ require. But this is probably just symptomatic of Python's package management.
 """
 
 import logging
-from functools import lru_cache
 from importlib import metadata
 from typing import Any, Iterable, NamedTuple, Optional, Sequence, cast
 
@@ -67,7 +66,6 @@ RUNTIME_EXTRAS = set(ALL_EXTRAS) - DEV_EXTRAS
 VERSION = metadata.version(DISTRIBUTION_NAME)
 
 
-@lru_cache(maxsize=None)
 def _marker_environment(extra: str) -> dict[str, str]:
     """Return the marker environment for `extra`, seeded with the current interpreter."""
 
