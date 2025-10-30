@@ -53,7 +53,7 @@ from twisted.internet import defer, threads
 from twisted.python.threadpool import ThreadPool
 
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
-from synapse.util.stringutils import random_string
+from synapse.util.stringutils import random_string_insecure_fast
 
 if TYPE_CHECKING:
     from synapse.logging.scopecontextmanager import _LogContextScope
@@ -689,7 +689,7 @@ class PreserveLoggingContext:
         self, new_context: LoggingContextOrSentinel = SENTINEL_CONTEXT
     ) -> None:
         self._new_context = new_context
-        self._instance_id = random_string(5)
+        self._instance_id = random_string_insecure_fast(5)
 
     def __enter__(self) -> None:
         logcontext_debug_logger.debug(
@@ -891,7 +891,7 @@ def run_in_background(
         Note that the returned Deferred does not follow the synapse logcontext
         rules.
     """
-    instance_id = random_string(5)
+    instance_id = random_string_insecure_fast(5)
     calling_context = current_context()
     logcontext_debug_logger.debug(
         "run_in_background(%s): called with logcontext=%s", instance_id, calling_context
@@ -928,7 +928,7 @@ def run_in_background(
         # If the function messes with logcontexts, we can assume it follows the Synapse
         # logcontext rules (Rules for functions returning awaitables: "If the awaitable
         # is already complete, the function returns with the same logcontext it started
-        # with."). If it function doesn't touch logcontexts at all, we can also assume
+        # with."). If the function doesn't touch logcontexts at all, we can also assume
         # the logcontext is unchanged.
         #
         # Either way, the function should have maintained the calling logcontext, so we
@@ -937,11 +937,21 @@ def run_in_background(
         # to reset the logcontext to the sentinel logcontext as that would run
         # immediately (remember our goal is to maintain the calling logcontext when we
         # return).
-        logcontext_debug_logger.debug(
-            "run_in_background(%s): deferred already completed and the function should have maintained the logcontext %s",
-            instance_id,
-            calling_context,
-        )
+        if current_context() != calling_context:
+            logcontext_error(
+                "run_in_background(%s): deferred already completed but the function did not maintain the calling logcontext %s (found %s)"
+                % (
+                    instance_id,
+                    calling_context,
+                    current_context(),
+                )
+            )
+        else:
+            logcontext_debug_logger.debug(
+                "run_in_background(%s): deferred already completed (maintained the calling logcontext %s)",
+                instance_id,
+                calling_context,
+            )
         return d
 
     # Since the function we called may follow the Synapse logcontext rules (Rules for
@@ -1044,7 +1054,7 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     restores the old context once the awaitable completes (execution passes from the
     reactor back to the code).
     """
-    instance_id = random_string(5)
+    instance_id = random_string_insecure_fast(5)
     logcontext_debug_logger.debug(
         "make_deferred_yieldable(%s): called with logcontext=%s",
         instance_id,
