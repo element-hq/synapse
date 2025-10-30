@@ -20,7 +20,12 @@ The available background update controller callbacks are:
 _First introduced in Synapse v1.49.0_
 
 ```python
-def on_update(update_name: str, database_name: str, one_shot: bool) -> AsyncContextManager[int]
+def on_update(
+    self,
+    update_name: str,
+    database_name: str,
+    one_shot: bool,
+) -> AsyncContextManager[int]
 ```
 
 Called when about to do an iteration of a background update. The module is given the name
@@ -46,7 +51,11 @@ This callback is required when registering any other background update controlle
 _First introduced in Synapse v1.49.0_
 
 ```python
-async def default_batch_size(update_name: str, database_name: str) -> int
+async def default_batch_size(
+    self,
+    update_name: str,
+    database_name: str,
+) -> int
 ```
 
 Called before the first iteration of a background update, with the name of the update and
@@ -60,7 +69,11 @@ If this callback is not defined, Synapse will use a default value of 100.
 _First introduced in Synapse v1.49.0_
 
 ```python
-async def min_batch_size(update_name: str, database_name: str) -> int
+async def min_batch_size(
+    self,
+    update_name: str,
+    database_name: str,
+) -> int
 ```
 
 Called before running a new batch for a background update, with the name of the update and

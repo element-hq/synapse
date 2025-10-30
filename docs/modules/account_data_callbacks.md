@@ -14,6 +14,7 @@ _First introduced in Synapse v1.57.0_
 
 ```python
 async def on_account_data_updated(
+    self,
     user_id: str,
     room_id: Optional[str],
     account_data_type: str,

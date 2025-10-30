@@ -22,6 +22,7 @@ _First introduced in Synapse v1.42.0_
 
 ```python 
 async def get_users_for_states(
+    self,
     state_updates: Iterable["synapse.api.UserPresenceState"],
 ) -> Dict[str, Set["synapse.api.UserPresenceState"]]
 ```
@@ -44,7 +45,8 @@ _First introduced in Synapse v1.42.0_
 
 ```python
 async def get_interested_users(
-    user_id: str
+    self,
+    user_id: str,
 ) -> Union[Set[str], "synapse.module_api.PRESENCE_ALL_USERS"]
 ```
 **Requires** `get_users_for_states` to also be registered

@@ -12,7 +12,10 @@ The available account validity callbacks are:
 _First introduced in Synapse v1.39.0_
 
 ```python
-async def is_user_expired(user: str) -> Optional[bool]
+async def is_user_expired(
+    self,
+    user: str,
+) -> Optional[bool]
 ```
 
 Called when processing any authenticated request (except for logout requests). The module
@@ -34,7 +37,10 @@ any of the subsequent implementations of this callback.
 _First introduced in Synapse v1.39.0_
 
 ```python
-async def on_user_registration(user: str) -> None
+async def on_user_registration(
+    self,
+    user: str,
+) -> None
 ```
 
 Called after successfully registering a user, in case the module needs to perform extra
@@ -48,7 +54,12 @@ If multiple modules implement this callback, Synapse runs them all in order.
 _First introduced in Synapse v1.98.0_
 
 ```python
-async def on_user_login(user_id: str, auth_provider_type: str, auth_provider_id: str) -> None
+async def on_user_login(
+    self,
+    user_id: str,
+    auth_provider_type: str,
+    auth_provider_id: str,
+) -> None
 ```
 
 Called after successfully login or registration of a user for cases when module needs to perform extra operations after auth.

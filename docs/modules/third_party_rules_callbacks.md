@@ -14,6 +14,7 @@ _First introduced in Synapse v1.39.0_
 
 ```python
 async def check_event_allowed(
+    self,
     event: "synapse.events.EventBase",
     state_events: "synapse.types.StateMap",
 ) -> Tuple[bool, Optional[dict]]
@@ -65,6 +66,7 @@ _First introduced in Synapse v1.39.0_
 
 ```python
 async def on_create_room(
+    self,
     requester: "synapse.types.Requester",
     request_content: dict,
     is_requester_admin: bool,
@@ -92,6 +94,7 @@ _First introduced in Synapse v1.39.0_
 
 ```python
 async def check_threepid_can_be_invited(
+    self,
     medium: str,
     address: str,
     state_events: "synapse.types.StateMap",
@@ -112,6 +115,7 @@ _First introduced in Synapse v1.39.0_
 
 ```python
 async def check_visibility_can_be_modified(
+    self,
     room_id: str,
     state_events: "synapse.types.StateMap",
     new_visibility: str,
@@ -133,6 +137,7 @@ _First introduced in Synapse v1.47.0_
 
 ```python
 async def on_new_event(
+    self,
     event: "synapse.events.EventBase",
     state_events: "synapse.types.StateMap",
 ) -> None:
@@ -161,7 +166,9 @@ _First introduced in Synapse v1.55.0_
 
 ```python
 async def check_can_shutdown_room(
-    user_id: str, room_id: str,
+    self,
+    user_id: str,
+    room_id: str,
 ) -> bool:
 ```
 
@@ -180,7 +187,9 @@ _First introduced in Synapse v1.55.0_
 
 ```python
 async def check_can_deactivate_user(
-    user_id: str, by_admin: bool,
+    self,
+    user_id: str,
+    by_admin: bool,
 ) -> bool:
 ```
 
@@ -204,6 +213,7 @@ _First introduced in Synapse v1.54.0_
 
 ```python
 async def on_profile_update(
+    self,
     user_id: str,
     new_profile: "synapse.module_api.ProfileInfo",
     by_admin: bool,
@@ -239,7 +249,10 @@ _First introduced in Synapse v1.54.0_
 
 ```python
 async def on_user_deactivation_status_changed(
-    user_id: str, deactivated: bool, by_admin: bool
+    self,
+    user_id: str,
+    deactivated: bool,
+    by_admin: bool,
 ) -> None:
 ```
 
@@ -264,7 +277,12 @@ features the same functionality. The only difference is in name.
 </span>**
 
 ```python
-async def on_threepid_bind(user_id: str, medium: str, address: str) -> None:
+async def on_threepid_bind(
+    self,
+    user_id: str,
+    medium: str,
+    address: str,
+) -> None:
 ```
 
 Called after creating an association between a local user and a third-party identifier
@@ -282,7 +300,12 @@ If multiple modules implement this callback, Synapse runs them all in order.
 _First introduced in Synapse v1.79.0_
 
 ```python
-async def on_add_user_third_party_identifier(user_id: str, medium: str, address: str) -> None:
+async def on_add_user_third_party_identifier(
+    self,
+    user_id: str,
+    medium: str,
+    address: str,
+) -> None:
 ```
 
 Called after successfully creating an association between a user and a third-party identifier
@@ -301,7 +324,12 @@ If multiple modules implement this callback, Synapse runs them all in order.
 _First introduced in Synapse v1.79.0_
 
 ```python
-async def on_remove_user_third_party_identifier(user_id: str, medium: str, address: str) -> None:
+async def on_remove_user_third_party_identifier(
+    self,
+    user_id: str,
+    medium: str,
+    address: str,
+) -> None:
 ```
 
 Called after successfully removing an association between a user and a third-party identifier

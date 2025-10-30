@@ -11,7 +11,10 @@ The available media repository callbacks are:
 _First introduced in Synapse v1.132.0_
 
 ```python
-async def get_media_config_for_user(user_id: str) -> Optional[JsonDict]
+async def get_media_config_for_user(
+    self,
+    user_id: str,
+) -> Optional[JsonDict]
 ```
 
 **<span style="color:red">
@@ -41,7 +44,11 @@ If no module returns a non-`None` value then the default media config will be re
 _First introduced in Synapse v1.132.0_
 
 ```python
-async def is_user_allowed_to_upload_media_of_size(user_id: str, size: int) -> bool
+async def is_user_allowed_to_upload_media_of_size(
+    self,
+    user_id: str,
+    size: int,
+) -> bool
 ```
 
 **<span style="color:red">
@@ -70,7 +77,11 @@ implementations of this callback.
 _First introduced in Synapse v1.139.0_
 
 ```python
-async def get_media_upload_limits_for_user(user_id: str, size: int) -> Optional[List[synapse.module_api.MediaUploadLimit]]
+async def get_media_upload_limits_for_user(
+    self,
+    user_id: str,
+    size: int,
+) -> Optional[List[synapse.module_api.MediaUploadLimit]]
 ```
 
 **<span style="color:red">
@@ -105,7 +116,13 @@ will be used.
 _First introduced in Synapse v1.139.0_
 
 ```python
-async def on_media_upload_limit_exceeded(user_id: str, limit: synapse.module_api.MediaUploadLimit, sent_bytes: int, attempted_bytes: int) -> None
+async def on_media_upload_limit_exceeded(
+    self,
+    user_id: str,
+    limit: synapse.module_api.MediaUploadLimit,
+    sent_bytes: int,
+    attempted_bytes: int,
+) -> None
 ```
 
 **<span style="color:red">

@@ -18,6 +18,7 @@ The callback should be of the form
 
 ```python
 async def add_field_to_unsigned(
+    self,
     event: EventBase,
 ) -> JsonDict:
 ```

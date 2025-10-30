@@ -15,7 +15,10 @@ _First introduced in Synapse v1.37.0_
 _Changed in Synapse v1.60.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean or a string is now deprecated._ 
 
 ```python
-async def check_event_for_spam(event: "synapse.module_api.EventBase") -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", str, bool]
+async def check_event_for_spam(
+    self,
+    event: "synapse.module_api.EventBase",
+) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", str, bool]
 ```
 
 Called when receiving an event from a client or via federation. The callback must return one of:
@@ -41,7 +44,12 @@ _First introduced in Synapse v1.37.0_
 _Changed in Synapse v1.61.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
 
 ```python
-async def user_may_join_room(user: str, room: str, is_invited: bool) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
+async def user_may_join_room(
+    self,
+    user: str,
+    room: str,
+    is_invited: bool,
+) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
 Called when a user is trying to join a room. The user is represented by their Matrix user ID (e.g.
@@ -73,7 +81,12 @@ _First introduced in Synapse v1.37.0_
 _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
 
 ```python
-async def user_may_invite(inviter: str, invitee: str, room_id: str) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
+async def user_may_invite(
+    self,
+    inviter: str,
+    invitee: str,
+    room_id: str,
+) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
 Called when processing an invitation, both when one is created locally or when
@@ -104,7 +117,10 @@ this callback.
 _First introduced in Synapse v1.133.0_
 
 ```python
-async def federated_user_may_invite(event: "synapse.events.EventBase") -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
+async def federated_user_may_invite(
+    self,
+    event: "synapse.events.EventBase",
+) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
 Called when processing an invitation received over federation. Unlike `user_may_invite`,
@@ -135,6 +151,7 @@ _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_a
 
 ```python
 async def user_may_send_3pid_invite(
+    self,
     inviter: str,
     medium: str,
     address: str,
@@ -192,7 +209,11 @@ _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_a
 _Changed in Synapse v1.132.0: Added the `room_config` argument. Callbacks that only expect a single `user_id` argument are still supported._
 
 ```python
-async def user_may_create_room(user_id: str, room_config: synapse.module_api.JsonDict) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
+async def user_may_create_room(
+    self,
+    user_id: str,
+    room_config: synapse.module_api.JsonDict,
+) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
 Called when processing a room creation or room upgrade request.
@@ -229,7 +250,11 @@ _First introduced in Synapse v1.37.0_
 _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
 
 ```python
-async def user_may_create_room_alias(user_id: str, room_alias: "synapse.module_api.RoomAlias") -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
+async def user_may_create_room_alias(
+    self,
+    user_id: str,
+    room_alias: "synapse.module_api.RoomAlias",
+) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
 Called when trying to associate an alias with an existing room.
@@ -258,7 +283,11 @@ _First introduced in Synapse v1.37.0_
 _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
 
 ```python
-async def user_may_publish_room(user_id: str, room_id: str) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
+async def user_may_publish_room(
+    self,
+    user_id: str,
+    room_id: str,
+) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
 Called when trying to publish a room to the homeserver's public rooms directory.
@@ -284,7 +313,14 @@ this callback.
 _First introduced in Synapse v1.132.0_
 
 ```python
-async def user_may_send_state_event(user_id: str, room_id: str, event_type: str, state_key: str, content: JsonDict) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]
+async def user_may_send_state_event(
+    self,
+    user_id: str,
+    room_id: str,
+    event_type: str,
+    state_key: str,
+    content: JsonDict,
+) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]
 ```
 
 **<span style="color:red">
@@ -320,7 +356,11 @@ this callback.
 _First introduced in Synapse v1.37.0_
 
 ```python
-async def check_username_for_spam(user_profile: synapse.module_api.UserProfile, requester_id: str) -> bool
+async def check_username_for_spam(
+    self,
+    user_profile: synapse.module_api.UserProfile,
+    requester_id: str,
+) -> bool
 ```
 
 Called when computing search results in the user directory. The module must return a
@@ -352,6 +392,7 @@ _First introduced in Synapse v1.37.0_
 
 ```python
 async def check_registration_for_spam(
+    self,
     email_threepid: Optional[dict],
     username: Optional[str],
     request_info: Collection[Tuple[str, str]],
@@ -387,6 +428,7 @@ _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_a
 
 ```python
 async def check_media_file_for_spam(
+    self,
     file_wrapper: "synapse.media.media_storage.ReadableFileWrapper",
     file_info: "synapse.media._base.FileInfo",
 ) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
@@ -415,7 +457,10 @@ this callback.
 _First introduced in Synapse v1.60.0_
 
 ```python
-async def should_drop_federated_event(event: "synapse.events.EventBase") -> bool
+async def should_drop_federated_event(
+    self,
+    event: "synapse.events.EventBase",
+) -> bool
 ```
 
 Called when checking whether a remote server can federate an event with us. **Returning
@@ -437,6 +482,7 @@ _First introduced in Synapse v1.87.0_
 
 ```python
 async def check_login_for_spam(
+    self,
     user_id: str,
     device_id: Optional[str],
     initial_display_name: Optional[str],

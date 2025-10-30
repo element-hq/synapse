@@ -20,6 +20,7 @@ callbacks, which should be of the following form:
 
 ```python
 async def check_auth(
+    self,
     user: str,
     login_type: str,
     login_dict: "synapse.module_api.JsonDict",
@@ -64,6 +65,7 @@ _First introduced in Synapse v1.46.0_
 
 ```python
 async def check_3pid_auth(
+    self,
     medium: str, 
     address: str,
     password: str,
@@ -97,9 +99,10 @@ _First introduced in Synapse v1.46.0_
 
 ```python
 async def on_logged_out(
+    self,
     user_id: str,
     device_id: Optional[str],
-    access_token: str
+    access_token: str,
 ) -> None
 ``` 
 Called during a logout request for a user. It is passed the qualified user ID, the ID of the
@@ -117,6 +120,7 @@ _First introduced in Synapse v1.52.0_
 
 ```python
 async def get_username_for_registration(
+    self,
     uia_results: Dict[str, Any],
     params: Dict[str, Any],
 ) -> Optional[str]
@@ -178,6 +182,7 @@ _First introduced in Synapse v1.54.0_
 
 ```python
 async def get_displayname_for_registration(
+    self,
     uia_results: Dict[str, Any],
     params: Dict[str, Any],
 ) -> Optional[str]
@@ -205,7 +210,12 @@ the username will be used (e.g. `alice` if the user being registered is `@alice:
 _First introduced in Synapse v1.53.0_
 
 ```python
-async def is_3pid_allowed(self, medium: str, address: str, registration: bool) -> bool
+async def is_3pid_allowed(
+    self,
+    medium: str,
+    address: str,
+    registration: bool,
+) -> bool
 ```
 
 Called when attempting to bind a third-party identifier (i.e. an email address or a phone
