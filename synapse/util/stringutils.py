@@ -60,7 +60,7 @@ def random_string(length: int) -> str:
 
     Because this is generated from cryptographic sources, it takes a notable amount of
     effort to generate (computationally expensive). If you don't need cryptographic
-    security, consider using `pseudo_random_string` for better performance.
+    security, consider using `random_string_insecure_fast` for better performance.
     """
     return "".join(secrets.choice(string.ascii_letters) for _ in range(length))
 
@@ -73,7 +73,7 @@ def random_string_with_symbols(length: int) -> str:
     return "".join(secrets.choice(_string_with_symbols) for _ in range(length))
 
 
-def pseudo_random_string(length: int) -> str:
+def random_string_insecure_fast(length: int) -> str:
     """
     Generate a string of random letters (insecure, fast). This is a more performant but
     insecure version of `random_string`.
