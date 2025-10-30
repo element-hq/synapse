@@ -916,7 +916,7 @@ def run_in_background(
             )
         else:
             logcontext_debug_logger.debug(
-                "run_in_background(%s): deferred already completed and the function should have maintained the calling logcontext %s",
+                "run_in_background(%s): deferred already completed (maintained the calling logcontext %s)",
                 instance_id,
                 calling_context,
             )
