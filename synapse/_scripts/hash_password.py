@@ -77,7 +77,7 @@ def main() -> None:
     if len(bytes_to_hash) > 72:
         # bcrypt only looks at the first 72 bytes
         print(
-            f"Password is too long ({len(bytes_to_hash)} bytes); truncating to 72 bytes for bcrypt. "
+            f"Password + pepper is too long ({len(bytes_to_hash)} bytes); truncating to 72 bytes for bcrypt. "
             "This is expected behaviour and will not affect a user's ability to log in. 72 bytes is "
             "sufficient entropy for a password."
         )

@@ -2040,61 +2040,29 @@ class EventFederationWorkerStore(
         Returns:
             The received_ts of the row that was deleted, if any.
         """
-        if self.db_pool.engine.supports_returning:
 
-            def _remove_received_event_from_staging_txn(
-                txn: LoggingTransaction,
-            ) -> Optional[int]:
-                sql = """
-                    DELETE FROM federation_inbound_events_staging
-                    WHERE origin = ? AND event_id = ?
-                    RETURNING received_ts
-                """
+        def _remove_received_event_from_staging_txn(
+            txn: LoggingTransaction,
+        ) -> Optional[int]:
+            sql = """
+                DELETE FROM federation_inbound_events_staging
+                WHERE origin = ? AND event_id = ?
+                RETURNING received_ts
+            """
 
-                txn.execute(sql, (origin, event_id))
-                row = cast(Optional[tuple[int]], txn.fetchone())
+            txn.execute(sql, (origin, event_id))
+            row = cast(Optional[tuple[int]], txn.fetchone())
 
-                if row is None:
-                    return None
+            if row is None:
+                return None
 
-                return row[0]
+            return row[0]
 
-            return await self.db_pool.runInteraction(
-                "remove_received_event_from_staging",
-                _remove_received_event_from_staging_txn,
-                db_autocommit=True,
-            )
-
-        else:
-
-            def _remove_received_event_from_staging_txn(
-                txn: LoggingTransaction,
-            ) -> Optional[int]:
-                received_ts = self.db_pool.simple_select_one_onecol_txn(
-                    txn,
-                    table="federation_inbound_events_staging",
-                    keyvalues={
-                        "origin": origin,
-                        "event_id": event_id,
-                    },
-                    retcol="received_ts",
-                    allow_none=True,
-                )
-                self.db_pool.simple_delete_txn(
-                    txn,
-                    table="federation_inbound_events_staging",
-                    keyvalues={
-                        "origin": origin,
-                        "event_id": event_id,
-                    },
-                )
-
-                return received_ts
-
-            return await self.db_pool.runInteraction(
-                "remove_received_event_from_staging",
-                _remove_received_event_from_staging_txn,
-            )
+        return await self.db_pool.runInteraction(
+            "remove_received_event_from_staging",
+            _remove_received_event_from_staging_txn,
+            db_autocommit=True,
+        )
 
     async def get_next_staged_event_id_for_room(
         self,
