@@ -1,4 +1,4 @@
-# Synapse 1.141.0rc2 (2025-10-28)
+# Synapse 1.141.0 (2025-10-29)
 
 ## Deprecation of MacOS Python wheels
 
@@ -12,6 +12,19 @@ do make use of these wheels downstream, please reach out to us in
 [#synapse-dev:matrix.org](https://matrix.to/#/#synapse-dev:matrix.org). We'd
 love to hear from you!
 
+
+## Docker images now based on Debian `trixie` with Python 3.13
+
+The Docker images are now based on Debian `trixie` and use Python 3.13. If you
+are using the Docker images as a base image you may need to e.g. adjust the
+paths you mount any additional Python packages at.
+
+No significant changes since 1.141.0rc2.
+
+
+
+
+# Synapse 1.141.0rc2 (2025-10-28)
 
 ## Bugfixes
 
