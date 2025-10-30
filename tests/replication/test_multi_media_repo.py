@@ -20,7 +20,7 @@
 #
 import logging
 import os
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
 from twisted.internet.protocol import Factory
 from twisted.internet.testing import MemoryReactor
@@ -78,7 +78,7 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
     def _get_media_req(
         self, hs: HomeServer, target: str, media_id: str
-    ) -> Tuple[FakeChannel, Request]:
+    ) -> tuple[FakeChannel, Request]:
         """Request some remote media from the given HS by calling the download
         API.
 
@@ -293,7 +293,7 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
     def _get_media_req(
         self, hs: HomeServer, target: str, media_id: str
-    ) -> Tuple[FakeChannel, Request]:
+    ) -> tuple[FakeChannel, Request]:
         """Request some remote media from the given HS by calling the download
         API.
 

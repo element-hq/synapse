@@ -20,7 +20,7 @@
 
 """Tests REST events for /rooms paths."""
 
-from typing import List, Optional
+from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -249,7 +249,7 @@ class TestMauLimit(unittest.HomeserverTestCase):
         }
     )
     def test_as_trial_days(self) -> None:
-        user_tokens: List[str] = []
+        user_tokens: list[str] = []
 
         def advance_time_and_sync() -> None:
             self.reactor.advance(24 * 60 * 61)

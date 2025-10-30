@@ -14,7 +14,7 @@
 
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Set, cast
+from typing import TYPE_CHECKING, Mapping, Optional, cast
 
 import attr
 
@@ -222,7 +222,7 @@ class SlidingSyncStore(SQLBaseStore):
         # with the updates to `required_state`
 
         # Dict from required state json -> required state ID
-        required_state_to_id: Dict[str, int] = {}
+        required_state_to_id: dict[str, int] = {}
         if previous_connection_position is not None:
             rows = self.db_pool.simple_select_list_txn(
                 txn,
@@ -233,8 +233,8 @@ class SlidingSyncStore(SQLBaseStore):
             for required_state_id, required_state in rows:
                 required_state_to_id[required_state] = required_state_id
 
-        room_to_state_ids: Dict[str, int] = {}
-        unique_required_state: Dict[str, List[str]] = {}
+        room_to_state_ids: dict[str, int] = {}
+        unique_required_state: dict[str, list[str]] = {}
         for room_id, room_state in per_connection_state.room_configs.items():
             serialized_state = json_encoder.encode(
                 # We store the required state as a sorted list of event type /
@@ -418,7 +418,7 @@ class SlidingSyncStore(SQLBaseStore):
             ),
         )
 
-        required_state_map: Dict[int, Dict[str, Set[str]]] = {}
+        required_state_map: dict[int, dict[str, set[str]]] = {}
         for row in rows:
             state = required_state_map[row[0]] = {}
             for event_type, state_key in db_to_json(row[1]):
@@ -437,7 +437,7 @@ class SlidingSyncStore(SQLBaseStore):
             ),
         )
 
-        room_configs: Dict[str, RoomSyncConfig] = {}
+        room_configs: dict[str, RoomSyncConfig] = {}
         for (
             room_id,
             timeline_limit,
@@ -449,9 +449,9 @@ class SlidingSyncStore(SQLBaseStore):
             )
 
         # Now look up the per-room stream data.
-        rooms: Dict[str, HaveSentRoom[str]] = {}
-        receipts: Dict[str, HaveSentRoom[str]] = {}
-        account_data: Dict[str, HaveSentRoom[str]] = {}
+        rooms: dict[str, HaveSentRoom[str]] = {}
+        receipts: dict[str, HaveSentRoom[str]] = {}
+        account_data: dict[str, HaveSentRoom[str]] = {}
 
         receipt_rows = self.db_pool.simple_select_list_txn(
             txn,

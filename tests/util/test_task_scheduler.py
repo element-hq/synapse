@@ -18,11 +18,12 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional, Tuple
+from typing import Optional
 
-from twisted.internet.task import deferLater
+from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
+from synapse.logging.context import make_deferred_yieldable
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
 from synapse.util.clock import Clock
@@ -42,7 +43,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _test_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         # This test task will copy the parameters to the result
         result = None
         if task.params:
@@ -85,9 +86,9 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _sleeping_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         # Sleep for a second
-        await deferLater(self.reactor, 1, lambda: None)
+        await self.hs.get_clock().sleep(1)
         return TaskStatus.COMPLETE, None, None
 
     def test_schedule_lot_of_tasks(self) -> None:
@@ -103,7 +104,7 @@ class TestTaskScheduler(HomeserverTestCase):
                 )
             )
 
-        def get_tasks_of_status(status: TaskStatus) -> List[ScheduledTask]:
+        def get_tasks_of_status(status: TaskStatus) -> list[ScheduledTask]:
             tasks = (
                 self.get_success(self.task_scheduler.get_task(task_id))
                 for task_id in task_ids
@@ -151,7 +152,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _raising_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         raise Exception("raising")
 
     def test_schedule_raising_task(self) -> None:
@@ -165,13 +166,15 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _resumable_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         if task.result and "in_progress" in task.result:
             return TaskStatus.COMPLETE, {"success": True}, None
         else:
             await self.task_scheduler.update_task(task.id, result={"in_progress": True})
+            # Create a deferred which we will never complete
+            incomplete_d: Deferred = Deferred()
             # Await forever to simulate an aborted task because of a restart
-            await deferLater(self.reactor, 2**16, lambda: None)
+            await make_deferred_yieldable(incomplete_d)
             # This should never been called
             return TaskStatus.ACTIVE, None, None
 
@@ -201,7 +204,7 @@ class TestTaskSchedulerWithBackgroundWorker(BaseMultiWorkerStreamTestCase):
 
     async def _test_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         return (TaskStatus.COMPLETE, None, None)
 
     @override_config({"run_background_tasks_on": "worker1"})

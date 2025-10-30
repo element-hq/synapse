@@ -21,7 +21,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, Iterable, List, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from synapse.api.constants import EduTypes, EventTypes, Membership, PresenceState
 from synapse.api.errors import AuthError, SynapseError
@@ -100,7 +100,7 @@ class EventStreamHandler:
 
             # When the user joins a new room, or another user joins a currently
             # joined room, we need to send down presence for those users.
-            to_add: List[JsonDict] = []
+            to_add: list[JsonDict] = []
             for event in events:
                 if not isinstance(event, EventBase):
                     continue

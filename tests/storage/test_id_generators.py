@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict, List, Optional
+from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -43,12 +43,12 @@ from tests.utils import USE_POSTGRES_FOR_TESTS
 
 class MultiWriterIdGeneratorBase(HomeserverTestCase):
     positive: bool = True
-    tables: List[str] = ["foobar"]
+    tables: list[str] = ["foobar"]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.db_pool: DatabasePool = self.store.db_pool
-        self.instances: Dict[str, MultiWriterIdGenerator] = {}
+        self.instances: dict[str, MultiWriterIdGenerator] = {}
 
         self.get_success(self.db_pool.runInteraction("_setup_db", self._setup_db))
 
@@ -76,7 +76,7 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
     def _create_id_generator(
         self,
         instance_name: str = "master",
-        writers: Optional[List[str]] = None,
+        writers: Optional[list[str]] = None,
     ) -> MultiWriterIdGenerator:
         def _create(conn: LoggingDatabaseConnection) -> MultiWriterIdGenerator:
             return MultiWriterIdGenerator(

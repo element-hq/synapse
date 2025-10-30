@@ -14,11 +14,8 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
-    FrozenSet,
     Iterable,
-    List,
     Optional,
-    Tuple,
     Union,
     cast,
 )
@@ -479,7 +476,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
     @cached(max_entries=100)
     async def get_subscribers_to_thread(
         self, room_id: str, thread_root_event_id: str
-    ) -> FrozenSet[str]:
+    ) -> frozenset[str]:
         """
         Returns:
             the set of user_ids for local users who are subscribed to the given thread.
@@ -510,7 +507,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
     async def get_updated_thread_subscriptions(
         self, *, from_id: int, to_id: int, limit: int
-    ) -> List[Tuple[int, str, str, str]]:
+    ) -> list[tuple[int, str, str, str]]:
         """Get updates to thread subscriptions between two stream IDs.
 
         Args:
@@ -524,7 +521,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
         def get_updated_thread_subscriptions_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[int, str, str, str]]:
+        ) -> list[tuple[int, str, str, str]]:
             sql = """
                 SELECT stream_id, user_id, room_id, event_id
                 FROM thread_subscriptions
@@ -534,7 +531,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
             """
 
             txn.execute(sql, (from_id, to_id, limit))
-            return cast(List[Tuple[int, str, str, str]], txn.fetchall())
+            return cast(list[tuple[int, str, str, str]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_updated_thread_subscriptions",
@@ -543,7 +540,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
     async def get_latest_updated_thread_subscriptions_for_user(
         self, user_id: str, *, from_id: int, to_id: int, limit: int
-    ) -> List[Tuple[int, str, str, bool, Optional[bool]]]:
+    ) -> list[tuple[int, str, str, bool, Optional[bool]]]:
         """Get the latest updates to thread subscriptions for a specific user.
 
         Args:
@@ -561,7 +558,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
         def get_updated_thread_subscriptions_for_user_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[int, str, str, bool, Optional[bool]]]:
+        ) -> list[tuple[int, str, str, bool, Optional[bool]]]:
             sql = """
                 WITH the_updates AS (
                     SELECT stream_id, room_id, event_id, subscribed, automatic

@@ -61,13 +61,9 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Iterable,
-    List,
     Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 from twisted.internet.interfaces import IDelayedCall
@@ -183,16 +179,16 @@ class _ServiceQueuer:
 
     def __init__(self, txn_ctrl: "_TransactionController", hs: "HomeServer"):
         # dict of {service_id: [events]}
-        self.queued_events: Dict[str, List[EventBase]] = {}
+        self.queued_events: dict[str, list[EventBase]] = {}
         # dict of {service_id: [events]}
-        self.queued_ephemeral: Dict[str, List[JsonMapping]] = {}
+        self.queued_ephemeral: dict[str, list[JsonMapping]] = {}
         # dict of {service_id: [to_device_message_json]}
-        self.queued_to_device_messages: Dict[str, List[JsonMapping]] = {}
+        self.queued_to_device_messages: dict[str, list[JsonMapping]] = {}
         # dict of {service_id: [device_list_summary]}
-        self.queued_device_list_summaries: Dict[str, List[DeviceListUpdates]] = {}
+        self.queued_device_list_summaries: dict[str, list[DeviceListUpdates]] = {}
 
         # the appservices which currently have a transaction in flight
-        self.requests_in_flight: Set[str] = set()
+        self.requests_in_flight: set[str] = set()
         self.txn_ctrl = txn_ctrl
         self._msc3202_transaction_extensions_enabled: bool = (
             hs.config.experimental.msc3202_transaction_extensions
@@ -302,7 +298,7 @@ class _ServiceQueuer:
         events: Iterable[EventBase],
         ephemerals: Iterable[JsonMapping],
         to_device_messages: Iterable[JsonMapping],
-    ) -> Tuple[TransactionOneTimeKeysCount, TransactionUnusedFallbackKeys]:
+    ) -> tuple[TransactionOneTimeKeysCount, TransactionUnusedFallbackKeys]:
         """
         Given a list of the events, ephemeral messages and to-device messages,
         - first computes a list of application services users that may have
@@ -313,14 +309,14 @@ class _ServiceQueuer:
         """
 
         # Set of 'interesting' users who may have updates
-        users: Set[str] = set()
+        users: set[str] = set()
 
         # The sender is always included
         users.add(service.sender.to_string())
 
         # All AS users that would receive the PDUs or EDUs sent to these rooms
         # are classed as 'interesting'.
-        rooms_of_interesting_users: Set[str] = set()
+        rooms_of_interesting_users: set[str] = set()
         # PDUs
         rooms_of_interesting_users.update(event.room_id for event in events)
         # EDUs
@@ -364,7 +360,7 @@ class _TransactionController:
         self.as_api = hs.get_application_service_api()
 
         # map from service id to recoverer instance
-        self.recoverers: Dict[str, "_Recoverer"] = {}
+        self.recoverers: dict[str, "_Recoverer"] = {}
 
         # for UTs
         self.RECOVERER_CLASS = _Recoverer
@@ -373,8 +369,8 @@ class _TransactionController:
         self,
         service: ApplicationService,
         events: Sequence[EventBase],
-        ephemeral: Optional[List[JsonMapping]] = None,
-        to_device_messages: Optional[List[JsonMapping]] = None,
+        ephemeral: Optional[list[JsonMapping]] = None,
+        to_device_messages: Optional[list[JsonMapping]] = None,
         one_time_keys_count: Optional[TransactionOneTimeKeysCount] = None,
         unused_fallback_keys: Optional[TransactionUnusedFallbackKeys] = None,
         device_list_summary: Optional[DeviceListUpdates] = None,

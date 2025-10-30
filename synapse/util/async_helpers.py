@@ -35,16 +35,12 @@ from typing import (
     Callable,
     Collection,
     Coroutine,
-    Dict,
     Generator,
     Generic,
     Hashable,
     Iterable,
-    List,
     Literal,
     Optional,
-    Set,
-    Tuple,
     TypeVar,
     Union,
     overload,
@@ -108,8 +104,8 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
     __slots__ = ["_deferred", "_observers", "_result"]
 
     _deferred: "defer.Deferred[_T]"
-    _observers: Union[List["defer.Deferred[_T]"], Tuple[()]]
-    _result: Union[None, Tuple[Literal[True], _T], Tuple[Literal[False], Failure]]
+    _observers: Union[list["defer.Deferred[_T]"], tuple[()]]
+    _result: Union[None, tuple[Literal[True], _T], tuple[Literal[False], Failure]]
 
     def __init__(self, deferred: "defer.Deferred[_T]", consumeErrors: bool = False):
         object.__setattr__(self, "_deferred", deferred)
@@ -268,7 +264,7 @@ async def yieldable_gather_results(
     iter: Iterable[T],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> List[R]:
+) -> list[R]:
     """Executes the function with each argument concurrently.
 
     Args:
@@ -310,7 +306,7 @@ async def yieldable_gather_results_delaying_cancellation(
     iter: Iterable[T],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> List[R]:
+) -> list[R]:
     """Executes the function with each argument concurrently.
     Cancellation is delayed until after all the results have been gathered.
 
@@ -350,49 +346,49 @@ T6 = TypeVar("T6")
 
 @overload
 def gather_results(
-    deferredList: Tuple[()], consumeErrors: bool = ...
-) -> "defer.Deferred[Tuple[()]]": ...
+    deferredList: tuple[()], consumeErrors: bool = ...
+) -> "defer.Deferred[tuple[()]]": ...
 
 
 @overload
 def gather_results(
-    deferredList: Tuple["defer.Deferred[T1]"],
+    deferredList: tuple["defer.Deferred[T1]"],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1]]": ...
+) -> "defer.Deferred[tuple[T1]]": ...
 
 
 @overload
 def gather_results(
-    deferredList: Tuple["defer.Deferred[T1]", "defer.Deferred[T2]"],
+    deferredList: tuple["defer.Deferred[T1]", "defer.Deferred[T2]"],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1, T2]]": ...
+) -> "defer.Deferred[tuple[T1, T2]]": ...
 
 
 @overload
 def gather_results(
-    deferredList: Tuple[
+    deferredList: tuple[
         "defer.Deferred[T1]", "defer.Deferred[T2]", "defer.Deferred[T3]"
     ],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1, T2, T3]]": ...
+) -> "defer.Deferred[tuple[T1, T2, T3]]": ...
 
 
 @overload
 def gather_results(
-    deferredList: Tuple[
+    deferredList: tuple[
         "defer.Deferred[T1]",
         "defer.Deferred[T2]",
         "defer.Deferred[T3]",
         "defer.Deferred[T4]",
     ],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1, T2, T3, T4]]": ...
+) -> "defer.Deferred[tuple[T1, T2, T3, T4]]": ...
 
 
 def gather_results(  # type: ignore[misc]
-    deferredList: Tuple["defer.Deferred[T1]", ...],
+    deferredList: tuple["defer.Deferred[T1]", ...],
     consumeErrors: bool = False,
-) -> "defer.Deferred[Tuple[T1, ...]]":
+) -> "defer.Deferred[tuple[T1, ...]]":
     """Combines a tuple of `Deferred`s into a single `Deferred`.
 
     Wraps `defer.gatherResults` to provide type annotations that support heterogenous
@@ -406,50 +402,50 @@ def gather_results(  # type: ignore[misc]
 
 @overload
 async def gather_optional_coroutines(
-    *coroutines: Unpack[Tuple[Optional[Coroutine[Any, Any, T1]]]],
-) -> Tuple[Optional[T1]]: ...
+    *coroutines: Unpack[tuple[Optional[Coroutine[Any, Any, T1]]]],
+) -> tuple[Optional[T1]]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
-        Tuple[
+        tuple[
             Optional[Coroutine[Any, Any, T1]],
             Optional[Coroutine[Any, Any, T2]],
         ]
     ],
-) -> Tuple[Optional[T1], Optional[T2]]: ...
+) -> tuple[Optional[T1], Optional[T2]]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
-        Tuple[
+        tuple[
             Optional[Coroutine[Any, Any, T1]],
             Optional[Coroutine[Any, Any, T2]],
             Optional[Coroutine[Any, Any, T3]],
         ]
     ],
-) -> Tuple[Optional[T1], Optional[T2], Optional[T3]]: ...
+) -> tuple[Optional[T1], Optional[T2], Optional[T3]]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
-        Tuple[
+        tuple[
             Optional[Coroutine[Any, Any, T1]],
             Optional[Coroutine[Any, Any, T2]],
             Optional[Coroutine[Any, Any, T3]],
             Optional[Coroutine[Any, Any, T4]],
         ]
     ],
-) -> Tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4]]: ...
+) -> tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4]]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
-        Tuple[
+        tuple[
             Optional[Coroutine[Any, Any, T1]],
             Optional[Coroutine[Any, Any, T2]],
             Optional[Coroutine[Any, Any, T3]],
@@ -457,13 +453,13 @@ async def gather_optional_coroutines(
             Optional[Coroutine[Any, Any, T5]],
         ]
     ],
-) -> Tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5]]: ...
+) -> tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5]]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
-        Tuple[
+        tuple[
             Optional[Coroutine[Any, Any, T1]],
             Optional[Coroutine[Any, Any, T2]],
             Optional[Coroutine[Any, Any, T3]],
@@ -472,14 +468,14 @@ async def gather_optional_coroutines(
             Optional[Coroutine[Any, Any, T6]],
         ]
     ],
-) -> Tuple[
+) -> tuple[
     Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5], Optional[T6]
 ]: ...
 
 
 async def gather_optional_coroutines(
-    *coroutines: Unpack[Tuple[Optional[Coroutine[Any, Any, T1]], ...]],
-) -> Tuple[Optional[T1], ...]:
+    *coroutines: Unpack[tuple[Optional[Coroutine[Any, Any, T1]], ...]],
+) -> tuple[Optional[T1], ...]:
     """Helper function that allows waiting on multiple coroutines at once.
 
     The return value is a tuple of the return values of the coroutines in order.
@@ -563,7 +559,7 @@ class Linearizer:
         self._clock = clock
 
         # key_to_defer is a map from the key to a _LinearizerEntry.
-        self.key_to_defer: Dict[Hashable, _LinearizerEntry] = {}
+        self.key_to_defer: dict[Hashable, _LinearizerEntry] = {}
 
     def is_queued(self, key: Hashable) -> bool:
         """Checks whether there is a process queued up waiting"""
@@ -698,10 +694,10 @@ class ReadWriteLock:
 
     def __init__(self) -> None:
         # Latest readers queued
-        self.key_to_current_readers: Dict[str, Set[defer.Deferred]] = {}
+        self.key_to_current_readers: dict[str, set[defer.Deferred]] = {}
 
         # Latest writer queued
-        self.key_to_current_writer: Dict[str, defer.Deferred] = {}
+        self.key_to_current_writer: dict[str, defer.Deferred] = {}
 
     def read(self, key: str) -> AsyncContextManager:
         @asynccontextmanager
@@ -812,7 +808,8 @@ def timeout_deferred(
         timed_out[0] = True
 
         try:
-            deferred.cancel()
+            with PreserveLoggingContext():
+                deferred.cancel()
         except Exception:  # if we throw any exception it'll break time outs
             logger.exception("Canceller failed during timeout")
 
@@ -968,7 +965,7 @@ class AwakenableSleeper:
     """
 
     def __init__(self, clock: Clock) -> None:
-        self._streams: Dict[str, Set[defer.Deferred[None]]] = {}
+        self._streams: dict[str, set[defer.Deferred[None]]] = {}
         self._clock = clock
 
     def wake(self, name: str) -> None:

@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 import attr
 
@@ -45,7 +45,7 @@ class RatelimitModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
-        self._get_ratelimit_override_for_user_callbacks: List[
+        self._get_ratelimit_override_for_user_callbacks: list[
             GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
         ] = []
 

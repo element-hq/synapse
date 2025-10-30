@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 from twisted.python.failure import Failure
 
@@ -53,8 +53,8 @@ running_tasks_gauge = LaterGauge(
 class TaskScheduler:
     """
     This is a simple task scheduler designed for resumable tasks. Normally,
-    you'd use `run_in_background` to start a background task or Twisted's
-    `deferLater` if you want to run it later.
+    you'd use `run_in_background` to start a background task or `clock.call_later`
+    if you want to run it later.
 
     The issue is that these tasks stop completely and won't resume if Synapse is
     shut down for any reason.
@@ -110,13 +110,13 @@ class TaskScheduler:
         self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
-        self._running_tasks: Set[str] = set()
+        self._running_tasks: set[str] = set()
         # A map between action names and their registered function
-        self._actions: Dict[
+        self._actions: dict[
             str,
             Callable[
                 [ScheduledTask],
-                Awaitable[Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]],
+                Awaitable[tuple[TaskStatus, Optional[JsonMapping], Optional[str]]],
             ],
         ] = {}
         self._run_background_tasks = hs.config.worker.run_background_tasks
@@ -143,7 +143,7 @@ class TaskScheduler:
         self,
         function: Callable[
             [ScheduledTask],
-            Awaitable[Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]],
+            Awaitable[tuple[TaskStatus, Optional[JsonMapping], Optional[str]]],
         ],
         action_name: str,
     ) -> None:
@@ -278,12 +278,12 @@ class TaskScheduler:
     async def get_tasks(
         self,
         *,
-        actions: Optional[List[str]] = None,
+        actions: Optional[list[str]] = None,
         resource_id: Optional[str] = None,
-        statuses: Optional[List[TaskStatus]] = None,
+        statuses: Optional[list[TaskStatus]] = None,
         max_timestamp: Optional[int] = None,
         limit: Optional[int] = None,
-    ) -> List[ScheduledTask]:
+    ) -> list[ScheduledTask]:
         """Get a list of tasks. Returns all the tasks if no args are provided.
 
         If an arg is `None`, all tasks matching the other args will be selected.
