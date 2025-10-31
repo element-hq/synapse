@@ -141,7 +141,7 @@ jobs:
           python-version: "3.x"
 
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.0.0
+        run: python -m pip install cibuildwheel==3.2.1
 
       - name: Only build a single wheel on PR
         if: startsWith(github.ref, 'refs/pull/')
@@ -152,7 +152,9 @@ jobs:
         env:
           # Skip testing for platforms which various libraries don't have wheels
           # for, and so need extra build deps.
-          CIBW_TEST_SKIP: pp3*-* *i686* *musl*
+          #
+          # cp39-*: Python 3.9 is EOL.
+          CIBW_TEST_SKIP: pp3*-* cp39-* *i686* *musl*
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
