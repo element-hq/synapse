@@ -353,7 +353,7 @@ async def start(ss: AdminCmdServer, args: argparse.Namespace) -> None:
 
     Args:
         ss: The homeserver to setup.
-        args: TODO
+        args: Command line arguments.
     """
     await _base.start(ss)
     await args.func(ss, args)
