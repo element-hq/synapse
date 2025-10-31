@@ -26,13 +26,8 @@ from collections import Counter
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Union
 
-from typing_extensions import Self
+from pydantic import StrictBool, StrictStr, field_validator
 
-from synapse._pydantic_compat import (
-    StrictBool,
-    StrictStr,
-    validator,
-)
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
     Codes,
@@ -164,7 +159,7 @@ class KeyUploadServlet(RestServlet):
         device_keys: Optional[DeviceKeys] = None
         """Identity keys for the device. May be absent if no new identity keys are required."""
 
-        fallback_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]]
+        fallback_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]] = None
         """
         The public key which should be used if the device's one-time keys are
         exhausted. The fallback key is not deleted once used, but should be
@@ -180,8 +175,9 @@ class KeyUploadServlet(RestServlet):
         May be absent if a new fallback key is not required.
         """
 
-        @validator("fallback_keys", pre=True)
-        def validate_fallback_keys(cls: Self, v: Any) -> Any:
+        @field_validator("fallback_keys", mode="before")
+        @classmethod
+        def validate_fallback_keys(cls, v: Any) -> Any:
             if v is None:
                 return v
             if not isinstance(v, dict):
@@ -206,8 +202,9 @@ class KeyUploadServlet(RestServlet):
         https://spec.matrix.org/v1.16/client-server-api/#key-algorithms.
         """
 
-        @validator("one_time_keys", pre=True)
-        def validate_one_time_keys(cls: Self, v: Any) -> Any:
+        @field_validator("one_time_keys", mode="before")
+        @classmethod
+        def validate_one_time_keys(cls, v: Any) -> Any:
             if v is None:
                 return v
             if not isinstance(v, dict):

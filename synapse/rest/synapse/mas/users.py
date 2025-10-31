@@ -17,7 +17,8 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Optional, TypedDict
 
-from synapse._pydantic_compat import StrictBool, StrictStr, root_validator
+from pydantic import StrictBool, StrictStr, model_validator
+
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.http.servlet import (
     parse_and_validate_json_object_from_request,
@@ -111,7 +112,8 @@ class MasProvisionUserResource(MasBaseResource):
         unset_emails: StrictBool = False
         set_emails: Optional[list[StrictStr]] = None
 
-        @root_validator(pre=True)
+        @model_validator(mode="before")
+        @classmethod
         def validate_exclusive(cls, values: Any) -> Any:
             if "unset_displayname" in values and "set_displayname" in values:
                 raise ValueError(

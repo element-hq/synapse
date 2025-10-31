@@ -26,8 +26,8 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, Union
 
 import attr
+from pydantic import StrictBool, StrictInt, StrictStr
 
-from synapse._pydantic_compat import StrictBool, StrictInt, StrictStr
 from synapse.api.constants import Direction
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
@@ -1476,9 +1476,9 @@ class RedactUser(RestServlet):
 
     class PostBody(RequestBodyModel):
         rooms: list[StrictStr]
-        reason: Optional[StrictStr]
-        limit: Optional[StrictInt]
-        use_admin: Optional[StrictBool]
+        reason: Optional[StrictStr] = None
+        limit: Optional[StrictInt] = None
+        use_admin: Optional[StrictBool] = None
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
