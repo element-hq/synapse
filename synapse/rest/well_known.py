@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from twisted.web.resource import Resource
 from twisted.web.server import Request
@@ -28,7 +28,7 @@ from synapse.api.errors import NotFoundError
 from synapse.http.server import DirectServeJsonResource
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict
-from synapse.util import json_encoder
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import parse_server_name
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ class ClientWellKnownResource(DirectServeJsonResource):
         super().__init__(clock=hs.get_clock())
         self._well_known_builder = WellKnownBuilder(hs)
 
-    async def _async_render_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         r = await self._well_known_builder.get_well_known()
         if not r:
             raise NotFoundError(".well-known not available")

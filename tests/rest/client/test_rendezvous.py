@@ -19,7 +19,6 @@
 #
 #
 
-from typing import Dict
 from urllib.parse import urlparse
 
 from twisted.internet.testing import MemoryReactor
@@ -28,7 +27,7 @@ from twisted.web.resource import Resource
 from synapse.rest.client import rendezvous
 from synapse.rest.synapse.client.rendezvous import MSC4108RendezvousSessionResource
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -46,7 +45,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.hs = self.setup_test_homeserver()
         return self.hs
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         return {
             **super().create_resource_dict(),
             "/_synapse/client/rendezvous": MSC4108RendezvousSessionResource(self.hs),

@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict, List, Optional, Tuple, Union, cast
+from typing import Any, Optional, Union, cast
 
 import attr
 
@@ -27,7 +27,8 @@ from synapse.api.errors import StoreError
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import LoggingTransaction
 from synapse.types import JsonDict
-from synapse.util import json_encoder, stringutils
+from synapse.util import stringutils
+from synapse.util.json import json_encoder
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -169,7 +170,7 @@ class UIAuthWorkerStore(SQLBaseStore):
 
     async def get_completed_ui_auth_stages(
         self, session_id: str
-    ) -> Dict[str, Union[str, bool, JsonDict]]:
+    ) -> dict[str, Union[str, bool, JsonDict]]:
         """
         Retrieve the completed stages of a UI authentication session.
 
@@ -181,7 +182,7 @@ class UIAuthWorkerStore(SQLBaseStore):
         """
         results = {}
         rows = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="ui_auth_sessions_credentials",
                 keyvalues={"session_id": session_id},
@@ -301,14 +302,14 @@ class UIAuthWorkerStore(SQLBaseStore):
     async def get_user_agents_ips_to_ui_auth_session(
         self,
         session_id: str,
-    ) -> List[Tuple[str, str]]:
+    ) -> list[tuple[str, str]]:
         """Get the given user agents / IPs used during the ui auth process
 
         Returns:
             List of user_agent/ip pairs
         """
         return cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="ui_auth_sessions_ips",
                 keyvalues={"session_id": session_id},
@@ -352,7 +353,7 @@ class UIAuthWorkerStore(SQLBaseStore):
         # If a registration token was used, decrement the pending counter
         # before deleting the session.
         rows = cast(
-            List[Tuple[str]],
+            list[tuple[str]],
             self.db_pool.simple_select_many_txn(
                 txn,
                 table="ui_auth_sessions_credentials",
@@ -364,7 +365,7 @@ class UIAuthWorkerStore(SQLBaseStore):
         )
 
         # Get the tokens used and how much pending needs to be decremented by.
-        token_counts: Dict[str, int] = {}
+        token_counts: dict[str, int] = {}
         for r in rows:
             # If registration was successfully completed, the result of the
             # registration token stage for that session will be True.
@@ -377,7 +378,7 @@ class UIAuthWorkerStore(SQLBaseStore):
         # Update the `pending` counters.
         if len(token_counts) > 0:
             token_rows = cast(
-                List[Tuple[str, int]],
+                list[tuple[str, int]],
                 self.db_pool.simple_select_many_txn(
                     txn,
                     table="registration_tokens",

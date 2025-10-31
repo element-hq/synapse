@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Optional, Tuple
+from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -29,7 +29,7 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.event_push_actions import NotifCounts
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -47,7 +47,7 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         assert persist_events_store is not None
         self.persist_events_store = persist_events_store
 
-    def _create_users_and_room(self) -> Tuple[str, str, str, str, str]:
+    def _create_users_and_room(self) -> tuple[str, str, str, str, str]:
         """
         Creates two users and a shared room.
 

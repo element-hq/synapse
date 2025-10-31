@@ -20,7 +20,7 @@
 #
 import logging
 import re
-from typing import TYPE_CHECKING, Callable, Dict, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Callable, Optional
 
 import attr
 import saml2
@@ -90,7 +90,7 @@ class SamlHandler:
         self.idp_brand = hs.config.saml2.idp_brand
 
         # a map from saml session id to Saml2SessionData object
-        self._outstanding_requests_dict: Dict[str, Saml2SessionData] = {}
+        self._outstanding_requests_dict: dict[str, Saml2SessionData] = {}
 
         self._sso_handler = hs.get_sso_handler()
         self._sso_handler.register_identity_provider(self)
@@ -393,7 +393,7 @@ def dot_replace_for_mxid(username: str) -> str:
     return username
 
 
-MXID_MAPPER_MAP: Dict[str, Callable[[str], str]] = {
+MXID_MAPPER_MAP: dict[str, Callable[[str], str]] = {
     "hexencode": map_username_to_mxid_localpart,
     "dotreplace": dot_replace_for_mxid,
 }
@@ -509,7 +509,7 @@ class DefaultSamlMappingProvider:
         return SamlConfig(mxid_source_attribute, mxid_mapper)
 
     @staticmethod
-    def get_saml_attributes(config: SamlConfig) -> Tuple[Set[str], Set[str]]:
+    def get_saml_attributes(config: SamlConfig) -> tuple[set[str], set[str]]:
         """Returns the required attributes of a SAML
 
         Args:

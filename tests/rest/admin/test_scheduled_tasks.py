@@ -13,7 +13,7 @@
 #
 #
 #
-from typing import Mapping, Optional, Tuple
+from typing import Mapping, Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -22,7 +22,7 @@ from synapse.api.errors import Codes
 from synapse.rest.client import login
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -42,17 +42,17 @@ class ScheduledTasksAdminApiTestCase(unittest.HomeserverTestCase):
         # create and schedule a few tasks
         async def _test_task(
             task: ScheduledTask,
-        ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+        ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
             return TaskStatus.ACTIVE, None, None
 
         async def _finished_test_task(
             task: ScheduledTask,
-        ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+        ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
             return TaskStatus.COMPLETE, None, None
 
         async def _failed_test_task(
             task: ScheduledTask,
-        ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+        ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
             return TaskStatus.FAILED, None, "Everything failed"
 
         self._task_scheduler.register_action(_test_task, "test_task")

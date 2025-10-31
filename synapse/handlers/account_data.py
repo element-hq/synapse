@@ -21,7 +21,7 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 from synapse.api.constants import AccountDataTypes
 from synapse.replication.http.account_data import (
@@ -67,7 +67,7 @@ class AccountDataHandler:
         self._remove_tag_client = ReplicationRemoveTagRestServlet.make_client(hs)
         self._account_data_writers = hs.config.worker.writers.account_data
 
-        self._on_account_data_updated_callbacks: List[
+        self._on_account_data_updated_callbacks: list[
             ON_ACCOUNT_DATA_UPDATED_CALLBACK
         ] = []
 
@@ -325,7 +325,7 @@ class AccountDataEventSource(EventSource[int, JsonDict]):
         room_ids: StrCollection,
         is_guest: bool,
         explicit_room_id: Optional[str] = None,
-    ) -> Tuple[List[JsonDict], int]:
+    ) -> tuple[list[JsonDict], int]:
         user_id = user.to_string()
         last_stream_id = from_key
 

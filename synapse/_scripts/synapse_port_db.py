@@ -33,15 +33,10 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Generator,
     Iterable,
-    List,
     NoReturn,
     Optional,
-    Set,
-    Tuple,
-    Type,
     TypedDict,
     TypeVar,
     cast,
@@ -54,11 +49,11 @@ from twisted.internet import defer, reactor as reactor_
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.logging.context import (
-    LoggingContext,
     make_deferred_yieldable,
     run_in_background,
 )
-from synapse.notifier import ReplicationNotifier
+from synapse.server import HomeServer
+from synapse.storage import DataStore
 from synapse.storage.database import DatabasePool, LoggingTransaction, make_conn
 from synapse.storage.databases.main import FilteringWorkerStore
 from synapse.storage.databases.main.account_data import AccountDataWorkerStore
@@ -98,7 +93,6 @@ from synapse.storage.databases.state.bg_updates import StateBackgroundUpdateStor
 from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor
-from synapse.util import SYNAPSE_VERSION, Clock
 
 # Cast safety: Twisted does some naughty magic which replaces the
 # twisted.internet.reactor module with a Reactor instance at runtime.
@@ -245,7 +239,7 @@ end_error: Optional[str] = None
 # not the error then the script will show nothing outside of what's printed in the run
 # function. If both are defined, the script will print both the error and the stacktrace.
 end_error_exec_info: Optional[
-    Tuple[Type[BaseException], BaseException, TracebackType]
+    tuple[type[BaseException], BaseException, TracebackType]
 ] = None
 
 R = TypeVar("R")
@@ -282,8 +276,8 @@ class Store(
     def execute(self, f: Callable[..., R], *args: Any, **kwargs: Any) -> Awaitable[R]:
         return self.db_pool.runInteraction(f.__name__, f, *args, **kwargs)
 
-    def execute_sql(self, sql: str, *args: object) -> Awaitable[List[Tuple]]:
-        def r(txn: LoggingTransaction) -> List[Tuple]:
+    def execute_sql(self, sql: str, *args: object) -> Awaitable[list[tuple]]:
+        def r(txn: LoggingTransaction) -> list[tuple]:
             txn.execute(sql, args)
             return txn.fetchall()
 
@@ -293,8 +287,8 @@ class Store(
         self,
         txn: LoggingTransaction,
         table: str,
-        headers: List[str],
-        rows: List[Tuple],
+        headers: list[str],
+        rows: list[tuple],
         override_system_value: bool = False,
     ) -> None:
         sql = "INSERT INTO %s (%s) %s VALUES (%s)" % (
@@ -317,43 +311,31 @@ class Store(
         )
 
 
-class MockHomeserver:
+class MockHomeserver(HomeServer):
+    DATASTORE_CLASS = DataStore
+
     def __init__(self, config: HomeServerConfig):
-        self.clock = Clock(reactor)
-        self.config = config
-        self.hostname = config.server.server_name
-        self.version_string = SYNAPSE_VERSION
-
-    def get_clock(self) -> Clock:
-        return self.clock
-
-    def get_reactor(self) -> ISynapseReactor:
-        return reactor
-
-    def get_instance_name(self) -> str:
-        return "master"
-
-    def should_send_federation(self) -> bool:
-        return False
-
-    def get_replication_notifier(self) -> ReplicationNotifier:
-        return ReplicationNotifier()
+        super().__init__(
+            hostname=config.server.server_name,
+            config=config,
+            reactor=reactor,
+        )
 
 
 class Porter:
     def __init__(
         self,
-        sqlite_config: Dict[str, Any],
+        sqlite_config: dict[str, Any],
         progress: "Progress",
         batch_size: int,
-        hs_config: HomeServerConfig,
+        hs: HomeServer,
     ):
         self.sqlite_config = sqlite_config
         self.progress = progress
         self.batch_size = batch_size
-        self.hs_config = hs_config
+        self.hs = hs
 
-    async def setup_table(self, table: str) -> Tuple[str, int, int, int, int]:
+    async def setup_table(self, table: str) -> tuple[str, int, int, int, int]:
         if table in APPEND_ONLY_TABLES:
             # It's safe to just carry on inserting.
             row = await self.postgres_store.db_pool.simple_select_one(
@@ -416,10 +398,10 @@ class Porter:
 
         return table, already_ported, total_to_port, forward_chunk, backward_chunk
 
-    async def get_table_constraints(self) -> Dict[str, Set[str]]:
+    async def get_table_constraints(self) -> dict[str, set[str]]:
         """Returns a map of tables that have foreign key constraints to tables they depend on."""
 
-        def _get_constraints(txn: LoggingTransaction) -> Dict[str, Set[str]]:
+        def _get_constraints(txn: LoggingTransaction) -> dict[str, set[str]]:
             # We can pull the information about foreign key constraints out from
             # the postgres schema tables.
             sql = """
@@ -435,7 +417,7 @@ class Porter:
             """
             txn.execute(sql)
 
-            results: Dict[str, Set[str]] = {}
+            results: dict[str, set[str]] = {}
             for table, foreign_table in txn:
                 results.setdefault(table, set()).add(foreign_table)
             return results
@@ -503,7 +485,7 @@ class Porter:
 
             def r(
                 txn: LoggingTransaction,
-            ) -> Tuple[Optional[List[str]], List[Tuple], List[Tuple]]:
+            ) -> tuple[Optional[list[str]], list[tuple], list[tuple]]:
                 forward_rows = []
                 backward_rows = []
                 if do_forward[0]:
@@ -520,7 +502,7 @@ class Porter:
 
                 if forward_rows or backward_rows:
                     assert txn.description is not None
-                    headers: Optional[List[str]] = [
+                    headers: Optional[list[str]] = [
                         column[0] for column in txn.description
                     ]
                 else:
@@ -587,7 +569,7 @@ class Porter:
 
         while True:
 
-            def r(txn: LoggingTransaction) -> Tuple[List[str], List[Tuple]]:
+            def r(txn: LoggingTransaction) -> tuple[list[str], list[tuple]]:
                 txn.execute(select, (forward_chunk, self.batch_size))
                 rows = txn.fetchall()
                 assert txn.description is not None
@@ -671,8 +653,7 @@ class Porter:
 
         engine = create_engine(db_config.config)
 
-        hs = MockHomeserver(self.hs_config)
-        server_name = hs.hostname
+        server_name = self.hs.hostname
 
         with make_conn(
             db_config=db_config,
@@ -683,9 +664,17 @@ class Porter:
             engine.check_database(
                 db_conn, allow_outdated_version=allow_outdated_version
             )
-            prepare_database(db_conn, engine, config=self.hs_config)
+            prepare_database(db_conn, engine, config=self.hs.config)
             # Type safety: ignore that we're using Mock homeservers here.
-            store = Store(DatabasePool(hs, db_config, engine), db_conn, hs)  # type: ignore[arg-type]
+            store = Store(
+                DatabasePool(
+                    self.hs,
+                    db_config,
+                    engine,
+                ),
+                db_conn,
+                self.hs,
+            )
             db_conn.commit()
 
         return store
@@ -782,7 +771,7 @@ class Porter:
                 return
 
             self.postgres_store = self.build_db_store(
-                self.hs_config.database.get_single_database()
+                self.hs.config.database.get_single_database()
             )
 
             await self.remove_ignored_background_updates_from_database()
@@ -962,7 +951,7 @@ class Porter:
             self.progress.set_state("Copying to postgres")
 
             constraints = await self.get_table_constraints()
-            tables_ported = set()  # type: Set[str]
+            tables_ported = set()  # type: set[str]
 
             while tables_to_port_info_map:
                 # Pulls out all tables that are still to be ported and which
@@ -1001,8 +990,8 @@ class Porter:
             reactor.stop()
 
     def _convert_rows(
-        self, table: str, headers: List[str], rows: List[Tuple]
-    ) -> List[Tuple]:
+        self, table: str, headers: list[str], rows: list[tuple]
+    ) -> list[tuple]:
         bool_col_names = BOOLEAN_COLUMNS.get(table, [])
 
         bool_cols = [i for i, h in enumerate(headers) if h in bool_col_names]
@@ -1036,7 +1025,7 @@ class Porter:
 
         return outrows
 
-    async def _setup_sent_transactions(self) -> Tuple[int, int, int]:
+    async def _setup_sent_transactions(self) -> tuple[int, int, int]:
         # Only save things from the last day
         yesterday = int(time.time() * 1000) - 86400000
 
@@ -1048,7 +1037,7 @@ class Porter:
             ")"
         )
 
-        def r(txn: LoggingTransaction) -> Tuple[List[str], List[Tuple]]:
+        def r(txn: LoggingTransaction) -> tuple[list[str], list[tuple]]:
             txn.execute(select)
             rows = txn.fetchall()
             assert txn.description is not None
@@ -1118,14 +1107,14 @@ class Porter:
         self, table: str, forward_chunk: int, backward_chunk: int
     ) -> int:
         frows = cast(
-            List[Tuple[int]],
+            list[tuple[int]],
             await self.sqlite_store.execute_sql(
                 "SELECT count(*) FROM %s WHERE rowid >= ?" % (table,), forward_chunk
             ),
         )
 
         brows = cast(
-            List[Tuple[int]],
+            list[tuple[int]],
             await self.sqlite_store.execute_sql(
                 "SELECT count(*) FROM %s WHERE rowid <= ?" % (table,), backward_chunk
             ),
@@ -1142,7 +1131,7 @@ class Porter:
 
     async def _get_total_count_to_port(
         self, table: str, forward_chunk: int, backward_chunk: int
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         remaining, done = await make_deferred_yieldable(
             defer.gatherResults(
                 [
@@ -1227,7 +1216,7 @@ class Porter:
     async def _setup_sequence(
         self,
         sequence_name: str,
-        stream_id_tables: Iterable[Tuple[str, str]],
+        stream_id_tables: Iterable[tuple[str, str]],
     ) -> None:
         """Set a sequence to the correct value."""
         current_stream_ids = []
@@ -1337,7 +1326,7 @@ class Progress:
     """Used to report progress of the port"""
 
     def __init__(self) -> None:
-        self.tables: Dict[str, TableProgress] = {}
+        self.tables: dict[str, TableProgress] = {}
 
         self.start_time = int(time.time())
 
@@ -1571,6 +1560,8 @@ def main() -> None:
     config = HomeServerConfig()
     config.parse_config_dict(hs_config, "", "")
 
+    hs = MockHomeserver(config)
+
     def start(stdscr: Optional["curses.window"] = None) -> None:
         progress: Progress
         if stdscr:
@@ -1582,15 +1573,14 @@ def main() -> None:
             sqlite_config=sqlite_config,
             progress=progress,
             batch_size=args.batch_size,
-            hs_config=config,
+            hs=hs,
         )
 
         @defer.inlineCallbacks
         def run() -> Generator["defer.Deferred[Any]", Any, None]:
-            with LoggingContext("synapse_port_db_run"):
-                yield defer.ensureDeferred(porter.run())
+            yield defer.ensureDeferred(porter.run())
 
-        reactor.callWhenRunning(run)
+        hs.get_clock().call_when_running(run)
 
         reactor.run()
 

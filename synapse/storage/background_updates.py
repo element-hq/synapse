@@ -28,24 +28,20 @@ from typing import (
     AsyncContextManager,
     Awaitable,
     Callable,
-    Dict,
     Iterable,
-    List,
     Optional,
     Sequence,
-    Tuple,
-    Type,
     cast,
 )
 
 import attr
+from pydantic import BaseModel
 
-from synapse._pydantic_compat import BaseModel
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Connection, Cursor
 from synapse.types import JsonDict, StrCollection
-from synapse.util import Clock, json_encoder
+from synapse.util.clock import Clock
+from synapse.util.json import json_encoder
 
 from . import engines
 
@@ -96,7 +92,7 @@ class ForeignKeyConstraint(Constraint):
     """
 
     referenced_table: str
-    columns: Sequence[Tuple[str, str]]
+    columns: Sequence[tuple[str, str]]
     deferred: bool
 
     def make_check_clause(self, table: str) -> str:
@@ -173,7 +169,7 @@ class _BackgroundUpdateContextManager:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc: Optional[BaseException],
         tb: Optional[TracebackType],
     ) -> None:
@@ -260,8 +256,8 @@ class BackgroundUpdater:
         self._default_batch_size_callback: Optional[DEFAULT_BATCH_SIZE_CALLBACK] = None
         self._min_batch_size_callback: Optional[MIN_BATCH_SIZE_CALLBACK] = None
 
-        self._background_update_performance: Dict[str, BackgroundUpdatePerformance] = {}
-        self._background_update_handlers: Dict[str, _BackgroundUpdateHandler] = {}
+        self._background_update_performance: dict[str, BackgroundUpdatePerformance] = {}
+        self._background_update_handlers: dict[str, _BackgroundUpdateHandler] = {}
         # TODO: all these bool flags make me feel icky---can we combine into a status
         # enum?
         self._all_done = False
@@ -283,6 +279,13 @@ class BackgroundUpdater:
         self.update_duration_ms = hs.config.background_updates.update_duration_ms
         self.sleep_duration_ms = hs.config.background_updates.sleep_duration_ms
         self.sleep_enabled = hs.config.background_updates.sleep_enabled
+
+    def shutdown(self) -> None:
+        """
+        Stop any further background updates from happening.
+        """
+        self.enabled = False
+        self._background_update_handlers.clear()
 
     def get_status(self) -> UpdaterStatus:
         """An integer summarising the updater status. Used as a metric."""
@@ -395,9 +398,8 @@ class BackgroundUpdater:
             # if we start a new background update, not all updates are done.
             self._all_done = False
             sleep = self.sleep_enabled
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "background_updates",
-                self.server_name,
                 self.run_background_updates,
                 sleep,
             )
@@ -524,14 +526,14 @@ class BackgroundUpdater:
             True if we have finished running all the background updates, otherwise False
         """
 
-        def get_background_updates_txn(txn: Cursor) -> List[Tuple[str, Optional[str]]]:
+        def get_background_updates_txn(txn: Cursor) -> list[tuple[str, Optional[str]]]:
             txn.execute(
                 """
                 SELECT update_name, depends_on FROM background_updates
                 ORDER BY ordering, update_name
                 """
             )
-            return cast(List[Tuple[str, Optional[str]]], txn.fetchall())
+            return cast(list[tuple[str, Optional[str]]], txn.fetchall())
 
         if not self._current_background_update:
             all_pending_updates = await self.db_pool.runInteraction(
@@ -952,14 +954,14 @@ class BackgroundUpdater:
         #      match the constraint.
         #   3. We try re-validating the constraint.
 
-        parsed_progress = ValidateConstraintProgress.parse_obj(progress)
+        parsed_progress = ValidateConstraintProgress.model_validate(progress)
 
         if parsed_progress.state == ValidateConstraintProgress.State.check:
             return_columns = ", ".join(unique_columns)
             order_columns = ", ".join(unique_columns)
 
             where_clause = ""
-            args: List[Any] = []
+            args: list[Any] = []
             if parsed_progress.lower_bound:
                 where_clause = f"""WHERE ({order_columns}) > ({", ".join("?" for _ in unique_columns)})"""
                 args.extend(parsed_progress.lower_bound)

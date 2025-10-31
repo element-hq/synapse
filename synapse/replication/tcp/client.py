@@ -21,7 +21,7 @@
 """A replication client for use by synapse workers."""
 
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from sortedcontainers import SortedList
 
@@ -32,7 +32,6 @@ from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.federation import send_queue
 from synapse.federation.sender import FederationSender
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.tcp.streams import (
     AccountDataStream,
     DeviceListsStream,
@@ -44,6 +43,7 @@ from synapse.replication.tcp.streams import (
     UnPartialStatedEventStream,
     UnPartialStatedRoomStream,
 )
+from synapse.replication.tcp.streams._base import ThreadSubscriptionsStream
 from synapse.replication.tcp.streams.events import (
     EventsStream,
     EventsStreamEventRow,
@@ -95,8 +95,8 @@ class ReplicationDataHandler:
 
         # Map from stream and instance to list of deferreds waiting for the stream to
         # arrive at a particular position. The lists are sorted by stream position.
-        self._streams_to_waiters: Dict[
-            Tuple[str, str], SortedList[Tuple[int, Deferred]]
+        self._streams_to_waiters: dict[
+            tuple[str, str], SortedList[tuple[int, Deferred]]
         ] = {}
 
     async def on_rdata(
@@ -113,7 +113,7 @@ class ReplicationDataHandler:
             token: stream token for this batch of rows
             rows: a list of Stream.ROW_TYPE objects as returned by Stream.parse_row.
         """
-        all_room_ids: Set[str] = set()
+        all_room_ids: set[str] = set()
         if stream_name == DeviceListsStream.NAME:
             if any(not row.is_signature and not row.hosts_calculated for row in rows):
                 # This only uses the minimum stream position on the device lists
@@ -200,7 +200,7 @@ class ReplicationDataHandler:
                 if row.data.rejected:
                     continue
 
-                extra_users: Tuple[UserID, ...] = ()
+                extra_users: tuple[UserID, ...] = ()
                 if row.data.type == EventTypes.Member and row.data.state_key:
                     extra_users = (UserID.from_string(row.data.state_key),)
 
@@ -255,6 +255,12 @@ class ReplicationDataHandler:
                 self._state_storage_controller.notify_event_un_partial_stated(
                     row.event_id
                 )
+        elif stream_name == ThreadSubscriptionsStream.NAME:
+            self.notifier.on_new_event(
+                StreamKeyType.THREAD_SUBSCRIPTIONS,
+                token,
+                users=[row.user_id for row in rows],
+            )
 
         await self._presence_handler.process_replication_rows(
             stream_name, instance_name, token, rows
@@ -337,7 +343,9 @@ class ReplicationDataHandler:
         # to wedge here forever.
         deferred: "Deferred[None]" = Deferred()
         deferred = timeout_deferred(
-            deferred, _WAIT_FOR_REPLICATION_TIMEOUT_SECONDS, self._reactor
+            deferred=deferred,
+            timeout=_WAIT_FOR_REPLICATION_TIMEOUT_SECONDS,
+            clock=self._clock,
         )
 
         waiting_list = self._streams_to_waiters.setdefault(
@@ -429,7 +437,9 @@ class FederationSenderHandler:
         # to. This is always set before we use it.
         self.federation_position: Optional[int] = None
 
-        self._fed_position_linearizer = Linearizer(name="_fed_position_linearizer")
+        self._fed_position_linearizer = Linearizer(
+            name="_fed_position_linearizer", clock=hs.get_clock()
+        )
 
     async def process_replication_rows(
         self, stream_name: str, token: int, rows: list
@@ -504,8 +514,8 @@ class FederationSenderHandler:
             # no need to queue up another task.
             return
 
-        run_as_background_process(
-            "_save_and_send_ack", self.server_name, self._save_and_send_ack
+        self._hs.run_as_background_process(
+            "_save_and_send_ack", self._save_and_send_ack
         )
 
     async def _save_and_send_ack(self) -> None:

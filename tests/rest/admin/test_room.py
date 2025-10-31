@@ -22,25 +22,29 @@ import json
 import time
 import urllib.parse
 from http import HTTPStatus
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
 
-from twisted.internet.task import deferLater
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EventTypes, Membership, RoomTypes
+from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.errors import Codes
+from synapse.api.room_versions import RoomVersions
 from synapse.handlers.pagination import (
     PURGE_ROOM_ACTION_NAME,
     SHUTDOWN_AND_PURGE_ROOM_ACTION_NAME,
 )
 from synapse.rest.client import directory, events, knock, login, room, sync
 from synapse.server import HomeServer
+from synapse.storage.databases.main.purge_events import (
+    purge_room_tables_with_event_id_index,
+    purge_room_tables_with_room_id_column,
+)
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests import unittest
@@ -49,6 +53,308 @@ from tests import unittest
 
 
 ONE_HOUR_IN_S = 3600
+
+
+class AdminHierarchyTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # create some users
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
+
+        self.other_user = self.register_user("user", "pass")
+        self.other_user_tok = self.login("user", "pass")
+
+        self.third_user = self.register_user("third_user", "pass")
+        self.third_user_tok = self.login("third_user", "pass")
+
+        # mock out the function which pulls room information in over federation.
+        self._room_summary_handler = hs.get_room_summary_handler()
+        self._room_summary_handler._summarize_remote_room_hierarchy = Mock()  # type: ignore[method-assign]
+
+        # create some rooms with different options
+        self.room_id1 = self.helper.create_room_as(
+            self.other_user,
+            is_public=False,
+            tok=self.other_user_tok,
+            extra_content={"name": "nefarious", "topic": "being bad"},
+        )
+
+        self.room_id2 = self.helper.create_room_as(
+            self.third_user,
+            tok=self.third_user_tok,
+            extra_content={"name": "also nefarious"},
+        )
+
+        self.room_id3 = self.helper.create_room_as(
+            self.admin_user,
+            is_public=False,
+            tok=self.admin_user_tok,
+            extra_content={
+                "name": "not nefarious",
+                "topic": "happy things",
+                "creation_content": {
+                    "additional_creators": [self.other_user, self.third_user]
+                },
+            },
+            room_version="12",
+        )
+
+        self.not_in_space_room_id = self.helper.create_room_as(
+            self.other_user,
+            tok=self.other_user_tok,
+            extra_content={"name": "not related to other rooms"},
+        )
+
+        # create a space room
+        self.space_room_id = self.helper.create_room_as(
+            self.other_user,
+            is_public=True,
+            extra_content={
+                "visibility": "public",
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE},
+                "name": "space_room",
+            },
+            tok=self.other_user_tok,
+        )
+
+        # and an unjoined remote room
+        self.remote_room_id = "!remote_room"
+
+        self.room_id_to_human_name_map = {
+            self.room_id1: "room1",
+            self.room_id2: "room2",
+            self.room_id3: "room3",
+            self.not_in_space_room_id: "room4",
+            self.space_room_id: "space_room",
+            self.remote_room_id: "remote_room",
+        }
+
+        # add three of the rooms to space
+        for state_key in [self.room_id1, self.room_id2, self.room_id3]:
+            self.helper.send_state(
+                self.space_room_id,
+                EventTypes.SpaceChild,
+                body={"via": ["local_test_server"]},
+                tok=self.other_user_tok,
+                state_key=state_key,
+            )
+
+        # and add remote room to space - ideally we'd add an actual remote
+        # space with rooms in it but the test framework doesn't currently
+        # support that. Instead we add a room which the server would have to
+        # reach out over federation to get details about and assert that the
+        # federation call was not made
+        self.helper.send_state(
+            self.space_room_id,
+            EventTypes.SpaceChild,
+            body={"via": ["remote_test_server"]},
+            tok=self.other_user_tok,
+            state_key=self.remote_room_id,
+        )
+
+    def test_no_auth(self) -> None:
+        """
+        If the requester does not provide authentication, a 401 is returned
+        """
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy",
+        )
+
+        self.assertEqual(401, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.MISSING_TOKEN, channel.json_body["errcode"])
+
+    def test_requester_is_no_admin(self) -> None:
+        """
+        If the requester is not a server admin, an error 403 is returned.
+        """
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy",
+            access_token=self.other_user_tok,
+        )
+
+        self.assertEqual(403, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+    def test_bad_request(self) -> None:
+        """
+        Test that invalid param values raise an error
+        """
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy?limit=ten",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy?max_depth=four",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+
+    def test_room_summary(self) -> None:
+        """
+        Test that details of room and details of children of room are
+        provided correctly
+        """
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel.code, 200, msg=channel.json_body)
+        rooms = channel.json_body["rooms"]
+        self.assertCountEqual(
+            {
+                self.room_id_to_human_name_map.get(
+                    room["room_id"], f"Unknown room: {room['room_id']}"
+                )
+                for room in rooms
+            },
+            {"space_room", "room1", "room2", "room3"},
+        )
+
+        for room_result in rooms:
+            room_id = room_result["room_id"]
+            if room_id == self.room_id1:
+                self.assertEqual(room_result["name"], "nefarious")
+                self.assertEqual(room_result["topic"], "being bad")
+                self.assertEqual(room_result["join_rule"], "invite")
+                self.assertEqual(len(room_result["children_state"]), 0)
+                self.assertEqual(room_result["world_readable"], False)
+                self.assertEqual(room_result["guest_can_join"], True)
+                self.assertEqual(room_result["num_joined_members"], 1)
+            elif room_id == self.room_id2:
+                self.assertEqual(room_result["name"], "also nefarious")
+                self.assertEqual(room_result["join_rule"], "public")
+                self.assertEqual(len(room_result["children_state"]), 0)
+                self.assertEqual(room_result["world_readable"], False)
+                self.assertEqual(room_result["guest_can_join"], False)
+                self.assertEqual(room_result["num_joined_members"], 1)
+            elif room_id == self.room_id3:
+                self.assertEqual(room_result["name"], "not nefarious")
+                self.assertEqual(room_result["join_rule"], "invite")
+                self.assertEqual(room_result["topic"], "happy things")
+                self.assertEqual(len(room_result["children_state"]), 0)
+                self.assertEqual(room_result["world_readable"], False)
+                self.assertEqual(room_result["guest_can_join"], True)
+                self.assertEqual(room_result["num_joined_members"], 1)
+            elif room_id == self.not_in_space_room_id:
+                self.fail("this room should not have been returned")
+            elif room_id == self.space_room_id:
+                self.assertEqual(room_result["join_rule"], "public")
+                self.assertEqual(len(room_result["children_state"]), 4)
+                self.assertEqual(room_result["room_type"], "m.space")
+                self.assertEqual(room_result["world_readable"], False)
+                self.assertEqual(room_result["guest_can_join"], False)
+                self.assertEqual(room_result["num_joined_members"], 1)
+                self.assertEqual(room_result["name"], "space_room")
+            else:
+                self.fail("unknown room returned")
+
+        # Assert that a federation function to look up details about
+        # this room has not been called. We never expect the admin
+        # hierarchy endpoint to reach out over federation.
+        self._room_summary_handler._summarize_remote_room_hierarchy.assert_not_called()  # type: ignore[attr-defined]
+
+    def test_room_summary_pagination(self) -> None:
+        """
+        Test that details of room and details of children of room are provided
+        correctly when paginating
+        """
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy?limit=2",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel.code, 200, msg=channel.json_body)
+        rooms = channel.json_body["rooms"]
+        self.assertCountEqual(
+            {
+                self.room_id_to_human_name_map.get(
+                    room["room_id"], f"Unknown room: {room['room_id']}"
+                )
+                for room in rooms
+            },
+            {"space_room", "room1"},
+        )
+        next_batch = channel.json_body["next_batch"]
+
+        channel2 = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy?from={next_batch}",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel2.code, 200, msg=channel2.json_body)
+        new_rooms = channel2.json_body["rooms"]
+        self.assertCountEqual(
+            {
+                self.room_id_to_human_name_map.get(
+                    room["room_id"], f"Unknown room: {room['room_id']}"
+                )
+                for room in new_rooms
+            },
+            {"room2", "room3"},
+        )
+
+        rooms_to_check = rooms + new_rooms
+        for room_result in rooms_to_check:
+            room_id = room_result["room_id"]
+            if room_id == self.room_id1:
+                self.assertEqual(room_result["name"], "nefarious")
+                self.assertEqual(room_result["topic"], "being bad")
+                self.assertEqual(room_result["join_rule"], "invite")
+                self.assertEqual(len(room_result["children_state"]), 0)
+                self.assertEqual(room_result["world_readable"], False)
+                self.assertEqual(room_result["guest_can_join"], True)
+                self.assertEqual(room_result["num_joined_members"], 1)
+            elif room_id == self.room_id2:
+                self.assertEqual(room_result["name"], "also nefarious")
+                self.assertEqual(room_result["join_rule"], "public")
+                self.assertEqual(len(room_result["children_state"]), 0)
+                self.assertEqual(room_result["world_readable"], False)
+                self.assertEqual(room_result["guest_can_join"], False)
+                self.assertEqual(room_result["num_joined_members"], 1)
+            elif room_id == self.room_id3:
+                self.assertEqual(room_result["name"], "not nefarious")
+                self.assertEqual(room_result["join_rule"], "invite")
+                self.assertEqual(room_result["topic"], "happy things")
+                self.assertEqual(len(room_result["children_state"]), 0)
+                self.assertEqual(room_result["world_readable"], False)
+                self.assertEqual(room_result["guest_can_join"], True)
+                self.assertEqual(room_result["num_joined_members"], 1)
+            elif room_id == self.not_in_space_room_id:
+                self.fail("this room should not have been returned")
+            elif room_id == self.space_room_id:
+                self.assertEqual(room_result["join_rule"], "public")
+                self.assertEqual(len(room_result["children_state"]), 4)
+                self.assertEqual(room_result["room_type"], "m.space")
+                self.assertEqual(room_result["world_readable"], False)
+                self.assertEqual(room_result["guest_can_join"], False)
+                self.assertEqual(room_result["num_joined_members"], 1)
+                self.assertEqual(room_result["name"], "space_room")
+            else:
+                self.fail("unknown room returned")
+
+        # Assert that a federation function to look up details about
+        # this room has not been called. We never expect the admin
+        # hierarchy endpoint to reach out over federation.
+        self._room_summary_handler._summarize_remote_room_hierarchy.assert_not_called()  # type: ignore[attr-defined]
 
 
 class DeleteRoomTestCase(unittest.HomeserverTestCase):
@@ -546,7 +852,7 @@ class DeleteRoomTestCase(unittest.HomeserverTestCase):
 
     def _is_purged(self, room_id: str) -> None:
         """Test that the following tables have been purged of all rows related to the room."""
-        for table in PURGE_TABLES:
+        for table in purge_room_tables_with_room_id_column:
             count = self.get_success(
                 self.store.db_pool.simple_select_one_onecol(
                     table=table,
@@ -555,7 +861,21 @@ class DeleteRoomTestCase(unittest.HomeserverTestCase):
                     desc="test_purge_room",
                 )
             )
+            self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
+        for table in purge_room_tables_with_event_id_index:
+            rows = self.get_success(
+                self.store.db_pool.execute(
+                    "find_event_count_for_table",
+                    f"""
+                    SELECT COUNT(*) FROM {table} WHERE event_id IN (
+                        SELECT event_id FROM events WHERE room_id=?
+                    )
+                    """,
+                    room_id,
+                )
+            )
+            count = rows[0][0]
             self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
     def _assert_peek(self, room_id: str, expect_code: int) -> None:
@@ -842,7 +1162,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
         # Mock PaginationHandler.purge_room to sleep for 100s, so we have time to do a second call
         # before the purge is over. Note that it doesn't purge anymore, but we don't care.
         async def purge_room(room_id: str, force: bool) -> None:
-            await deferLater(self.hs.get_reactor(), 100, lambda: None)
+            await self.hs.get_clock().sleep(100)
 
         self.pagination_handler.purge_room = AsyncMock(side_effect=purge_room)  # type: ignore[method-assign]
 
@@ -1228,7 +1548,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
 
     def _is_purged(self, room_id: str) -> None:
         """Test that the following tables have been purged of all rows related to the room."""
-        for table in PURGE_TABLES:
+        for table in purge_room_tables_with_room_id_column:
             count = self.get_success(
                 self.store.db_pool.simple_select_one_onecol(
                     table=table,
@@ -1237,7 +1557,21 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
                     desc="test_purge_room",
                 )
             )
+            self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
+        for table in purge_room_tables_with_event_id_index:
+            rows = self.get_success(
+                self.store.db_pool.execute(
+                    "find_event_count_for_table",
+                    f"""
+                    SELECT COUNT(*) FROM {table} WHERE event_id IN (
+                        SELECT event_id FROM events WHERE room_id=?
+                    )
+                    """,
+                    room_id,
+                )
+            )
+            count = rows[0][0]
             self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
     def _assert_peek(self, room_id: str, expect_code: int) -> None:
@@ -1576,7 +1910,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
 
         def _order_test(
             order_type: str,
-            expected_room_list: List[str],
+            expected_room_list: list[str],
             reverse: bool = False,
         ) -> None:
             """Request the list of rooms in a certain order. Assert that order is what
@@ -2211,7 +2545,7 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
 
     def test_topo_token_is_accepted(self) -> None:
         """Test Topo Token is accepted."""
-        token = "t1-0_0_0_0_0_0_0_0_0_0"
+        token = "t1-0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/rooms/%s/messages?from=%s" % (self.room_id, token),
@@ -2225,7 +2559,7 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
 
     def test_stream_token_is_accepted_for_fwd_pagianation(self) -> None:
         """Test that stream token is accepted for forward pagination."""
-        token = "s0_0_0_0_0_0_0_0_0_0"
+        token = "s0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/rooms/%s/messages?from=%s" % (self.room_id, token),
@@ -2892,6 +3226,63 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
             "No local admin user in room with power to update power levels.",
         )
 
+    def test_v12_room(self) -> None:
+        """Test that you can be promoted to admin in v12 rooms which won't have the admin the PL event."""
+        room_id = self.helper.create_room_as(
+            self.creator,
+            tok=self.creator_tok,
+            room_version=RoomVersions.V12.identifier,
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/rooms/{room_id}/make_room_admin",
+            content={},
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        # Now we test that we can join the room and that the admin user has PL 100.
+        self.helper.join(room_id, self.admin_user, tok=self.admin_user_tok)
+        pl = self.helper.get_state(
+            room_id, EventTypes.PowerLevels, tok=self.creator_tok
+        )
+        self.assertEquals(pl["users"][self.admin_user], 100)
+
+    def test_v12_room_with_many_user_pls(self) -> None:
+        """Test that you can be promoted to the admin user's PL in v12 rooms that contain a range of user PLs."""
+        room_id = self.helper.create_room_as(
+            self.creator,
+            tok=self.creator_tok,
+            room_version=RoomVersions.V12.identifier,
+            is_public=True,
+            extra_content={
+                "power_level_content_override": {
+                    "users": {
+                        self.second_user_id: 50,
+                    },
+                },
+            },
+        )
+
+        self.helper.join(room_id, self.admin_user, tok=self.admin_user_tok)
+        self.helper.join(room_id, self.second_user_id, tok=self.second_tok)
+
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/rooms/{room_id}/make_room_admin",
+            content={},
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        pl = self.helper.get_state(
+            room_id, EventTypes.PowerLevels, tok=self.creator_tok
+        )
+        self.assertEquals(pl["users"][self.admin_user], 100)
+
 
 class BlockRoomTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -3119,35 +3510,3 @@ class BlockRoomTestCase(unittest.HomeserverTestCase):
         """Block a room in database"""
         self.get_success(self._store.block_room(room_id, self.other_user))
         self._is_blocked(room_id, expect=True)
-
-
-PURGE_TABLES = [
-    "current_state_events",
-    "event_backward_extremities",
-    "event_forward_extremities",
-    "event_json",
-    "event_push_actions",
-    "event_search",
-    "events",
-    "receipts_graph",
-    "receipts_linearized",
-    "room_aliases",
-    "room_depth",
-    "room_memberships",
-    "room_stats_state",
-    "room_stats_current",
-    "room_stats_earliest_token",
-    "rooms",
-    "stream_ordering_to_exterm",
-    "users_in_public_rooms",
-    "users_who_share_private_rooms",
-    "appservice_room_list",
-    "e2e_room_keys",
-    "event_push_summary",
-    "pusher_throttle",
-    "room_account_data",
-    "room_tags",
-    "state_groups",
-    "state_groups_state",
-    "federation_inbound_events_staging",
-]

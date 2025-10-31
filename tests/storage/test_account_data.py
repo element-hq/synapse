@@ -19,14 +19,14 @@
 #
 #
 
-from typing import Iterable, Optional, Set
+from typing import Iterable, Optional
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes
 from synapse.api.errors import Codes, SynapseError
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -52,7 +52,7 @@ class IgnoredUsersTestCase(unittest.HomeserverTestCase):
         )
 
     def assert_ignorers(
-        self, ignored_user_id: str, expected_ignorer_user_ids: Set[str]
+        self, ignored_user_id: str, expected_ignorer_user_ids: set[str]
     ) -> None:
         self.assertEqual(
             self.get_success(self.store.ignored_by(ignored_user_id)),
@@ -60,7 +60,7 @@ class IgnoredUsersTestCase(unittest.HomeserverTestCase):
         )
 
     def assert_ignored(
-        self, ignorer_user_id: str, expected_ignored_user_ids: Set[str]
+        self, ignorer_user_id: str, expected_ignored_user_ids: set[str]
     ) -> None:
         self.assertEqual(
             self.get_success(self.store.ignored_users(ignorer_user_id)),

@@ -18,20 +18,20 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional, cast
+from typing import Optional, cast
 
 from canonicaljson import json
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.room_versions import RoomVersions
+from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.builder import EventBuilder
 from synapse.server import HomeServer
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict, RoomID, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.utils import create_room
@@ -247,8 +247,8 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
             async def build(
                 self,
-                prev_event_ids: List[str],
-                auth_event_ids: Optional[List[str]],
+                prev_event_ids: list[str],
+                auth_event_ids: Optional[list[str]],
                 depth: Optional[int] = None,
             ) -> EventBase:
                 built_event = await self._base_builder.build(
@@ -263,11 +263,16 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
             @property
             def room_id(self) -> str:
+                assert self._base_builder.room_id is not None
                 return self._base_builder.room_id
 
             @property
             def type(self) -> str:
                 return self._base_builder.type
+
+            @property
+            def room_version(self) -> RoomVersion:
+                return self._base_builder.room_version
 
             @property
             def internal_metadata(self) -> EventInternalMetadata:

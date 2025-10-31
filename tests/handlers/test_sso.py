@@ -18,7 +18,7 @@
 #
 #
 from http import HTTPStatus
-from typing import BinaryIO, Callable, Dict, List, Optional, Tuple
+from typing import BinaryIO, Callable, Optional
 from unittest.mock import Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -27,7 +27,7 @@ from twisted.web.http_headers import Headers
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.client import RawHeaders
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG, FakeResponse
@@ -120,7 +120,7 @@ async def mock_get_file(
     max_size: Optional[int] = None,
     headers: Optional[RawHeaders] = None,
     is_allowed_content_type: Optional[Callable[[str], bool]] = None,
-) -> Tuple[int, Dict[bytes, List[bytes]], str, int]:
+) -> tuple[int, dict[bytes, list[bytes]], str, int]:
     fake_response = FakeResponse(code=404)
     if url == "http://my.server/me.png":
         fake_response = FakeResponse(

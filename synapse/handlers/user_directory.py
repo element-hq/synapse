@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -36,7 +36,6 @@ from synapse.api.constants import (
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
@@ -130,18 +129,22 @@ class UserDirectoryHandler(StateDeltasHandler):
         # Guard to ensure we only have one process for refreshing remote profiles
         # for the given servers.
         # Set of server names.
-        self._is_refreshing_remote_profiles_for_servers: Set[str] = set()
+        self._is_refreshing_remote_profiles_for_servers: set[str] = set()
 
         if self.update_user_directory:
             self.notifier.add_replication_callback(self.notify_new_event)
 
             # We kick this off so that we don't have to wait for a change before
             # we start populating the user directory
-            self.clock.call_later(0, self.notify_new_event)
+            self.clock.call_later(
+                0,
+                self.notify_new_event,
+            )
 
             # Kick off the profile refresh process on startup
             self._refresh_remote_profiles_call_later = self.clock.call_later(
-                10, self.kick_off_remote_profile_refresh_process
+                10,
+                self.kick_off_remote_profile_refresh_process,
             )
 
     async def search_users(
@@ -193,9 +196,7 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_processing = False
 
         self._is_processing = True
-        run_as_background_process(
-            "user_directory.notify_new_event", self.server_name, process
-        )
+        self._hs.run_as_background_process("user_directory.notify_new_event", process)
 
     async def handle_local_profile_change(
         self, user_id: str, profile: ProfileInfo
@@ -269,7 +270,7 @@ class UserDirectoryHandler(StateDeltasHandler):
 
                 await self.store.update_user_directory_stream_pos(max_pos)
 
-    async def _handle_deltas(self, deltas: List[StateDelta]) -> None:
+    async def _handle_deltas(self, deltas: list[StateDelta]) -> None:
         """Called with the state deltas to process"""
         for delta in deltas:
             logger.debug(
@@ -465,7 +466,7 @@ class UserDirectoryHandler(StateDeltasHandler):
                     or await self.store.should_include_local_user_in_dir(other)
                 )
             ]
-            updates_to_users_who_share_rooms: Set[Tuple[str, str]] = set()
+            updates_to_users_who_share_rooms: set[tuple[str, str]] = set()
 
             # First, if the joining user is our local user then we need an
             # update for every other user in the room.
@@ -609,8 +610,8 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_refreshing_remote_profiles = False
 
         self._is_refreshing_remote_profiles = True
-        run_as_background_process(
-            "user_directory.refresh_remote_profiles", self.server_name, process
+        self._hs.run_as_background_process(
+            "user_directory.refresh_remote_profiles", process
         )
 
     async def _unsafe_refresh_remote_profiles(self) -> None:
@@ -655,8 +656,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 if not users:
                     return
                 _, _, next_try_at_ts = users[0]
+                delay = ((next_try_at_ts - self.clock.time_msec()) // 1000) + 2
                 self._refresh_remote_profiles_call_later = self.clock.call_later(
-                    ((next_try_at_ts - self.clock.time_msec()) // 1000) + 2,
+                    delay,
                     self.kick_off_remote_profile_refresh_process,
                 )
 
@@ -692,9 +694,8 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_refreshing_remote_profiles_for_servers.remove(server_name)
 
         self._is_refreshing_remote_profiles_for_servers.add(server_name)
-        run_as_background_process(
+        self._hs.run_as_background_process(
             "user_directory.refresh_remote_profiles_for_remote_server",
-            self.server_name,
             process,
         )
 

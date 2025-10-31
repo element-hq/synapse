@@ -19,7 +19,7 @@
 #
 import logging
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Optional
 
 from twisted.internet.address import IPv4Address
 from twisted.internet.protocol import Protocol, connectionDone
@@ -32,14 +32,13 @@ from synapse.config.workers import InstanceTcpLocationConfig, InstanceUnixLocati
 from synapse.http.site import SynapseRequest, SynapseSite
 from synapse.replication.http import ReplicationRestResource
 from synapse.replication.tcp.client import ReplicationDataHandler
-from synapse.replication.tcp.handler import ReplicationCommandHandler
 from synapse.replication.tcp.protocol import (
     ClientReplicationStreamProtocol,
     ServerReplicationStreamProtocol,
 )
 from synapse.replication.tcp.resource import ReplicationStreamProtocolFactory
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeTransport
@@ -97,7 +96,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         self.test_handler = self._build_replication_data_handler()
         self.worker_hs._replication_data_handler = self.test_handler  # type: ignore[attr-defined]
 
-        repl_handler = ReplicationCommandHandler(self.worker_hs)
+        repl_handler = self.worker_hs.get_replication_command_handler()
         self.client = ClientReplicationStreamProtocol(
             self.worker_hs,
             "client",
@@ -109,7 +108,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         self._client_transport: Optional[FakeTransport] = None
         self._server_transport: Optional[FakeTransport] = None
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         d = super().create_resource_dict()
         d["/_synapse/replication"] = ReplicationRestResource(self.hs)
         return d
@@ -174,11 +173,17 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        channel = self.site.buildProtocol((host, port))
+        # The type ignore is here because mypy doesn't think the host/port tuple is of
+        # the correct type, even though it is the exact example given for
+        # `twisted.internet.interfaces.IAddress`.
+        # Mypy was happy with the type before we overrode `buildProtocol` in
+        # `SynapseSite`, probably because there was enough inheritance indirection before
+        # withe the argument not having a type associated with it.
+        channel = self.site.buildProtocol((host, port))  # type: ignore[arg-type]
 
         # hook into the channel's request factory so that we can keep a record
         # of the requests
-        requests: List[SynapseRequest] = []
+        requests: list[SynapseRequest] = []
         real_request_factory = channel.requestFactory
 
         def request_factory(*args: Any, **kwargs: Any) -> SynapseRequest:
@@ -186,7 +191,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
             requests.append(request)
             return request
 
-        channel.requestFactory = request_factory
+        channel.requestFactory = request_factory  # type: ignore[method-assign]
 
         # Connect client to server and vice versa.
         client_to_server_transport = FakeTransport(
@@ -209,7 +214,12 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         client_to_server_transport.loseConnection()
 
         # there should have been exactly one request
-        self.assertEqual(len(requests), 1)
+        self.assertEqual(
+            len(requests),
+            1,
+            "Expected to handle exactly one HTTP replication request but saw %d - requests=%s"
+            % (len(requests), requests),
+        )
 
         return requests[0]
 
@@ -246,7 +256,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
         # Redis replication only takes place on Postgres
         skip = "Requires Postgres"
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         """
         Overrides the default config to enable Redis.
         Even if the test only uses make_worker_hs, the main process needs Redis
@@ -428,7 +438,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        channel = self._hs_to_site[hs].buildProtocol((host, port))
+        channel = self._hs_to_site[hs].buildProtocol((host, port))  # type: ignore[arg-type]
 
         # Connect client to server and vice versa.
         client_to_server_transport = FakeTransport(
@@ -481,7 +491,7 @@ class TestReplicationDataHandler(ReplicationDataHandler):
         super().__init__(hs)
 
         # list of received (stream_name, token, row) tuples
-        self.received_rdata_rows: List[Tuple[str, int, Any]] = []
+        self.received_rdata_rows: list[tuple[str, int, Any]] = []
 
     async def on_rdata(
         self, stream_name: str, instance_name: str, token: int, rows: list
@@ -495,7 +505,7 @@ class FakeRedisPubSubServer:
     """A fake Redis server for pub/sub."""
 
     def __init__(self) -> None:
-        self._subscribers_by_channel: Dict[bytes, Set["FakeRedisPubSubProtocol"]] = (
+        self._subscribers_by_channel: dict[bytes, set["FakeRedisPubSubProtocol"]] = (
             defaultdict(set)
         )
 

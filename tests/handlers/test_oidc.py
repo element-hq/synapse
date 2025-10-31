@@ -19,7 +19,7 @@
 #
 #
 import os
-from typing import Any, Awaitable, ContextManager, Dict, Optional, Tuple
+from typing import Any, Awaitable, ContextManager, Optional
 from unittest.mock import ANY, AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -31,7 +31,7 @@ from synapse.handlers.sso import MappingException
 from synapse.http.site import SynapseRequest
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.macaroons import get_value_from_macaroon
 from synapse.util.stringutils import random_string
 
@@ -152,7 +152,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
     if not HAS_OIDC:
         skip = "requires OIDC"
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
         return config
@@ -204,7 +204,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
         client_redirect_url: str = "http://client/redirect",
         scope: str = "openid",
         with_sid: bool = False,
-    ) -> Tuple[SynapseRequest, FakeAuthorizationGrant]:
+    ) -> tuple[SynapseRequest, FakeAuthorizationGrant]:
         """Start an authorization request, and get the callback request back."""
         nonce = random_string(10)
         state = random_string(10)
@@ -222,7 +222,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
 
     def assertRenderedError(
         self, error: str, error_description: Optional[str] = None
-    ) -> Tuple[Any, ...]:
+    ) -> tuple[Any, ...]:
         self.render_error.assert_called_once()
         args = self.render_error.call_args[0]
         self.assertEqual(args[1], error)

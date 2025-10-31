@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List
 from unittest import mock
 
 from twisted.internet.testing import MemoryReactor
@@ -29,12 +28,12 @@ from synapse.storage.database import LoggingDatabaseConnection
 from synapse.storage.prepare_database import PrepareDatabaseException, prepare_database
 from synapse.storage.schema import SCHEMA_VERSION
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
 
-def fake_listdir(filepath: str) -> List[str]:
+def fake_listdir(filepath: str) -> list[str]:
     """
     A fake implementation of os.listdir which we can use to mock out the filesystem.
 

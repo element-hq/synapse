@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, List, Literal, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Iterable, Literal, Optional
 
 from synapse.api.errors import FederationDeniedError, SynapseError
 from synapse.federation.transport.server._base import (
@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 class TransportLayerServer(JsonResource):
     """Handles incoming federation HTTP requests"""
 
-    def __init__(self, hs: "HomeServer", servlet_groups: Optional[List[str]] = None):
+    def __init__(self, hs: "HomeServer", servlet_groups: Optional[list[str]] = None):
         """Initialize the TransportLayerServer
 
         Will by default register all servlets. For custom behaviour, pass in
@@ -130,12 +130,12 @@ class PublicRoomList(BaseFederationServlet):
         self.allow_access = hs.config.server.allow_public_rooms_over_federation
 
     async def on_GET(
-        self, origin: str, content: Literal[None], query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
+        self, origin: str, content: Literal[None], query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
         if not self.allow_access:
             raise FederationDeniedError(origin)
 
-        limit = parse_integer_from_args(query, "limit", 0)
+        limit: Optional[int] = parse_integer_from_args(query, "limit", 0)
         since_token = parse_string_from_args(query, "since", None)
         include_all_networks = parse_boolean_from_args(
             query, "include_all_networks", default=False
@@ -164,8 +164,8 @@ class PublicRoomList(BaseFederationServlet):
         return 200, data
 
     async def on_POST(
-        self, origin: str, content: JsonDict, query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
+        self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
         # This implements MSC2197 (Search Filtering over Federation)
         if not self.allow_access:
             raise FederationDeniedError(origin)
@@ -242,8 +242,8 @@ class OpenIdUserInfo(BaseFederationServlet):
         self,
         origin: Optional[str],
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
-    ) -> Tuple[int, JsonDict]:
+        query: dict[bytes, list[bytes]],
+    ) -> tuple[int, JsonDict]:
         token = parse_string_from_args(query, "access_token")
         if token is None:
             return (
@@ -265,7 +265,7 @@ class OpenIdUserInfo(BaseFederationServlet):
         return 200, {"sub": user_id}
 
 
-SERVLET_GROUPS: Dict[str, Iterable[Type[BaseFederationServlet]]] = {
+SERVLET_GROUPS: dict[str, Iterable[type[BaseFederationServlet]]] = {
     "federation": FEDERATION_SERVLET_CLASSES,
     "room_list": (PublicRoomList,),
     "openid": (OpenIdUserInfo,),

@@ -26,11 +26,8 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Generic,
-    List,
     Optional,
-    Type,
     TypedDict,
     TypeVar,
     Union,
@@ -67,8 +64,9 @@ from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
 from synapse.module_api import ModuleApi
 from synapse.types import JsonDict, UserID, map_username_to_mxid_localpart
-from synapse.util import Clock, json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
+from synapse.util.clock import Clock
+from synapse.util.json import json_decoder
 from synapse.util.macaroons import MacaroonGenerator, OidcSessionData
 from synapse.util.templates import _localpart_from_email_filter
 
@@ -95,7 +93,7 @@ logger = logging.getLogger(__name__)
 # Here we have the names of the cookies, and the options we use to set them.
 _SESSION_COOKIES = [
     (b"oidc_session", b"HttpOnly; Secure; SameSite=None"),
-    (b"oidc_session_no_samesite", b"HttpOnly"),
+    (b"oidc_session_no_samesite", b"HttpOnly; Secure"),
 ]
 
 
@@ -112,14 +110,14 @@ class Token(TypedDict):
 
 #: A JWK, as per RFC7517 sec 4. The type could be more precise than that, but
 #: there is no real point of doing this in our case.
-JWK = Dict[str, str]
+JWK = dict[str, str]
 
 C = TypeVar("C")
 
 
 #: A JWK Set, as per RFC7517 sec 5.
 class JWKS(TypedDict):
-    keys: List[JWK]
+    keys: list[JWK]
 
 
 class OidcHandler:
@@ -133,7 +131,7 @@ class OidcHandler:
         assert provider_confs
 
         self._macaroon_generator = hs.get_macaroon_generator()
-        self._providers: Dict[str, "OidcProvider"] = {
+        self._providers: dict[str, "OidcProvider"] = {
             p.idp_id: OidcProvider(hs, self._macaroon_generator, p)
             for p in provider_confs
         }
@@ -331,7 +329,7 @@ class OidcHandler:
 
             # At this point we properly checked both claims types
             issuer: str = iss
-            audience: List[str] = aud
+            audience: list[str] = aud
         except (TypeError, KeyError):
             raise SynapseError(400, "Invalid issuer/audience in logout_token")
 
@@ -427,8 +425,10 @@ class OidcProvider:
         # from the IdP's jwks_uri, if required.
         self._jwks = RetryOnExceptionCachedCall(self._load_jwks)
 
+        # type-ignore: we will not be instantiating a subclass of the provider class,
+        # so the warning about directly accessing __init__ being unsound does not apply here
         user_mapping_provider_init_method = (
-            provider.user_mapping_provider_class.__init__
+            provider.user_mapping_provider_class.__init__  # type: ignore[misc]
         )
         if len(inspect.signature(user_mapping_provider_init_method).parameters) == 3:
             self._user_mapping_provider = provider.user_mapping_provider_class(
@@ -757,7 +757,7 @@ class OidcProvider:
         """
         metadata = await self.load_metadata()
         token_endpoint = metadata.get("token_endpoint")
-        raw_headers: Dict[str, str] = {
+        raw_headers: dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": self._http_client.user_agent.decode("ascii"),
             "Accept": "application/json",
@@ -901,9 +901,9 @@ class OidcProvider:
 
     async def _verify_jwt(
         self,
-        alg_values: List[str],
+        alg_values: list[str],
         token: str,
-        claims_cls: Type[C],
+        claims_cls: type[C],
         claims_options: Optional[dict] = None,
         claims_params: Optional[dict] = None,
     ) -> C:
@@ -1588,7 +1588,7 @@ class UserAttributeDict(TypedDict):
     confirm_localpart: bool
     display_name: Optional[str]
     picture: Optional[str]  # may be omitted by older `OidcMappingProviders`
-    emails: List[str]
+    emails: list[str]
 
 
 class OidcMappingProvider(Generic[C]):
@@ -1677,7 +1677,7 @@ class JinjaOidcMappingConfig:
     localpart_template: Optional[Template]
     display_name_template: Optional[Template]
     email_template: Optional[Template]
-    extra_attributes: Dict[str, Template]
+    extra_attributes: dict[str, Template]
     confirm_localpart: bool = False
 
 
@@ -1777,7 +1777,7 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
         if display_name == "":
             display_name = None
 
-        emails: List[str] = []
+        emails: list[str] = []
         email = render_template_field(self._config.email_template)
         if email:
             emails.append(email)
@@ -1793,7 +1793,7 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
         )
 
     async def get_extra_attributes(self, userinfo: UserInfo, token: Token) -> JsonDict:
-        extras: Dict[str, str] = {}
+        extras: dict[str, str] = {}
         for key, template in self._config.extra_attributes.items():
             try:
                 extras[key] = template.render(user=userinfo).strip()

@@ -16,14 +16,16 @@ import logging
 from typing import TYPE_CHECKING, Optional
 from urllib.parse import urlencode
 
-from synapse._pydantic_compat import (
+from pydantic import (
+    AnyHttpUrl,
     BaseModel,
-    Extra,
+    ConfigDict,
     StrictBool,
     StrictInt,
     StrictStr,
     ValidationError,
 )
+
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
     AuthError,
@@ -33,7 +35,6 @@ from synapse.api.errors import (
     UnrecognizedRequestError,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import (
     active_span,
     force_tracing,
@@ -43,9 +44,9 @@ from synapse.logging.opentracing import (
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import JsonDict, Requester, UserID, create_requester
-from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+from synapse.util.json import json_decoder
 
 from . import introspection_response_timer
 
@@ -57,13 +58,14 @@ logger = logging.getLogger(__name__)
 
 # Scope as defined by MSC2967
 # https://github.com/matrix-org/matrix-spec-proposals/pull/2967
-SCOPE_MATRIX_API = "urn:matrix:org.matrix.msc2967.client:api:*"
-SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:org.matrix.msc2967.client:device:"
+UNSTABLE_SCOPE_MATRIX_API = "urn:matrix:org.matrix.msc2967.client:api:*"
+UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:org.matrix.msc2967.client:device:"
+STABLE_SCOPE_MATRIX_API = "urn:matrix:client:api:*"
+STABLE_SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:client:device:"
 
 
 class ServerMetadata(BaseModel):
-    class Config:
-        extra = Extra.allow
+    model_config = ConfigDict(extra="allow")
 
     issuer: StrictStr
     account_management_uri: StrictStr
@@ -72,14 +74,12 @@ class ServerMetadata(BaseModel):
 class IntrospectionResponse(BaseModel):
     retrieved_at_ms: StrictInt
     active: StrictBool
-    scope: Optional[StrictStr]
-    username: Optional[StrictStr]
-    sub: Optional[StrictStr]
-    device_id: Optional[StrictStr]
-    expires_in: Optional[StrictInt]
-
-    class Config:
-        extra = Extra.allow
+    scope: Optional[StrictStr] = None
+    username: Optional[StrictStr] = None
+    sub: Optional[StrictStr] = None
+    device_id: Optional[StrictStr] = None
+    expires_in: Optional[StrictInt] = None
+    model_config = ConfigDict(extra="allow")
 
     def get_scope_set(self) -> set[str]:
         if not self.scope:
@@ -147,11 +147,33 @@ class MasDelegatedAuth(BaseAuth):
 
     @property
     def _metadata_url(self) -> str:
-        return f"{self._config.endpoint.rstrip('/')}/.well-known/openid-configuration"
+        return str(
+            AnyHttpUrl.build(
+                scheme=self._config.endpoint.scheme,
+                username=self._config.endpoint.username,
+                password=self._config.endpoint.password,
+                host=self._config.endpoint.host or "",
+                port=self._config.endpoint.port,
+                path=".well-known/openid-configuration",
+                query=None,
+                fragment=None,
+            )
+        )
 
     @property
     def _introspection_endpoint(self) -> str:
-        return f"{self._config.endpoint.rstrip('/')}/oauth2/introspect"
+        return str(
+            AnyHttpUrl.build(
+                scheme=self._config.endpoint.scheme,
+                username=self._config.endpoint.username,
+                password=self._config.endpoint.password,
+                host=self._config.endpoint.host or "",
+                port=self._config.endpoint.port,
+                path="oauth2/introspect",
+                query=None,
+                fragment=None,
+            )
+        )
 
     async def _load_metadata(self) -> ServerMetadata:
         response = await self._http_client.get_json(self._metadata_url)
@@ -227,13 +249,12 @@ class MasDelegatedAuth(BaseAuth):
         try:
             with start_active_span("mas-introspect-token"):
                 inject_request_headers(raw_headers)
-                with PreserveLoggingContext():
-                    resp_body = await self._rust_http_client.post(
-                        url=self._introspection_endpoint,
-                        response_limit=1 * 1024 * 1024,
-                        headers=raw_headers,
-                        request_body=body,
-                    )
+                resp_body = await self._rust_http_client.post(
+                    url=self._introspection_endpoint,
+                    response_limit=1 * 1024 * 1024,
+                    headers=raw_headers,
+                    request_body=body,
+                )
         except HttpResponseException as e:
             end_time = self._clock.time()
             introspection_response_timer.labels(
@@ -334,7 +355,10 @@ class MasDelegatedAuth(BaseAuth):
         scope = introspection_result.get_scope_set()
 
         # Determine type of user based on presence of particular scopes
-        if SCOPE_MATRIX_API not in scope:
+        if (
+            UNSTABLE_SCOPE_MATRIX_API not in scope
+            and STABLE_SCOPE_MATRIX_API not in scope
+        ):
             raise InvalidClientTokenError(
                 "Token doesn't grant access to the Matrix C-S API"
             )
@@ -366,11 +390,12 @@ class MasDelegatedAuth(BaseAuth):
             # We only allow a single device_id in the scope, so we find them all in the
             # scope list, and raise if there are more than one. The OIDC server should be
             # the one enforcing valid scopes, so we raise a 500 if we find an invalid scope.
-            device_ids = [
-                tok[len(SCOPE_MATRIX_DEVICE_PREFIX) :]
-                for tok in scope
-                if tok.startswith(SCOPE_MATRIX_DEVICE_PREFIX)
-            ]
+            device_ids: set[str] = set()
+            for tok in scope:
+                if tok.startswith(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX):
+                    device_ids.add(tok[len(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX) :])
+                elif tok.startswith(STABLE_SCOPE_MATRIX_DEVICE_PREFIX):
+                    device_ids.add(tok[len(STABLE_SCOPE_MATRIX_DEVICE_PREFIX) :])
 
             if len(device_ids) > 1:
                 raise AuthError(
@@ -378,7 +403,7 @@ class MasDelegatedAuth(BaseAuth):
                     "Multiple device IDs in scope",
                 )
 
-            device_id = device_ids[0] if device_ids else None
+            device_id = next(iter(device_ids), None)
 
         if device_id is not None:
             # Sanity check the device_id

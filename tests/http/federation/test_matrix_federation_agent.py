@@ -20,7 +20,7 @@
 import base64
 import logging
 import os
-from typing import Generator, List, Optional, cast
+from typing import Generator, Optional, cast
 from unittest.mock import AsyncMock, call, patch
 
 import treq
@@ -65,7 +65,7 @@ from synapse.util.caches.ttlcache import TTLCache
 
 from tests import unittest
 from tests.http import dummy_address, get_test_ca_cert_file, wrap_server_factory_for_tls
-from tests.server import FakeTransport, ThreadedMemoryReactorClock
+from tests.server import FakeTransport, get_clock
 from tests.utils import checked_cast, default_config
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ logger = logging.getLogger(__name__)
 
 class MatrixFederationAgentTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.reactor = ThreadedMemoryReactorClock()
+        self.reactor, self.clock = get_clock()
 
         self.mock_resolver = AsyncMock(spec=SrvResolver)
 
@@ -98,6 +98,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         self.well_known_resolver = WellKnownResolver(
             server_name="OUR_STUB_HOMESERVER_NAME",
             reactor=self.reactor,
+            clock=self.clock,
             agent=Agent(self.reactor, contextFactory=self.tls_factory),
             user_agent=b"test-agent",
             well_known_cache=self.well_known_cache,
@@ -109,7 +110,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         client_factory: IProtocolFactory,
         ssl: bool = True,
         expected_sni: Optional[bytes] = None,
-        tls_sanlist: Optional[List[bytes]] = None,
+        tls_sanlist: Optional[list[bytes]] = None,
     ) -> HTTPChannel:
         """Builds a test server, and completes the outgoing client connection
         Args:
@@ -200,7 +201,10 @@ class MatrixFederationAgentTests(unittest.TestCase):
         """
         Sends a simple GET request via the agent, and checks its logcontext management
         """
-        with LoggingContext("one") as context:
+        with LoggingContext(
+            name="one",
+            server_name="test_server",
+        ) as context:
             fetch_d: Deferred[IResponse] = self.agent.request(b"GET", uri)
 
             # Nothing happened yet
@@ -277,6 +281,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         return MatrixFederationAgent(
             server_name="OUR_STUB_HOMESERVER_NAME",
             reactor=cast(ISynapseReactor, self.reactor),
+            clock=self.clock,
             tls_client_options_factory=self.tls_factory,
             user_agent=b"test-agent",  # Note that this is unused since _well_known_resolver is provided.
             ip_allowlist=IPSet(),
@@ -1021,6 +1026,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         agent = MatrixFederationAgent(
             server_name="OUR_STUB_HOMESERVER_NAME",
             reactor=self.reactor,
+            clock=self.clock,
             tls_client_options_factory=tls_factory,
             user_agent=b"test-agent",  # This is unused since _well_known_resolver is passed below.
             ip_allowlist=IPSet(),
@@ -1030,6 +1036,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
             _well_known_resolver=WellKnownResolver(
                 server_name="OUR_STUB_HOMESERVER_NAME",
                 reactor=cast(ISynapseReactor, self.reactor),
+                clock=self.clock,
                 agent=Agent(self.reactor, contextFactory=tls_factory),
                 user_agent=b"test-agent",
                 well_known_cache=self.well_known_cache,

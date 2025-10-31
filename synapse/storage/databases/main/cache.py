@@ -21,8 +21,9 @@
 
 
 import itertools
+import json
 import logging
-from typing import TYPE_CHECKING, Any, Collection, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Collection, Iterable, Optional
 
 from synapse.api.constants import EventTypes
 from synapse.config._base import Config
@@ -61,6 +62,12 @@ PURGE_HISTORY_CACHE_NAME = "ph_cache_fake"
 
 # As above, but for invalidating room caches on room deletion
 DELETE_ROOM_CACHE_NAME = "dr_cache_fake"
+
+# This cache takes a list of tuples as its first argument, which requires
+# special handling.
+GET_E2E_CROSS_SIGNING_SIGNATURES_FOR_DEVICE_CACHE_NAME = (
+    "_get_e2e_cross_signing_signatures_for_device"
+)
 
 # How long between cache invalidation table cleanups, once we have caught up
 # with the backlog.
@@ -138,7 +145,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
 
     async def get_all_updated_caches(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple]], int, bool]:
         """Get updates for caches replication stream.
 
         Args:
@@ -165,7 +172,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
 
         def get_all_updated_caches_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+        ) -> tuple[list[tuple[int, tuple]], int, bool]:
             # We purposefully don't bound by the current token, as we want to
             # send across cache invalidations as quickly as possible. Cache
             # invalidations are idempotent, so duplicates are fine.
@@ -270,6 +277,33 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     # room membership.
                     #
                     # self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
+                elif (
+                    row.cache_func
+                    == GET_E2E_CROSS_SIGNING_SIGNATURES_FOR_DEVICE_CACHE_NAME
+                ):
+                    # "keys" is a list of strings, where each string is a
+                    # JSON-encoded representation of the tuple keys, i.e.
+                    # keys: ['["@userid:domain", "DEVICEID"]','["@userid2:domain", "DEVICEID2"]']
+                    #
+                    # This is a side-effect of not being able to send nested
+                    # information over replication.
+                    for json_str in row.keys:
+                        try:
+                            user_id, device_id = json.loads(json_str)
+                        except (json.JSONDecodeError, TypeError):
+                            logger.error(
+                                "Failed to deserialise cache key as valid JSON: %s",
+                                json_str,
+                            )
+                            continue
+
+                        # Invalidate each key.
+                        #
+                        # Note: .invalidate takes a tuple of arguments, hence the need
+                        # to nest our tuple in another tuple.
+                        self._get_e2e_cross_signing_signatures_for_device.invalidate(  # type: ignore[attr-defined]
+                            ((user_id, device_id),)
+                        )
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)
 
@@ -563,7 +597,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._invalidate_state_caches_all(room_id)
 
     async def invalidate_cache_and_stream(
-        self, cache_name: str, keys: Tuple[Any, ...]
+        self, cache_name: str, keys: tuple[Any, ...]
     ) -> None:
         """Invalidates the cache and adds it to the cache stream so other workers
         will know to invalidate their caches.
@@ -586,7 +620,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         cache_func: CachedFunction,
-        keys: Tuple[Any, ...],
+        keys: tuple[Any, ...],
     ) -> None:
         """Invalidates the cache and adds it to the cache stream so other workers
         will know to invalidate their caches.
@@ -602,7 +636,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         cache_func: CachedFunction,
-        key_tuples: Collection[Tuple[Any, ...]],
+        key_tuples: Collection[tuple[Any, ...]],
     ) -> None:
         """A bulk version of _invalidate_cache_and_stream.
 
@@ -717,7 +751,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     "instance_name": self._instance_name,
                     "cache_func": cache_name,
                     "keys": keys,
-                    "invalidation_ts": self._clock.time_msec(),
+                    "invalidation_ts": self.clock.time_msec(),
                 },
             )
 
@@ -725,7 +759,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         cache_name: str,
-        key_tuples: Collection[Tuple[Any, ...]],
+        key_tuples: Collection[tuple[Any, ...]],
     ) -> None:
         """Announce the invalidation of multiple (but not all) cache entries.
 
@@ -744,7 +778,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             assert self._cache_id_gen is not None
 
             stream_ids = self._cache_id_gen.get_next_mult_txn(txn, len(key_tuples))
-            ts = self._clock.time_msec()
+            ts = self.clock.time_msec()
             txn.call_after(self.hs.get_notifier().on_new_replication_data)
             self.db_pool.simple_insert_many_txn(
                 txn,
@@ -796,7 +830,8 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             next_interval = REGULAR_CLEANUP_INTERVAL_MS
 
         self.hs.get_clock().call_later(
-            next_interval / 1000, self._clean_up_cache_invalidation_wrapper
+            next_interval / 1000,
+            self._clean_up_cache_invalidation_wrapper,
         )
 
     async def _clean_up_batch_of_old_cache_invalidations(

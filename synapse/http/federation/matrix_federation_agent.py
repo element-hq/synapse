@@ -19,7 +19,7 @@
 #
 import logging
 import urllib.parse
-from typing import Any, Generator, List, Optional
+from typing import Any, Generator, Optional
 from urllib.request import (  # type: ignore[attr-defined]
     proxy_bypass_environment,
 )
@@ -49,7 +49,7 @@ from synapse.http.federation.well_known_resolver import WellKnownResolver
 from synapse.http.proxyagent import ProxyAgent
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import ISynapseReactor
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,9 @@ class MatrixFederationAgent:
 
     Args:
         reactor: twisted reactor to use for underlying requests
+
+        clock: Internal `HomeServer` clock used to track delayed and looping calls.
+            Should be obtained from `hs.get_clock()`.
 
         tls_client_options_factory:
             factory to use for fetching client tls options, or none to disable TLS.
@@ -97,6 +100,7 @@ class MatrixFederationAgent:
         *,
         server_name: str,
         reactor: ISynapseReactor,
+        clock: Clock,
         tls_client_options_factory: Optional[FederationPolicyForHTTPS],
         user_agent: bytes,
         ip_allowlist: Optional[IPSet],
@@ -109,6 +113,7 @@ class MatrixFederationAgent:
         Args:
             server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
             reactor
+            clock: Should be the `hs` clock from `hs.get_clock()`
             tls_client_options_factory
             user_agent
             ip_allowlist
@@ -124,7 +129,6 @@ class MatrixFederationAgent:
         # addresses, to prevent DNS rebinding.
         reactor = BlocklistingReactorWrapper(reactor, ip_allowlist, ip_blocklist)
 
-        self._clock = Clock(reactor)
         self._pool = HTTPConnectionPool(reactor)
         self._pool.retryAutomatically = False
         self._pool.maxPersistentPerHost = 5
@@ -147,6 +151,7 @@ class MatrixFederationAgent:
             _well_known_resolver = WellKnownResolver(
                 server_name=server_name,
                 reactor=reactor,
+                clock=clock,
                 agent=BlocklistingAgentWrapper(
                     ProxyAgent(
                         reactor=reactor,
@@ -408,7 +413,7 @@ class MatrixHostnameEndpoint:
         # to try and if that doesn't work then we'll have an exception.
         raise Exception("Failed to resolve server %r" % (self._parsed_uri.netloc,))
 
-    async def _resolve_server(self) -> List[Server]:
+    async def _resolve_server(self) -> list[Server]:
         """Resolves the server name to a list of hosts and ports to attempt to
         connect to.
         """

@@ -24,7 +24,7 @@
 import logging
 import urllib.parse
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from canonicaljson import encode_canonical_json
 
@@ -36,7 +36,7 @@ from synapse.rest.client import login, profile, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.profile import MAX_PROFILE_SIZE
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.utils import USE_POSTGRES_FOR_TESTS
@@ -778,7 +778,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
-    def _setup_local_files(self, names_and_props: Dict[str, Dict[str, Any]]) -> None:
+    def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 
         Args:

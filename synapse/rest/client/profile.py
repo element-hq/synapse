@@ -23,7 +23,7 @@
 
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, SynapseError
@@ -69,7 +69,7 @@ class ProfileRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester_user = None
 
         if self.hs.config.server.require_auth_for_profile_requests:
@@ -109,10 +109,16 @@ class ProfileFieldRestServlet(RestServlet):
         self.hs = hs
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
+        if hs.config.experimental.msc4133_enabled:
+            self.PATTERNS.append(
+                re.compile(
+                    r"^/_matrix/client/unstable/uk\.tcpip\.msc4133/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)"
+                )
+            )
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester_user = None
 
         if self.hs.config.server.require_auth_for_profile_requests:
@@ -150,7 +156,7 @@ class ProfileFieldRestServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, field_name: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         if not UserID.is_valid(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
@@ -215,7 +221,7 @@ class ProfileFieldRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str, field_name: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         if not UserID.is_valid(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM

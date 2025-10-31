@@ -21,13 +21,9 @@
 import datetime
 from typing import (
     Collection,
-    Dict,
-    FrozenSet,
     Iterable,
-    List,
     Mapping,
-    Set,
-    Tuple,
+    NamedTuple,
     TypeVar,
     Union,
     cast,
@@ -52,7 +48,8 @@ from synapse.storage.database import LoggingTransaction
 from synapse.storage.types import Cursor
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict
-from synapse.util import Clock, json_encoder
+from synapse.util.clock import Clock
+from synapse.util.json import json_encoder
 
 import tests.unittest
 import tests.utils
@@ -72,7 +69,7 @@ import tests.utils
 #     |   |
 #     K   J
 
-AUTH_GRAPH: Dict[str, List[str]] = {
+AUTH_GRAPH: dict[str, list[str]] = {
     "a": ["e"],
     "b": ["e"],
     "c": ["g", "i"],
@@ -106,7 +103,7 @@ T = TypeVar("T")
 def get_all_topologically_sorted_orders(
     nodes: Iterable[T],
     graph: Mapping[T, Collection[T]],
-) -> List[List[T]]:
+) -> list[list[T]]:
     """Given a set of nodes and a graph, return all possible topological
     orderings.
     """
@@ -115,7 +112,7 @@ def get_all_topologically_sorted_orders(
     # we have a choice over which node to consider next.
 
     degree_map = dict.fromkeys(nodes, 0)
-    reverse_graph: Dict[T, Set[T]] = {}
+    reverse_graph: dict[T, set[T]] = {}
 
     for node, edges in graph.items():
         if node not in degree_map:
@@ -136,10 +133,10 @@ def get_all_topologically_sorted_orders(
 
 
 def _get_all_topologically_sorted_orders_inner(
-    reverse_graph: Dict[T, Set[T]],
-    zero_degree: List[T],
-    degree_map: Dict[T, int],
-) -> List[List[T]]:
+    reverse_graph: dict[T, set[T]],
+    zero_degree: list[T],
+    degree_map: dict[T, int],
+) -> list[list[T]]:
     new_paths = []
 
     # Rather than only choosing *one* item from the list of nodes with zero
@@ -173,7 +170,7 @@ def _get_all_topologically_sorted_orders_inner(
 def get_all_topologically_consistent_subsets(
     nodes: Iterable[T],
     graph: Mapping[T, Collection[T]],
-) -> Set[FrozenSet[T]]:
+) -> set[frozenset[T]]:
     """Get all subsets of the graph where if node N is in the subgraph, then all
     nodes that can reach that node (i.e. for all X there exists a path X -> N)
     are in the subgraph.
@@ -193,7 +190,7 @@ def get_all_topologically_consistent_subsets(
 @attr.s(auto_attribs=True, frozen=True, slots=True)
 class _BackfillSetupInfo:
     room_id: str
-    depth_map: Dict[str, int]
+    depth_map: dict[str, int]
 
 
 class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
@@ -571,7 +568,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         #     |   |
         #     K   J
 
-        auth_graph: Dict[str, List[str]] = {
+        auth_graph: dict[str, list[str]] = {
             "a": ["e"],
             "b": ["e"],
             "c": ["g", "i"],
@@ -730,6 +727,202 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         )
         self.assertSetEqual(difference, set())
 
+    def test_conflicted_subgraph(self) -> None:
+        """Test that the conflicted subgraph code in state res v2.1 can walk arbitrary length links
+        and chains.
+
+        We construct a chain cover index like this:
+
+        A1 <- A2 <- A3
+               ^--- B1 <- B2 <- B3
+                           ^--- C1 <- C2 <- C3     v--- G1 <- G2
+                                 ^--- D1 <- D2 <- D3
+                                             ^--- E1
+                                                   ^--- F1 <- F2
+
+        ..and then pick various events to be conflicted / additional backwards reachable to assert
+        that the code walks the chains correctly. We're particularly interested in ensuring that
+        the code walks multiple links between chains, hence why we have so many chains.
+        """
+
+        class TestNode(NamedTuple):
+            event_id: str
+            chain_id: int
+            seq_num: int
+
+        class TestLink(NamedTuple):
+            origin_chain_and_seq: tuple[int, int]
+            target_chain_and_seq: tuple[int, int]
+
+        # Map to chain IDs / seq nums
+        nodes: list[TestNode] = [
+            TestNode("A1", 1, 1),
+            TestNode("A2", 1, 2),
+            TestNode("A3", 1, 3),
+            TestNode("B1", 2, 1),
+            TestNode("B2", 2, 2),
+            TestNode("B3", 2, 3),
+            TestNode("C1", 3, 1),
+            TestNode("C2", 3, 2),
+            TestNode("C3", 3, 3),
+            TestNode("D1", 4, 1),
+            TestNode("D2", 4, 2),
+            TestNode("D3", 4, 3),
+            TestNode("E1", 5, 1),
+            TestNode("F1", 6, 1),
+            TestNode("F2", 6, 2),
+            TestNode("G1", 7, 1),
+            TestNode("G2", 7, 2),
+        ]
+        links: list[TestLink] = [
+            TestLink((2, 1), (1, 2)),  # B1 -> A2
+            TestLink((3, 1), (2, 2)),  # C1 -> B2
+            TestLink((4, 1), (3, 1)),  # D1 -> C1
+            TestLink((5, 1), (4, 2)),  # E1 -> D2
+            TestLink((6, 1), (5, 1)),  # F1 -> E1
+            TestLink((7, 1), (4, 3)),  # G1 -> D3
+        ]
+
+        # populate the chain cover index tables as that's all we need
+        for node in nodes:
+            self.get_success(
+                self.store.db_pool.simple_insert(
+                    "event_auth_chains",
+                    {
+                        "event_id": node.event_id,
+                        "chain_id": node.chain_id,
+                        "sequence_number": node.seq_num,
+                    },
+                    desc="insert",
+                )
+            )
+        for link in links:
+            self.get_success(
+                self.store.db_pool.simple_insert(
+                    "event_auth_chain_links",
+                    {
+                        "origin_chain_id": link.origin_chain_and_seq[0],
+                        "origin_sequence_number": link.origin_chain_and_seq[1],
+                        "target_chain_id": link.target_chain_and_seq[0],
+                        "target_sequence_number": link.target_chain_and_seq[1],
+                    },
+                    desc="insert",
+                )
+            )
+
+        # Define the test cases
+        class TestCase(NamedTuple):
+            name: str
+            conflicted: set[str]
+            additional_backwards_reachable: set[str]
+            want_conflicted_subgraph: set[str]
+
+        # Reminder:
+        # A1 <- A2 <- A3
+        #        ^--- B1 <- B2 <- B3
+        #                    ^--- C1 <- C2 <- C3     v--- G1 <- G2
+        #                          ^--- D1 <- D2 <- D3
+        #                                      ^--- E1
+        #                                            ^--- F1 <- F2
+        test_cases = [
+            TestCase(
+                name="basic_single_chain",
+                conflicted={"B1", "B3"},
+                additional_backwards_reachable=set(),
+                want_conflicted_subgraph={"B1", "B2", "B3"},
+            ),
+            TestCase(
+                name="basic_single_link",
+                conflicted={"A1", "B2"},
+                additional_backwards_reachable=set(),
+                want_conflicted_subgraph={"A1", "A2", "B1", "B2"},
+            ),
+            TestCase(
+                name="basic_multi_link",
+                conflicted={"B1", "F1"},
+                additional_backwards_reachable=set(),
+                want_conflicted_subgraph={"B1", "B2", "C1", "D1", "D2", "E1", "F1"},
+            ),
+            # Repeat these tests but put the later event as an additional backwards reachable event.
+            # The output should be the same.
+            TestCase(
+                name="basic_single_chain_as_additional",
+                conflicted={"B1"},
+                additional_backwards_reachable={"B3"},
+                want_conflicted_subgraph={"B1", "B2", "B3"},
+            ),
+            TestCase(
+                name="basic_single_link_as_additional",
+                conflicted={"A1"},
+                additional_backwards_reachable={"B2"},
+                want_conflicted_subgraph={"A1", "A2", "B1", "B2"},
+            ),
+            TestCase(
+                name="basic_multi_link_as_additional",
+                conflicted={"B1"},
+                additional_backwards_reachable={"F1"},
+                want_conflicted_subgraph={"B1", "B2", "C1", "D1", "D2", "E1", "F1"},
+            ),
+            TestCase(
+                name="mixed_multi_link",
+                conflicted={"D1", "F1"},
+                additional_backwards_reachable={"G1"},
+                want_conflicted_subgraph={"D1", "D2", "D3", "E1", "F1", "G1"},
+            ),
+            TestCase(
+                name="additional_backwards_doesnt_add_forwards_info",
+                conflicted={"C1", "C3"},
+                # This is on the path to the root but Chain C isn't forwards reachable so this doesn't
+                # change anything.
+                additional_backwards_reachable={"B1"},
+                want_conflicted_subgraph={"C1", "C2", "C3"},
+            ),
+            TestCase(
+                name="empty_subgraph",
+                conflicted={
+                    "B3",
+                    "C3",
+                },  # these can't reach each other going forwards, so the subgraph is empty
+                additional_backwards_reachable=set(),
+                want_conflicted_subgraph={"B3", "C3"},
+            ),
+            TestCase(
+                name="empty_subgraph_with_additional",
+                conflicted={"C1"},
+                # This is on the path to the root but Chain C isn't forwards reachable so this doesn't
+                # change anything.
+                additional_backwards_reachable={"B1"},
+                want_conflicted_subgraph={"C1"},
+            ),
+            TestCase(
+                name="empty_subgraph_single_conflict",
+                conflicted={"C1"},  # no subgraph can form as you need 2+
+                additional_backwards_reachable=set(),
+                want_conflicted_subgraph={"C1"},
+            ),
+        ]
+
+        def run_test(txn: LoggingTransaction, test_case: TestCase) -> None:
+            result = self.store._get_auth_chain_difference_using_cover_index_txn(
+                txn,
+                "!not_relevant",
+                [test_case.conflicted.union(test_case.additional_backwards_reachable)],
+                test_case.conflicted,
+                test_case.additional_backwards_reachable,
+            )
+            self.assertEquals(
+                result.conflicted_subgraph,
+                test_case.want_conflicted_subgraph,
+                f"{test_case.name} : conflicted subgraph mismatch",
+            )
+
+        for test_case in test_cases:
+            self.get_success(
+                self.store.db_pool.runInteraction(
+                    f"test_case_{test_case.name}", run_test, test_case
+                )
+            )
+
     @parameterized.expand(
         [(room_version,) for room_version in KNOWN_ROOM_VERSIONS.values()]
     )
@@ -738,7 +931,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
 
         room_id = "some_room_id"
 
-        def prev_event_format(prev_event_id: str) -> Union[Tuple[str, dict], str]:
+        def prev_event_format(prev_event_id: str) -> Union[tuple[str, dict], str]:
             """Account for differences in prev_events format across room versions"""
             if room_version.event_format == EventFormatVersions.ROOM_V1_V2:
                 return prev_event_id, {}
@@ -836,7 +1029,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         #    |
         #    5 (newest)
 
-        event_graph: Dict[str, List[str]] = {
+        event_graph: dict[str, list[str]] = {
             "1": [],
             "2": ["1"],
             "3": ["2", "A"],
@@ -852,7 +1045,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             "b6": ["3"],
         }
 
-        depth_map: Dict[str, int] = {
+        depth_map: dict[str, int] = {
             "1": 1,
             "2": 2,
             "b1": 3,
@@ -872,7 +1065,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         # The rest are events in the room but not backfilled tet.
         our_server_events = {"5", "4", "B", "3", "A"}
 
-        complete_event_dict_map: Dict[str, JsonDict] = {}
+        complete_event_dict_map: dict[str, JsonDict] = {}
         stream_ordering = 0
         for event_id, prev_event_ids in event_graph.items():
             depth = depth_map[event_id]
@@ -1227,14 +1420,14 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
 class FakeEvent:
     event_id: str
     room_id: str
-    auth_events: List[str]
+    auth_events: list[str]
 
     type = "foo"
     state_key = "foo"
 
     internal_metadata = EventInternalMetadata({})
 
-    def auth_event_ids(self) -> List[str]:
+    def auth_event_ids(self) -> list[str]:
         return self.auth_events
 
     def is_state(self) -> bool:

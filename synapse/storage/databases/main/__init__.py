@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, List, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Optional, Union, cast
 
 import attr
 
@@ -188,9 +188,9 @@ class DataStore(
         order_by: str = UserSortOrder.NAME.value,
         direction: Direction = Direction.FORWARDS,
         approved: bool = True,
-        not_user_types: Optional[List[str]] = None,
+        not_user_types: Optional[list[str]] = None,
         locked: bool = False,
-    ) -> Tuple[List[UserPaginateResponse], int]:
+    ) -> tuple[list[UserPaginateResponse], int]:
         """Function to retrieve a paginated list of users from
         users list. This will return a json list of users and the
         total number of users matching the filter criteria.
@@ -216,7 +216,7 @@ class DataStore(
 
         def get_users_paginate_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[UserPaginateResponse], int]:
+        ) -> tuple[list[UserPaginateResponse], int]:
             filters = []
             args: list = []
 
@@ -301,18 +301,23 @@ class DataStore(
                 LEFT JOIN erased_users AS eu ON u.name = eu.user_id
                 LEFT JOIN (
                     SELECT user_id, MAX(last_seen) AS last_seen_ts
+                    FROM devices GROUP BY user_id
+                ) lsd ON u.name = lsd.user_id
+                LEFT JOIN (
+                    SELECT user_id, MAX(last_seen) AS last_seen_ts
                     FROM user_ips GROUP BY user_id
-                ) ls ON u.name = ls.user_id
+                ) lsi ON u.name = lsi.user_id
                 {where_clause}
                 """
             sql = "SELECT COUNT(*) as total_users " + sql_base
             txn.execute(sql, args)
-            count = cast(Tuple[int], txn.fetchone())[0]
+            count = cast(tuple[int], txn.fetchone())[0]
 
             sql = f"""
                 SELECT name, user_type, is_guest, admin, deactivated, shadow_banned,
                 displayname, avatar_url, creation_ts * 1000 as creation_ts, approved,
-                eu.user_id is not null as erased, last_seen_ts, locked
+                eu.user_id is not null as erased,
+                COALESCE(lsd.last_seen_ts, lsi.last_seen_ts) as last_seen_ts, locked
                 {sql_base}
                 ORDER BY {order_by_column} {order}, u.name ASC
                 LIMIT ? OFFSET ?
@@ -346,8 +351,8 @@ class DataStore(
 
     async def search_users(
         self, term: str
-    ) -> List[
-        Tuple[str, Optional[str], Union[int, bool], Union[int, bool], Optional[str]]
+    ) -> list[
+        tuple[str, Optional[str], Union[int, bool], Union[int, bool], Optional[str]]
     ]:
         """Function to search users list for one or more users with
         the matched term.
@@ -361,8 +366,8 @@ class DataStore(
 
         def search_users(
             txn: LoggingTransaction,
-        ) -> List[
-            Tuple[str, Optional[str], Union[int, bool], Union[int, bool], Optional[str]]
+        ) -> list[
+            tuple[str, Optional[str], Union[int, bool], Union[int, bool], Optional[str]]
         ]:
             search_term = "%%" + term + "%%"
 
@@ -374,8 +379,8 @@ class DataStore(
             txn.execute(sql, (search_term,))
 
             return cast(
-                List[
-                    Tuple[
+                list[
+                    tuple[
                         str,
                         Optional[str],
                         Union[int, bool],

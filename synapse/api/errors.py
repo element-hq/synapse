@@ -26,11 +26,11 @@ import math
 import typing
 from enum import Enum
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 from twisted.web import http
 
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 
 if typing.TYPE_CHECKING:
     from synapse.config.homeserver import HomeServerConfig
@@ -140,11 +140,17 @@ class Codes(str, Enum):
     # Part of MSC4155
     INVITE_BLOCKED = "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED"
 
+    # Part of MSC4190
+    APPSERVICE_LOGIN_UNSUPPORTED = "IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED"
+
     # Part of MSC4306: Thread Subscriptions
     MSC4306_CONFLICTING_UNSUBSCRIPTION = (
         "IO.ELEMENT.MSC4306.M_CONFLICTING_UNSUBSCRIPTION"
     )
     MSC4306_NOT_IN_THREAD = "IO.ELEMENT.MSC4306.M_NOT_IN_THREAD"
+
+    # Part of MSC4326
+    UNKNOWN_DEVICE = "ORG.MATRIX.MSC4326.M_UNKNOWN_DEVICE"
 
 
 class CodeMessageException(RuntimeError):
@@ -160,7 +166,7 @@ class CodeMessageException(RuntimeError):
         self,
         code: Union[int, HTTPStatus],
         msg: str,
-        headers: Optional[Dict[str, str]] = None,
+        headers: Optional[dict[str, str]] = None,
     ):
         super().__init__("%d: %s" % (code, msg))
 
@@ -195,7 +201,7 @@ class RedirectException(CodeMessageException):
         super().__init__(code=http_code, msg=msg)
         self.location = location
 
-        self.cookies: List[bytes] = []
+        self.cookies: list[bytes] = []
 
 
 class SynapseError(CodeMessageException):
@@ -217,8 +223,8 @@ class SynapseError(CodeMessageException):
         code: int,
         msg: str,
         errcode: str = Codes.UNKNOWN,
-        additional_fields: Optional[Dict] = None,
-        headers: Optional[Dict[str, str]] = None,
+        additional_fields: Optional[dict] = None,
+        headers: Optional[dict[str, str]] = None,
     ):
         """Constructs a synapse error.
 
@@ -230,7 +236,7 @@ class SynapseError(CodeMessageException):
         super().__init__(code, msg, headers)
         self.errcode = errcode
         if additional_fields is None:
-            self._additional_fields: Dict = {}
+            self._additional_fields: dict = {}
         else:
             self._additional_fields = dict(additional_fields)
 
@@ -270,7 +276,7 @@ class ProxiedRequestError(SynapseError):
         code: int,
         msg: str,
         errcode: str = Codes.UNKNOWN,
-        additional_fields: Optional[Dict] = None,
+        additional_fields: Optional[dict] = None,
     ):
         super().__init__(code, msg, errcode, additional_fields)
 
@@ -403,7 +409,7 @@ class OAuthInsufficientScopeError(SynapseError):
 
     def __init__(
         self,
-        required_scopes: List[str],
+        required_scopes: list[str],
     ):
         headers = {
             "WWW-Authenticate": 'Bearer error="insufficient_scope", scope="%s"'

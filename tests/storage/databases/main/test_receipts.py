@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Optional, Sequence
 
 from twisted.internet.testing import MemoryReactor
 
@@ -27,7 +27,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -51,8 +51,8 @@ class ReceiptsBackgroundUpdateStoreTestCase(HomeserverTestCase):
         update_name: str,
         index_name: str,
         table: str,
-        receipts: Dict[Tuple[str, str, str], Sequence[Dict[str, Any]]],
-        expected_unique_receipts: Dict[Tuple[str, str, str], Optional[Dict[str, Any]]],
+        receipts: dict[tuple[str, str, str], Sequence[dict[str, Any]]],
+        expected_unique_receipts: dict[tuple[str, str, str], Optional[dict[str, Any]]],
     ) -> None:
         """Test that the background update to uniqueify non-thread receipts in
         the given receipts table works properly.

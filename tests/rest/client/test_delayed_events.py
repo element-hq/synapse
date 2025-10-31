@@ -15,7 +15,6 @@
 """Tests REST events for /delayed_events paths."""
 
 from http import HTTPStatus
-from typing import List
 
 from parameterized import parameterized
 
@@ -26,7 +25,7 @@ from synapse.rest import admin
 from synapse.rest.client import delayed_events, login, room, versions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import HomeserverTestCase
@@ -574,7 +573,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-    def _get_delayed_events(self) -> List[JsonDict]:
+    def _get_delayed_events(self) -> list[JsonDict]:
         channel = self.make_request(
             "GET",
             PATH_PREFIX,

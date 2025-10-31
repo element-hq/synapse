@@ -183,13 +183,10 @@ from typing import (
     Callable,
     Collection,
     ContextManager,
-    Dict,
     Generator,
     Iterable,
-    List,
     Optional,
     Pattern,
-    Type,
     TypeVar,
     Union,
     cast,
@@ -204,7 +201,7 @@ from twisted.web.http import Request
 from twisted.web.http_headers import Headers
 
 from synapse.config import ConfigError
-from synapse.util import json_decoder, json_encoder
+from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
     from synapse.http.site import SynapseRequest
@@ -292,7 +289,7 @@ try:
             except Exception:
                 logger.exception("Failed to report span")
 
-    RustReporter: Optional[Type[_WrappedRustReporter]] = _WrappedRustReporter
+    RustReporter: Optional[type[_WrappedRustReporter]] = _WrappedRustReporter
 except ImportError:
     RustReporter = None
 
@@ -536,8 +533,8 @@ def whitelisted_homeserver(destination: str) -> bool:
 def start_active_span(
     operation_name: str,
     child_of: Optional[Union["opentracing.Span", "opentracing.SpanContext"]] = None,
-    references: Optional[List["opentracing.Reference"]] = None,
-    tags: Optional[Dict[str, str]] = None,
+    references: Optional[list["opentracing.Reference"]] = None,
+    tags: Optional[dict[str, str]] = None,
     start_time: Optional[float] = None,
     ignore_active_span: bool = False,
     finish_on_close: bool = True,
@@ -577,7 +574,9 @@ def start_active_span_follows_from(
     operation_name: str,
     contexts: Collection,
     child_of: Optional[Union["opentracing.Span", "opentracing.SpanContext"]] = None,
+    tags: Optional[dict[str, str]] = None,
     start_time: Optional[float] = None,
+    ignore_active_span: bool = False,
     *,
     inherit_force_tracing: bool = False,
     tracer: Optional["opentracing.Tracer"] = None,
@@ -592,8 +591,15 @@ def start_active_span_follows_from(
            span will be the parent. (If there is no currently active span, the first
            span in `contexts` will be the parent.)
 
+        tags: an optional dictionary of span tags. The caller gives up ownership of that
+            dictionary, because the :class:`Tracer` may use it as-is to avoid extra data
+            copying.
+
         start_time: optional override for the start time of the created span. Seconds
             since the epoch.
+
+        ignore_active_span: an explicit flag that ignores the current active
+            scope and creates a root span.
 
         inherit_force_tracing: if set, and any of the previous contexts have had tracing
            forced, the new span will also have tracing forced.
@@ -607,7 +613,9 @@ def start_active_span_follows_from(
         operation_name,
         child_of=child_of,
         references=references,
+        tags=tags,
         start_time=start_time,
+        ignore_active_span=ignore_active_span,
         tracer=tracer,
     )
 
@@ -620,10 +628,10 @@ def start_active_span_follows_from(
 
 
 def start_active_span_from_edu(
-    edu_content: Dict[str, Any],
+    edu_content: dict[str, Any],
     operation_name: str,
-    references: Optional[List["opentracing.Reference"]] = None,
-    tags: Optional[Dict[str, str]] = None,
+    references: Optional[list["opentracing.Reference"]] = None,
+    tags: Optional[dict[str, str]] = None,
     start_time: Optional[float] = None,
     ignore_active_span: bool = False,
     finish_on_close: bool = True,
@@ -673,9 +681,21 @@ def start_active_span_from_edu(
 
 # Opentracing setters for tags, logs, etc
 @only_if_tracing
-def active_span() -> Optional["opentracing.Span"]:
-    """Get the currently active span, if any"""
-    return opentracing.tracer.active_span
+def active_span(
+    *,
+    tracer: Optional["opentracing.Tracer"] = None,
+) -> Optional["opentracing.Span"]:
+    """
+    Get the currently active span, if any
+
+    Args:
+        tracer: override the opentracing tracer. By default the global tracer is used.
+    """
+    if tracer is None:
+        # use the global tracer by default
+        tracer = opentracing.tracer
+
+    return tracer.active_span
 
 
 @ensure_active_span("set a tag")
@@ -686,7 +706,7 @@ def set_tag(key: str, value: Union[str, bool, int, float]) -> None:
 
 
 @ensure_active_span("log")
-def log_kv(key_values: Dict[str, Any], timestamp: Optional[float] = None) -> None:
+def log_kv(key_values: dict[str, Any], timestamp: Optional[float] = None) -> None:
     """Log to the active span"""
     assert opentracing.tracer.active_span is not None
     opentracing.tracer.active_span.log_kv(key_values, timestamp)
@@ -737,7 +757,7 @@ def is_context_forced_tracing(
 
 @ensure_active_span("inject the span into a header dict")
 def inject_header_dict(
-    headers: Dict[bytes, List[bytes]],
+    headers: dict[bytes, list[bytes]],
     destination: Optional[str] = None,
     check_destination: bool = True,
 ) -> None:
@@ -769,7 +789,7 @@ def inject_header_dict(
 
     span = opentracing.tracer.active_span
 
-    carrier: Dict[str, str] = {}
+    carrier: dict[str, str] = {}
     assert span is not None
     opentracing.tracer.inject(span.context, opentracing.Format.HTTP_HEADERS, carrier)
 
@@ -797,16 +817,16 @@ def inject_response_headers(response_headers: Headers) -> None:
 
 
 @ensure_active_span("inject the span into a header dict")
-def inject_request_headers(headers: Dict[str, str]) -> None:
+def inject_request_headers(headers: dict[str, str]) -> None:
     span = opentracing.tracer.active_span
     assert span is not None
     opentracing.tracer.inject(span.context, opentracing.Format.HTTP_HEADERS, headers)
 
 
 @ensure_active_span(
-    "get the active span context as a dict", ret=cast(Dict[str, str], {})
+    "get the active span context as a dict", ret=cast(dict[str, str], {})
 )
-def get_active_span_text_map(destination: Optional[str] = None) -> Dict[str, str]:
+def get_active_span_text_map(destination: Optional[str] = None) -> dict[str, str]:
     """
     Gets a span context as a dict. This can be used instead of manually
     injecting a span into an empty carrier.
@@ -821,7 +841,7 @@ def get_active_span_text_map(destination: Optional[str] = None) -> Dict[str, str
     if destination and not whitelisted_homeserver(destination):
         return {}
 
-    carrier: Dict[str, str] = {}
+    carrier: dict[str, str] = {}
     assert opentracing.tracer.active_span is not None
     opentracing.tracer.inject(
         opentracing.tracer.active_span.context, opentracing.Format.TEXT_MAP, carrier
@@ -836,7 +856,7 @@ def active_span_context_as_string() -> str:
     Returns:
         The active span context encoded as a string.
     """
-    carrier: Dict[str, str] = {}
+    carrier: dict[str, str] = {}
     if opentracing:
         assert opentracing.tracer.active_span is not None
         opentracing.tracer.inject(
@@ -865,12 +885,12 @@ def span_context_from_string(carrier: str) -> Optional["opentracing.SpanContext"
     Returns:
         The active span context decoded from a string.
     """
-    payload: Dict[str, str] = json_decoder.decode(carrier)
+    payload: dict[str, str] = json_decoder.decode(carrier)
     return opentracing.tracer.extract(opentracing.Format.TEXT_MAP, payload)
 
 
 @only_if_tracing
-def extract_text_map(carrier: Dict[str, str]) -> Optional["opentracing.SpanContext"]:
+def extract_text_map(carrier: dict[str, str]) -> Optional["opentracing.SpanContext"]:
     """
     Wrapper method for opentracing's tracer.extract for TEXT_MAP.
     Args:

@@ -26,13 +26,10 @@ import threading
 from typing import (
     Callable,
     Collection,
-    Dict,
     Generic,
     MutableMapping,
     Optional,
-    Set,
     Sized,
-    Tuple,
     TypeVar,
     Union,
     cast,
@@ -47,6 +44,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache, iterate_tree_cache_entry
+from synapse.util.clock import Clock
 
 cache_pending_metric = Gauge(
     "synapse_util_caches_cache_pending",
@@ -82,6 +80,7 @@ class DeferredCache(Generic[KT, VT]):
         self,
         *,
         name: str,
+        clock: Clock,
         server_name: str,
         max_entries: int = 1000,
         tree: bool = False,
@@ -103,6 +102,7 @@ class DeferredCache(Generic[KT, VT]):
             prune_unread_entries: If True, cache entries that haven't been read recently
                 will be evicted from the cache in the background. Set to False to
                 opt-out of this behaviour.
+            clock: The homeserver `Clock` instance
         """
         cache_type = TreeCache if tree else dict
 
@@ -120,6 +120,7 @@ class DeferredCache(Generic[KT, VT]):
         # a Deferred.
         self.cache: LruCache[KT, VT] = LruCache(
             max_size=max_entries,
+            clock=clock,
             server_name=server_name,
             cache_name=name,
             cache_type=cache_type,
@@ -199,7 +200,7 @@ class DeferredCache(Generic[KT, VT]):
         self,
         keys: Collection[KT],
         callback: Optional[Callable[[], None]] = None,
-    ) -> Tuple[Dict[KT, VT], Optional["defer.Deferred[Dict[KT, VT]]"], Collection[KT]]:
+    ) -> tuple[dict[KT, VT], Optional["defer.Deferred[dict[KT, VT]]"], Collection[KT]]:
         """Bulk lookup of items in the cache.
 
         Returns:
@@ -454,7 +455,7 @@ class CacheEntrySingle(CacheEntry[KT, VT]):
 
     def __init__(self, deferred: "defer.Deferred[VT]") -> None:
         self._deferred = ObservableDeferred(deferred, consumeErrors=True)
-        self._callbacks: Set[Callable[[], None]] = set()
+        self._callbacks: set[Callable[[], None]] = set()
 
     def deferred(self, key: KT) -> "defer.Deferred[VT]":
         return self._deferred.observe()
@@ -477,9 +478,9 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
     __slots__ = ["_deferred", "_callbacks", "_global_callbacks"]
 
     def __init__(self) -> None:
-        self._deferred: Optional[ObservableDeferred[Dict[KT, VT]]] = None
-        self._callbacks: Dict[KT, Set[Callable[[], None]]] = {}
-        self._global_callbacks: Set[Callable[[], None]] = set()
+        self._deferred: Optional[ObservableDeferred[dict[KT, VT]]] = None
+        self._callbacks: dict[KT, set[Callable[[], None]]] = {}
+        self._global_callbacks: set[Callable[[], None]] = set()
 
     def deferred(self, key: KT) -> "defer.Deferred[VT]":
         if not self._deferred:
@@ -509,7 +510,7 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
     def complete_bulk(
         self,
         cache: DeferredCache[KT, VT],
-        result: Dict[KT, VT],
+        result: dict[KT, VT],
     ) -> None:
         """Called when there is a result"""
         for key, value in result.items():

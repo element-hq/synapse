@@ -29,12 +29,8 @@ from typing import (
     TYPE_CHECKING,
     Awaitable,
     BinaryIO,
-    Dict,
     Generator,
-    List,
     Optional,
-    Tuple,
-    Type,
 )
 
 import attr
@@ -54,8 +50,8 @@ from synapse.logging.context import (
     make_deferred_yieldable,
     run_in_background,
 )
-from synapse.util import Clock
 from synapse.util.async_helpers import DeferredEvent
+from synapse.util.clock import Clock
 from synapse.util.stringutils import is_ascii
 
 if TYPE_CHECKING:
@@ -505,7 +501,7 @@ class Responder(ABC):
 
     def __exit__(  # noqa: B027
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
@@ -570,7 +566,7 @@ class FileInfo:
         return self.thumbnail.length
 
 
-def get_filename_from_headers(headers: Dict[bytes, List[bytes]]) -> Optional[str]:
+def get_filename_from_headers(headers: dict[bytes, list[bytes]]) -> Optional[str]:
     """
     Get the filename of the downloaded file by inspecting the
     Content-Disposition HTTP header.
@@ -618,7 +614,7 @@ def get_filename_from_headers(headers: Dict[bytes, List[bytes]]) -> Optional[str
     return upload_name
 
 
-def _parse_header(line: bytes) -> Tuple[bytes, Dict[bytes, bytes]]:
+def _parse_header(line: bytes) -> tuple[bytes, dict[bytes, bytes]]:
     """Parse a Content-type like header.
 
     Cargo-culted from `cgi`, but works on bytes rather than strings.
@@ -704,6 +700,7 @@ class ThreadedFileSender:
 
     def __init__(self, hs: "HomeServer") -> None:
         self.reactor = hs.get_reactor()
+        self.clock = hs.get_clock()
         self.thread_pool = hs.get_media_sender_thread_pool()
 
         self.file: Optional[BinaryIO] = None
@@ -712,7 +709,7 @@ class ThreadedFileSender:
 
         # Signals if the thread should keep reading/sending data. Set means
         # continue, clear means pause.
-        self.wakeup_event = DeferredEvent(self.reactor)
+        self.wakeup_event = DeferredEvent(self.clock)
 
         # Signals if the thread should terminate, e.g. because the consumer has
         # gone away.

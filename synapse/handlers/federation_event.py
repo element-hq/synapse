@@ -27,13 +27,9 @@ from typing import (
     TYPE_CHECKING,
     Collection,
     Container,
-    Dict,
     Iterable,
-    List,
     Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 from prometheus_client import Counter, Histogram
@@ -66,7 +62,11 @@ from synapse.event_auth import (
     validate_event_for_room_version,
 )
 from synapse.events import EventBase
-from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
+from synapse.events.snapshot import (
+    EventContext,
+    EventPersistencePair,
+    UnpersistedEventContextBase,
+)
 from synapse.federation.federation_client import InvalidResponseError, PulledPduInfo
 from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import (
@@ -77,7 +77,6 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
 )
@@ -149,6 +148,7 @@ class FederationEventHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
+        self.hs = hs
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._state_store = hs.get_datastores().state
@@ -171,6 +171,7 @@ class FederationEventHandler:
         )
         self._notifier = hs.get_notifier()
 
+        self._server_name = hs.hostname
         self._is_mine_id = hs.is_mine_id
         self._is_mine_server_name = hs.is_mine_server_name
         self._instance_name = hs.get_instance_name()
@@ -185,9 +186,9 @@ class FederationEventHandler:
         # For each room, a list of (pdu, origin) tuples.
         # TODO: replace this with something more elegant, probably based around the
         # federation event staging area.
-        self.room_queues: Dict[str, List[Tuple[EventBase, str]]] = {}
+        self.room_queues: dict[str, list[tuple[EventBase, str]]] = {}
 
-        self._room_pdu_linearizer = Linearizer("fed_room_pdu")
+        self._room_pdu_linearizer = Linearizer(name="fed_room_pdu", clock=self._clock)
 
     async def on_receive_pdu(self, origin: str, pdu: EventBase) -> None:
         """Process a PDU received via a federation /send/ transaction
@@ -244,9 +245,10 @@ class FederationEventHandler:
             self.room_queues[room_id].append((pdu, origin))
             return
 
-        # If we're not in the room just ditch the event entirely. This is
-        # probably an old server that has come back and thinks we're still in
-        # the room (or we've been rejoined to the room by a state reset).
+        # If we're not in the room just ditch the event entirely (and not
+        # invited). This is probably an old server that has come back and thinks
+        # we're still in the room (or we've been rejoined to the room by a state
+        # reset).
         #
         # Note that if we were never in the room then we would have already
         # dropped the event, since we wouldn't know the room version.
@@ -254,6 +256,43 @@ class FederationEventHandler:
             room_id, self.server_name
         )
         if not is_in_room:
+            # Check if this is a leave event rescinding an invite
+            if (
+                pdu.type == EventTypes.Member
+                and pdu.membership == Membership.LEAVE
+                and pdu.state_key != pdu.sender
+                and self._is_mine_id(pdu.state_key)
+            ):
+                (
+                    membership,
+                    membership_event_id,
+                ) = await self._store.get_local_current_membership_for_user_in_room(
+                    pdu.state_key, pdu.room_id
+                )
+                if (
+                    membership == Membership.INVITE
+                    and membership_event_id
+                    and membership_event_id
+                    in pdu.auth_event_ids()  # The invite should be in the auth events of the rescission.
+                ):
+                    invite_event = await self._store.get_event(
+                        membership_event_id, allow_none=True
+                    )
+
+                    # We cannot fully auth the rescission event, but we can
+                    # check if the sender of the leave event is the same as the
+                    # invite.
+                    #
+                    # Technically, a room admin could rescind the invite, but we
+                    # have no way of knowing who is and isn't a room admin.
+                    if invite_event and pdu.sender == invite_event.sender:
+                        # Handle the rescission event
+                        pdu.internal_metadata.outlier = True
+                        pdu.internal_metadata.out_of_band_membership = True
+                        context = EventContext.for_outlier(self._storage_controllers)
+                        await self.persist_events_and_notify(room_id, [(pdu, context)])
+                        return
+
             logger.info(
                 "Ignoring PDU from %s as we're not in the room",
                 origin,
@@ -341,7 +380,7 @@ class FederationEventHandler:
 
     async def on_send_membership_event(
         self, origin: str, event: EventBase
-    ) -> Tuple[EventBase, EventContext]:
+    ) -> EventPersistencePair:
         """
         We have received a join/leave/knock event for a room via send_join/leave/knock.
 
@@ -468,8 +507,8 @@ class FederationEventHandler:
         self,
         origin: str,
         room_id: str,
-        auth_events: List[EventBase],
-        state: List[EventBase],
+        auth_events: list[EventBase],
+        state: list[EventBase],
         event: EventBase,
         room_version: RoomVersion,
         partial_state: bool,
@@ -552,7 +591,7 @@ class FederationEventHandler:
                 )
                 missing_event_ids = prev_event_ids - seen_event_ids
 
-                state_maps_to_resolve: List[StateMap[str]] = []
+                state_maps_to_resolve: list[StateMap[str]] = []
 
                 # Fetch the state after the prev events that we know about.
                 state_maps_to_resolve.extend(
@@ -712,7 +751,7 @@ class FederationEventHandler:
 
     @trace
     async def _get_missing_events_for_pdu(
-        self, origin: str, pdu: EventBase, prevs: Set[str], min_depth: int
+        self, origin: str, pdu: EventBase, prevs: set[str], min_depth: int
     ) -> None:
         """
         Args:
@@ -859,7 +898,7 @@ class FederationEventHandler:
             [event.event_id for event in events]
         )
 
-        new_events: List[EventBase] = []
+        new_events: list[EventBase] = []
         for event in events:
             event_id = event.event_id
 
@@ -932,9 +971,8 @@ class FederationEventHandler:
         # Process previously failed backfill events in the background to not waste
         # time on something that is likely to fail again.
         if len(events_with_failed_pull_attempts) > 0:
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "_process_new_pulled_events_with_failed_pull_attempts",
-                self.server_name,
                 _process_new_pulled_events,
                 events_with_failed_pull_attempts,
             )
@@ -1144,7 +1182,7 @@ class FederationEventHandler:
             partial_state = any(partial_state_flags.values())
 
             # state_maps is a list of mappings from (type, state_key) to event_id
-            state_maps: List[StateMap[str]] = []
+            state_maps: list[StateMap[str]] = []
 
             # Ask the remote server for the states we don't
             # know about
@@ -1526,9 +1564,8 @@ class FederationEventHandler:
                     resync = True
 
             if resync:
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "resync_device_due_to_pdu",
-                    self.server_name,
                     self._resync_device,
                     event.sender,
                 )
@@ -1606,7 +1643,7 @@ class FederationEventHandler:
 
         room_version = await self._store.get_room_version(room_id)
 
-        events: List[EventBase] = []
+        events: list[EventBase] = []
 
         async def get_event(event_id: str) -> None:
             with nested_logging_context(event_id):
@@ -1712,7 +1749,7 @@ class FederationEventHandler:
             )
             auth_map.update(persisted_events)
 
-        events_and_contexts_to_persist: List[Tuple[EventBase, EventContext]] = []
+        events_and_contexts_to_persist: list[EventPersistencePair] = []
 
         async def prep(event: EventBase) -> None:
             with nested_logging_context(suffix=event.event_id):
@@ -1728,6 +1765,9 @@ class FederationEventHandler:
                             event,
                             auth_event_id,
                         )
+                        # Drop the event from the auth_map too, else we may incorrectly persist
+                        # events which depend on this dropped event.
+                        auth_map.pop(event.event_id, None)
                         return
                     auth.append(ae)
 
@@ -2006,7 +2046,7 @@ class FederationEventHandler:
             state_sets_d = await self._state_storage_controller.get_state_groups_ids(
                 event.room_id, extrem_ids
             )
-            state_sets: List[StateMap[str]] = list(state_sets_d.values())
+            state_sets: list[StateMap[str]] = list(state_sets_d.values())
             state_ids = await context.get_prev_state_ids()
             state_sets.append(state_ids)
             current_state_ids = (
@@ -2222,7 +2262,7 @@ class FederationEventHandler:
     async def persist_events_and_notify(
         self,
         room_id: str,
-        event_and_contexts: Sequence[Tuple[EventBase, EventContext]],
+        event_and_contexts: Sequence[EventPersistencePair],
         backfilled: bool = False,
     ) -> int:
         """Persists events and tells the notifier/pushers about them, if

@@ -23,7 +23,7 @@
 import base64
 import json
 from hashlib import sha256
-from typing import Any, ContextManager, Dict, List, Optional, Tuple
+from typing import Any, ContextManager, Optional
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs
 
@@ -33,7 +33,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import IResponse
 
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 from tests.test_utils import FakeResponse
@@ -75,16 +75,16 @@ class FakeOidcServer:
         self.post_token_handler = Mock(side_effect=self._post_token_handler)
 
         # A code -> grant mapping
-        self._authorization_grants: Dict[str, FakeAuthorizationGrant] = {}
+        self._authorization_grants: dict[str, FakeAuthorizationGrant] = {}
         # An access token -> grant mapping
-        self._sessions: Dict[str, FakeAuthorizationGrant] = {}
+        self._sessions: dict[str, FakeAuthorizationGrant] = {}
 
         # We generate here an ECDSA key with the P-256 curve (ES256 algorithm) used for
         # signing JWTs. ECDSA keys are really quick to generate compared to RSA.
         self._key = ECKey.generate_key(crv="P-256", is_private=True)
         self._jwks = KeySet([ECKey.import_key(self._key.as_pem(is_private=False))])
 
-        self._id_token_overrides: Dict[str, Any] = {}
+        self._id_token_overrides: dict[str, Any] = {}
 
     def reset_mocks(self) -> None:
         self.request.reset_mock()
@@ -222,7 +222,7 @@ class FakeOidcServer:
         userinfo: dict,
         nonce: Optional[str] = None,
         with_sid: bool = False,
-    ) -> Tuple[str, FakeAuthorizationGrant]:
+    ) -> tuple[str, FakeAuthorizationGrant]:
         """Start an authorization request, and get back the code to use on the authorization endpoint."""
         code = random_string(10)
         sid = None
@@ -242,7 +242,7 @@ class FakeOidcServer:
 
         return code, grant
 
-    def exchange_code(self, code: str) -> Optional[Dict[str, Any]]:
+    def exchange_code(self, code: str) -> Optional[dict[str, Any]]:
         grant = self._authorization_grants.pop(code, None)
         if grant is None:
             return None
@@ -269,7 +269,7 @@ class FakeOidcServer:
         metadata: bool = False,
         token: bool = False,
         userinfo: bool = False,
-    ) -> ContextManager[Dict[str, Mock]]:
+    ) -> ContextManager[dict[str, Mock]]:
         """A context which makes a set of endpoints return a 500 error.
 
         Args:
@@ -356,7 +356,7 @@ class FakeOidcServer:
 
         return FakeResponse.json(payload=user_info)
 
-    def _post_token_handler(self, params: Dict[str, List[str]]) -> IResponse:
+    def _post_token_handler(self, params: dict[str, list[str]]) -> IResponse:
         """Handles requests to the token endpoint."""
         code = params.get("code", [])
 

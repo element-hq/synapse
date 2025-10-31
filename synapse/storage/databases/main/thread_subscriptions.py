@@ -15,9 +15,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Iterable,
-    List,
     Optional,
-    Tuple,
     Union,
     cast,
 )
@@ -99,6 +97,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                 self.get_subscription_for_thread.invalidate(
                     (row.user_id, row.room_id, row.event_id)
                 )
+                self.get_subscribers_to_thread.invalidate((row.room_id, row.event_id))
 
         super().process_replication_rows(stream_name, instance_name, token, rows)
 
@@ -194,6 +193,16 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         """
         assert self._can_write_to_thread_subscriptions
 
+        def _invalidate_subscription_caches(txn: LoggingTransaction) -> None:
+            txn.call_after(
+                self.get_subscription_for_thread.invalidate,
+                (user_id, room_id, thread_root_event_id),
+            )
+            txn.call_after(
+                self.get_subscribers_to_thread.invalidate,
+                (room_id, thread_root_event_id),
+            )
+
         def _subscribe_user_to_thread_txn(
             txn: LoggingTransaction,
         ) -> Optional[Union[int, AutomaticSubscriptionConflicted]]:
@@ -234,10 +243,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                         "unsubscribed_at_topological_ordering": None,
                     },
                 )
-                txn.call_after(
-                    self.get_subscription_for_thread.invalidate,
-                    (user_id, room_id, thread_root_event_id),
-                )
+                _invalidate_subscription_caches(txn)
                 return stream_id
 
             # we already have either a subscription or a prior unsubscription here
@@ -291,10 +297,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                     "unsubscribed_at_topological_ordering": None,
                 },
             )
-            txn.call_after(
-                self.get_subscription_for_thread.invalidate,
-                (user_id, room_id, thread_root_event_id),
-            )
+            _invalidate_subscription_caches(txn)
 
             return stream_id
 
@@ -376,6 +379,10 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                 self.get_subscription_for_thread.invalidate,
                 (user_id, room_id, thread_root_event_id),
             )
+            txn.call_after(
+                self.get_subscribers_to_thread.invalidate,
+                (room_id, thread_root_event_id),
+            )
 
             return stream_id
 
@@ -388,7 +395,9 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         Purge all subscriptions for the user.
         The fact that subscriptions have been purged will not be streamed;
         all stream rows for the user will in fact be removed.
-        This is intended only for dealing with user deactivation.
+
+        This must only be used for user deactivation,
+        because it does not invalidate the `subscribers_to_thread` cache.
         """
 
         def _purge_thread_subscription_settings_for_user_txn(
@@ -449,6 +458,42 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
         return ThreadSubscription(automatic=automatic)
 
+    # max_entries=100 rationale:
+    # this returns a potentially large datastructure
+    # (since each entry contains a set which contains a potentially large number of user IDs),
+    # whereas the default of 10'000 entries for @cached feels more
+    # suitable for very small cache entries.
+    #
+    # Overall, when bearing in mind the usual profile of a small community-server or company-server
+    # (where cache tuning hasn't been done, so we're in out-of-box configuration), it is very
+    # unlikely we would benefit from keeping hot the subscribers for as many as 100 threads,
+    # since it's unlikely that so many threads will be active in a short span of time on a small homeserver.
+    # It feels that medium servers will probably also not exhaust this limit.
+    # Larger homeservers are more likely to be carefully tuned, either with a larger global cache factor
+    # or carefully following the usage patterns & cache metrics.
+    # Finally, the query is not so intensive that computing it every time is a huge deal, but given people
+    # often send messages back-to-back in the same thread it seems like it would offer a mild benefit.
+    @cached(max_entries=100)
+    async def get_subscribers_to_thread(
+        self, room_id: str, thread_root_event_id: str
+    ) -> frozenset[str]:
+        """
+        Returns:
+            the set of user_ids for local users who are subscribed to the given thread.
+        """
+        return frozenset(
+            await self.db_pool.simple_select_onecol(
+                table="thread_subscriptions",
+                keyvalues={
+                    "room_id": room_id,
+                    "event_id": thread_root_event_id,
+                    "subscribed": True,
+                },
+                retcol="user_id",
+                desc="get_subscribers_to_thread",
+            )
+        )
+
     def get_max_thread_subscriptions_stream_id(self) -> int:
         """Get the current maximum stream_id for thread subscriptions.
 
@@ -457,9 +502,12 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         """
         return self._thread_subscriptions_id_gen.get_current_token()
 
+    def get_thread_subscriptions_stream_id_generator(self) -> MultiWriterIdGenerator:
+        return self._thread_subscriptions_id_gen
+
     async def get_updated_thread_subscriptions(
         self, *, from_id: int, to_id: int, limit: int
-    ) -> List[Tuple[int, str, str, str]]:
+    ) -> list[tuple[int, str, str, str]]:
         """Get updates to thread subscriptions between two stream IDs.
 
         Args:
@@ -473,7 +521,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
         def get_updated_thread_subscriptions_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[int, str, str, str]]:
+        ) -> list[tuple[int, str, str, str]]:
             sql = """
                 SELECT stream_id, user_id, room_id, event_id
                 FROM thread_subscriptions
@@ -483,41 +531,59 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
             """
 
             txn.execute(sql, (from_id, to_id, limit))
-            return cast(List[Tuple[int, str, str, str]], txn.fetchall())
+            return cast(list[tuple[int, str, str, str]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_updated_thread_subscriptions",
             get_updated_thread_subscriptions_txn,
         )
 
-    async def get_updated_thread_subscriptions_for_user(
+    async def get_latest_updated_thread_subscriptions_for_user(
         self, user_id: str, *, from_id: int, to_id: int, limit: int
-    ) -> List[Tuple[int, str, str]]:
-        """Get updates to thread subscriptions for a specific user.
+    ) -> list[tuple[int, str, str, bool, Optional[bool]]]:
+        """Get the latest updates to thread subscriptions for a specific user.
 
         Args:
             user_id: The ID of the user
             from_id: The starting stream ID (exclusive)
             to_id: The ending stream ID (inclusive)
             limit: The maximum number of rows to return
+                If there are too many rows to return, rows from the start (closer to `from_id`)
+                will be omitted.
 
         Returns:
-            A list of (stream_id, room_id, thread_root_event_id) tuples.
+            A list of (stream_id, room_id, thread_root_event_id, subscribed, automatic) tuples.
+            The row with lowest `stream_id` is the first row.
         """
 
         def get_updated_thread_subscriptions_for_user_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[int, str, str]]:
+        ) -> list[tuple[int, str, str, bool, Optional[bool]]]:
             sql = """
-                SELECT stream_id, room_id, event_id
-                FROM thread_subscriptions
-                WHERE user_id = ? AND ? < stream_id AND stream_id <= ?
+                WITH the_updates AS (
+                    SELECT stream_id, room_id, event_id, subscribed, automatic
+                    FROM thread_subscriptions
+                    WHERE user_id = ? AND ? < stream_id AND stream_id <= ?
+                    ORDER BY stream_id DESC
+                    LIMIT ?
+                )
+                SELECT stream_id, room_id, event_id, subscribed, automatic
+                FROM the_updates
                 ORDER BY stream_id ASC
-                LIMIT ?
             """
 
             txn.execute(sql, (user_id, from_id, to_id, limit))
-            return [(row[0], row[1], row[2]) for row in txn]
+            return [
+                (
+                    stream_id,
+                    room_id,
+                    event_id,
+                    # SQLite integer to boolean conversions
+                    bool(subscribed),
+                    bool(automatic) if subscribed else None,
+                )
+                for (stream_id, room_id, event_id, subscribed, automatic) in txn
+            ]
 
         return await self.db_pool.runInteraction(
             "get_updated_thread_subscriptions_for_user",

@@ -1,3 +1,515 @@
+# Synapse 1.141.0 (2025-10-29)
+
+## Deprecation of MacOS Python wheels
+
+The team has decided to deprecate and eventually stop publishing python wheels
+for MacOS. This is a burden on the team, and we're not aware of any parties
+that use them. Synapse docker images will continue to work on MacOS, as will
+building Synapse from source (though note this requires a Rust compiler).
+
+Publishing MacOS Python wheels will continue for the next few releases. If you
+do make use of these wheels downstream, please reach out to us in
+[#synapse-dev:matrix.org](https://matrix.to/#/#synapse-dev:matrix.org). We'd
+love to hear from you!
+
+
+## Docker images now based on Debian `trixie` with Python 3.13
+
+The Docker images are now based on Debian `trixie` and use Python 3.13. If you
+are using the Docker images as a base image you may need to e.g. adjust the
+paths you mount any additional Python packages at.
+
+No significant changes since 1.141.0rc2.
+
+
+
+
+# Synapse 1.141.0rc2 (2025-10-28)
+
+## Bugfixes
+
+- Fix users being unable to log in if their password, or the server's configured pepper, was too long. ([\#19101](https://github.com/element-hq/synapse/issues/19101))
+
+
+
+
+# Synapse 1.141.0rc1 (2025-10-21)
+
+## Features
+
+- Allow using [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) behavior without the opt-in registration flag. Contributed by @tulir @ Beeper. ([\#19031](https://github.com/element-hq/synapse/issues/19031))
+- Stabilized support for [MSC4326](https://github.com/matrix-org/matrix-spec-proposals/pull/4326): Device masquerading for appservices. Contributed by @tulir @ Beeper. ([\#19033](https://github.com/element-hq/synapse/issues/19033))
+
+## Bugfixes
+
+- Fix a bug introduced in 1.136.0 that would prevent Synapse from being able to be `reload`-ed more than once when running under systemd. ([\#19060](https://github.com/element-hq/synapse/issues/19060))
+- Fix a bug introduced in 1.140.0 where an internal server error could be raised when hashing user passwords that are too long. ([\#19078](https://github.com/element-hq/synapse/issues/19078))
+
+## Updates to the Docker image
+
+- Update docker image to use Debian trixie as the base and thus Python 3.13. ([\#19064](https://github.com/element-hq/synapse/issues/19064))
+
+## Internal Changes
+
+- Move unique snowflake homeserver background tasks to `start_background_tasks` (the standard pattern for this kind of thing). ([\#19037](https://github.com/element-hq/synapse/issues/19037))
+- Drop a deprecated field of the `PyGitHub` dependency in the release script and raise the dependency's minimum version to `1.59.0`. ([\#19039](https://github.com/element-hq/synapse/issues/19039))
+- Update TODO list of conflicting areas where we encounter metrics being clobbered (`ApplicationService`). ([\#19040](https://github.com/element-hq/synapse/issues/19040))
+
+
+
+
+# Synapse 1.140.0 (2025-10-14)
+
+## Compatibility notice for users of `synapse-s3-storage-provider`
+
+Deployments that make use of the
+[synapse-s3-storage-provider](https://github.com/matrix-org/synapse-s3-storage-provider)
+module must upgrade to
+[v1.6.0](https://github.com/matrix-org/synapse-s3-storage-provider/releases/tag/v1.6.0).
+Using older versions of the module with this release of Synapse will prevent
+users from being able to upload or download media.
+
+
+No significant changes since 1.140.0rc1.
+
+
+
+
+# Synapse 1.140.0rc1 (2025-10-10)
+
+## Features
+
+- Add [a new Media Query by ID Admin API](https://element-hq.github.io/synapse/v1.140/admin_api/media_admin_api.html#query-a-piece-of-media-by-id) that allows server admins to query and investigate the metadata of local or cached remote media via
+  the `origin/media_id` identifier found in a [Matrix Content URI](https://spec.matrix.org/v1.14/client-server-api/#matrix-content-mxc-uris). ([\#18911](https://github.com/element-hq/synapse/issues/18911))
+- Add [a new Fetch Event Admin API](https://element-hq.github.io/synapse/v1.140/admin_api/fetch_event.html) to fetch an event by ID. ([\#18963](https://github.com/element-hq/synapse/issues/18963))
+- Update [MSC4284: Policy Servers](https://github.com/matrix-org/matrix-spec-proposals/pull/4284) implementation to support signatures when available. ([\#18934](https://github.com/element-hq/synapse/issues/18934))
+- Add experimental implementation of the `GET /_matrix/client/v1/rtc/transports` endpoint for the latest draft of [MSC4143: MatrixRTC](https://github.com/matrix-org/matrix-spec-proposals/pull/4143). ([\#18967](https://github.com/element-hq/synapse/issues/18967))
+- Expose a `defer_to_threadpool` function in the Synapse Module API that allows modules to run a function on a separate thread in a custom threadpool. ([\#19032](https://github.com/element-hq/synapse/issues/19032))
+
+## Bugfixes
+
+- Fix room upgrade `room_config` argument and documentation for `user_may_create_room` spam-checker callback. ([\#18721](https://github.com/element-hq/synapse/issues/18721))
+- Compute a user's last seen timestamp from their devices' last seen timestamps instead of IPs, because the latter are automatically cleared according to `user_ips_max_age`. ([\#18948](https://github.com/element-hq/synapse/issues/18948))
+- Fix bug where ephemeral events were not filtered by room ID. Contributed by @frastefanini. ([\#19002](https://github.com/element-hq/synapse/issues/19002))
+- Update Synapse main process version string to include git info. ([\#19011](https://github.com/element-hq/synapse/issues/19011))
+
+## Improved Documentation
+
+- Explain how `Deferred` callbacks interact with logcontexts. ([\#18914](https://github.com/element-hq/synapse/issues/18914))
+- Fix documentation for `rc_room_creation` and `rc_reports` to clarify that a `per_user` rate limit is not supported. ([\#18998](https://github.com/element-hq/synapse/issues/18998))
+
+## Deprecations and Removals
+
+- Remove deprecated `LoggingContext.set_current_context`/`LoggingContext.current_context` methods which already have equivalent bare methods in `synapse.logging.context`. ([\#18989](https://github.com/element-hq/synapse/issues/18989))
+- Drop support for unstable field names from the long-accepted [MSC2732](https://github.com/matrix-org/matrix-spec-proposals/pull/2732) (Olm fallback keys) proposal. ([\#18996](https://github.com/element-hq/synapse/issues/18996))
+
+## Internal Changes
+
+- Cleanly shutdown `SynapseHomeServer` object, allowing artifacts of embedded small hosts to be properly garbage collected. ([\#18828](https://github.com/element-hq/synapse/issues/18828))
+- Update OEmbed providers to use 'X' instead of 'Twitter' in URL previews, following a rebrand. Contributed by @HammyHavoc. ([\#18767](https://github.com/element-hq/synapse/issues/18767))
+- Fix `server_name` in logging context for multiple Synapse instances in one process. ([\#18868](https://github.com/element-hq/synapse/issues/18868))
+- Wrap the Rust HTTP client with `make_deferred_yieldable` so it follows Synapse logcontext rules. ([\#18903](https://github.com/element-hq/synapse/issues/18903))
+- Fix the GitHub Actions workflow that moves issues labeled "X-Needs-Info" to the "Needs info" column on the team's internal triage board. ([\#18913](https://github.com/element-hq/synapse/issues/18913))
+- Disconnect background process work from request trace. ([\#18932](https://github.com/element-hq/synapse/issues/18932))
+- Reduce overall number of calls to `_get_e2e_cross_signing_signatures_for_devices` by increasing the batch size of devices the query is called with, reducing DB load. ([\#18939](https://github.com/element-hq/synapse/issues/18939))
+- Update error code used when an appservice tries to masquerade as an unknown device using [MSC4326](https://github.com/matrix-org/matrix-spec-proposals/pull/4326). Contributed by @tulir @ Beeper. ([\#18947](https://github.com/element-hq/synapse/issues/18947))
+- Fix `no active span when trying to log` tracing error on startup (when OpenTracing is enabled). ([\#18959](https://github.com/element-hq/synapse/issues/18959))
+- Fix `run_coroutine_in_background(...)` incorrectly handling logcontext. ([\#18964](https://github.com/element-hq/synapse/issues/18964))
+- Add debug logs wherever we change current logcontext. ([\#18966](https://github.com/element-hq/synapse/issues/18966))
+- Update dockerfile metadata to fix broken link; point to documentation website. ([\#18971](https://github.com/element-hq/synapse/issues/18971))
+- Note that the code is additionally licensed under the [Element Commercial license](https://github.com/element-hq/synapse/blob/develop/LICENSE-COMMERCIAL) in SPDX expression field configs. ([\#18973](https://github.com/element-hq/synapse/issues/18973))
+- Fix logcontext handling in `timeout_deferred` tests. ([\#18974](https://github.com/element-hq/synapse/issues/18974))
+- Remove internal `ReplicationUploadKeysForUserRestServlet` as a follow-up to the work in https://github.com/element-hq/synapse/pull/18581 that moved device changes off the main process. ([\#18988](https://github.com/element-hq/synapse/issues/18988))
+- Switch task scheduler from raw logcontext manipulation to using the dedicated logcontext utils. ([\#18990](https://github.com/element-hq/synapse/issues/18990))
+- Remove `MockClock()` in tests. ([\#18992](https://github.com/element-hq/synapse/issues/18992))
+- Switch back to our own custom `LogContextScopeManager` instead of OpenTracing's `ContextVarsScopeManager` which was causing problems when using the experimental `SYNAPSE_ASYNC_IO_REACTOR` option with tracing enabled. ([\#19007](https://github.com/element-hq/synapse/issues/19007))
+- Remove `version_string` argument from `HomeServer` since it's always the same. ([\#19012](https://github.com/element-hq/synapse/issues/19012))
+- Remove duplicate call to `hs.start_background_tasks()` introduced from a bad merge. ([\#19013](https://github.com/element-hq/synapse/issues/19013))
+- Split homeserver creation (`create_homeserver`) and setup (`setup`). ([\#19015](https://github.com/element-hq/synapse/issues/19015))
+- Swap near-end-of-life `macos-13` GitHub Actions runner for the `macos-15-intel` variant. ([\#19025](https://github.com/element-hq/synapse/issues/19025))
+- Introduce `RootConfig.validate_config()` which can be subclassed in `HomeServerConfig` to do cross-config class validation. ([\#19027](https://github.com/element-hq/synapse/issues/19027))
+- Allow any command of the `release.py` script to accept a `--gh-token` argument. ([\#19035](https://github.com/element-hq/synapse/issues/19035))
+
+
+
+### Updates to locked dependencies
+
+* Bump Swatinem/rust-cache from 2.8.0 to 2.8.1. ([\#18949](https://github.com/element-hq/synapse/issues/18949))
+* Bump actions/cache from 4.2.4 to 4.3.0. ([\#18983](https://github.com/element-hq/synapse/issues/18983))
+* Bump anyhow from 1.0.99 to 1.0.100. ([\#18950](https://github.com/element-hq/synapse/issues/18950))
+* Bump authlib from 1.6.3 to 1.6.4. ([\#18957](https://github.com/element-hq/synapse/issues/18957))
+* Bump authlib from 1.6.4 to 1.6.5. ([\#19019](https://github.com/element-hq/synapse/issues/19019))
+* Bump bcrypt from 4.3.0 to 5.0.0. ([\#18984](https://github.com/element-hq/synapse/issues/18984))
+* Bump docker/login-action from 3.5.0 to 3.6.0. ([\#18978](https://github.com/element-hq/synapse/issues/18978))
+* Bump lxml from 6.0.0 to 6.0.2. ([\#18979](https://github.com/element-hq/synapse/issues/18979))
+* Bump phonenumbers from 9.0.13 to 9.0.14. ([\#18954](https://github.com/element-hq/synapse/issues/18954))
+* Bump phonenumbers from 9.0.14 to 9.0.15. ([\#18991](https://github.com/element-hq/synapse/issues/18991))
+* Bump prometheus-client from 0.22.1 to 0.23.1. ([\#19016](https://github.com/element-hq/synapse/issues/19016))
+* Bump pydantic from 2.11.9 to 2.11.10. ([\#19017](https://github.com/element-hq/synapse/issues/19017))
+* Bump pygithub from 2.7.0 to 2.8.1. ([\#18952](https://github.com/element-hq/synapse/issues/18952))
+* Bump regex from 1.11.2 to 1.11.3. ([\#18981](https://github.com/element-hq/synapse/issues/18981))
+* Bump serde from 1.0.224 to 1.0.226. ([\#18953](https://github.com/element-hq/synapse/issues/18953))
+* Bump serde from 1.0.226 to 1.0.228. ([\#18982](https://github.com/element-hq/synapse/issues/18982))
+* Bump setuptools-rust from 1.11.1 to 1.12.0. ([\#18980](https://github.com/element-hq/synapse/issues/18980))
+* Bump twine from 6.1.0 to 6.2.0. ([\#18985](https://github.com/element-hq/synapse/issues/18985))
+* Bump types-pyyaml from 6.0.12.20250809 to 6.0.12.20250915. ([\#19018](https://github.com/element-hq/synapse/issues/19018))
+* Bump types-requests from 2.32.4.20250809 to 2.32.4.20250913. ([\#18951](https://github.com/element-hq/synapse/issues/18951))
+* Bump typing-extensions from 4.14.1 to 4.15.0. ([\#18956](https://github.com/element-hq/synapse/issues/18956))
+
+# Synapse 1.139.2 (2025-10-07)
+
+## Bugfixes
+
+- Fix a bug introduced in 1.139.1 where a client could receive an Internal Server Error if they set `device_keys: null` in the request to [`POST /_matrix/client/v3/keys/upload`](https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysupload). ([\#19023](https://github.com/element-hq/synapse/issues/19023))
+
+
+
+
+# Synapse 1.139.1 (2025-10-07)
+
+## Security Fixes
+
+- Fix [CVE-2025-61672](https://www.cve.org/CVERecord?id=CVE-2025-61672) / [GHSA-fh66-fcv5-jjfr](https://github.com/element-hq/synapse/security/advisories/GHSA-fh66-fcv5-jjfr). Lack of validation for device keys in Synapse before 1.139.1 allows an attacker registered on the victim homeserver to degrade federation functionality, unpredictably breaking outbound federation to other homeservers. ([\#17097](https://github.com/element-hq/synapse/issues/17097))
+
+## Deprecations and Removals
+
+- Drop support for unstable field names from the long-accepted [MSC2732](https://github.com/matrix-org/matrix-spec-proposals/pull/2732) (Olm fallback keys) proposal. This change allows unit tests to pass following the security patch above. ([\#18996](https://github.com/element-hq/synapse/issues/18996))
+
+
+
+# Synapse 1.138.4 (2025-10-07)
+
+## Bugfixes
+
+- Fix a bug introduced in 1.138.3 where a client could receive an Internal Server Error if they set `device_keys: null` in the request to [`POST /_matrix/client/v3/keys/upload`](https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysupload). ([\#19023](https://github.com/element-hq/synapse/issues/19023))
+
+
+
+
+# Synapse 1.138.3 (2025-10-07)
+
+## Security Fixes
+
+- Fix [CVE-2025-61672](https://www.cve.org/CVERecord?id=CVE-2025-61672) / [GHSA-fh66-fcv5-jjfr](https://github.com/element-hq/synapse/security/advisories/GHSA-fh66-fcv5-jjfr). Lack of validation for device keys in Synapse before 1.139.1 allows an attacker registered on the victim homeserver to degrade federation functionality, unpredictably breaking outbound federation to other homeservers. ([\#17097](https://github.com/element-hq/synapse/issues/17097))
+
+## Deprecations and Removals
+
+- Drop support for unstable field names from the long-accepted [MSC2732](https://github.com/matrix-org/matrix-spec-proposals/pull/2732) (Olm fallback keys) proposal. This change allows unit tests to pass following the security patch above. ([\#18996](https://github.com/element-hq/synapse/issues/18996))
+
+# Synapse 1.139.0 (2025-09-30)
+
+### `/register` requests from old application service implementations may break when using MAS
+
+If you are using Matrix Authentication Service (MAS), as of this release any
+Application Services that do not set `inhibit_login=true` when calling `POST
+/_matrix/client/v3/register` will receive the error
+`IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED` in response. Please see [the
+upgrade
+notes](https://element-hq.github.io/synapse/develop/upgrade.html#register-requests-from-old-application-service-implementations-may-break-when-using-mas)
+for more information.
+
+No significant changes since 1.139.0rc3.
+
+
+# Synapse 1.139.0rc3 (2025-09-25)
+
+## Bugfixes
+
+- Fix a bug introduced in 1.139.0rc1 where `run_coroutine_in_background(...)` incorrectly handled logcontexts, resulting in partially broken logging. ([\#18964](https://github.com/element-hq/synapse/issues/18964))
+
+
+
+
+# Synapse 1.139.0rc2 (2025-09-23)
+
+## Internal Changes
+
+- Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin. This change was applied on top of 1.139.0rc1. ([\#18962](https://github.com/element-hq/synapse/issues/18962))
+
+
+
+# Synapse 1.139.0rc1 (2025-09-23)
+
+## Features
+
+- Add experimental support for [MSC4308: Thread Subscriptions extension to Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4308) when [MSC4306: Thread Subscriptions](https://github.com/matrix-org/matrix-spec-proposals/pull/4306) and [MSC4186: Simplified Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) are enabled. ([\#18695](https://github.com/element-hq/synapse/issues/18695))
+- Update push rules for experimental [MSC4306: Thread Subscriptions](https://github.com/matrix-org/matrix-doc/issues/4306) to follow a newer draft. ([\#18846](https://github.com/element-hq/synapse/issues/18846))
+- Add `get_media_upload_limits_for_user` and `on_media_upload_limit_exceeded` module API callbacks to the media repository. ([\#18848](https://github.com/element-hq/synapse/issues/18848))
+- Support [MSC4169](https://github.com/matrix-org/matrix-spec-proposals/pull/4169) for backwards-compatible redaction sending using the `/send` endpoint. Contributed by @SpiritCroc @ Beeper. ([\#18898](https://github.com/element-hq/synapse/issues/18898))
+- Add an in-memory cache to `_get_e2e_cross_signing_signatures_for_devices` to reduce DB load. ([\#18899](https://github.com/element-hq/synapse/issues/18899))
+- Update [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) support to return correct errors and allow appservices to reset cross-signing keys without user-interactive authentication. Contributed by @tulir @ Beeper. ([\#18946](https://github.com/element-hq/synapse/issues/18946))
+
+## Bugfixes
+
+- Ensure all PDUs sent via `/send` pass canonical JSON checks. ([\#18641](https://github.com/element-hq/synapse/issues/18641))
+- Fix bug where we did not send invite revocations over federation. ([\#18823](https://github.com/element-hq/synapse/issues/18823))
+- Fix prefixed support for [MSC4133](https://github.com/matrix-org/matrix-spec-proposals/pull/4133). ([\#18875](https://github.com/element-hq/synapse/issues/18875))
+- Fix open redirect in legacy SSO flow with the `idp` query parameter. ([\#18909](https://github.com/element-hq/synapse/issues/18909))
+- Fix a performance regression related to the experimental Delayed Events ([MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140)) feature. ([\#18926](https://github.com/element-hq/synapse/issues/18926))
+
+## Updates to the Docker image
+
+- Suppress "Applying schema" log noise bulk when `SYNAPSE_LOG_TESTING` is set. ([\#18878](https://github.com/element-hq/synapse/issues/18878))
+
+## Improved Documentation
+
+- Clarify Python dependency constraints in our deprecation policy. ([\#18856](https://github.com/element-hq/synapse/issues/18856))
+- Clarify necessary `jwt_config` parameter in OIDC documentation for authentik. Contributed by @maxkratz. ([\#18931](https://github.com/element-hq/synapse/issues/18931))
+
+## Deprecations and Removals
+
+- Remove obsolete and experimental `/sync/e2ee` endpoint. ([\#18583](https://github.com/element-hq/synapse/issues/18583))
+
+## Internal Changes
+
+- Fix `LaterGauge` metrics to collect from all servers. ([\#18791](https://github.com/element-hq/synapse/issues/18791))
+- Configure Synapse to run [MSC4306: Thread Subscriptions](https://github.com/matrix-org/matrix-spec-proposals/pull/4306) Complement tests. ([\#18819](https://github.com/element-hq/synapse/issues/18819))
+- Remove `sentinel` logcontext usage where we log in `setup`, `start` and `exit`. ([\#18870](https://github.com/element-hq/synapse/issues/18870))
+- Use the `Enum`'s value for the dictionary key when responding to an admin request for experimental features. ([\#18874](https://github.com/element-hq/synapse/issues/18874))
+- Start background tasks after we fork the process (daemonize). ([\#18886](https://github.com/element-hq/synapse/issues/18886))
+- Better explain how we manage the logcontext in `run_in_background(...)` and `run_as_background_process(...)`. ([\#18900](https://github.com/element-hq/synapse/issues/18900), [\#18906](https://github.com/element-hq/synapse/issues/18906))
+- Remove `sentinel` logcontext usage in `Clock` utilities like `looping_call` and `call_later`. ([\#18907](https://github.com/element-hq/synapse/issues/18907))
+- Replace usages of the deprecated `pkg_resources` interface in preparation of setuptools dropping it soon. ([\#18910](https://github.com/element-hq/synapse/issues/18910))
+- Split loading config from homeserver `setup`. ([\#18933](https://github.com/element-hq/synapse/issues/18933))
+- Fix `run_in_background` not being awaited properly in some tests causing `LoggingContext` problems. ([\#18937](https://github.com/element-hq/synapse/issues/18937))
+- Fix `run_as_background_process` not being awaited properly causing `LoggingContext` problems in experimental [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Delayed events implementation. ([\#18938](https://github.com/element-hq/synapse/issues/18938))
+- Introduce `Clock.call_when_running(...)` to wrap startup code in a logcontext, ensuring we can identify which server generated the logs. ([\#18944](https://github.com/element-hq/synapse/issues/18944))
+- Introduce `Clock.add_system_event_trigger(...)` to wrap system event callback code in a logcontext, ensuring we can identify which server generated the logs. ([\#18945](https://github.com/element-hq/synapse/issues/18945))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/setup-go from 5.5.0 to 6.0.0. ([\#18891](https://github.com/element-hq/synapse/issues/18891))
+* Bump actions/setup-python from 5.6.0 to 6.0.0. ([\#18890](https://github.com/element-hq/synapse/issues/18890))
+* Bump authlib from 1.6.1 to 1.6.3. ([\#18921](https://github.com/element-hq/synapse/issues/18921))
+* Bump jsonschema from 4.25.0 to 4.25.1. ([\#18897](https://github.com/element-hq/synapse/issues/18897))
+* Bump log from 0.4.27 to 0.4.28. ([\#18892](https://github.com/element-hq/synapse/issues/18892))
+* Bump phonenumbers from 9.0.12 to 9.0.13. ([\#18893](https://github.com/element-hq/synapse/issues/18893))
+* Bump pydantic from 2.11.7 to 2.11.9. ([\#18922](https://github.com/element-hq/synapse/issues/18922))
+* Bump serde from 1.0.219 to 1.0.223. ([\#18920](https://github.com/element-hq/synapse/issues/18920))
+* Bump serde_json from 1.0.143 to 1.0.145. ([\#18919](https://github.com/element-hq/synapse/issues/18919))
+* Bump sigstore/cosign-installer from 3.9.2 to 3.10.0. ([\#18917](https://github.com/element-hq/synapse/issues/18917))
+* Bump towncrier from 24.8.0 to 25.8.0. ([\#18894](https://github.com/element-hq/synapse/issues/18894))
+* Bump types-psycopg2 from 2.9.21.20250809 to 2.9.21.20250915. ([\#18918](https://github.com/element-hq/synapse/issues/18918))
+* Bump types-requests from 2.32.4.20250611 to 2.32.4.20250809. ([\#18895](https://github.com/element-hq/synapse/issues/18895))
+* Bump types-setuptools from 80.9.0.20250809 to 80.9.0.20250822. ([\#18924](https://github.com/element-hq/synapse/issues/18924))
+
+# Synapse 1.138.2 (2025-09-24)
+
+## Internal Changes
+
+- Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin. This change was applied on top of 1.138.1. ([\#18962](https://github.com/element-hq/synapse/issues/18962))
+
+
+
+# Synapse 1.138.1 (2025-09-24)
+
+## Bugfixes
+
+- Fix a performance regression related to the experimental Delayed Events ([MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140)) feature. ([\#18926](https://github.com/element-hq/synapse/issues/18926))
+
+
+
+
+# Synapse 1.138.0 (2025-09-09)
+
+No significant changes since 1.138.0rc1.
+
+
+
+
+# Synapse 1.138.0rc1 (2025-09-02)
+
+### Features
+
+- Support for the stable endpoint and scopes of [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) & co. ([\#18549](https://github.com/element-hq/synapse/issues/18549))
+
+### Bugfixes
+
+- Improve database performance of [MSC4293](https://github.com/matrix-org/matrix-spec-proposals/pull/4293) - Redact on Kick/Ban. ([\#18851](https://github.com/element-hq/synapse/issues/18851))
+- Do not throw an error when fetching a rejected delayed state event on startup. ([\#18858](https://github.com/element-hq/synapse/issues/18858))
+
+### Improved Documentation
+
+- Fix worker documentation incorrectly indicating all room Admin API requests were capable of being handled by workers. ([\#18853](https://github.com/element-hq/synapse/issues/18853))
+
+### Internal Changes
+
+- Instrument `_ByteProducer` with tracing to measure potential dead time while writing bytes to the request. ([\#18804](https://github.com/element-hq/synapse/issues/18804))
+- Switch to OpenTracing's `ContextVarsScopeManager` instead of our own custom `LogContextScopeManager`. ([\#18849](https://github.com/element-hq/synapse/issues/18849))
+- Trace how much work is being done while "recursively fetching redactions". ([\#18854](https://github.com/element-hq/synapse/issues/18854))
+- Link [upstream Twisted bug](https://github.com/twisted/twisted/issues/12498) tracking the problem that explains why we have to use a `Producer` to write bytes to the request. ([\#18855](https://github.com/element-hq/synapse/issues/18855))
+- Introduce `EventPersistencePair` type. ([\#18857](https://github.com/element-hq/synapse/issues/18857))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/add-to-project from c0c5949b017d0d4a39f7ba888255881bdac2a823 to 4515659e2b458b27365e167605ac44f219494b66. ([\#18863](https://github.com/element-hq/synapse/issues/18863))
+* Bump actions/checkout from 4.3.0 to 5.0.0. ([\#18834](https://github.com/element-hq/synapse/issues/18834))
+* Bump anyhow from 1.0.98 to 1.0.99. ([\#18841](https://github.com/element-hq/synapse/issues/18841))
+* Bump docker/login-action from 3.4.0 to 3.5.0. ([\#18835](https://github.com/element-hq/synapse/issues/18835))
+* Bump dtolnay/rust-toolchain from b3b07ba8b418998c39fb20f53e8b695cdcc8de1b to e97e2d8cc328f1b50210efc529dca0028893a2d9. ([\#18862](https://github.com/element-hq/synapse/issues/18862))
+* Bump phonenumbers from 9.0.11 to 9.0.12. ([\#18837](https://github.com/element-hq/synapse/issues/18837))
+* Bump regex from 1.11.1 to 1.11.2. ([\#18864](https://github.com/element-hq/synapse/issues/18864))
+* Bump reqwest from 0.12.22 to 0.12.23. ([\#18842](https://github.com/element-hq/synapse/issues/18842))
+* Bump ruff from 0.12.7 to 0.12.10. ([\#18865](https://github.com/element-hq/synapse/issues/18865))
+* Bump serde_json from 1.0.142 to 1.0.143. ([\#18866](https://github.com/element-hq/synapse/issues/18866))
+* Bump types-bleach from 6.2.0.20250514 to 6.2.0.20250809. ([\#18838](https://github.com/element-hq/synapse/issues/18838))
+* Bump types-jsonschema from 4.25.0.20250720 to 4.25.1.20250822. ([\#18867](https://github.com/element-hq/synapse/issues/18867))
+* Bump types-psycopg2 from 2.9.21.20250718 to 2.9.21.20250809. ([\#18836](https://github.com/element-hq/synapse/issues/18836))
+
+# Synapse 1.137.0 (2025-08-26)
+
+No significant changes since 1.137.0rc1.
+
+
+
+
+# Synapse 1.137.0rc1 (2025-08-19)
+
+### Bugfixes
+
+- Fix a bug which could corrupt auth chains making it impossible to perform state resolution. ([\#18746](https://github.com/element-hq/synapse/issues/18746))
+- Fix error message in `register_new_matrix_user` utility script for empty `registration_shared_secret`. ([\#18780](https://github.com/element-hq/synapse/issues/18780))
+- Allow enabling [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/pull/4108) when the stable Matrix Authentication Service integration is enabled. ([\#18832](https://github.com/element-hq/synapse/issues/18832))
+
+### Improved Documentation
+
+- Include IPv6 networks in `denied-peer-ips` of coturn setup. Contributed by @litetex. ([\#18781](https://github.com/element-hq/synapse/issues/18781))
+
+### Internal Changes
+
+- Update tests to ensure all database tables are emptied when purging a room. ([\#18794](https://github.com/element-hq/synapse/issues/18794))
+- Instrument the `encode_response` part of Sliding Sync requests for more complete traces in Jaeger. ([\#18815](https://github.com/element-hq/synapse/issues/18815))
+- Tag Sliding Sync traces when we `wait_for_events`. ([\#18816](https://github.com/element-hq/synapse/issues/18816))
+- Fix `portdb` CI by hardcoding the new `pg_dump` restrict key that was added due to [CVE-2025-8714](https://nvd.nist.gov/vuln/detail/cve-2025-8714). ([\#18824](https://github.com/element-hq/synapse/issues/18824))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/add-to-project from 5b1a254a3546aef88e0a7724a77a623fa2e47c36 to 0c37450c4be3b6a7582b2fb013c9ebfd9c8e9300. ([\#18557](https://github.com/element-hq/synapse/issues/18557))
+* Bump actions/cache from 4.2.3 to 4.2.4. ([\#18799](https://github.com/element-hq/synapse/issues/18799))
+* Bump actions/checkout from 4.2.2 to 4.3.0. ([\#18800](https://github.com/element-hq/synapse/issues/18800))
+* Bump actions/download-artifact from 4.3.0 to 5.0.0. ([\#18801](https://github.com/element-hq/synapse/issues/18801))
+* Bump docker/metadata-action from 5.7.0 to 5.8.0. ([\#18773](https://github.com/element-hq/synapse/issues/18773))
+* Bump mypy from 1.16.1 to 1.17.1. ([\#18775](https://github.com/element-hq/synapse/issues/18775))
+* Bump phonenumbers from 9.0.10 to 9.0.11. ([\#18797](https://github.com/element-hq/synapse/issues/18797))
+* Bump pygithub from 2.6.1 to 2.7.0. ([\#18779](https://github.com/element-hq/synapse/issues/18779))
+* Bump serde_json from 1.0.141 to 1.0.142. ([\#18776](https://github.com/element-hq/synapse/issues/18776))
+* Bump slab from 0.4.10 to 0.4.11. ([\#18809](https://github.com/element-hq/synapse/issues/18809))
+* Bump tokio from 1.47.0 to 1.47.1. ([\#18774](https://github.com/element-hq/synapse/issues/18774))
+* Bump types-pyyaml from 6.0.12.20250516 to 6.0.12.20250809. ([\#18798](https://github.com/element-hq/synapse/issues/18798))
+* Bump types-setuptools from 80.9.0.20250529 to 80.9.0.20250809. ([\#18796](https://github.com/element-hq/synapse/issues/18796))
+
+# Synapse 1.136.0 (2025-08-12)
+
+Note: This release includes the security fixes from `1.135.2` and `1.136.0rc2`, detailed below.
+
+### Bugfixes
+
+- Fix bug introduced in 1.135.2 and 1.136.0rc2 where the [Make Room Admin API](https://element-hq.github.io/synapse/latest/admin_api/rooms.html#make-room-admin-api) would not treat a room v12's creator power level as the highest in room. ([\#18805](https://github.com/element-hq/synapse/issues/18805))
+
+
+# Synapse 1.135.2 (2025-08-11)
+
+This is the Synapse portion of the [Matrix coordinated security release](https://matrix.org/blog/2025/07/security-predisclosure/). This release includes support for [room version](https://spec.matrix.org/v1.15/rooms/) 12 which fixes a number of security vulnerabilities, including [CVE-2025-49090](https://www.cve.org/CVERecord?id=CVE-2025-49090).
+
+The default room version is not changed. Not all clients will support room version 12 immediately, and not all users will be using the latest version of their clients. Large, public rooms are advised to wait a few weeks before upgrading to room version 12 to allow users throughout the Matrix ecosystem to update their clients.
+
+Note: release 1.135.1 was skipped due to issues discovered during the release process.
+
+Two patched Synapse releases are now available:
+
+* `1.135.2`: stable release comprised of `1.135.0` + security patches
+    * Upgrade to this release **if you are currently running 1.135.0 or below**.
+* `1.136.0rc2`: unstable release candidate comprised of `1.136.0rc1` + security patches.
+    * Upgrade to this release **only if you are on 1.136.0rc1**.
+
+### Bugfixes
+
+- Fix invalidation of storage cache that was broken in 1.135.0. ([\#18786](https://github.com/element-hq/synapse/issues/18786))
+
+### Internal Changes
+
+- Add a parameter to `upgrade_rooms(..)` to allow auto join local users. ([\#82](https://github.com/element-hq/synapse/issues/82))
+- Speed up upgrading a room with large numbers of banned users. ([\#18574](https://github.com/element-hq/synapse/issues/18574))
+
+
+# Synapse 1.136.0rc2 (2025-08-11)
+
+- Update MSC4293 redaction logic for room v12. ([\#80](https://github.com/element-hq/synapse/issues/80))
+
+### Internal Changes
+
+- Add a parameter to `upgrade_rooms(..)` to allow auto join local users. ([\#83](https://github.com/element-hq/synapse/issues/83))
+
+
+# Synapse 1.136.0rc1 (2025-08-05)
+
+Please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11360) as this release contains changes to MAS support, metrics labels and the module API which may require your attention when upgrading.
+
+### Features
+
+- Add configurable rate limiting for the creation of rooms. ([\#18514](https://github.com/element-hq/synapse/issues/18514))
+- Add support for [MSC4293](https://github.com/matrix-org/matrix-spec-proposals/pull/4293) - Redact on Kick/Ban. ([\#18540](https://github.com/element-hq/synapse/issues/18540))
+- When admins enable themselves to see soft-failed events, they will also see if the cause is due to the policy server flagging them as spam via `unsigned`. ([\#18585](https://github.com/element-hq/synapse/issues/18585))
+- Add ability to configure forward/outbound proxy via homeserver config instead of environment variables. See `http_proxy`, `https_proxy`, `no_proxy_hosts`. ([\#18686](https://github.com/element-hq/synapse/issues/18686))
+- Advertise experimental support for [MSC4306](https://github.com/matrix-org/matrix-spec-proposals/pull/4306) (Thread Subscriptions) through `/_matrix/clients/versions` if enabled. ([\#18722](https://github.com/element-hq/synapse/issues/18722))
+- Stabilise support for delegating authentication to [Matrix Authentication Service](https://github.com/element-hq/matrix-authentication-service/). ([\#18759](https://github.com/element-hq/synapse/issues/18759))
+- Implement the push rules for experimental [MSC4306: Thread Subscriptions](https://github.com/matrix-org/matrix-doc/issues/4306). ([\#18762](https://github.com/element-hq/synapse/issues/18762))
+
+### Bugfixes
+
+- Allow return code 403 (allowed by C2S Spec since v1.2) when fetching profiles via federation. ([\#18696](https://github.com/element-hq/synapse/issues/18696))
+- Register the MSC4306 (Thread Subscriptions) endpoints in the CS API when the experimental feature is enabled. ([\#18726](https://github.com/element-hq/synapse/issues/18726))
+- Fix a long-standing bug where suspended users could not have server notices sent to them (a 403 was returned to the admin). ([\#18750](https://github.com/element-hq/synapse/issues/18750))
+- Fix an issue that could cause logcontexts to be lost on rate-limited requests. Found by @realtyem. ([\#18763](https://github.com/element-hq/synapse/issues/18763))
+- Fix invalidation of storage cache that was broken in 1.135.0. ([\#18786](https://github.com/element-hq/synapse/issues/18786))
+
+### Improved Documentation
+
+- Minor improvements to README. ([\#18700](https://github.com/element-hq/synapse/issues/18700))
+- Document that there can be multiple workers handling the `receipts` stream. ([\#18760](https://github.com/element-hq/synapse/issues/18760))
+- Improve worker documentation for some device paths. ([\#18761](https://github.com/element-hq/synapse/issues/18761))
+
+### Deprecations and Removals
+
+- Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`. See [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11360) for more information. ([\#18737](https://github.com/element-hq/synapse/issues/18737))
+
+### Internal Changes
+
+- Add debug logging for HMAC digest verification failures when using the admin API to register users. ([\#18474](https://github.com/element-hq/synapse/issues/18474))
+- Speed up upgrading a room with large numbers of banned users. ([\#18574](https://github.com/element-hq/synapse/issues/18574))
+- Fix config documentation generation script on Windows by enforcing UTF-8. ([\#18580](https://github.com/element-hq/synapse/issues/18580))
+- Refactor cache, background process, `Counter`, `LaterGauge`, `GaugeBucketCollector`, `Histogram`, and `Gauge` metrics to be homeserver-scoped. ([\#18656](https://github.com/element-hq/synapse/issues/18656), [\#18714](https://github.com/element-hq/synapse/issues/18714), [\#18715](https://github.com/element-hq/synapse/issues/18715), [\#18724](https://github.com/element-hq/synapse/issues/18724), [\#18753](https://github.com/element-hq/synapse/issues/18753), [\#18725](https://github.com/element-hq/synapse/issues/18725), [\#18670](https://github.com/element-hq/synapse/issues/18670), [\#18748](https://github.com/element-hq/synapse/issues/18748), [\#18751](https://github.com/element-hq/synapse/issues/18751))
+- Reduce database usage in Sliding Sync by not querying for background update completion after the update is known to be complete. ([\#18718](https://github.com/element-hq/synapse/issues/18718))
+- Improve order of validation and ratelimiting in room creation. ([\#18723](https://github.com/element-hq/synapse/issues/18723))
+- Bump minimum version bound on Twisted to 21.2.0. ([\#18727](https://github.com/element-hq/synapse/issues/18727), [\#18729](https://github.com/element-hq/synapse/issues/18729))
+- Use `twisted.internet.testing` module in tests instead of deprecated `twisted.test.proto_helpers`. ([\#18728](https://github.com/element-hq/synapse/issues/18728))
+- Remove obsolete `/send_event` replication endpoint. ([\#18730](https://github.com/element-hq/synapse/issues/18730))
+- Update metrics linting to be able to handle custom metrics. ([\#18733](https://github.com/element-hq/synapse/issues/18733))
+- Work around `twisted.protocols.amp.TooLong` error by reducing logging in some tests. ([\#18736](https://github.com/element-hq/synapse/issues/18736))
+- Prevent "Move labelled issues to correct projects" GitHub Actions workflow from failing when an issue is already on the project board. ([\#18755](https://github.com/element-hq/synapse/issues/18755))
+- Bump minimum supported Rust version (MSRV) to 1.82.0. Missed in [#18553](https://github.com/element-hq/synapse/pull/18553) (released in Synapse 1.134.0). ([\#18757](https://github.com/element-hq/synapse/issues/18757))
+- Make `Clock.sleep(...)` return a coroutine, so that mypy can catch places where we don't await on it. ([\#18772](https://github.com/element-hq/synapse/issues/18772))
+- Update implementation of [MSC4306: Thread Subscriptions](https://github.com/matrix-org/matrix-doc/issues/4306) to include automatic subscription conflict prevention as introduced in later drafts. ([\#18756](https://github.com/element-hq/synapse/issues/18756))
+
+
+
+### Updates to locked dependencies
+
+* Bump gitpython from 3.1.44 to 3.1.45. ([\#18743](https://github.com/element-hq/synapse/issues/18743))
+* Bump mypy-zope from 1.0.12 to 1.0.13. ([\#18744](https://github.com/element-hq/synapse/issues/18744))
+* Bump phonenumbers from 9.0.9 to 9.0.10. ([\#18741](https://github.com/element-hq/synapse/issues/18741))
+* Bump ruff from 0.12.4 to 0.12.5. ([\#18742](https://github.com/element-hq/synapse/issues/18742))
+* Bump sentry-sdk from 2.32.0 to 2.33.2. ([\#18745](https://github.com/element-hq/synapse/issues/18745))
+* Bump tokio from 1.46.1 to 1.47.0. ([\#18740](https://github.com/element-hq/synapse/issues/18740))
+* Bump types-jsonschema from 4.24.0.20250708 to 4.25.0.20250720. ([\#18703](https://github.com/element-hq/synapse/issues/18703))
+* Bump types-psycopg2 from 2.9.21.20250516 to 2.9.21.20250718. ([\#18706](https://github.com/element-hq/synapse/issues/18706))
+
 # Synapse 1.135.0 (2025-08-01)
 
 No significant changes since 1.135.0rc2.

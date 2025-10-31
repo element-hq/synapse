@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, Optional, Union, cast
 
 from twisted.internet.testing import MemoryReactor
 
@@ -36,7 +36,7 @@ from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.synapse_rust.push import PushRuleEvaluator
 from synapse.types import JsonDict, JsonMapping, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.frozenutils import freeze
 
 from tests import unittest
@@ -60,7 +60,7 @@ class FlattenDictTestCase(unittest.TestCase):
 
     def test_non_string(self) -> None:
         """String, booleans, ints, nulls and list of those should be kept while other items are dropped."""
-        input: Dict[str, Any] = {
+        input: dict[str, Any] = {
             "woo": "woo",
             "foo": True,
             "bar": 1,
@@ -150,6 +150,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         *,
         related_events: Optional[JsonDict] = None,
         msc4210: bool = False,
+        msc4306: bool = False,
     ) -> PushRuleEvaluator:
         event = FrozenEvent(
             {
@@ -164,18 +165,19 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         )
         room_member_count = 0
         sender_power_level = 0
-        power_levels: Dict[str, Union[int, Dict[str, int]]] = {}
+        power_levels: dict[str, Union[int, dict[str, int]]] = {}
         return PushRuleEvaluator(
             _flatten_dict(event),
             False,
             room_member_count,
             sender_power_level,
-            cast(Dict[str, int], power_levels.get("notifications", {})),
+            cast(dict[str, int], power_levels.get("notifications", {})),
             {} if related_events is None else related_events,
             related_event_match_enabled=True,
             room_version_feature_flags=event.room_version.msc3931_push_features,
             msc3931_enabled=True,
             msc4210_enabled=msc4210,
+            msc4306_enabled=msc4306,
         )
 
     def test_display_name(self) -> None:
@@ -586,7 +588,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         This tests the behaviour of tweaks_for_actions.
         """
 
-        actions: List[Union[Dict[str, str], str]] = [
+        actions: list[Union[dict[str, str], str]] = [
             {"set_tweak": "sound", "value": "default"},
             {"set_tweak": "highlight"},
             "notify",
@@ -803,6 +805,112 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
                 },
                 "@user:test",
                 "display_name",
+            )
+        )
+
+    def test_thread_subscription_subscribed(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an event in a subscribed thread.
+        """
+        evaluator = self._get_evaluator(
+            {
+                "msgtype": "m.text",
+                "body": "Squawk",
+                "m.relates_to": {
+                    "event_id": "$threadroot",
+                    "rel_type": "m.thread",
+                },
+            },
+            msc4306=True,
+        )
+        self.assertTrue(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=True,
+            )
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=True,
+            )
+        )
+
+    def test_thread_subscription_unsubscribed(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an event in an unsubscribed thread.
+        """
+        evaluator = self._get_evaluator(
+            {
+                "msgtype": "m.text",
+                "body": "Squawk",
+                "m.relates_to": {
+                    "event_id": "$threadroot",
+                    "rel_type": "m.thread",
+                },
+            },
+            msc4306=True,
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=False,
+            )
+        )
+        self.assertTrue(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=False,
+            )
+        )
+
+    def test_thread_subscription_unthreaded(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an unthreaded event.
+        """
+        evaluator = self._get_evaluator(
+            {"msgtype": "m.text", "body": "Squawk"}, msc4306=True
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=None,
+            )
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=None,
             )
         )
 

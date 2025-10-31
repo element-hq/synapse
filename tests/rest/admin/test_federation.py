@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional
+from typing import Optional
 
 from parameterized import parameterized
 
@@ -29,7 +29,7 @@ from synapse.api.errors import Codes
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -272,7 +272,7 @@ class FederationTestCase(unittest.HomeserverTestCase):
         """Testing order list with parameter `order_by`"""
 
         def _order_test(
-            expected_destination_list: List[str],
+            expected_destination_list: list[str],
             order_by: Optional[str],
             dir: Optional[str] = None,
         ) -> None:
@@ -521,7 +521,7 @@ class FederationTestCase(unittest.HomeserverTestCase):
             dest = f"sub{i}.example.com"
             self._create_destination(dest, 50, 50, 50, 100)
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that the expected destination attributes are present in content
 
         Args:
@@ -820,7 +820,7 @@ class DestinationMembershipTestCase(unittest.HomeserverTestCase):
         self,
         number_rooms: int,
         destination: Optional[str] = None,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Create the given number of rooms. The given `destination` homeserver will
         be recorded as a participant.
@@ -853,7 +853,7 @@ class DestinationMembershipTestCase(unittest.HomeserverTestCase):
 
         return room_ids
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that the expected room attributes are present in content
 
         Args:

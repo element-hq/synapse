@@ -25,7 +25,7 @@ import traceback
 from collections import deque
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from math import floor
-from typing import Callable, Deque, Optional
+from typing import Callable, Optional
 
 import attr
 from zope.interface import implementer
@@ -66,7 +66,7 @@ class LogProducer:
     # (connected and registerProducer) which are part of the implementation.
     transport: Connection
     _format: Callable[[logging.LogRecord], str]
-    _buffer: Deque[logging.LogRecord]
+    _buffer: deque[logging.LogRecord]
     _paused: bool = attr.ib(default=False, init=False)
 
     def pauseProducing(self) -> None:
@@ -120,7 +120,7 @@ class RemoteHandler(logging.Handler):
         self.port = port
         self.maximum_buffer = maximum_buffer
 
-        self._buffer: Deque[logging.LogRecord] = deque()
+        self._buffer: deque[logging.LogRecord] = deque()
         self._connection_waiter: Optional[Deferred] = None
         self._producer: Optional[LogProducer] = None
 

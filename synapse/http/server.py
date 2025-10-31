@@ -33,14 +33,11 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Iterable,
     Iterator,
-    List,
     Optional,
     Pattern,
     Protocol,
-    Tuple,
     Union,
     cast,
 )
@@ -52,9 +49,10 @@ from zope.interface import implementer
 
 from twisted.internet import defer, interfaces, reactor
 from twisted.internet.defer import CancelledError
-from twisted.internet.interfaces import IReactorTime
 from twisted.python import failure
 from twisted.web import resource
+
+from synapse.types import ISynapseThreadlessReactor
 
 try:
     from twisted.web.pages import notFound
@@ -77,10 +75,11 @@ from synapse.api.errors import (
 from synapse.config.homeserver import HomeServerConfig
 from synapse.logging.context import defer_to_thread, preserve_fn, run_in_background
 from synapse.logging.opentracing import active_span, start_active_span, trace_servlet
-from synapse.util import Clock, json_encoder
 from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
+from synapse.util.clock import Clock
 from synapse.util.iterutils import chunk_seq
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     import opentracing
@@ -265,7 +264,7 @@ def wrap_async_request_handler(
 # it is actually called with a SynapseRequest and a kwargs dict for the params,
 # but I can't figure out how to represent that.
 ServletCallback = Callable[
-    ..., Union[None, Awaitable[None], Tuple[int, Any], Awaitable[Tuple[int, Any]]]
+    ..., Union[None, Awaitable[None], tuple[int, Any], Awaitable[tuple[int, Any]]]
 ]
 
 
@@ -352,7 +351,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
 
     async def _async_render(
         self, request: "SynapseRequest"
-    ) -> Optional[Tuple[int, Any]]:
+    ) -> Optional[tuple[int, Any]]:
         """Delegates to `_async_render_<METHOD>` methods, or returns a 400 if
         no appropriate method exists. Can be overridden in sub classes for
         different routing.
@@ -409,8 +408,26 @@ class DirectServeJsonResource(_AsyncResource):
         # Clock is optional as this class is exposed to the module API.
         clock: Optional[Clock] = None,
     ):
+        """
+        Args:
+            canonical_json: TODO
+            extract_context: TODO
+            clock: This is expected to be passed in by any Synapse code.
+                Only optional for the Module API.
+        """
+
         if clock is None:
-            clock = Clock(cast(IReactorTime, reactor))
+            # Ideally we wouldn't ignore the linter error here and instead enforce a
+            # required `Clock` be passed into the `__init__` function.
+            # However, this would change the function signature which is currently being
+            # exported to the module api. Since we don't want to break that api, we have
+            # to settle with ignoring the linter error here.
+            # As of the time of writing this, all Synapse internal usages of
+            # `DirectServeJsonResource` pass in the existing homeserver clock instance.
+            clock = Clock(  # type: ignore[multiple-internal-clocks]
+                cast(ISynapseThreadlessReactor, reactor),
+                server_name="synapse_module_running_from_unknown_server",
+            )
 
         super().__init__(clock, extract_context)
         self.canonical_json = canonical_json
@@ -471,7 +488,7 @@ class JsonResource(DirectServeJsonResource):
         self.clock = hs.get_clock()
         super().__init__(canonical_json, extract_context, clock=self.clock)
         # Map of path regex -> method -> callback.
-        self._routes: Dict[Pattern[str], Dict[bytes, _PathEntry]] = {}
+        self._routes: dict[Pattern[str], dict[bytes, _PathEntry]] = {}
         self.hs = hs
 
     def register_paths(
@@ -507,7 +524,7 @@ class JsonResource(DirectServeJsonResource):
 
     def _get_handler_for_request(
         self, request: "SynapseRequest"
-    ) -> Tuple[ServletCallback, str, Dict[str, str]]:
+    ) -> tuple[ServletCallback, str, dict[str, str]]:
         """Finds a callback method to handle the given request.
 
         Returns:
@@ -536,7 +553,7 @@ class JsonResource(DirectServeJsonResource):
         # Huh. No one wanted to handle that? Fiiiiiine.
         raise UnrecognizedRequestError(code=404)
 
-    async def _async_render(self, request: "SynapseRequest") -> Tuple[int, Any]:
+    async def _async_render(self, request: "SynapseRequest") -> tuple[int, Any]:
         callback, servlet_classname, group_dict = self._get_handler_for_request(request)
 
         request.is_render_cancellable = is_function_cancellable(callback)
@@ -588,8 +605,24 @@ class DirectServeHtmlResource(_AsyncResource):
         # Clock is optional as this class is exposed to the module API.
         clock: Optional[Clock] = None,
     ):
+        """
+        Args:
+            extract_context: TODO
+            clock: This is expected to be passed in by any Synapse code.
+                Only optional for the Module API.
+        """
         if clock is None:
-            clock = Clock(cast(IReactorTime, reactor))
+            # Ideally we wouldn't ignore the linter error here and instead enforce a
+            # required `Clock` be passed into the `__init__` function.
+            # However, this would change the function signature which is currently being
+            # exported to the module api. Since we don't want to break that api, we have
+            # to settle with ignoring the linter error here.
+            # As of the time of writing this, all Synapse internal usages of
+            # `DirectServeHtmlResource` pass in the existing homeserver clock instance.
+            clock = Clock(  # type: ignore[multiple-internal-clocks]
+                cast(ISynapseThreadlessReactor, reactor),
+                server_name="synapse_module_running_from_unknown_server",
+            )
 
         super().__init__(clock, extract_context)
 
@@ -702,6 +735,10 @@ class _ByteProducer:
         self._request: Optional[Request] = request
         self._iterator = iterator
         self._paused = False
+        self.tracing_scope = start_active_span(
+            "write_bytes_to_request",
+        )
+        self.tracing_scope.__enter__()
 
         try:
             self._request.registerProducer(self, True)
@@ -712,13 +749,13 @@ class _ByteProducer:
             logger.info("Connection disconnected before response was written: %r", e)
 
             # We drop our references to data we'll not use.
-            self._request = None
             self._iterator = iter(())
+            self.tracing_scope.__exit__(type(e), None, e.__traceback__)
         else:
             # Start producing if `registerProducer` was successful
             self.resumeProducing()
 
-    def _send_data(self, data: List[bytes]) -> None:
+    def _send_data(self, data: list[bytes]) -> None:
         """
         Send a list of bytes as a chunk of a response.
         """
@@ -727,6 +764,9 @@ class _ByteProducer:
         self._request.write(b"".join(data))
 
     def pauseProducing(self) -> None:
+        opentracing_span = active_span()
+        if opentracing_span is not None:
+            opentracing_span.log_kv({"event": "producer_paused"})
         self._paused = True
 
     def resumeProducing(self) -> None:
@@ -736,6 +776,10 @@ class _ByteProducer:
             return
 
         self._paused = False
+
+        opentracing_span = active_span()
+        if opentracing_span is not None:
+            opentracing_span.log_kv({"event": "producer_resumed"})
 
         # Write until there's backpressure telling us to stop.
         while not self._paused:
@@ -771,6 +815,7 @@ class _ByteProducer:
     def stopProducing(self) -> None:
         # Clear a circular reference.
         self._request = None
+        self.tracing_scope.__exit__(None, None, None)
 
 
 def _encode_json_bytes(json_object: object) -> bytes:
@@ -913,8 +958,9 @@ def _write_bytes_to_request(request: Request, bytes_to_write: bytes) -> None:
     # once (via `Request.write`) is that doing so starts the timeout for the
     # next request to be received: so if it takes longer than 60s to stream back
     # the response to the client, the client never gets it.
+    # c.f https://github.com/twisted/twisted/issues/12498
     #
-    # The correct solution is to use a Producer; then the timeout is only
+    # One workaround is to use a `Producer`; then the timeout is only
     # started once all of the content is sent over the TCP connection.
 
     # To make sure we don't write all of the bytes at once we split it up into

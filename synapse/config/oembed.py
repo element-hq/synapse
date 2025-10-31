@@ -18,13 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import importlib.resources as importlib_resources
 import json
 import re
-from typing import Any, Dict, Iterable, List, Optional, Pattern
+from typing import Any, Iterable, Optional, Pattern
 from urllib import parse as urlparse
 
 import attr
-import pkg_resources
 
 from synapse.types import JsonDict, StrSequence
 
@@ -37,9 +37,9 @@ class OEmbedEndpointConfig:
     # The API endpoint to fetch.
     api_endpoint: str
     # The patterns to match.
-    url_patterns: List[Pattern[str]]
+    url_patterns: list[Pattern[str]]
     # The supported formats.
-    formats: Optional[List[str]]
+    formats: Optional[list[str]]
 
 
 class OembedConfig(Config):
@@ -48,10 +48,10 @@ class OembedConfig(Config):
     section = "oembed"
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
-        oembed_config: Dict[str, Any] = config.get("oembed") or {}
+        oembed_config: dict[str, Any] = config.get("oembed") or {}
 
         # A list of patterns which will be used.
-        self.oembed_patterns: List[OEmbedEndpointConfig] = list(
+        self.oembed_patterns: list[OEmbedEndpointConfig] = list(
             self._parse_and_validate_providers(oembed_config)
         )
 
@@ -64,7 +64,12 @@ class OembedConfig(Config):
         """
         # Whether to use the packaged providers.json file.
         if not oembed_config.get("disable_default_providers") or False:
-            with pkg_resources.resource_stream("synapse", "res/providers.json") as s:
+            path = (
+                importlib_resources.files("synapse")
+                .joinpath("res")
+                .joinpath("providers.json")
+            )
+            with path.open("r", encoding="utf-8") as s:
                 providers = json.load(s)
 
             yield from self._parse_and_validate_provider(
@@ -87,7 +92,7 @@ class OembedConfig(Config):
             )
 
     def _parse_and_validate_provider(
-        self, providers: List[JsonDict], config_path: StrSequence
+        self, providers: list[JsonDict], config_path: StrSequence
     ) -> Iterable[OEmbedEndpointConfig]:
         # Ensure it is the proper form.
         validate_config(

@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import Dict, List, Optional, Tuple, cast
+from typing import Optional, cast
 
 import attr
 from parameterized import parameterized
@@ -39,7 +39,7 @@ from synapse.storage.databases.main.events_bg_updates import (
 )
 from synapse.types import create_requester
 from synapse.types.storage import _BackgroundUpdates
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.test_utils.event_injection import create_event
 from tests.unittest import HomeserverTestCase
@@ -112,7 +112,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
 
         self.state_handler = self.hs.get_state_handler()
 
-    def _get_sliding_sync_joined_rooms(self) -> Dict[str, _SlidingSyncJoinedRoomResult]:
+    def _get_sliding_sync_joined_rooms(self) -> dict[str, _SlidingSyncJoinedRoomResult]:
         """
         Return the rows from the `sliding_sync_joined_rooms` table.
 
@@ -120,7 +120,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             Mapping from room_id to _SlidingSyncJoinedRoomResult.
         """
         rows = cast(
-            List[Tuple[str, int, int, str, str, bool, str]],
+            list[tuple[str, int, int, str, str, bool, str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     "sliding_sync_joined_rooms",
@@ -153,7 +153,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
 
     def _get_sliding_sync_membership_snapshots(
         self,
-    ) -> Dict[Tuple[str, str], _SlidingSyncMembershipSnapshotResult]:
+    ) -> dict[tuple[str, str], _SlidingSyncMembershipSnapshotResult]:
         """
         Return the rows from the `sliding_sync_membership_snapshots` table.
 
@@ -161,7 +161,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             Mapping from the (room_id, user_id) to _SlidingSyncMembershipSnapshotResult.
         """
         rows = cast(
-            List[Tuple[str, str, str, str, str, int, int, bool, str, str, bool, str]],
+            list[tuple[str, str, str, str, str, int, int, bool, str, str, bool, str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     "sliding_sync_membership_snapshots",
@@ -207,8 +207,8 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
     def _create_remote_invite_room_for_user(
         self,
         invitee_user_id: str,
-        unsigned_invite_room_state: Optional[List[StrippedStateEvent]],
-    ) -> Tuple[str, EventBase]:
+        unsigned_invite_room_state: Optional[list[StrippedStateEvent]],
+    ) -> tuple[str, EventBase]:
         """
         Create a fake invite for a remote room and persist it.
 
@@ -2246,7 +2246,7 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
         ]
     )
     def test_non_join_remote_invite_no_stripped_state(
-        self, _description: str, stripped_state: Optional[List[StrippedStateEvent]]
+        self, _description: str, stripped_state: Optional[list[StrippedStateEvent]]
     ) -> None:
         """
         Test remote invite with no stripped state provided shows up in

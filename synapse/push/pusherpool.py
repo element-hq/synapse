@@ -20,14 +20,13 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from prometheus_client import Gauge
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.push import Pusher, PusherConfig, PusherConfigException
@@ -70,10 +69,8 @@ class PusherPool:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
+        self.hs = hs  # nb must be called this for @wrap_as_background_process
+        self.server_name = hs.hostname
         self.pusher_factory = PusherFactory(hs)
         self.store = self.hs.get_datastores().main
         self.clock = self.hs.get_clock()
@@ -103,7 +100,7 @@ class PusherPool:
         self._last_room_stream_id_seen = self.store.get_room_max_stream_ordering()
 
         # map from user id to app_id:pushkey to pusher
-        self.pushers: Dict[str, Dict[str, Pusher]] = {}
+        self.pushers: dict[str, dict[str, Pusher]] = {}
 
         self._account_validity_handler = hs.get_account_validity_handler()
 
@@ -112,9 +109,7 @@ class PusherPool:
         if not self._should_start_pushers:
             logger.info("Not starting pushers because they are disabled in the config")
             return
-        run_as_background_process(
-            "start_pushers", self.server_name, self._start_pushers
-        )
+        self.hs.run_as_background_process("start_pushers", self._start_pushers)
 
     async def add_or_update_pusher(
         self,

@@ -20,7 +20,7 @@
 #
 
 import urllib.parse
-from typing import Dict, cast
+from typing import cast
 
 from parameterized import parameterized
 
@@ -33,7 +33,7 @@ from synapse.rest.admin import VersionServlet
 from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG
@@ -65,7 +65,7 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources

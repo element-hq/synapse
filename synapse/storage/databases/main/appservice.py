@@ -20,7 +20,7 @@
 #
 import logging
 import re
-from typing import TYPE_CHECKING, List, Optional, Pattern, Sequence, Tuple, cast
+from typing import TYPE_CHECKING, Optional, Pattern, Sequence, cast
 
 from synapse.appservice import (
     ApplicationService,
@@ -42,8 +42,8 @@ from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
 from synapse.storage.types import Cursor
 from synapse.storage.util.sequence import build_sequence_generator
 from synapse.types import DeviceListUpdates, JsonMapping
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import _CacheContext, cached
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 def _make_exclusive_regex(
-    services_cache: List[ApplicationService],
+    services_cache: list[ApplicationService],
 ) -> Optional[Pattern]:
     # We precompile a regex constructed from all the regexes that the AS's
     # have registered for exclusive users.
@@ -83,13 +83,17 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
             hs.hostname, hs.config.appservice.app_service_config_files
         )
         self.exclusive_user_regex = _make_exclusive_regex(self.services_cache)
+        # When OAuth is enabled, force all appservices to enable MSC4190 too.
+        if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+            for appservice in self.services_cache:
+                appservice.msc4190_device_management = True
 
         def get_max_as_txn_id(txn: Cursor) -> int:
             logger.warning("Falling back to slow query, you should port to postgres")
             txn.execute(
                 "SELECT COALESCE(max(txn_id), 0) FROM application_services_txns"
             )
-            return cast(Tuple[int], txn.fetchone())[0]
+            return cast(tuple[int], txn.fetchone())[0]
 
         self._as_txn_seq_gen = build_sequence_generator(
             db_conn,
@@ -102,7 +106,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
 
         super().__init__(database, db_conn, hs)
 
-    def get_app_services(self) -> List[ApplicationService]:
+    def get_app_services(self) -> list[ApplicationService]:
         return self.services_cache
 
     def get_if_app_services_interested_in_user(self, user_id: str) -> bool:
@@ -195,7 +199,7 @@ class ApplicationServiceTransactionWorkerStore(
 ):
     async def get_appservices_by_state(
         self, state: ApplicationServiceState
-    ) -> List[ApplicationService]:
+    ) -> list[ApplicationService]:
         """Get a list of application services based on their state.
 
         Args:
@@ -204,7 +208,7 @@ class ApplicationServiceTransactionWorkerStore(
             A list of ApplicationServices, which may be empty.
         """
         results = cast(
-            List[Tuple[str]],
+            list[tuple[str]],
             await self.db_pool.simple_select_list(
                 table="application_services_state",
                 keyvalues={"state": state.value},
@@ -269,8 +273,8 @@ class ApplicationServiceTransactionWorkerStore(
         self,
         service: ApplicationService,
         events: Sequence[EventBase],
-        ephemeral: List[JsonMapping],
-        to_device_messages: List[JsonMapping],
+        ephemeral: list[JsonMapping],
+        to_device_messages: list[JsonMapping],
         one_time_keys_count: TransactionOneTimeKeysCount,
         unused_fallback_keys: TransactionUnusedFallbackKeys,
         device_list_summary: DeviceListUpdates,
@@ -354,7 +358,7 @@ class ApplicationServiceTransactionWorkerStore(
 
         def _get_oldest_unsent_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Tuple[int, str]]:
+        ) -> Optional[tuple[int, str]]:
             # Monotonically increasing txn ids, so just select the smallest
             # one in the txns table (we delete them when they are sent)
             txn.execute(
@@ -362,7 +366,7 @@ class ApplicationServiceTransactionWorkerStore(
                 " ORDER BY txn_id ASC LIMIT 1",
                 (service.id,),
             )
-            return cast(Optional[Tuple[int, str]], txn.fetchone())
+            return cast(Optional[tuple[int, str]], txn.fetchone())
 
         entry = await self.db_pool.runInteraction(
             "get_oldest_unsent_appservice_txn", _get_oldest_unsent_txn

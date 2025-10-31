@@ -21,7 +21,7 @@
 import asyncio
 from asyncio import Future
 from http import HTTPStatus
-from typing import Any, Awaitable, Dict, List, Optional, Tuple, TypeVar, cast
+from typing import Any, Awaitable, Optional, TypeVar, cast
 from unittest.mock import Mock
 
 import attr
@@ -35,13 +35,13 @@ from synapse.config._base import RootConfig
 from synapse.config.auto_accept_invites import AutoAcceptInvitesConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.federation.federation_base import event_from_pdu_json
-from synapse.handlers.sync import JoinedSyncResult, SyncRequestKey, SyncVersion
+from synapse.handlers.sync import JoinedSyncResult, SyncRequestKey
 from synapse.module_api import ModuleApi
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import StreamToken, UserID, UserInfo, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.handlers.test_sync import generate_sync_config
 from tests.unittest import (
@@ -527,7 +527,7 @@ def sync_join(
     testcase: HomeserverTestCase,
     user_id: str,
     since_token: Optional[StreamToken] = None,
-) -> Tuple[List[JoinedSyncResult], StreamToken]:
+) -> tuple[list[JoinedSyncResult], StreamToken]:
     """Perform a sync request for the given user and return the user join updates
     they've received, as well as the next_batch token.
 
@@ -548,7 +548,6 @@ def sync_join(
         testcase.hs.get_sync_handler().wait_for_sync_for_user(
             requester,
             sync_config,
-            SyncVersion.SYNC_V2,
             generate_request_key(),
             since_token,
         )
@@ -766,7 +765,7 @@ class MockEvent:
 
     sender: str
     type: str
-    content: Dict[str, Any]
+    content: dict[str, Any]
     room_id: str = "!someroom"
     state_key: Optional[str] = None
 
@@ -803,7 +802,7 @@ def make_multiple_awaitable(result: TV) -> Awaitable[TV]:
 
 
 def create_module(
-    config_override: Optional[Dict[str, Any]] = None, worker_name: Optional[str] = None
+    config_override: Optional[dict[str, Any]] = None, worker_name: Optional[str] = None
 ) -> InviteAutoAccepter:
     # Create a mock based on the ModuleApi spec, but override some mocked functions
     # because some capabilities are needed for running the tests.

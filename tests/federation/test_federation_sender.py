@@ -17,7 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Callable, FrozenSet, List, Optional, Set
+from typing import Callable, Optional
 from unittest.mock import AsyncMock, Mock
 
 from signedjson import key, sign
@@ -36,7 +36,7 @@ from synapse.rest.client import login
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventMetadata
 from synapse.types import JsonDict, ReadReceipt
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -435,7 +435,7 @@ class FederationSenderPresenceTestCases(HomeserverTestCase):
 
         # A set of all user presence we see, this should end up matching the
         # number we sent out above.
-        seen_users: Set[str] = set()
+        seen_users: set[str] = set()
 
         for edu in presence_edus:
             presence_states = edu["content"]["push"]
@@ -483,12 +483,12 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
 
         # stub out `get_rooms_for_user` and `get_current_hosts_in_room` so that the
         # server thinks the user shares a room with `@user2:host2`
-        def get_rooms_for_user(user_id: str) -> "defer.Deferred[FrozenSet[str]]":
+        def get_rooms_for_user(user_id: str) -> "defer.Deferred[frozenset[str]]":
             return defer.succeed(frozenset({test_room_id}))
 
         hs.get_datastores().main.get_rooms_for_user = get_rooms_for_user  # type: ignore[assignment]
 
-        async def get_current_hosts_in_room(room_id: str) -> Set[str]:
+        async def get_current_hosts_in_room(room_id: str) -> set[str]:
             if room_id == test_room_id:
                 return {"host2"}
             else:
@@ -504,7 +504,7 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
         self.device_handler = device_handler
 
         # whenever send_transaction is called, record the edu data
-        self.edus: List[JsonDict] = []
+        self.edus: list[JsonDict] = []
         self.federation_transport_client.send_transaction.side_effect = (
             self.record_transaction
         )

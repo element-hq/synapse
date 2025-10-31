@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
@@ -58,7 +58,7 @@ class KnockRoomAliasServlet(RestServlet):
         self,
         request: SynapseRequest,
         room_identifier: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         content = parse_json_object_from_request(request)
@@ -70,7 +70,7 @@ class KnockRoomAliasServlet(RestServlet):
             room_id = room_identifier
 
             # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
-            args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+            args: dict[bytes, list[bytes]] = request.args  # type: ignore
             # Prefer via over server_name (deprecated with MSC4156)
             remote_room_hosts = parse_strings_from_args(args, "via", required=False)
             if remote_room_hosts is None:

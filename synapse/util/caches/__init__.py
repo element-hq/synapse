@@ -24,7 +24,7 @@ import logging
 import typing
 from enum import Enum, auto
 from sys import intern
-from typing import Any, Callable, Dict, List, Optional, Sized, TypeVar
+from typing import Any, Callable, Optional, Sized, TypeVar
 
 import attr
 from prometheus_client import REGISTRY
@@ -162,7 +162,7 @@ class CacheMetric:
         if self.memory_usage is not None:
             self.memory_usage = 0
 
-    def describe(self) -> List[str]:
+    def describe(self) -> list[str]:
         return []
 
     def collect(self) -> None:
@@ -244,7 +244,7 @@ def register_cache(
         collect_callback=collect_callback,
     )
     metric_name = "cache_%s_%s_%s" % (cache_type, cache_name, server_name)
-    CACHE_METRIC_REGISTRY.register_hook(metric_name, metric.collect)
+    CACHE_METRIC_REGISTRY.register_hook(server_name, metric_name, metric.collect)
     return metric
 
 
@@ -283,7 +283,7 @@ def intern_string(string: T) -> T:
         return string
 
 
-def intern_dict(dictionary: Dict[str, Any]) -> Dict[str, Any]:
+def intern_dict(dictionary: dict[str, Any]) -> dict[str, Any]:
     """Takes a dictionary and interns well known keys and their values"""
     return {
         KNOWN_KEYS.get(key, key): _intern_known_values(key, value)

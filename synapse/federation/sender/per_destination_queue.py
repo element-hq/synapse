@@ -23,10 +23,12 @@ import datetime
 import logging
 from collections import OrderedDict
 from types import TracebackType
-from typing import TYPE_CHECKING, Dict, Hashable, Iterable, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Hashable, Iterable, Optional
 
 import attr
 from prometheus_client import Counter
+
+from twisted.internet import defer
 
 from synapse.api.constants import EduTypes
 from synapse.api.errors import (
@@ -41,7 +43,6 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.opentracing import SynapseTags, set_tag
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import JsonDict, ReadReceipt
 from synapse.util.retryutils import NotRetryingDestination, get_retry_limiter
 from synapse.visibility import filter_events_for_server
@@ -79,6 +80,7 @@ MAX_PRESENCE_STATES_PER_EDU = 50
 class PerDestinationQueue:
     """
     Manages the per-destination transmission queues.
+    Runs until `shutdown()` is called on the queue.
 
     Args:
         hs
@@ -94,6 +96,7 @@ class PerDestinationQueue:
         destination: str,
     ):
         self.server_name = hs.hostname
+        self._hs = hs
         self._clock = hs.get_clock()
         self._storage_controllers = hs.get_storage_controllers()
         self._store = hs.get_datastores().main
@@ -117,6 +120,8 @@ class PerDestinationQueue:
 
         self._destination = destination
         self.transmission_loop_running = False
+        self._transmission_loop_enabled = True
+        self.active_transmission_loop: Optional[defer.Deferred] = None
 
         # Flag to signal to any running transmission loop that there is new data
         # queued up to be sent.
@@ -140,16 +145,16 @@ class PerDestinationQueue:
         self._last_successful_stream_ordering: Optional[int] = None
 
         # a queue of pending PDUs
-        self._pending_pdus: List[EventBase] = []
+        self._pending_pdus: list[EventBase] = []
 
         # XXX this is never actually used: see
         # https://github.com/matrix-org/synapse/issues/7549
-        self._pending_edus: List[Edu] = []
+        self._pending_edus: list[Edu] = []
 
         # Pending EDUs by their "key". Keyed EDUs are EDUs that get clobbered
         # based on their key (e.g. typing events by room_id)
         # Map of (edu_type, key) -> Edu
-        self._pending_edus_keyed: Dict[Tuple[str, Hashable], Edu] = {}
+        self._pending_edus_keyed: dict[tuple[str, Hashable], Edu] = {}
 
         # Map of user_id -> UserPresenceState of pending presence to be sent to this
         # destination
@@ -159,7 +164,7 @@ class PerDestinationQueue:
         #
         # Each receipt can only have a single receipt per
         # (room ID, receipt type, user ID, thread ID) tuple.
-        self._pending_receipt_edus: List[Dict[str, Dict[str, Dict[str, dict]]]] = []
+        self._pending_receipt_edus: list[dict[str, dict[str, dict[str, dict]]]] = []
 
         # stream_id of last successfully sent to-device message.
         # NB: may be a long or an int.
@@ -170,6 +175,20 @@ class PerDestinationQueue:
 
     def __str__(self) -> str:
         return "PerDestinationQueue[%s]" % self._destination
+
+    def shutdown(self) -> None:
+        """Instruct the queue to stop processing any further requests"""
+        self._transmission_loop_enabled = False
+        # The transaction manager must be shutdown before cancelling the active
+        # transmission loop. Otherwise the transmission loop can enter a new cycle of
+        # sleeping before retrying since the shutdown flag of the _transaction_manager
+        # hasn't been set yet.
+        self._transaction_manager.shutdown()
+        try:
+            if self.active_transmission_loop is not None:
+                self.active_transmission_loop.cancel()
+        except Exception:
+            pass
 
     def pending_pdu_count(self) -> int:
         return len(self._pending_pdus)
@@ -309,25 +328,28 @@ class PerDestinationQueue:
             )
             return
 
+        if not self._transmission_loop_enabled:
+            logger.warning("Shutdown has been requested. Not sending transaction")
+            return
+
         logger.debug("TX [%s] Starting transaction loop", self._destination)
 
-        run_as_background_process(
+        self.active_transmission_loop = self._hs.run_as_background_process(
             "federation_transaction_transmission_loop",
-            self.server_name,
             self._transaction_transmission_loop,
         )
 
     async def _transaction_transmission_loop(self) -> None:
-        pending_pdus: List[EventBase] = []
+        pending_pdus: list[EventBase] = []
         try:
             self.transmission_loop_running = True
-
             # This will throw if we wouldn't retry. We do this here so we fail
             # quickly, but we will later check this again in the http client,
             # hence why we throw the result away.
             await get_retry_limiter(
                 destination=self._destination,
                 our_server_name=self.server_name,
+                hs=self._hs,
                 clock=self._clock,
                 store=self._store,
             )
@@ -339,7 +361,7 @@ class PerDestinationQueue:
                     # not caught up yet
                     return
 
-            while True:
+            while self._transmission_loop_enabled:
                 self._new_data_to_send = False
 
                 async with _TransactionQueueManager(self) as (
@@ -352,8 +374,8 @@ class PerDestinationQueue:
                         # If we've gotten told about new things to send during
                         # checking for things to send, we try looking again.
                         # Otherwise new PDUs or EDUs might arrive in the meantime,
-                        # but not get sent because we hold the
-                        # `transmission_loop_running` flag.
+                        # but not get sent because we currently have an
+                        # `_active_transmission_loop` running.
                         if self._new_data_to_send:
                             continue
                         else:
@@ -442,6 +464,7 @@ class PerDestinationQueue:
                 )
         finally:
             # We want to be *very* sure we clear this after we stop processing
+            self.active_transmission_loop = None
             self.transmission_loop_running = False
 
     async def _catch_up_transmission_loop(self) -> None:
@@ -469,7 +492,7 @@ class PerDestinationQueue:
         last_successful_stream_ordering: int = _tmp_last_successful_stream_ordering
 
         # get at most 50 catchup room/PDUs
-        while True:
+        while self._transmission_loop_enabled:
             event_ids = await self._store.get_catch_up_room_event_ids(
                 self._destination, last_successful_stream_ordering
             )
@@ -642,12 +665,12 @@ class PerDestinationQueue:
         if not self._pending_receipt_edus:
             self._rrs_pending_flush = False
 
-    def _pop_pending_edus(self, limit: int) -> List[Edu]:
+    def _pop_pending_edus(self, limit: int) -> list[Edu]:
         pending_edus = self._pending_edus
         pending_edus, self._pending_edus = pending_edus[:limit], pending_edus[limit:]
         return pending_edus
 
-    async def _get_device_update_edus(self, limit: int) -> Tuple[List[Edu], int]:
+    async def _get_device_update_edus(self, limit: int) -> tuple[list[Edu], int]:
         last_device_list = self._last_device_list_stream_id
 
         # Retrieve list of new device updates to send to the destination
@@ -668,7 +691,7 @@ class PerDestinationQueue:
 
         return edus, now_stream_id
 
-    async def _get_to_device_message_edus(self, limit: int) -> Tuple[List[Edu], int]:
+    async def _get_to_device_message_edus(self, limit: int) -> tuple[list[Edu], int]:
         last_device_stream_id = self._last_device_stream_id
         to_device_stream_id = self._store.get_to_device_stream_token()
         contents, stream_id = await self._store.get_new_device_msgs_for_remote(
@@ -722,9 +745,9 @@ class _TransactionQueueManager:
     _device_stream_id: Optional[int] = None
     _device_list_id: Optional[int] = None
     _last_stream_ordering: Optional[int] = None
-    _pdus: List[EventBase] = attr.Factory(list)
+    _pdus: list[EventBase] = attr.Factory(list)
 
-    async def __aenter__(self) -> Tuple[List[EventBase], List[Edu]]:
+    async def __aenter__(self) -> tuple[list[EventBase], list[Edu]]:
         # First we calculate the EDUs we want to send, if any.
 
         # There's a maximum number of EDUs that can be sent with a transaction,
@@ -744,7 +767,7 @@ class _TransactionQueueManager:
         if self.queue._pending_presence:
             # Only send max 50 presence entries in the EDU, to bound the amount
             # of data we're sending.
-            presence_to_add: List[JsonDict] = []
+            presence_to_add: list[JsonDict] = []
             while (
                 self.queue._pending_presence
                 and len(presence_to_add) < MAX_PRESENCE_STATES_PER_EDU
@@ -822,7 +845,7 @@ class _TransactionQueueManager:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc: Optional[BaseException],
         tb: Optional[TracebackType],
     ) -> None:

@@ -21,13 +21,9 @@
 import itertools
 from typing import (
     Collection,
-    Dict,
     Iterable,
-    List,
     Mapping,
     Optional,
-    Set,
-    Tuple,
     TypeVar,
 )
 
@@ -45,6 +41,7 @@ from synapse.state.v2 import (
     lexicographical_topological_sort,
     resolve_events_with_store,
 )
+from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import EventID, StateMap
 
 from tests import unittest
@@ -93,7 +90,7 @@ class FakeEvent:
         self.content = content
         self.room_id = ROOM_ID
 
-    def to_event(self, auth_events: List[str], prev_events: List[str]) -> EventBase:
+    def to_event(self, auth_events: list[str], prev_events: list[str]) -> EventBase:
         """Given the auth_events and prev_events, convert to a Frozen Event
 
         Args:
@@ -460,9 +457,9 @@ class StateTestCase(unittest.TestCase):
 
     def do_check(
         self,
-        events: List[FakeEvent],
-        edges: List[List[str]],
-        expected_state_ids: List[str],
+        events: list[FakeEvent],
+        edges: list[list[str]],
+        expected_state_ids: list[str],
     ) -> None:
         """Take a list of events and edges and calculate the state of the
         graph at END, and asserts it matches `expected_state_ids`
@@ -475,9 +472,9 @@ class StateTestCase(unittest.TestCase):
                 the keys that haven't changed since START).
         """
         # We want to sort the events into topological order for processing.
-        graph: Dict[str, Set[str]] = {}
+        graph: dict[str, set[str]] = {}
 
-        fake_event_map: Dict[str, FakeEvent] = {}
+        fake_event_map: dict[str, FakeEvent] = {}
 
         for ev in itertools.chain(INITIAL_EVENTS, events):
             graph[ev.node_id] = set()
@@ -490,8 +487,8 @@ class StateTestCase(unittest.TestCase):
             for a, b in pairwise(edge_list):
                 graph[a].add(b)
 
-        event_map: Dict[str, EventBase] = {}
-        state_at_event: Dict[str, StateMap[str]] = {}
+        event_map: dict[str, EventBase] = {}
+        state_at_event: dict[str, StateMap[str]] = {}
 
         # We copy the map as the sort consumes the graph
         graph_copy = {k: set(v) for k, v in graph.items()}
@@ -567,7 +564,7 @@ class StateTestCase(unittest.TestCase):
 
 class LexicographicalTestCase(unittest.TestCase):
     def test_simple(self) -> None:
-        graph: Dict[str, Set[str]] = {
+        graph: dict[str, set[str]] = {
             "l": {"o"},
             "m": {"n", "o"},
             "n": {"o"},
@@ -734,7 +731,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -791,7 +792,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -858,7 +863,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -1007,7 +1016,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
 T = TypeVar("T")
 
 
-def pairwise(iterable: Iterable[T]) -> Iterable[Tuple[T, T]]:
+def pairwise(iterable: Iterable[T]) -> Iterable[tuple[T, T]]:
     "s -> (s0,s1), (s1,s2), (s2, s3), ..."
     a, b = itertools.tee(iterable)
     next(b, None)
@@ -1016,11 +1025,11 @@ def pairwise(iterable: Iterable[T]) -> Iterable[Tuple[T, T]]:
 
 @attr.s
 class TestStateResolutionStore:
-    event_map: Dict[str, EventBase] = attr.ib()
+    event_map: dict[str, EventBase] = attr.ib()
 
     def get_events(
         self, event_ids: Collection[str], allow_rejected: bool = False
-    ) -> "defer.Deferred[Dict[str, EventBase]]":
+    ) -> "defer.Deferred[dict[str, EventBase]]":
         """Get events from the database
 
         Args:
@@ -1035,7 +1044,7 @@ class TestStateResolutionStore:
             {eid: self.event_map[eid] for eid in event_ids if eid in self.event_map}
         )
 
-    def _get_auth_chain(self, event_ids: Iterable[str]) -> List[str]:
+    def _get_auth_chain(self, event_ids: Iterable[str]) -> list[str]:
         """Gets the full auth chain for a set of events (including rejected
         events).
 
@@ -1070,9 +1079,18 @@ class TestStateResolutionStore:
         return list(result)
 
     def get_auth_chain_difference(
-        self, room_id: str, auth_sets: List[Set[str]]
-    ) -> "defer.Deferred[Set[str]]":
+        self,
+        room_id: str,
+        auth_sets: list[set[str]],
+        conflicted_state: Optional[set[str]],
+        additional_backwards_reachable_conflicted_events: Optional[set[str]],
+    ) -> "defer.Deferred[StateDifference]":
         chains = [frozenset(self._get_auth_chain(a)) for a in auth_sets]
 
         common = set(chains[0]).intersection(*chains[1:])
-        return defer.succeed(set(chains[0]).union(*chains[1:]) - common)
+        return defer.succeed(
+            StateDifference(
+                auth_difference=set(chains[0]).union(*chains[1:]) - common,
+                conflicted_subgraph=set(),
+            ),
+        )

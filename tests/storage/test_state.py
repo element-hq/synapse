@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import List, Tuple, cast
+from typing import cast
 
 from immutabledict import immutabledict
 
@@ -32,7 +32,7 @@ from synapse.events import EventBase
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomID, StateMap, UserID
 from synapse.types.state import StateFilter
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -593,7 +593,7 @@ class StateStoreTestCase(HomeserverTestCase):
 
         # check that only state events are in state_groups, and all state events are in state_groups
         res = cast(
-            List[Tuple[str]],
+            list[tuple[str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     table="state_groups",
@@ -618,7 +618,7 @@ class StateStoreTestCase(HomeserverTestCase):
         for event, context in processed_events_and_context:
             if event.is_state():
                 state = cast(
-                    List[Tuple[str, str]],
+                    list[tuple[str, str]],
                     self.get_success(
                         self.store.db_pool.simple_select_list(
                             table="state_groups_state",
@@ -631,7 +631,7 @@ class StateStoreTestCase(HomeserverTestCase):
                 self.assertEqual(event.state_key, state[0][1])
 
                 groups = cast(
-                    List[Tuple[str]],
+                    list[tuple[str]],
                     self.get_success(
                         self.store.db_pool.simple_select_list(
                             table="state_group_edges",

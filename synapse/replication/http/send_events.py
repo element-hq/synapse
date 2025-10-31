@@ -20,13 +20,13 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
-from synapse.events import EventBase, make_event_from_dict
-from synapse.events.snapshot import EventContext
+from synapse.events import make_event_from_dict
+from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.http.server import HttpServer
 from synapse.replication.http._base import ReplicationEndpoint
 from synapse.types import JsonDict, Requester, UserID
@@ -85,11 +85,11 @@ class ReplicationSendEventsRestServlet(ReplicationEndpoint):
 
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
-        events_and_context: List[Tuple[EventBase, EventContext]],
+        events_and_context: list[EventPersistencePair],
         store: "DataStore",
         requester: Requester,
         ratelimit: bool,
-        extra_users: List[UserID],
+        extra_users: list[UserID],
     ) -> JsonDict:
         """
         Args:
@@ -122,7 +122,7 @@ class ReplicationSendEventsRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, payload: JsonDict
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         with Measure(
             self.clock, name="repl_send_events_parse", server_name=self.server_name
         ):

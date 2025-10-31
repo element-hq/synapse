@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 
 from synapse.api.constants import EduTypes, ReceiptTypes
 from synapse.appservice import ApplicationService
@@ -136,10 +136,10 @@ class ReceiptsHandler:
 
         await self._handle_new_receipts(receipts)
 
-    async def _handle_new_receipts(self, receipts: List[ReadReceipt]) -> bool:
+    async def _handle_new_receipts(self, receipts: list[ReadReceipt]) -> bool:
         """Takes a list of receipts, stores them and informs the notifier."""
 
-        receipts_persisted: List[ReadReceipt] = []
+        receipts_persisted: list[ReadReceipt] = []
         for receipt in receipts:
             stream_id = await self.store.insert_receipt(
                 receipt.room_id,
@@ -216,7 +216,7 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
     @staticmethod
     def filter_out_private_receipts(
         rooms: Sequence[JsonMapping], user_id: str
-    ) -> List[JsonMapping]:
+    ) -> list[JsonMapping]:
         """
         Filters a list of serialized receipts (as returned by /sync and /initialSync)
         and removes private read receipts of other users.
@@ -233,7 +233,7 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
             The same as rooms, but filtered.
         """
 
-        result: List[JsonMapping] = []
+        result: list[JsonMapping] = []
 
         # Iterate through each room's receipt content.
         for room in rooms:
@@ -287,7 +287,7 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
         is_guest: bool,
         explicit_room_id: Optional[str] = None,
         to_key: Optional[MultiWriterStreamToken] = None,
-    ) -> Tuple[List[JsonMapping], MultiWriterStreamToken]:
+    ) -> tuple[list[JsonMapping], MultiWriterStreamToken]:
         """
         Find read receipts for given rooms (> `from_token` and <= `to_token`)
         """
@@ -313,7 +313,7 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
         from_key: MultiWriterStreamToken,
         to_key: MultiWriterStreamToken,
         service: ApplicationService,
-    ) -> Tuple[List[JsonMapping], MultiWriterStreamToken]:
+    ) -> tuple[list[JsonMapping], MultiWriterStreamToken]:
         """Returns a set of new read receipt events that an appservice
         may be interested in.
 

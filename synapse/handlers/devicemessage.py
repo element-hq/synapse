@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from synapse.api.constants import EduTypes, EventContentFields, ToDeviceEventTypes
 from synapse.api.errors import Codes, SynapseError
@@ -34,7 +34,7 @@ from synapse.logging.opentracing import (
     set_tag,
 )
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, get_domain_from_id
-from synapse.util import json_encoder
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -158,7 +158,7 @@ class DeviceMessageHandler:
         self,
         message_type: str,
         sender_user_id: str,
-        by_device: Dict[str, Dict[str, Any]],
+        by_device: dict[str, dict[str, Any]],
     ) -> None:
         """Checks inbound device messages for unknown remote devices, and if
         found marks the remote cache for the user as stale.
@@ -207,7 +207,7 @@ class DeviceMessageHandler:
         self,
         requester: Requester,
         message_type: str,
-        messages: Dict[str, Dict[str, JsonDict]],
+        messages: dict[str, dict[str, JsonDict]],
     ) -> None:
         """
         Handle a request from a user to send to-device message(s).
@@ -222,7 +222,7 @@ class DeviceMessageHandler:
         set_tag(SynapseTags.TO_DEVICE_TYPE, message_type)
         set_tag(SynapseTags.TO_DEVICE_SENDER, sender_user_id)
         local_messages = {}
-        remote_messages: Dict[str, Dict[str, Dict[str, JsonDict]]] = {}
+        remote_messages: dict[str, dict[str, dict[str, JsonDict]]] = {}
         for user_id, by_device in messages.items():
             if not UserID.is_valid(user_id):
                 logger.warning(

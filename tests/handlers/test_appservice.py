@@ -19,7 +19,15 @@
 #
 #
 
-from typing import Dict, Iterable, List, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Iterable,
+    Optional,
+    TypeVar,
+)
 from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
@@ -36,6 +44,7 @@ from synapse.appservice import (
     TransactionUnusedFallbackKeys,
 )
 from synapse.handlers.appservice import ApplicationServicesHandler
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.client import login, receipts, register, room, sendtodevice
 from synapse.server import HomeServer
 from synapse.types import (
@@ -45,13 +54,18 @@ from synapse.types import (
     StreamKeyType,
     UserID,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 from tests import unittest
+from tests.server import get_clock
 from tests.test_utils import event_injection
 from tests.unittest import override_config
-from tests.utils import MockClock
+
+if TYPE_CHECKING:
+    from typing_extensions import LiteralString
+
+R = TypeVar("R")
 
 
 class AppServiceHandlerTestCase(unittest.TestCase):
@@ -61,14 +75,27 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         self.mock_store = Mock()
         self.mock_as_api = AsyncMock()
         self.mock_scheduler = Mock()
+        self.reactor, self.clock = get_clock()
+
         hs = Mock()
+
+        def test_run_as_background_process(
+            desc: "LiteralString",
+            func: Callable[..., Awaitable[Optional[R]]],
+            *args: Any,
+            **kwargs: Any,
+        ) -> "defer.Deferred[Optional[R]]":
+            # Ignore linter error as this is used only for testing purposes (i.e. outside of Synapse).
+            return run_as_background_process(desc, "test_server", func, *args, **kwargs)  # type: ignore[untracked-background-process]
+
+        hs.run_as_background_process = test_run_as_background_process
         hs.get_datastores.return_value = Mock(main=self.mock_store)
         self.mock_store.get_appservice_last_pos = AsyncMock(return_value=None)
         self.mock_store.set_appservice_last_pos = AsyncMock(return_value=None)
         self.mock_store.set_appservice_stream_type_pos = AsyncMock(return_value=None)
         hs.get_application_service_api.return_value = self.mock_as_api
         hs.get_application_service_scheduler.return_value = self.mock_scheduler
-        hs.get_clock.return_value = MockClock()
+        hs.get_clock.return_value = self.clock
         self.handler = ApplicationServicesHandler(hs)
         self.event_source = hs.get_event_sources()
 
@@ -421,7 +448,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         hs.get_application_service_handler().scheduler.txn_ctrl.send = self.send_mock  # type: ignore[method-assign]
 
         # Mock out application services, and allow defining our own in tests
-        self._services: List[ApplicationService] = []
+        self._services: list[ApplicationService] = []
         self.hs.get_datastores().main.get_app_services = Mock(  # type: ignore[method-assign]
             return_value=self._services
         )
@@ -855,7 +882,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         # Count the total number of to-device messages that were sent out per-service.
         # Ensure that we only sent to-device messages to interested services, and that
         # each interested service received the full count of to-device messages.
-        service_id_to_message_count: Dict[str, int] = {}
+        service_id_to_message_count: dict[str, int] = {}
 
         for call in self.send_mock.call_args_list:
             (
@@ -994,7 +1021,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
 
     def _register_application_service(
         self,
-        namespaces: Optional[Dict[str, Iterable[Dict]]] = None,
+        namespaces: Optional[dict[str, Iterable[dict]]] = None,
     ) -> ApplicationService:
         """
         Register a new application service, with the given namespaces of interest.
@@ -1044,7 +1071,7 @@ class ApplicationServicesHandlerDeviceListsTestCase(unittest.HomeserverTestCase)
         hs.get_application_service_api().put_json = self.put_json  # type: ignore[method-assign]
 
         # Mock out application services, and allow defining our own in tests
-        self._services: List[ApplicationService] = []
+        self._services: list[ApplicationService] = []
         self.hs.get_datastores().main.get_app_services = Mock(  # type: ignore[method-assign]
             return_value=self._services
         )

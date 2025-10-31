@@ -23,7 +23,7 @@
 import collections.abc
 import hashlib
 import logging
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable
 
 from canonicaljson import encode_canonical_json
 from signedjson.sign import sign_json
@@ -80,8 +80,8 @@ def check_event_content_hash(
 
 
 def compute_content_hash(
-    event_dict: Dict[str, Any], hash_algorithm: Hasher
-) -> Tuple[str, bytes]:
+    event_dict: dict[str, Any], hash_algorithm: Hasher
+) -> tuple[str, bytes]:
     """Compute the content hash of an event, which is the hash of the
     unredacted event.
 
@@ -101,6 +101,9 @@ def compute_content_hash(
     event_dict.pop("outlier", None)
     event_dict.pop("destinations", None)
 
+    # N.B. no need to pop the room_id from create events in MSC4291 rooms
+    # as they shouldn't have one.
+
     event_json_bytes = encode_canonical_json(event_dict)
 
     hashed = hash_algorithm(event_json_bytes)
@@ -109,7 +112,7 @@ def compute_content_hash(
 
 def compute_event_reference_hash(
     event: EventBase, hash_algorithm: Hasher = hashlib.sha256
-) -> Tuple[str, bytes]:
+) -> tuple[str, bytes]:
     """Computes the event reference hash. This is the hash of the redacted
     event.
 
@@ -136,7 +139,7 @@ def compute_event_signature(
     event_dict: JsonDict,
     signature_name: str,
     signing_key: SigningKey,
-) -> Dict[str, Dict[str, str]]:
+) -> dict[str, dict[str, str]]:
     """Compute the signature of the event for the given name and key.
 
     Args:

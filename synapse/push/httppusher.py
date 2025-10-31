@@ -21,7 +21,7 @@
 import logging
 import random
 import urllib.parse
-from typing import TYPE_CHECKING, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 from prometheus_client import Counter
 
@@ -32,7 +32,6 @@ from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.storage.databases.main.event_push_actions import HttpPushAction
 from synapse.types import JsonDict, JsonMapping
@@ -69,7 +68,7 @@ http_badges_failed_counter = Counter(
 )
 
 
-def tweaks_for_actions(actions: List[Union[str, Dict]]) -> JsonMapping:
+def tweaks_for_actions(actions: list[Union[str, dict]]) -> JsonMapping:
     """
     Converts a list of actions into a `tweaks` dict (which can then be passed to
         the push gateway).
@@ -182,8 +181,8 @@ class HttpPusher(Pusher):
 
         # We could check the receipts are actually m.read receipts here,
         # but currently that's the only type of receipt anyway...
-        run_as_background_process(
-            "http_pusher.on_new_receipts", self.server_name, self._update_badge
+        self.hs.run_as_background_process(
+            "http_pusher.on_new_receipts", self._update_badge
         )
 
     async def _update_badge(self) -> None:
@@ -219,7 +218,7 @@ class HttpPusher(Pusher):
         if self.failing_since and self.timed_call and self.timed_call.active():
             return
 
-        run_as_background_process("httppush.process", self.server_name, self._process)
+        self.hs.run_as_background_process("httppush.process", self._process)
 
     async def _process(self) -> None:
         # we should never get here if we are already processing
@@ -336,8 +335,9 @@ class HttpPusher(Pusher):
                     )
                 else:
                     logger.info("Push failed: delaying for %ds", self.backoff_delay)
-                    self.timed_call = self.hs.get_reactor().callLater(
-                        self.backoff_delay, self.on_timer
+                    self.timed_call = self.hs.get_clock().call_later(
+                        self.backoff_delay,
+                        self.on_timer,
                     )
                     self.backoff_delay = min(
                         self.backoff_delay * 2, self.MAX_BACKOFF_SEC
@@ -396,7 +396,7 @@ class HttpPusher(Pusher):
         content: JsonDict,
         tweaks: Optional[JsonMapping] = None,
         default_payload: Optional[JsonMapping] = None,
-    ) -> Union[bool, List[str]]:
+    ) -> Union[bool, list[str]]:
         """Send a notification to the registered push gateway, with `content` being
         the content of the `notification` top property specified in the spec.
         Note that the `devices` property will be added with device-specific
@@ -453,7 +453,7 @@ class HttpPusher(Pusher):
         event: EventBase,
         tweaks: JsonMapping,
         badge: int,
-    ) -> Union[bool, List[str]]:
+    ) -> Union[bool, list[str]]:
         """Send a notification to the registered push gateway by building it
         from an event.
 

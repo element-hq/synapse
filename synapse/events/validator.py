@@ -19,11 +19,11 @@
 #
 #
 import collections.abc
-from typing import List, Type, Union, cast
+from typing import Union, cast
 
 import jsonschema
+from pydantic import Field, StrictBool, StrictStr
 
-from synapse._pydantic_compat import Field, StrictBool, StrictStr
 from synapse.api.constants import (
     MAX_ALIAS_LENGTH,
     EventContentFields,
@@ -183,7 +183,17 @@ class EventValidator:
         fields an event would have
         """
 
+        create_event_as_room_id = (
+            event.room_version.msc4291_room_ids_as_hashes
+            and event.type == EventTypes.Create
+            and hasattr(event, "state_key")
+            and event.state_key == ""
+        )
+
         strings = ["room_id", "sender", "type"]
+
+        if create_event_as_room_id:
+            strings.remove("room_id")
 
         if hasattr(event, "state_key"):
             strings.append("state_key")
@@ -192,7 +202,14 @@ class EventValidator:
             if not isinstance(getattr(event, s), str):
                 raise SynapseError(400, "Not '%s' a string type" % (s,))
 
-        RoomID.from_string(event.room_id)
+        if not create_event_as_room_id:
+            assert event.room_id is not None
+            RoomID.from_string(event.room_id)
+            if event.room_version.msc4291_room_ids_as_hashes and not RoomID.is_valid(
+                event.room_id
+            ):
+                raise SynapseError(400, f"Invalid room ID '{event.room_id}'")
+
         UserID.from_string(event.sender)
 
         if event.type == EventTypes.Message:
@@ -266,13 +283,13 @@ POWER_LEVELS_SCHEMA = {
 
 
 class Mentions(RequestBodyModel):
-    user_ids: List[StrictStr] = Field(default_factory=list)
+    user_ids: list[StrictStr] = Field(default_factory=list)
     room: StrictBool = False
 
 
 # This could return something newer than Draft 7, but that's the current "latest"
 # validator.
-def _create_validator(schema: JsonDict) -> Type[jsonschema.Draft7Validator]:
+def _create_validator(schema: JsonDict) -> type[jsonschema.Draft7Validator]:
     validator = jsonschema.validators.validator_for(schema)
 
     # by default jsonschema does not consider a immutabledict to be an object so

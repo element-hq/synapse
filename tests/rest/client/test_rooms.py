@@ -25,7 +25,7 @@
 
 import json
 from http import HTTPStatus
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Any, Iterable, Literal, Optional, Union
 from unittest.mock import AsyncMock, Mock, call, patch
 from urllib import parse as urlparse
 
@@ -60,7 +60,7 @@ from synapse.rest.client import (
 )
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomAlias, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 from tests import unittest
@@ -989,7 +989,7 @@ class RoomsCreateTestCase(RoomBase):
             mxid: str,
             room_id: str,
             is_invite: bool,
-        ) -> Tuple[Codes, dict]:
+        ) -> tuple[Codes, dict]:
             return Codes.INCOMPATIBLE_ROOM_VERSION, {}
 
         join_mock.side_effect = user_may_join_room_tuple
@@ -1002,7 +1002,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         self.assertEqual(join_mock.call_count, 0)
 
-    def _create_basic_room(self) -> Tuple[int, object]:
+    def _create_basic_room(self) -> tuple[int, object]:
         """
         Tries to create a basic room and returns the response code.
         """
@@ -1351,7 +1351,7 @@ class RoomJoinTestCase(RoomBase):
         """
 
         # Register a dummy callback. Make it allow all room joins for now.
-        return_value: Union[Literal["NOT_SPAM"], Tuple[Codes, dict], Codes] = (
+        return_value: Union[Literal["NOT_SPAM"], tuple[Codes, dict], Codes] = (
             synapse.module_api.NOT_SPAM
         )
 
@@ -1359,7 +1359,7 @@ class RoomJoinTestCase(RoomBase):
             userid: str,
             room_id: str,
             is_invited: bool,
-        ) -> Union[Literal["NOT_SPAM"], Tuple[Codes, dict], Codes]:
+        ) -> Union[Literal["NOT_SPAM"], tuple[Codes, dict], Codes]:
             return return_value
 
         # `spec` argument is needed for this function mock to have `__qualname__`, which
@@ -1848,12 +1848,12 @@ class RoomMessagesTestCase(RoomBase):
     def test_spam_checker_check_event_for_spam(
         self,
         name: str,
-        value: Union[str, bool, Codes, Tuple[Codes, JsonDict]],
+        value: Union[str, bool, Codes, tuple[Codes, JsonDict]],
         expected_code: int,
         expected_fields: dict,
     ) -> None:
         class SpamCheck:
-            mock_return_value: Union[str, bool, Codes, Tuple[Codes, JsonDict], bool] = (
+            mock_return_value: Union[str, bool, Codes, tuple[Codes, JsonDict], bool] = (
                 "NOT_SPAM"
             )
             mock_content: Optional[JsonDict] = None
@@ -1861,7 +1861,7 @@ class RoomMessagesTestCase(RoomBase):
             async def check_event_for_spam(
                 self,
                 event: synapse.events.EventBase,
-            ) -> Union[str, Codes, Tuple[Codes, JsonDict], bool]:
+            ) -> Union[str, Codes, tuple[Codes, JsonDict], bool]:
                 self.mock_content = event.content
                 return self.mock_return_value
 
@@ -1915,7 +1915,7 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
         self.admin_user_id = self.register_user("admin", "pass")
         self.admin_access_token = self.login("admin", "pass")
 
-    def power_levels(self, room_id: str) -> Dict[str, Any]:
+    def power_levels(self, room_id: str) -> dict[str, Any]:
         return self.helper.get_state(
             room_id, "m.room.power_levels", self.admin_access_token
         )
@@ -2076,7 +2076,7 @@ class RoomPowerLevelOverridesInPracticeTestCase(RoomBase):
         # Given the server has config allowing normal users to post my event type
         # And I am a normal member of a room
         # But the room was created with special permissions
-        extra_content: Dict[str, Any] = {
+        extra_content: dict[str, Any] = {
             "power_level_content_override": {"events": {}},
         }
         room_id = self.helper.create_room_as(
@@ -2245,7 +2245,7 @@ class RoomMessageListTestCase(RoomBase):
         self.room_id = self.helper.create_room_as(self.user_id)
 
     def test_topo_token_is_accepted(self) -> None:
-        token = "t1-0_0_0_0_0_0_0_0_0_0"
+        token = "t1-0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET", "/rooms/%s/messages?access_token=x&from=%s" % (self.room_id, token)
         )
@@ -2256,7 +2256,7 @@ class RoomMessageListTestCase(RoomBase):
         self.assertTrue("end" in channel.json_body)
 
     def test_stream_token_is_accepted_for_fwd_pagianation(self) -> None:
-        token = "s0_0_0_0_0_0_0_0_0_0"
+        token = "s0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET", "/rooms/%s/messages?access_token=x&from=%s" % (self.room_id, token)
         )
@@ -2707,9 +2707,9 @@ class PublicRoomsRoomTypeFilterTestCase(unittest.HomeserverTestCase):
 
     def make_public_rooms_request(
         self,
-        room_types: Optional[List[Union[str, None]]],
+        room_types: Optional[list[Union[str, None]]],
         instance_id: Optional[str] = None,
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         body: JsonDict = {"filter": {PublicRoomsFilterFields.ROOM_TYPES: room_types}}
         if instance_id:
             body["third_party_instance_id"] = "test|test"
@@ -3470,7 +3470,7 @@ class LabelsTestCase(unittest.HomeserverTestCase):
 
 
 class RelationsTestCase(PaginationTestCase):
-    def _filter_messages(self, filter: JsonDict) -> List[str]:
+    def _filter_messages(self, filter: JsonDict) -> list[str]:
         """Make a request to /messages with a filter, returns the chunk of events."""
         from_token = self.get_success(
             self.from_token.to_string(self.hs.get_datastores().main)
@@ -4529,8 +4529,8 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
 
     def _check_redactions(
         self,
-        original_events: List[EventBase],
-        pulled_events: List[JsonDict],
+        original_events: list[EventBase],
+        pulled_events: list[JsonDict],
         expect_redaction: bool,
         reason: Optional[str] = None,
     ) -> None:

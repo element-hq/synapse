@@ -20,7 +20,7 @@
 #
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from urllib.parse import urlencode
 
 from authlib.oauth2 import ClientAuth
@@ -34,12 +34,10 @@ from synapse.api.errors import (
     AuthError,
     HttpResponseException,
     InvalidClientTokenError,
-    OAuthInsufficientScopeError,
     SynapseError,
     UnrecognizedRequestError,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import (
     active_span,
     force_tracing,
@@ -49,9 +47,9 @@ from synapse.logging.opentracing import (
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import Requester, UserID, create_requester
-from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+from synapse.util.json import json_decoder
 
 from . import introspection_response_timer
 
@@ -63,15 +61,16 @@ logger = logging.getLogger(__name__)
 
 # Scope as defined by MSC2967
 # https://github.com/matrix-org/matrix-spec-proposals/pull/2967
-SCOPE_MATRIX_API = "urn:matrix:org.matrix.msc2967.client:api:*"
-SCOPE_MATRIX_GUEST = "urn:matrix:org.matrix.msc2967.client:api:guest"
-SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:org.matrix.msc2967.client:device:"
+UNSTABLE_SCOPE_MATRIX_API = "urn:matrix:org.matrix.msc2967.client:api:*"
+UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:org.matrix.msc2967.client:device:"
+STABLE_SCOPE_MATRIX_API = "urn:matrix:client:api:*"
+STABLE_SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:client:device:"
 
 # Scope which allows access to the Synapse admin API
 SCOPE_SYNAPSE_ADMIN = "urn:synapse:admin:*"
 
 
-def scope_to_list(scope: str) -> List[str]:
+def scope_to_list(scope: str) -> list[str]:
     """Convert a scope string to a list of scope tokens"""
     return scope.strip().split(" ")
 
@@ -97,7 +96,7 @@ class IntrospectionResult:
         absolute_expiry_ms = expires_in * 1000 + self.retrieved_at_ms
         return now_ms < absolute_expiry_ms
 
-    def get_scope_list(self) -> List[str]:
+    def get_scope_list(self) -> list[str]:
         value = self._inner.get("scope")
         if not isinstance(value, str):
             return []
@@ -265,7 +264,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             logger.warning("Failed to load metadata:", exc_info=True)
             return None
 
-    async def auth_metadata(self) -> Dict[str, Any]:
+    async def auth_metadata(self) -> dict[str, Any]:
         """
         Returns the auth metadata dict
         """
@@ -304,7 +303,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         # By default, we shouldn't cache the result unless we know it's valid
         cache_context.should_cache = False
         introspection_endpoint = await self._introspection_endpoint()
-        raw_headers: Dict[str, str] = {
+        raw_headers: dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
             # Tell MAS that we support reading the device ID as an explicit
@@ -327,13 +326,12 @@ class MSC3861DelegatedAuth(BaseAuth):
         try:
             with start_active_span("mas-introspect-token"):
                 inject_request_headers(raw_headers)
-                with PreserveLoggingContext():
-                    resp_body = await self._rust_http_client.post(
-                        url=uri,
-                        response_limit=1 * 1024 * 1024,
-                        headers=raw_headers,
-                        request_body=body,
-                    )
+                resp_body = await self._rust_http_client.post(
+                    url=uri,
+                    response_limit=1 * 1024 * 1024,
+                    headers=raw_headers,
+                    request_body=body,
+                )
         except HttpResponseException as e:
             end_time = self._clock.time()
             introspection_response_timer.labels(
@@ -444,9 +442,6 @@ class MSC3861DelegatedAuth(BaseAuth):
         if not self._is_access_token_the_admin_token(access_token):
             await self._record_request(request, requester)
 
-        if not allow_guest and requester.is_guest:
-            raise OAuthInsufficientScopeError([SCOPE_MATRIX_API])
-
         request.requester = requester
 
         return requester
@@ -525,13 +520,14 @@ class MSC3861DelegatedAuth(BaseAuth):
             raise InvalidClientTokenError("Token is not active")
 
         # Let's look at the scope
-        scope: List[str] = introspection_result.get_scope_list()
+        scope: list[str] = introspection_result.get_scope_list()
 
         # Determine type of user based on presence of particular scopes
-        has_user_scope = SCOPE_MATRIX_API in scope
-        has_guest_scope = SCOPE_MATRIX_GUEST in scope
+        has_user_scope = (
+            UNSTABLE_SCOPE_MATRIX_API in scope or STABLE_SCOPE_MATRIX_API in scope
+        )
 
-        if not has_user_scope and not has_guest_scope:
+        if not has_user_scope:
             raise InvalidClientTokenError("No scope in token granting user rights")
 
         # Match via the sub claim
@@ -579,11 +575,12 @@ class MSC3861DelegatedAuth(BaseAuth):
             # We only allow a single device_id in the scope, so we find them all in the
             # scope list, and raise if there are more than one. The OIDC server should be
             # the one enforcing valid scopes, so we raise a 500 if we find an invalid scope.
-            device_ids = [
-                tok[len(SCOPE_MATRIX_DEVICE_PREFIX) :]
-                for tok in scope
-                if tok.startswith(SCOPE_MATRIX_DEVICE_PREFIX)
-            ]
+            device_ids: set[str] = set()
+            for tok in scope:
+                if tok.startswith(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX):
+                    device_ids.add(tok[len(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX) :])
+                elif tok.startswith(STABLE_SCOPE_MATRIX_DEVICE_PREFIX):
+                    device_ids.add(tok[len(STABLE_SCOPE_MATRIX_DEVICE_PREFIX) :])
 
             if len(device_ids) > 1:
                 raise AuthError(
@@ -591,7 +588,7 @@ class MSC3861DelegatedAuth(BaseAuth):
                     "Multiple device IDs in scope",
                 )
 
-            device_id = device_ids[0] if device_ids else None
+            device_id = next(iter(device_ids), None)
 
         if device_id is not None:
             # Sanity check the device_id
@@ -617,5 +614,4 @@ class MSC3861DelegatedAuth(BaseAuth):
             user_id=user_id,
             device_id=device_id,
             scope=scope,
-            is_guest=(has_guest_scope and not has_user_scope),
         )

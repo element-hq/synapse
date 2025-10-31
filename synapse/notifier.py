@@ -25,14 +25,10 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Iterable,
-    List,
     Literal,
     Mapping,
     Optional,
-    Set,
-    Tuple,
     TypeVar,
     Union,
     overload,
@@ -148,7 +144,7 @@ class _NotifierUserStream:
         self.last_notified_ms = time_now_ms
 
         # Set of listeners that we need to wake up when there has been a change.
-        self.listeners: Set[Deferred[StreamToken]] = set()
+        self.listeners: set[Deferred[StreamToken]] = set()
 
     def update_and_fetch_deferreds(
         self,
@@ -215,7 +211,7 @@ class _NotifierUserStream:
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventStreamResult:
-    events: List[Union[JsonDict, EventBase]]
+    events: list[Union[JsonDict, EventBase]]
     start_token: StreamToken
     end_token: StreamToken
 
@@ -244,25 +240,25 @@ class Notifier:
     UNUSED_STREAM_EXPIRY_MS = 10 * 60 * 1000
 
     def __init__(self, hs: "HomeServer"):
-        self.user_to_user_stream: Dict[str, _NotifierUserStream] = {}
-        self.room_to_user_streams: Dict[str, Set[_NotifierUserStream]] = {}
+        self.user_to_user_stream: dict[str, _NotifierUserStream] = {}
+        self.room_to_user_streams: dict[str, set[_NotifierUserStream]] = {}
 
         self.hs = hs
         self.server_name = hs.hostname
         self._storage_controllers = hs.get_storage_controllers()
         self.event_sources = hs.get_event_sources()
         self.store = hs.get_datastores().main
-        self.pending_new_room_events: List[_PendingRoomEventEntry] = []
+        self.pending_new_room_events: list[_PendingRoomEventEntry] = []
 
         self._replication_notifier = hs.get_replication_notifier()
-        self._new_join_in_room_callbacks: List[Callable[[str, str], None]] = []
+        self._new_join_in_room_callbacks: list[Callable[[str, str], None]] = []
 
         self._federation_client = hs.get_federation_http_client()
 
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
         # List of callbacks to be notified when a lock is released
-        self._lock_released_callback: List[Callable[[str, str, str], None]] = []
+        self._lock_released_callback: list[Callable[[str, str, str], None]] = []
 
         self.reactor = hs.get_reactor()
         self.clock = hs.get_clock()
@@ -283,10 +279,10 @@ class Notifier:
         # when rendering the metrics page, which is likely once per minute at
         # most when scraping it.
         #
-        # Ideally, we'd use `Mapping[Tuple[str], int]` here but mypy doesn't like it.
+        # Ideally, we'd use `Mapping[tuple[str], int]` here but mypy doesn't like it.
         # This is close enough and better than a type ignore.
-        def count_listeners() -> Mapping[Tuple[str, ...], int]:
-            all_user_streams: Set[_NotifierUserStream] = set()
+        def count_listeners() -> Mapping[tuple[str, ...], int]:
+            all_user_streams: set[_NotifierUserStream] = set()
 
             for streams in list(self.room_to_user_streams.values()):
                 all_user_streams |= streams
@@ -299,16 +295,20 @@ class Notifier:
                 )
             }
 
-        notifier_listeners_gauge.register_hook(count_listeners)
+        notifier_listeners_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(), hook=count_listeners
+        )
         notifier_rooms_gauge.register_hook(
-            lambda: {
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
                 (self.server_name,): count(
                     bool, list(self.room_to_user_streams.values())
                 )
-            }
+            },
         )
         notifier_users_gauge.register_hook(
-            lambda: {(self.server_name,): len(self.user_to_user_stream)}
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self.user_to_user_stream)},
         )
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:
@@ -334,7 +334,7 @@ class Notifier:
 
     async def on_new_room_events(
         self,
-        events_and_pos: List[Tuple[EventBase, PersistedEventPosition]],
+        events_and_pos: list[tuple[EventBase, PersistedEventPosition]],
         max_room_stream_token: RoomStreamToken,
         extra_users: Optional[Collection[UserID]] = None,
     ) -> None:
@@ -369,7 +369,7 @@ class Notifier:
         time_now_ms = self.clock.time_msec()
         current_token = self.event_sources.get_current_token()
 
-        listeners: List["Deferred[StreamToken]"] = []
+        listeners: list["Deferred[StreamToken]"] = []
         for user_stream in user_streams:
             try:
                 listeners.extend(
@@ -393,7 +393,7 @@ class Notifier:
 
     async def notify_new_room_events(
         self,
-        event_entries: List[Tuple[_PendingRoomEventEntry, str]],
+        event_entries: list[tuple[_PendingRoomEventEntry, str]],
         max_room_stream_token: RoomStreamToken,
     ) -> None:
         """Used by handlers to inform the notifier something has happened
@@ -449,8 +449,8 @@ class Notifier:
         pending = self.pending_new_room_events
         self.pending_new_room_events = []
 
-        users: Set[UserID] = set()
-        rooms: Set[str] = set()
+        users: set[UserID] = set()
+        rooms: set[str] = set()
 
         for entry in pending:
             if entry.event_pos.persisted_after(max_room_stream_token):
@@ -528,6 +528,7 @@ class Notifier:
             StreamKeyType.TO_DEVICE,
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
+            StreamKeyType.THREAD_SUBSCRIPTIONS,
         ],
         new_token: int,
         users: Optional[Collection[Union[str, UserID]]] = None,
@@ -555,7 +556,7 @@ class Notifier:
         users = users or []
         rooms = rooms or []
 
-        user_streams: Set[_NotifierUserStream] = set()
+        user_streams: set[_NotifierUserStream] = set()
 
         log_kv(
             {
@@ -588,7 +589,7 @@ class Notifier:
 
             time_now_ms = self.clock.time_msec()
             current_token = self.event_sources.get_current_token()
-            listeners: List["Deferred[StreamToken]"] = []
+            listeners: list["Deferred[StreamToken]"] = []
             for user_stream in user_streams:
                 try:
                     listeners.extend(
@@ -671,9 +672,16 @@ class Notifier:
                         # is a new token.
                         listener = user_stream.new_listener(prev_token)
                         listener = timeout_deferred(
-                            listener,
-                            (end_time - now) / 1000.0,
-                            self.hs.get_reactor(),
+                            deferred=listener,
+                            timeout=(end_time - now) / 1000.0,
+                            # We don't track these calls since they are constantly being
+                            # overridden by new calls to /sync and they don't hold the
+                            # `HomeServer` in memory on shutdown. It is safe to let them
+                            # timeout of their own accord after shutting down since it
+                            # won't delay shutdown and there won't be any adverse
+                            # behaviour.
+                            cancel_on_shutdown=False,
+                            clock=self.hs.get_clock(),
                         )
 
                         log_kv(
@@ -759,7 +767,7 @@ class Notifier:
             # The events fetched from each source are a JsonDict, EventBase, or
             # UserPresenceState, but see below for UserPresenceState being
             # converted to JsonDict.
-            events: List[Union[JsonDict, EventBase]] = []
+            events: list[Union[JsonDict, EventBase]] = []
             end_token = from_token
 
             for keyname, source in self.event_sources.sources.get_sources():
@@ -859,7 +867,7 @@ class Notifier:
 
     async def _get_room_ids(
         self, user: UserID, explicit_room_id: Optional[str]
-    ) -> Tuple[StrCollection, bool]:
+    ) -> tuple[StrCollection, bool]:
         joined_room_ids = await self.store.get_rooms_for_user(user.to_string())
         if explicit_room_id:
             if explicit_room_id in joined_room_ids:
@@ -948,7 +956,7 @@ class ReplicationNotifier:
     This is separate from the notifier to avoid circular dependencies.
     """
 
-    _replication_callbacks: List[Callable[[], None]] = attr.Factory(list)
+    _replication_callbacks: list[Callable[[], None]] = attr.Factory(list)
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:
         """Add a callback that will be called when some new data is available.

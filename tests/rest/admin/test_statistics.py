@@ -19,7 +19,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict, List, Optional
+from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
@@ -29,7 +29,7 @@ from synapse.api.errors import Codes
 from synapse.rest.client import login
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG
@@ -50,7 +50,7 @@ class UserMediaStatisticsTestCase(unittest.HomeserverTestCase):
 
         self.url = "/_synapse/admin/v1/statistics/users/media"
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -485,7 +485,7 @@ class UserMediaStatisticsTestCase(unittest.HomeserverTestCase):
             # Upload some media into the room
             self.helper.upload_media(SMALL_PNG, tok=user_token, expect_code=200)
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that all attributes are present in content
         Args:
             content: List that is checked for content
@@ -497,7 +497,7 @@ class UserMediaStatisticsTestCase(unittest.HomeserverTestCase):
             self.assertIn("media_length", c)
 
     def _order_test(
-        self, order_type: str, expected_user_list: List[str], dir: Optional[str] = None
+        self, order_type: str, expected_user_list: list[str], dir: Optional[str] = None
     ) -> None:
         """Request the list of users in a certain order. Assert that order is what
         we expect

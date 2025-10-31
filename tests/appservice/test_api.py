@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, List, Mapping, Optional, Sequence, Union
+from typing import Any, Mapping, Optional, Sequence, Union
 from unittest.mock import Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -26,7 +26,7 @@ from twisted.internet.testing import MemoryReactor
 from synapse.appservice import ApplicationService
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -81,7 +81,7 @@ class ApplicationServiceApiTestCase(unittest.HomeserverTestCase):
             url: str,
             args: Mapping[Any, Any],
             headers: Mapping[Union[str, bytes], Sequence[Union[str, bytes]]],
-        ) -> List[JsonDict]:
+        ) -> list[JsonDict]:
             # Ensure the access token is passed as a header.
             if not headers or not headers.get(b"Authorization"):
                 raise RuntimeError("Access token not provided")
@@ -157,7 +157,7 @@ class ApplicationServiceApiTestCase(unittest.HomeserverTestCase):
             headers: Optional[
                 Mapping[Union[str, bytes], Sequence[Union[str, bytes]]]
             ] = None,
-        ) -> List[JsonDict]:
+        ) -> list[JsonDict]:
             # Ensure the access token is passed as a both a query param and in the headers.
             if not args.get(b"access_token"):
                 raise RuntimeError("Access token should be provided in query params.")

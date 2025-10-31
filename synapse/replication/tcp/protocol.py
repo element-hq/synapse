@@ -28,7 +28,7 @@ import fcntl
 import logging
 import struct
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Collection, List, Optional
+from typing import TYPE_CHECKING, Any, Collection, Optional
 
 from prometheus_client import Counter
 from zope.interface import Interface, implementer
@@ -42,7 +42,6 @@ from synapse.logging.context import PreserveLoggingContext
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
-    run_as_background_process,
 )
 from synapse.replication.tcp.commands import (
     VALID_CLIENT_COMMANDS,
@@ -55,7 +54,7 @@ from synapse.replication.tcp.commands import (
     ServerCommand,
     parse_command_from_line,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -83,7 +82,7 @@ tcp_outbound_commands_counter = Counter(
 
 # A list of all connected protocols. This allows us to send metrics about the
 # connections.
-connected_connections: "List[BaseReplicationStreamProtocol]" = []
+connected_connections: "list[BaseReplicationStreamProtocol]" = []
 
 
 logger = logging.getLogger(__name__)
@@ -140,9 +139,14 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
     max_line_buffer = 10000
 
     def __init__(
-        self, server_name: str, clock: Clock, handler: "ReplicationCommandHandler"
+        self,
+        hs: "HomeServer",
+        server_name: str,
+        clock: Clock,
+        handler: "ReplicationCommandHandler",
     ):
         self.server_name = server_name
+        self.hs = hs
         self.clock = clock
         self.command_handler = handler
 
@@ -159,7 +163,7 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         self.conn_id = random_string(5)  # To dedupe in case of name clashes.
 
         # List of pending commands to send once we've established the connection
-        self.pending_commands: List[Command] = []
+        self.pending_commands: list[Command] = []
 
         # The LoopingCall for sending pings.
         self._send_ping_loop: Optional[task.LoopingCall] = None
@@ -290,9 +294,8 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
             # if so.
 
             if isawaitable(res):
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "replication-" + cmd.get_logcontext_id(),
-                    self.server_name,
                     lambda: res,
                 )
 
@@ -470,9 +473,13 @@ class ServerReplicationStreamProtocol(BaseReplicationStreamProtocol):
     VALID_OUTBOUND_COMMANDS = VALID_SERVER_COMMANDS
 
     def __init__(
-        self, server_name: str, clock: Clock, handler: "ReplicationCommandHandler"
+        self,
+        hs: "HomeServer",
+        server_name: str,
+        clock: Clock,
+        handler: "ReplicationCommandHandler",
     ):
-        super().__init__(server_name, clock, handler)
+        super().__init__(hs, server_name, clock, handler)
 
         self.server_name = server_name
 
@@ -497,7 +504,7 @@ class ClientReplicationStreamProtocol(BaseReplicationStreamProtocol):
         clock: Clock,
         command_handler: "ReplicationCommandHandler",
     ):
-        super().__init__(server_name, clock, command_handler)
+        super().__init__(hs, server_name, clock, command_handler)
 
         self.client_name = client_name
         self.server_name = server_name
@@ -529,9 +536,10 @@ pending_commands = LaterGauge(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 pending_commands.register_hook(
-    lambda: {
+    homeserver_instance_id=None,
+    hook=lambda: {
         (p.name, p.server_name): len(p.pending_commands) for p in connected_connections
-    }
+    },
 )
 
 
@@ -548,9 +556,10 @@ transport_send_buffer = LaterGauge(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 transport_send_buffer.register_hook(
-    lambda: {
+    homeserver_instance_id=None,
+    hook=lambda: {
         (p.name, p.server_name): transport_buffer_size(p) for p in connected_connections
-    }
+    },
 )
 
 
@@ -577,10 +586,11 @@ tcp_transport_kernel_send_buffer = LaterGauge(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 tcp_transport_kernel_send_buffer.register_hook(
-    lambda: {
+    homeserver_instance_id=None,
+    hook=lambda: {
         (p.name, p.server_name): transport_kernel_read_buffer_size(p, False)
         for p in connected_connections
-    }
+    },
 )
 
 
@@ -590,8 +600,9 @@ tcp_transport_kernel_read_buffer = LaterGauge(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 tcp_transport_kernel_read_buffer.register_hook(
-    lambda: {
+    homeserver_instance_id=None,
+    hook=lambda: {
         (p.name, p.server_name): transport_kernel_read_buffer_size(p, True)
         for p in connected_connections
-    }
+    },
 )

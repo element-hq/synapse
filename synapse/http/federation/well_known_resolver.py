@@ -22,12 +22,11 @@ import logging
 import random
 import time
 from io import BytesIO
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Optional
 
 import attr
 
 from twisted.internet import defer
-from twisted.internet.interfaces import IReactorTime
 from twisted.web.client import RedirectAgent
 from twisted.web.http import stringToDatetime
 from twisted.web.http_headers import Headers
@@ -35,8 +34,10 @@ from twisted.web.iweb import IAgent, IResponse
 
 from synapse.http.client import BodyExceededMaxSize, read_body_with_max_size
 from synapse.logging.context import make_deferred_yieldable
-from synapse.util import Clock, json_decoder
+from synapse.types import ISynapseThreadlessReactor
 from synapse.util.caches.ttlcache import TTLCache
+from synapse.util.clock import Clock
+from synapse.util.json import json_decoder
 from synapse.util.metrics import Measure
 
 # period to cache .well-known results for by default
@@ -88,7 +89,8 @@ class WellKnownResolver:
     def __init__(
         self,
         server_name: str,
-        reactor: IReactorTime,
+        reactor: ISynapseThreadlessReactor,
+        clock: Clock,
         agent: IAgent,
         user_agent: bytes,
         well_known_cache: Optional[TTLCache[bytes, Optional[bytes]]] = None,
@@ -98,6 +100,7 @@ class WellKnownResolver:
         Args:
             server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
             reactor
+            clock: Should be the `hs` clock from `hs.get_clock()`
             agent
             user_agent
             well_known_cache
@@ -106,7 +109,7 @@ class WellKnownResolver:
 
         self.server_name = server_name
         self._reactor = reactor
-        self._clock = Clock(reactor)
+        self._clock = clock
 
         if well_known_cache is None:
             well_known_cache = TTLCache(
@@ -185,7 +188,7 @@ class WellKnownResolver:
 
         return WellKnownLookupResult(delegated_server=result)
 
-    async def _fetch_well_known(self, server_name: bytes) -> Tuple[bytes, float]:
+    async def _fetch_well_known(self, server_name: bytes) -> tuple[bytes, float]:
         """Actually fetch and parse a .well-known, without checking the cache
 
         Args:
@@ -248,7 +251,7 @@ class WellKnownResolver:
 
     async def _make_well_known_request(
         self, server_name: bytes, retry: bool
-    ) -> Tuple[IResponse, bytes]:
+    ) -> tuple[IResponse, bytes]:
         """Make the well known request.
 
         This will retry the request if requested and it fails (with unable
@@ -345,7 +348,7 @@ def _cache_period_from_headers(
     return None
 
 
-def _parse_cache_control(headers: Headers) -> Dict[bytes, Optional[bytes]]:
+def _parse_cache_control(headers: Headers) -> dict[bytes, Optional[bytes]]:
     cache_controls = {}
     cache_control_headers = headers.getRawHeaders(b"cache-control") or []
     for hdr in cache_control_headers:

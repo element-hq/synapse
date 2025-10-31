@@ -21,7 +21,7 @@
 #
 import logging
 from abc import ABCMeta
-from typing import TYPE_CHECKING, Any, Collection, Dict, Iterable, Optional, Union
+from typing import TYPE_CHECKING, Any, Collection, Iterable, Optional, Union
 
 from synapse.storage.database import (
     DatabasePool,
@@ -29,8 +29,8 @@ from synapse.storage.database import (
     make_in_list_sql_clause,  # noqa: F401
 )
 from synapse.types import get_domain_from_id
-from synapse.util import json_decoder
 from synapse.util.caches.descriptors import CachedFunction
+from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -56,11 +56,11 @@ class SQLBaseStore(metaclass=ABCMeta):
     ):
         self.hs = hs
         self.server_name = hs.hostname  # nb must be called this for @cached
-        self._clock = hs.get_clock()
+        self.clock = hs.get_clock()  # nb must be called this for @cached
         self.database_engine = database.engine
         self.db_pool = database
 
-        self.external_cached_functions: Dict[str, CachedFunction] = {}
+        self.external_cached_functions: dict[str, CachedFunction] = {}
 
     def process_replication_rows(  # noqa: B027 (no-op by design)
         self,

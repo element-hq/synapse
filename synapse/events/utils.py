@@ -26,9 +26,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
-    Iterable,
-    List,
+    Collection,
     Mapping,
     Match,
     MutableMapping,
@@ -49,6 +47,7 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion
+from synapse.logging.opentracing import SynapseTags, set_tag, trace
 from synapse.types import JsonDict, Requester
 
 from . import EventBase, StrippedStateEvent, make_event_from_dict
@@ -176,9 +175,12 @@ def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDic
         if room_version.updated_redaction_rules:
             # MSC2176 rules state that create events cannot have their `content` redacted.
             new_content = event_dict["content"]
-        elif not room_version.implicit_room_creator:
+        if not room_version.implicit_room_creator:
             # Some room versions give meaning to `creator`
             add_fields("creator")
+        if room_version.msc4291_room_ids_as_hashes:
+            # room_id is not allowed on the create event as it's derived from the event ID
+            allowed_keys.remove("room_id")
 
     elif event_type == EventTypes.JoinRules:
         add_fields("join_rule")
@@ -235,7 +237,7 @@ def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDic
     return allowed_fields
 
 
-def _copy_field(src: JsonDict, dst: JsonDict, field: List[str]) -> None:
+def _copy_field(src: JsonDict, dst: JsonDict, field: list[str]) -> None:
     """Copy the field in 'src' to 'dst'.
 
     For example, if src={"foo":{"bar":5}} and dst={}, and field=["foo","bar"]
@@ -288,7 +290,7 @@ def _escape_slash(m: Match[str]) -> str:
     return m.group(0)
 
 
-def _split_field(field: str) -> List[str]:
+def _split_field(field: str) -> list[str]:
     """
     Splits strings on unescaped dots and removes escaping.
 
@@ -329,7 +331,7 @@ def _split_field(field: str) -> List[str]:
     return result
 
 
-def only_fields(dictionary: JsonDict, fields: List[str]) -> JsonDict:
+def only_fields(dictionary: JsonDict, fields: list[str]) -> JsonDict:
     """Return a new dict with only the fields in 'dictionary' which are present
     in 'fields'.
 
@@ -415,7 +417,7 @@ class SerializeEventConfig:
     # the transaction_id in the unsigned section of the event.
     requester: Optional[Requester] = None
     # List of event fields to include. If empty, all fields will be returned.
-    only_event_fields: Optional[List[str]] = None
+    only_event_fields: Optional[list[str]] = None
     # Some events can have stripped room state stored in the `unsigned` field.
     # This is required for invite and knock functionality. If this option is
     # False, that state will be removed from the event before it is returned.
@@ -527,6 +529,10 @@ def serialize_event(
     if config.as_client_event:
         d = config.event_format(d)
 
+    # Ensure the room_id field is set for create events in MSC4291 rooms
+    if e.type == EventTypes.Create and e.room_version.msc4291_room_ids_as_hashes:
+        d["room_id"] = e.room_id
+
     # If the event is a redaction, the field with the redacted event ID appears
     # in a different location depending on the room version. e.redacts handles
     # fetching from the proper location; copy it to the other location for forwards-
@@ -565,7 +571,7 @@ class EventClientSerializer:
     def __init__(self, hs: "HomeServer") -> None:
         self._store = hs.get_datastores().main
         self._auth = hs.get_auth()
-        self._add_extra_fields_to_unsigned_client_event_callbacks: List[
+        self._add_extra_fields_to_unsigned_client_event_callbacks: list[
             ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
         ] = []
 
@@ -575,7 +581,7 @@ class EventClientSerializer:
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
-        bundle_aggregations: Optional[Dict[str, "BundledAggregations"]] = None,
+        bundle_aggregations: Optional[dict[str, "BundledAggregations"]] = None,
     ) -> JsonDict:
         """Serializes a single event.
 
@@ -633,7 +639,7 @@ class EventClientSerializer:
         event: EventBase,
         time_now: int,
         config: SerializeEventConfig,
-        bundled_aggregations: Dict[str, "BundledAggregations"],
+        bundled_aggregations: dict[str, "BundledAggregations"],
         serialized_event: JsonDict,
     ) -> None:
         """Potentially injects bundled aggregations into the unsigned portion of the serialized event.
@@ -703,14 +709,15 @@ class EventClientSerializer:
                 "m.relations", {}
             ).update(serialized_aggregations)
 
+    @trace
     async def serialize_events(
         self,
-        events: Iterable[Union[JsonDict, EventBase]],
+        events: Collection[Union[JsonDict, EventBase]],
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
-        bundle_aggregations: Optional[Dict[str, "BundledAggregations"]] = None,
-    ) -> List[JsonDict]:
+        bundle_aggregations: Optional[dict[str, "BundledAggregations"]] = None,
+    ) -> list[JsonDict]:
         """Serializes multiple events.
 
         Args:
@@ -724,6 +731,11 @@ class EventClientSerializer:
         Returns:
             The list of serialized events
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "events.length",
+            str(len(events)),
+        )
+
         return [
             await self.serialize_event(
                 event,
@@ -749,7 +761,7 @@ PowerLevelsContent = Mapping[str, Union[_PowerLevel, Mapping[str, _PowerLevel]]]
 
 def copy_and_fixup_power_levels_contents(
     old_power_levels: PowerLevelsContent,
-) -> Dict[str, Union[int, Dict[str, int]]]:
+) -> dict[str, Union[int, dict[str, int]]]:
     """Copy the content of a power_levels event, unfreezing immutabledicts along the way.
 
     We accept as input power level values which are strings, provided they represent an
@@ -765,11 +777,11 @@ def copy_and_fixup_power_levels_contents(
     if not isinstance(old_power_levels, collections.abc.Mapping):
         raise TypeError("Not a valid power-levels content: %r" % (old_power_levels,))
 
-    power_levels: Dict[str, Union[int, Dict[str, int]]] = {}
+    power_levels: dict[str, Union[int, dict[str, int]]] = {}
 
     for k, v in old_power_levels.items():
         if isinstance(v, collections.abc.Mapping):
-            h: Dict[str, int] = {}
+            h: dict[str, int] = {}
             power_levels[k] = h
             for k1, v1 in v.items():
                 _copy_power_level_value_as_integer(v1, h, k1)
@@ -872,6 +884,14 @@ def strip_event(event: EventBase) -> JsonDict:
     Stripped state events can only have the `sender`, `type`, `state_key` and `content`
     properties present.
     """
+    # MSC4311: Ensure the create event is available on invites and knocks.
+    # TODO: Implement the rest of MSC4311
+    if (
+        event.room_version.msc4291_room_ids_as_hashes
+        and event.type == EventTypes.Create
+        and event.get_state_key() == ""
+    ):
+        return event.get_pdu_json()
 
     return {
         "type": event.type,

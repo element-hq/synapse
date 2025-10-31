@@ -21,7 +21,7 @@
 
 import logging
 import math
-from typing import Collection, Dict, FrozenSet, List, Mapping, Optional, Set, Union
+from typing import Collection, Mapping, Optional, Union
 
 import attr
 from sortedcontainers import SortedDict
@@ -45,14 +45,14 @@ class AllEntitiesChangedResult:
     that callers do the correct checks.
     """
 
-    _entities: Optional[List[EntityType]]
+    _entities: Optional[list[EntityType]]
 
     @property
     def hit(self) -> bool:
         return self._entities is not None
 
     @property
-    def entities(self) -> List[EntityType]:
+    def entities(self) -> list[EntityType]:
         assert self._entities is not None
         return self._entities
 
@@ -94,11 +94,11 @@ class StreamChangeCache:
         self._max_size = math.floor(max_size)
 
         # map from stream id to the set of entities which changed at that stream id.
-        self._cache: SortedDict[int, Set[EntityType]] = SortedDict()
+        self._cache: SortedDict[int, set[EntityType]] = SortedDict()
         # map from entity to the stream ID of the latest change for that entity.
         #
         # Must be kept in sync with _cache.
-        self._entity_to_key: Dict[EntityType, int] = {}
+        self._entity_to_key: dict[EntityType, int] = {}
 
         # the earliest stream_pos for which we can reliably answer
         # get_all_entities_changed. In other words, one less than the earliest
@@ -182,7 +182,7 @@ class StreamChangeCache:
 
     def get_entities_changed(
         self, entities: Collection[EntityType], stream_pos: int, _perf_factor: int = 1
-    ) -> Union[Set[EntityType], FrozenSet[EntityType]]:
+    ) -> Union[set[EntityType], frozenset[EntityType]]:
         """
         Returns the subset of the given entities that have had changes after the given position.
 
@@ -291,7 +291,7 @@ class StreamChangeCache:
         if stream_pos < self._earliest_known_stream_pos:
             return AllEntitiesChangedResult(None)
 
-        changed_entities: List[EntityType] = []
+        changed_entities: list[EntityType] = []
 
         for k in self._cache.islice(start=self._cache.bisect_right(stream_pos)):
             changed_entities.extend(self._cache[k])

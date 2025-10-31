@@ -19,7 +19,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Awaitable, Callable, Dict
+from typing import Any, Awaitable, Callable
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -31,7 +31,7 @@ from synapse.events import EventBase
 from synapse.rest.client import directory, login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomAlias, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -43,7 +43,7 @@ class DirectoryTestCase(unittest.HomeserverTestCase):
         self.mock_federation = AsyncMock()
         self.mock_registry = Mock()
 
-        self.query_handlers: Dict[str, Callable[[dict], Awaitable[JsonDict]]] = {}
+        self.query_handlers: dict[str, Callable[[dict], Awaitable[JsonDict]]] = {}
 
         def register_query_handler(
             query_type: str, handler: Callable[[dict], Awaitable[JsonDict]]
@@ -410,7 +410,7 @@ class TestCreateAliasACL(unittest.HomeserverTestCase):
 
     servlets = [directory.register_servlets, room.register_servlets]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
 
         # Add custom alias creation rules to the config.
@@ -476,7 +476,7 @@ class TestCreatePublishedRoomACL(unittest.HomeserverTestCase):
     data = {"room_alias_name": "unofficial_test"}
     allowed_localpart = "allowed"
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
 
         # Add custom room list publication rules to the config.

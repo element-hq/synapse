@@ -23,7 +23,7 @@ import abc
 import logging
 import random
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Iterable, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from synapse import types
 from synapse.api.constants import (
@@ -42,7 +42,7 @@ from synapse.api.errors import (
 )
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.event_auth import get_named_level, get_power_level_event
-from synapse.events import EventBase
+from synapse.events import EventBase, is_creator
 from synapse.events.snapshot import EventContext
 from synapse.handlers.pagination import PURGE_ROOM_ACTION_NAME
 from synapse.handlers.profile import MAX_AVATAR_URL_LEN, MAX_DISPLAYNAME_LEN
@@ -50,7 +50,6 @@ from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.invite_rule import InviteRule
@@ -114,8 +113,12 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         if self.hs.config.server.include_profile_data_on_invite:
             self._membership_types_to_include_profile_data_in.add(Membership.INVITE)
 
-        self.member_linearizer: Linearizer = Linearizer(name="member")
-        self.member_as_limiter = Linearizer(max_count=10, name="member_as_limiter")
+        self.member_linearizer: Linearizer = Linearizer(
+            name="member", clock=hs.get_clock()
+        )
+        self.member_as_limiter = Linearizer(
+            max_count=10, name="member_as_limiter", clock=hs.get_clock()
+        )
 
         self.clock = hs.get_clock()
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
@@ -214,11 +217,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
     async def _remote_join(
         self,
         requester: Requester,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         room_id: str,
         user: UserID,
         content: dict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Try and join a room that this server is not in
 
         Args:
@@ -238,11 +241,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
     async def remote_knock(
         self,
         requester: Requester,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         room_id: str,
         user: UserID,
         content: dict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Try and knock on a room that this server is not in
 
         Args:
@@ -260,7 +263,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         txn_id: Optional[str],
         requester: Requester,
         content: JsonDict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """
         Rejects an out-of-band invite we have received from a remote server
 
@@ -283,7 +286,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         txn_id: Optional[str],
         requester: Requester,
         content: JsonDict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Rescind a local knock made on a remote room.
 
         Args:
@@ -393,8 +396,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         target: UserID,
         room_id: str,
         membership: str,
-        prev_event_ids: Optional[List[str]] = None,
-        state_event_ids: Optional[List[str]] = None,
+        prev_event_ids: Optional[list[str]] = None,
+        state_event_ids: Optional[list[str]] = None,
         depth: Optional[int] = None,
         txn_id: Optional[str] = None,
         ratelimit: bool = True,
@@ -402,7 +405,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         require_consent: bool = True,
         outlier: bool = False,
         origin_server_ts: Optional[int] = None,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """
         Internal membership update function to get an existing event or create
         and persist a new event for the new membership change.
@@ -570,18 +573,18 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         room_id: str,
         action: str,
         txn_id: Optional[str] = None,
-        remote_room_hosts: Optional[List[str]] = None,
+        remote_room_hosts: Optional[list[str]] = None,
         third_party_signed: Optional[dict] = None,
         ratelimit: bool = True,
         content: Optional[dict] = None,
         new_room: bool = False,
         require_consent: bool = True,
         outlier: bool = False,
-        prev_event_ids: Optional[List[str]] = None,
-        state_event_ids: Optional[List[str]] = None,
+        prev_event_ids: Optional[list[str]] = None,
+        state_event_ids: Optional[list[str]] = None,
         depth: Optional[int] = None,
         origin_server_ts: Optional[int] = None,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Update a user's membership in a room.
 
         Params:
@@ -684,18 +687,18 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         room_id: str,
         action: str,
         txn_id: Optional[str] = None,
-        remote_room_hosts: Optional[List[str]] = None,
+        remote_room_hosts: Optional[list[str]] = None,
         third_party_signed: Optional[dict] = None,
         ratelimit: bool = True,
         content: Optional[dict] = None,
         new_room: bool = False,
         require_consent: bool = True,
         outlier: bool = False,
-        prev_event_ids: Optional[List[str]] = None,
-        state_event_ids: Optional[List[str]] = None,
+        prev_event_ids: Optional[list[str]] = None,
+        state_event_ids: Optional[list[str]] = None,
         depth: Optional[int] = None,
         origin_server_ts: Optional[int] = None,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Helper for update_membership.
 
         Assumes that the membership linearizer is already held for the room.
@@ -1160,9 +1163,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         elif effective_membership_state == Membership.KNOCK:
             if not is_host_in_room:
-                # The knock needs to be sent over federation instead
-                remote_room_hosts.append(get_domain_from_id(room_id))
-
+                # we used to add the domain of the room ID to remote_room_hosts.
+                # This is not safe in MSC4291 rooms which do not have a domain.
                 content["membership"] = Membership.KNOCK
 
                 try:
@@ -1222,12 +1224,12 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self,
         user_id: str,
         room_id: str,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         content: JsonDict,
         is_partial_state_room: bool,
         is_host_in_room: bool,
         partial_state_before_join: StateMap[str],
-    ) -> Tuple[bool, List[str]]:
+    ) -> tuple[bool, list[str]]:
         """
         Check whether the server should do a remote join (as opposed to a local
         join) for a user.
@@ -1563,7 +1565,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
     async def lookup_room_alias(
         self, room_alias: RoomAlias
-    ) -> Tuple[RoomID, List[str]]:
+    ) -> tuple[RoomID, list[str]]:
         """
         Get the room ID associated with a room alias.
 
@@ -1610,9 +1612,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         requester: Requester,
         txn_id: Optional[str],
         id_access_token: str,
-        prev_event_ids: Optional[List[str]] = None,
+        prev_event_ids: Optional[list[str]] = None,
         depth: Optional[int] = None,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Invite a 3PID to a room.
 
         Args:
@@ -1724,9 +1726,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         user: UserID,
         txn_id: Optional[str],
         id_access_token: str,
-        prev_event_ids: Optional[List[str]] = None,
+        prev_event_ids: Optional[list[str]] = None,
         depth: Optional[int] = None,
-    ) -> Tuple[EventBase, int]:
+    ) -> tuple[EventBase, int]:
         room_state = await self._storage_controllers.state.get_current_state(
             room_id,
             StateFilter.from_types(
@@ -1861,7 +1863,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
         self.distributor.declare("user_left_room")
 
     async def _is_remote_room_too_complex(
-        self, room_id: str, remote_room_hosts: List[str]
+        self, room_id: str, remote_room_hosts: list[str]
     ) -> Optional[bool]:
         """
         Check if complexity of a remote room is too great.
@@ -1897,11 +1899,11 @@ class RoomMemberMasterHandler(RoomMemberHandler):
     async def _remote_join(
         self,
         requester: Requester,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         room_id: str,
         user: UserID,
         content: dict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Implements RoomMemberHandler._remote_join"""
         # filter ourselves out of remote_room_hosts: do_invite_join ignores it
         # and if it is the only entry we'd like to return a 404 rather than a
@@ -1921,7 +1923,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
             check_complexity
             and self.hs.config.server.limit_remote_rooms.admins_can_join
         ):
-            check_complexity = not await self.store.is_server_admin(user)
+            check_complexity = not await self.store.is_server_admin(user.to_string())
 
         if check_complexity:
             # Fetch the room complexity
@@ -1978,7 +1980,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
         txn_id: Optional[str],
         requester: Requester,
         content: JsonDict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """
         Rejects an out-of-band invite received from a remote user
 
@@ -2015,7 +2017,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
         txn_id: Optional[str],
         requester: Requester,
         content: JsonDict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """
         Rescinds a local knock made on a remote room
 
@@ -2044,7 +2046,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
         txn_id: Optional[str],
         requester: Requester,
         content: JsonDict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Generate a local leave event for a room
 
         This can be called after we e.g fail to reject an invite via a remote server.
@@ -2124,11 +2126,11 @@ class RoomMemberMasterHandler(RoomMemberHandler):
     async def remote_knock(
         self,
         requester: Requester,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         room_id: str,
         user: UserID,
         content: dict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Sends a knock to a room. Attempts to do so via one remote out of a given list.
 
         Args:
@@ -2187,7 +2189,10 @@ class RoomForgetterHandler(StateDeltasHandler):
             self._notifier.add_replication_callback(self.notify_new_event)
 
             # We kick this off to pick up outstanding work from before the last restart.
-            self._clock.call_later(0, self.notify_new_event)
+            self._clock.call_later(
+                0,
+                self.notify_new_event,
+            )
 
     def notify_new_event(self) -> None:
         """Called when there may be more deltas to process"""
@@ -2202,9 +2207,7 @@ class RoomForgetterHandler(StateDeltasHandler):
             finally:
                 self._is_processing = False
 
-        run_as_background_process(
-            "room_forgetter.notify_new_event", self.server_name, process
-        )
+        self._hs.run_as_background_process("room_forgetter.notify_new_event", process)
 
     async def _unsafe_process(self) -> None:
         # If self.pos is None then means we haven't fetched it from DB
@@ -2267,7 +2270,7 @@ class RoomForgetterHandler(StateDeltasHandler):
 
             await self._store.update_room_forgetter_stream_pos(max_pos)
 
-    async def _handle_deltas(self, deltas: List[StateDelta]) -> None:
+    async def _handle_deltas(self, deltas: list[StateDelta]) -> None:
         """Called with the state deltas to process"""
         for delta in deltas:
             if delta.event_type != EventTypes.Member:
@@ -2297,7 +2300,7 @@ class RoomForgetterHandler(StateDeltasHandler):
                         raise
 
 
-def get_users_which_can_issue_invite(auth_events: StateMap[EventBase]) -> List[str]:
+def get_users_which_can_issue_invite(auth_events: StateMap[EventBase]) -> list[str]:
     """
     Return the list of users which can issue invites.
 
@@ -2324,6 +2327,7 @@ def get_users_which_can_issue_invite(auth_events: StateMap[EventBase]) -> List[s
 
     # Check which members are able to invite by ensuring they're joined and have
     # the necessary power level.
+    create_event = auth_events[(EventTypes.Create, "")]
     for (event_type, state_key), event in auth_events.items():
         if event_type != EventTypes.Member:
             continue
@@ -2331,14 +2335,18 @@ def get_users_which_can_issue_invite(auth_events: StateMap[EventBase]) -> List[s
         if event.membership != Membership.JOIN:
             continue
 
+        if create_event.room_version.msc4289_creator_power_enabled and is_creator(
+            create_event, state_key
+        ):
+            result.append(state_key)
         # Check if the user has a custom power level.
-        if users.get(state_key, users_default_level) >= invite_level:
+        elif users.get(state_key, users_default_level) >= invite_level:
             result.append(state_key)
 
     return result
 
 
-def get_servers_from_users(users: List[str]) -> Set[str]:
+def get_servers_from_users(users: list[str]) -> set[str]:
     """
     Resolve a list of users into their servers.
 
