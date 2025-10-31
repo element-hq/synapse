@@ -567,8 +567,8 @@ class ExperimentalConfig(Config):
         )
 
         # MSC4140: How many finalised delayed events to keep per user before deleting them.
-        self.msc4140_finalised_retention_limit = experimental.get(
-            "msc4140_finalised_retention_limit", 1000
+        self.msc4140_finalised_per_user_retention_limit = experimental.get(
+            "msc4140_finalised_per_user_retention_limit", 1000
         )
 
         # MSC4143: Matrix RTC Transport using Livekit Backend

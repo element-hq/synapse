@@ -334,7 +334,7 @@ class DelayedEventsHandler:
         await self._store.prune_finalised_delayed_events(
             self._get_current_ts(),
             self.hs.config.experimental.msc4140_finalised_retention_period,
-            self.hs.config.experimental.msc4140_finalised_retention_limit,
+            self.hs.config.experimental.msc4140_finalised_per_user_retention_limit,
         )
 
     async def add(
@@ -602,7 +602,7 @@ class DelayedEventsHandler:
                 delay_ids,
                 self._get_current_ts(),
                 self.hs.config.experimental.msc4140_finalised_retention_period,
-                self.hs.config.experimental.msc4140_finalised_retention_limit,
+                self.hs.config.experimental.msc4140_finalised_per_user_retention_limit,
             )
         return ret
 
