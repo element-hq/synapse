@@ -341,6 +341,14 @@ def create_homeserver(
     """
     Create a homeserver instance for the Synapse worker process.
 
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
+
     Args:
         config: The configuration for the homeserver.
         reactor: Optionally provide a reactor to use. Can be useful in different
@@ -384,11 +392,16 @@ def setup(hs: GenericWorkerServer) -> None:
     """
     Setup a `GenericWorkerServer` (worker) instance.
 
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
+
     Args:
         hs: The homeserver to setup.
-
-    Returns:
-        A homeserver instance.
     """
 
     setup_logging(hs, hs.config, use_worker_options=True)
@@ -413,6 +426,14 @@ async def start(
 ) -> None:
     """
     Should be called once the reactor is running.
+
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
 
     Args:
         hs: The homeserver to setup.

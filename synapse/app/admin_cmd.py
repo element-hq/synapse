@@ -294,7 +294,7 @@ def create_homeserver(
     reactor: Optional[ISynapseReactor] = None,
 ) -> AdminCmdServer:
     """
-    Create a homeserver instance for the Synapse main process.
+    Create a homeserver instance for the Synapse admin command process.
 
     Args:
         config: The configuration for the homeserver.
@@ -336,12 +336,25 @@ def create_homeserver(
 
 
 def setup(ss: AdminCmdServer) -> None:
+    """
+    Setup a `AdminCmdServer` instance.
+
+    Args:
+        ss: The homeserver to setup.
+    """
     setup_logging(ss, ss.config, use_worker_options=True)
 
     ss.setup()
 
 
 async def start(ss: AdminCmdServer, args: argparse.Namespace) -> None:
+    """
+    Should be called once the reactor is running.
+
+    Args:
+        ss: The homeserver to setup.
+        args: TODO
+    """
     await _base.start(ss)
     await args.func(ss, args)
 
