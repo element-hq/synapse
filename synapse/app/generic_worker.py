@@ -405,8 +405,6 @@ def setup(hs: GenericWorkerServer) -> None:
     except Exception as e:
         handle_startup_exception(e)
 
-    register_start(hs, start)
-
 
 async def start(
     hs: GenericWorkerServer,
@@ -442,7 +440,7 @@ def main() -> None:
         setup(hs)
 
         # Register a callback to be invoked once the reactor is running
-        register_start(hs, start)
+        register_start(hs, lambda: start(hs))
 
         _base.start_worker_reactor("synapse-generic-worker", homeserver_config)
 
