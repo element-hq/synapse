@@ -11,6 +11,7 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+-- Stores delayed events that have either been sent, cancelled, or not sent due to an error (MSC4140)
 CREATE TABLE finalised_delayed_events (
     delay_id TEXT NOT NULL,
     user_localpart TEXT NOT NULL,
