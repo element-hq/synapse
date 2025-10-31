@@ -134,7 +134,7 @@ fn get_runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRunt
 }
 
 /// A reference to the `twisted.internet.defer` module.
-static DEFER: OnceCell<PyObject> = OnceCell::new();
+static DEFER: OnceCell<Py<PyAny>> = OnceCell::new();
 
 /// Access to the `twisted.internet.defer` module.
 fn defer(py: Python<'_>) -> PyResult<&Bound<PyAny>> {
@@ -165,7 +165,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 #[pyclass]
 struct HttpClient {
     client: reqwest::Client,
-    reactor: PyObject,
+    reactor: Py<PyAny>,
 }
 
 #[pymethods]
