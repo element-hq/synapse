@@ -237,7 +237,7 @@ impl HttpClient {
                 return Err(HttpResponseException::new(status, buffer));
             }
 
-            let r = Python::with_gil(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
+            let r = Python::attach(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
 
             Ok(r)
         })
@@ -270,7 +270,7 @@ where
     handle.spawn(async move {
         let res = task.await;
 
-        Python::with_gil(move |py| {
+        Python::attach(move |py| {
             // Flatten the panic into standard python error
             let res = match res {
                 Ok(r) => r,
