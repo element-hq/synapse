@@ -23,11 +23,11 @@ import logging
 import re
 from typing import TYPE_CHECKING, Mapping
 
+from pydantic import ConfigDict, StrictInt, StrictStr
 from signedjson.sign import sign_json
 
 from twisted.web.server import Request
 
-from synapse._pydantic_compat import Extra, StrictInt, StrictStr
 from synapse.crypto.keyring import ServerKeyFetcher
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -48,8 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 class _KeyQueryCriteriaDataModel(RequestBodyModel):
-    class Config:
-        extra = Extra.allow
+    model_config = ConfigDict(extra="allow")
 
     minimum_valid_until_ts: StrictInt | None
 

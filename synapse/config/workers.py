@@ -25,12 +25,12 @@ import logging
 from typing import Any
 
 import attr
-
-from synapse._pydantic_compat import (
+from pydantic import (
     StrictBool,
     StrictInt,
     StrictStr,
 )
+
 from synapse.config._base import (
     Config,
     ConfigError,

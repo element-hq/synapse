@@ -34,8 +34,8 @@ from typing import (
 )
 
 import attr
+from pydantic import BaseModel
 
-from synapse._pydantic_compat import BaseModel
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Connection, Cursor
 from synapse.types import JsonDict, StrCollection
@@ -953,7 +953,7 @@ class BackgroundUpdater:
         #      match the constraint.
         #   3. We try re-validating the constraint.
 
-        parsed_progress = ValidateConstraintProgress.parse_obj(progress)
+        parsed_progress = ValidateConstraintProgress.model_validate(progress)
 
         if parsed_progress.state == ValidateConstraintProgress.State.check:
             return_columns = ", ".join(unique_columns)

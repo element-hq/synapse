@@ -1753,6 +1753,7 @@ class MatrixFederationHttpClient:
                     response, output_stream, boundary, expected_size + 1
                 )
                 deferred.addTimeout(self.default_timeout_seconds, self.reactor)
+                multipart_response = await make_deferred_yieldable(deferred)
         except BodyExceededMaxSize:
             msg = "Requested file is too large > %r bytes" % (expected_size,)
             logger.warning(
@@ -1789,7 +1790,6 @@ class MatrixFederationHttpClient:
             )
             raise
 
-        multipart_response = await make_deferred_yieldable(deferred)
         if not multipart_response.url:
             assert multipart_response.length is not None
             length = multipart_response.length
