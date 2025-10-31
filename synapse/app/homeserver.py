@@ -71,7 +71,6 @@ from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
 from synapse.storage import DataStore
 from synapse.types import ISynapseReactor
-from synapse.util.check_dependencies import check_requirements
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.module_loader import load_module
 
@@ -388,19 +387,12 @@ def create_homeserver(
 
 def setup(
     hs: SynapseHomeServer,
-    *,
-    freeze: bool = True,
 ) -> None:
     """
-    Setup a Synapse homeserver instance given a configuration.
+    Setup a `SynapseHomeServer` (main) instance.
 
     Args:
         hs: The homeserver to setup.
-        freeze: whether to freeze the homeserver base objects in the garbage collector.
-            May improve garbage collection performance by marking objects with an effectively
-            static lifetime as frozen so they don't need to be considered for cleanup.
-            If you ever want to `shutdown` the homeserver, this needs to be
-            False otherwise the homeserver cannot be garbage collected after `shutdown`.
 
     Returns:
         A homeserver instance.
@@ -419,22 +411,36 @@ def setup(
     except Exception as e:
         handle_startup_exception(e)
 
-    async def _start_when_reactor_running() -> None:
-        # TODO: Feels like this should be moved somewhere else.
-        #
-        # Load the OIDC provider metadatas, if OIDC is enabled.
-        if hs.config.oidc.oidc_enabled:
-            oidc = hs.get_oidc_handler()
-            # Loading the provider metadata also ensures the provider config is valid.
-            await oidc.load_metadata()
 
-        await _base.start(hs, freeze)
+async def start(
+    hs: SynapseHomeServer,
+    *,
+    freeze: bool = True,
+) -> None:
+    """
+    Should be called once the reactor is running.
 
-        # TODO: Feels like this should be moved somewhere else.
-        hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
+    Args:
+        hs: The homeserver to setup.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+    """
 
-    # Register a callback to be invoked once the reactor is running
-    register_start(hs, _start_when_reactor_running)
+    # TODO: Feels like this should be moved somewhere else.
+    #
+    # Load the OIDC provider metadatas, if OIDC is enabled.
+    if hs.config.oidc.oidc_enabled:
+        oidc = hs.get_oidc_handler()
+        # Loading the provider metadata also ensures the provider config is valid.
+        await oidc.load_metadata()
+
+    await _base.start(hs, freeze=freeze)
+
+    # TODO: Feels like this should be moved somewhere else.
+    hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
 
 def start_reactor(
@@ -460,15 +466,18 @@ def start_reactor(
 def main() -> None:
     homeserver_config = load_or_generate_config(sys.argv[1:])
 
+    # Create a logging context as soon as possible so we can start associating
+    # everything with this homeserver.
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
-        # check base requirements
-        check_requirements()
+        # redirect stdio to the logs, if configured.
+        if not homeserver_config.logging.no_redirect_stdio:
+            redirect_stdio_to_logs()
+
         hs = create_homeserver(homeserver_config)
         setup(hs)
 
-        # redirect stdio to the logs, if configured.
-        if not hs.config.logging.no_redirect_stdio:
-            redirect_stdio_to_logs()
+        # Register a callback to be invoked once the reactor is running
+        register_start(hs, start)
 
         start_reactor(homeserver_config)
 

@@ -602,7 +602,7 @@ def setup_sighup_handling() -> None:
     _already_setup_sighup_handling = True
 
 
-async def start(hs: "HomeServer", freeze: bool = True) -> None:
+async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
     """
     Start a Synapse server or worker.
 

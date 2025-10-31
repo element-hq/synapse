@@ -64,7 +64,7 @@ from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.databases.main.tags import TagsWorkerStore
 from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerStore
-from synapse.types import JsonMapping, StateMap
+from synapse.types import ISynapseReactor, JsonMapping, StateMap
 from synapse.util.logcontext import LoggingContext
 
 logger = logging.getLogger("synapse.app.admin_cmd")
@@ -289,7 +289,21 @@ def load_config(argv_options: list[str]) -> tuple[HomeServerConfig, argparse.Nam
     return config, args
 
 
-def start(config: HomeServerConfig, args: argparse.Namespace) -> None:
+def create_homeserver(
+    config: HomeServerConfig,
+    reactor: Optional[ISynapseReactor] = None,
+) -> AdminCmdServer:
+    """
+    Create a homeserver instance for the Synapse main process.
+
+    Args:
+        config: The configuration for the homeserver.
+        reactor: Optionally provide a reactor to use. Can be useful in different
+            scenarios that you want control over the reactor, such as tests.
+
+    Returns:
+        A homeserver instance.
+    """
     if config.worker.worker_app is not None:
         assert config.worker.worker_app == "synapse.app.admin_cmd"
 
@@ -315,30 +329,41 @@ def start(config: HomeServerConfig, args: argparse.Namespace) -> None:
     ss = AdminCmdServer(
         config.server.server_name,
         config=config,
+        reactor=reactor,
     )
 
-    setup_logging(ss, config, use_worker_options=True)
+    return ss
+
+
+def setup(ss: AdminCmdServer) -> None:
+    setup_logging(ss, ss.config, use_worker_options=True)
 
     ss.setup()
 
-    # We use task.react as the basic run command as it correctly handles tearing
-    # down the reactor when the deferreds resolve and setting the return value.
-    # We also make sure that `_base.start` gets run before we actually run the
-    # command.
 
-    async def run() -> None:
-        with LoggingContext(name="command", server_name=config.server.server_name):
-            await _base.start(ss)
-            await args.func(ss, args)
+async def start(ss: AdminCmdServer, args: argparse.Namespace) -> None:
+    await _base.start(ss)
+    await args.func(ss, args)
 
-    _base.start_worker_reactor(
-        "synapse-admin-cmd",
-        config,
-        run_command=lambda: task.react(lambda _reactor: defer.ensureDeferred(run())),
-    )
+
+def main() -> None:
+    homeserver_config, args = load_config(sys.argv[1:])
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
+        ss = create_homeserver(homeserver_config)
+        setup(ss)
+
+        _base.start_worker_reactor(
+            "synapse-admin-cmd",
+            ss.config,
+            # We use task.react as the basic run command as it correctly handles tearing
+            # down the reactor when the deferreds resolve and setting the return value.
+            # We also make sure that `_base.start` gets run before we actually run the
+            # command.
+            run_command=lambda: task.react(
+                lambda _reactor: defer.ensureDeferred(start(ss, args))
+            ),
+        )
 
 
 if __name__ == "__main__":
-    homeserver_config, args = load_config(sys.argv[1:])
-    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
-        start(homeserver_config, args)
+    main()
