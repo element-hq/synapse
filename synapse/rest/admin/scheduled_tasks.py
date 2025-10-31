@@ -13,7 +13,7 @@
 #
 #
 #
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.http.servlet import RestServlet, parse_integer, parse_string
 from synapse.http.site import SynapseRequest
@@ -35,7 +35,7 @@ class ScheduledTasksRestServlet(RestServlet):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         # extract query params

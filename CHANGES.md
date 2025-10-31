@@ -1,4 +1,64 @@
-# Synapse 1.140.0rc1 (2025-10-10)
+# Synapse 1.141.0 (2025-10-29)
+
+## Deprecation of MacOS Python wheels
+
+The team has decided to deprecate and eventually stop publishing python wheels
+for MacOS. This is a burden on the team, and we're not aware of any parties
+that use them. Synapse docker images will continue to work on MacOS, as will
+building Synapse from source (though note this requires a Rust compiler).
+
+Publishing MacOS Python wheels will continue for the next few releases. If you
+do make use of these wheels downstream, please reach out to us in
+[#synapse-dev:matrix.org](https://matrix.to/#/#synapse-dev:matrix.org). We'd
+love to hear from you!
+
+
+## Docker images now based on Debian `trixie` with Python 3.13
+
+The Docker images are now based on Debian `trixie` and use Python 3.13. If you
+are using the Docker images as a base image you may need to e.g. adjust the
+paths you mount any additional Python packages at.
+
+No significant changes since 1.141.0rc2.
+
+
+
+
+# Synapse 1.141.0rc2 (2025-10-28)
+
+## Bugfixes
+
+- Fix users being unable to log in if their password, or the server's configured pepper, was too long. ([\#19101](https://github.com/element-hq/synapse/issues/19101))
+
+
+
+
+# Synapse 1.141.0rc1 (2025-10-21)
+
+## Features
+
+- Allow using [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) behavior without the opt-in registration flag. Contributed by @tulir @ Beeper. ([\#19031](https://github.com/element-hq/synapse/issues/19031))
+- Stabilized support for [MSC4326](https://github.com/matrix-org/matrix-spec-proposals/pull/4326): Device masquerading for appservices. Contributed by @tulir @ Beeper. ([\#19033](https://github.com/element-hq/synapse/issues/19033))
+
+## Bugfixes
+
+- Fix a bug introduced in 1.136.0 that would prevent Synapse from being able to be `reload`-ed more than once when running under systemd. ([\#19060](https://github.com/element-hq/synapse/issues/19060))
+- Fix a bug introduced in 1.140.0 where an internal server error could be raised when hashing user passwords that are too long. ([\#19078](https://github.com/element-hq/synapse/issues/19078))
+
+## Updates to the Docker image
+
+- Update docker image to use Debian trixie as the base and thus Python 3.13. ([\#19064](https://github.com/element-hq/synapse/issues/19064))
+
+## Internal Changes
+
+- Move unique snowflake homeserver background tasks to `start_background_tasks` (the standard pattern for this kind of thing). ([\#19037](https://github.com/element-hq/synapse/issues/19037))
+- Drop a deprecated field of the `PyGitHub` dependency in the release script and raise the dependency's minimum version to `1.59.0`. ([\#19039](https://github.com/element-hq/synapse/issues/19039))
+- Update TODO list of conflicting areas where we encounter metrics being clobbered (`ApplicationService`). ([\#19040](https://github.com/element-hq/synapse/issues/19040))
+
+
+
+
+# Synapse 1.140.0 (2025-10-14)
 
 ## Compatibility notice for users of `synapse-s3-storage-provider`
 
@@ -8,6 +68,14 @@ module must upgrade to
 [v1.6.0](https://github.com/matrix-org/synapse-s3-storage-provider/releases/tag/v1.6.0).
 Using older versions of the module with this release of Synapse will prevent
 users from being able to upload or download media.
+
+
+No significant changes since 1.140.0rc1.
+
+
+
+
+# Synapse 1.140.0rc1 (2025-10-10)
 
 ## Features
 

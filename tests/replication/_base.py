@@ -19,7 +19,7 @@
 #
 import logging
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Optional
 
 from twisted.internet.address import IPv4Address
 from twisted.internet.protocol import Protocol, connectionDone
@@ -108,7 +108,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         self._client_transport: Optional[FakeTransport] = None
         self._server_transport: Optional[FakeTransport] = None
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         d = super().create_resource_dict()
         d["/_synapse/replication"] = ReplicationRestResource(self.hs)
         return d
@@ -183,7 +183,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
 
         # hook into the channel's request factory so that we can keep a record
         # of the requests
-        requests: List[SynapseRequest] = []
+        requests: list[SynapseRequest] = []
         real_request_factory = channel.requestFactory
 
         def request_factory(*args: Any, **kwargs: Any) -> SynapseRequest:
@@ -214,7 +214,12 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         client_to_server_transport.loseConnection()
 
         # there should have been exactly one request
-        self.assertEqual(len(requests), 1)
+        self.assertEqual(
+            len(requests),
+            1,
+            "Expected to handle exactly one HTTP replication request but saw %d - requests=%s"
+            % (len(requests), requests),
+        )
 
         return requests[0]
 
@@ -251,7 +256,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
         # Redis replication only takes place on Postgres
         skip = "Requires Postgres"
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         """
         Overrides the default config to enable Redis.
         Even if the test only uses make_worker_hs, the main process needs Redis
@@ -486,7 +491,7 @@ class TestReplicationDataHandler(ReplicationDataHandler):
         super().__init__(hs)
 
         # list of received (stream_name, token, row) tuples
-        self.received_rdata_rows: List[Tuple[str, int, Any]] = []
+        self.received_rdata_rows: list[tuple[str, int, Any]] = []
 
     async def on_rdata(
         self, stream_name: str, instance_name: str, token: int, rows: list
@@ -500,7 +505,7 @@ class FakeRedisPubSubServer:
     """A fake Redis server for pub/sub."""
 
     def __init__(self) -> None:
-        self._subscribers_by_channel: Dict[bytes, Set["FakeRedisPubSubProtocol"]] = (
+        self._subscribers_by_channel: dict[bytes, set["FakeRedisPubSubProtocol"]] = (
             defaultdict(set)
         )
 

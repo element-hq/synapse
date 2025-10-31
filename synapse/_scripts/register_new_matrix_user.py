@@ -26,7 +26,7 @@ import hashlib
 import hmac
 import logging
 import sys
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Optional
 
 import requests
 import yaml
@@ -262,7 +262,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    config: Optional[Dict[str, Any]] = None
+    config: Optional[dict[str, Any]] = None
     if "config" in args and args.config:
         config = yaml.safe_load(args.config)
 
@@ -350,7 +350,7 @@ def _read_file(file_path: Any, config_path: str) -> str:
         sys.exit(1)
 
 
-def _find_client_listener(config: Dict[str, Any]) -> Optional[str]:
+def _find_client_listener(config: dict[str, Any]) -> Optional[str]:
     # try to find a listener in the config. Returns a host:port pair
     for listener in config.get("listeners", []):
         if listener.get("type") != "http" or listener.get("tls", False):

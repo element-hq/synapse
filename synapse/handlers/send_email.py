@@ -24,7 +24,7 @@ import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from io import BytesIO
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.defer import Deferred
 from twisted.internet.endpoints import HostnameEndpoint
@@ -136,7 +136,7 @@ class SendEmailHandler:
         app_name: str,
         html: str,
         text: str,
-        additional_headers: Optional[Dict[str, str]] = None,
+        additional_headers: Optional[dict[str, str]] = None,
     ) -> None:
         """Send a multipart email with the given information.
 

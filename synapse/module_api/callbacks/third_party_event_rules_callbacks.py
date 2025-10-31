@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
 
 from twisted.internet.defer import CancelledError
 
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 CHECK_EVENT_ALLOWED_CALLBACK = Callable[
-    [EventBase, StateMap[EventBase]], Awaitable[Tuple[bool, Optional[dict]]]
+    [EventBase, StateMap[EventBase]], Awaitable[tuple[bool, Optional[dict]]]
 ]
 ON_CREATE_ROOM_CALLBACK = Callable[[Requester, dict, bool], Awaitable]
 CHECK_THREEPID_CAN_BE_INVITED_CALLBACK = Callable[
@@ -93,7 +93,7 @@ def load_legacy_third_party_event_rules(hs: "HomeServer") -> None:
             async def wrap_check_event_allowed(
                 event: EventBase,
                 state_events: StateMap[EventBase],
-            ) -> Tuple[bool, Optional[dict]]:
+            ) -> tuple[bool, Optional[dict]]:
                 # Assertion required because mypy can't prove we won't change
                 # `f` back to `None`. See
                 # https://mypy.readthedocs.io/en/latest/common_issues.html#narrowing-and-inner-functions
@@ -159,30 +159,30 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
 
-        self._check_event_allowed_callbacks: List[CHECK_EVENT_ALLOWED_CALLBACK] = []
-        self._on_create_room_callbacks: List[ON_CREATE_ROOM_CALLBACK] = []
-        self._check_threepid_can_be_invited_callbacks: List[
+        self._check_event_allowed_callbacks: list[CHECK_EVENT_ALLOWED_CALLBACK] = []
+        self._on_create_room_callbacks: list[ON_CREATE_ROOM_CALLBACK] = []
+        self._check_threepid_can_be_invited_callbacks: list[
             CHECK_THREEPID_CAN_BE_INVITED_CALLBACK
         ] = []
-        self._check_visibility_can_be_modified_callbacks: List[
+        self._check_visibility_can_be_modified_callbacks: list[
             CHECK_VISIBILITY_CAN_BE_MODIFIED_CALLBACK
         ] = []
-        self._on_new_event_callbacks: List[ON_NEW_EVENT_CALLBACK] = []
-        self._check_can_shutdown_room_callbacks: List[
+        self._on_new_event_callbacks: list[ON_NEW_EVENT_CALLBACK] = []
+        self._check_can_shutdown_room_callbacks: list[
             CHECK_CAN_SHUTDOWN_ROOM_CALLBACK
         ] = []
-        self._check_can_deactivate_user_callbacks: List[
+        self._check_can_deactivate_user_callbacks: list[
             CHECK_CAN_DEACTIVATE_USER_CALLBACK
         ] = []
-        self._on_profile_update_callbacks: List[ON_PROFILE_UPDATE_CALLBACK] = []
-        self._on_user_deactivation_status_changed_callbacks: List[
+        self._on_profile_update_callbacks: list[ON_PROFILE_UPDATE_CALLBACK] = []
+        self._on_user_deactivation_status_changed_callbacks: list[
             ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK
         ] = []
-        self._on_threepid_bind_callbacks: List[ON_THREEPID_BIND_CALLBACK] = []
-        self._on_add_user_third_party_identifier_callbacks: List[
+        self._on_threepid_bind_callbacks: list[ON_THREEPID_BIND_CALLBACK] = []
+        self._on_add_user_third_party_identifier_callbacks: list[
             ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
         ] = []
-        self._on_remove_user_third_party_identifier_callbacks: List[
+        self._on_remove_user_third_party_identifier_callbacks: list[
             ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
         ] = []
 
@@ -261,7 +261,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         self,
         event: EventBase,
         context: UnpersistedEventContextBase,
-    ) -> Tuple[bool, Optional[dict]]:
+    ) -> tuple[bool, Optional[dict]]:
         """Check if a provided event should be allowed in the given context.
 
         The module can return:

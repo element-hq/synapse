@@ -19,7 +19,7 @@
 #
 import logging
 import urllib.parse
-from typing import Any, Generator, List, Optional
+from typing import Any, Generator, Optional
 from urllib.request import (  # type: ignore[attr-defined]
     proxy_bypass_environment,
 )
@@ -413,7 +413,7 @@ class MatrixHostnameEndpoint:
         # to try and if that doesn't work then we'll have an exception.
         raise Exception("Failed to resolve server %r" % (self._parsed_uri.netloc,))
 
-    async def _resolve_server(self) -> List[Server]:
+    async def _resolve_server(self) -> list[Server]:
         """Resolves the server name to a list of hosts and ports to attempt to
         connect to.
         """

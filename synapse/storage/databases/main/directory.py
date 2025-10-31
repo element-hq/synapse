@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, Optional, Sequence
 
 import attr
 
@@ -34,7 +34,7 @@ from synapse.util.caches.descriptors import cached
 class RoomAliasMapping:
     room_id: str
     room_alias: str
-    servers: List[str]
+    servers: list[str]
 
 
 class DirectoryWorkerStore(CacheInvalidationWorkerStore):
@@ -187,7 +187,7 @@ class DirectoryWorkerStore(CacheInvalidationWorkerStore):
 
         def _update_aliases_for_room_txn(txn: LoggingTransaction) -> None:
             update_creator_sql = ""
-            sql_params: Tuple[str, ...] = (new_room_id, old_room_id)
+            sql_params: tuple[str, ...] = (new_room_id, old_room_id)
             if creator:
                 update_creator_sql = ", creator = ?"
                 sql_params = (new_room_id, creator, old_room_id)

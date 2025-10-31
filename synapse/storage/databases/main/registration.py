@@ -22,7 +22,7 @@
 import logging
 import random
 import re
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 import attr
 
@@ -576,7 +576,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
     async def get_user_from_renewal_token(
         self, renewal_token: str
-    ) -> Tuple[str, int, Optional[int]]:
+    ) -> tuple[str, int, Optional[int]]:
         """Get a user ID and renewal status from a renewal token.
 
         Args:
@@ -592,7 +592,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                     has not been renewed using the current token yet.
         """
         return cast(
-            Tuple[str, int, Optional[int]],
+            tuple[str, int, Optional[int]],
             await self.db_pool.simple_select_one(
                 table="account_validity",
                 keyvalues={"renewal_token": renewal_token},
@@ -617,7 +617,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             desc="get_renewal_token_for_user",
         )
 
-    async def get_users_expiring_soon(self) -> List[Tuple[str, int]]:
+    async def get_users_expiring_soon(self) -> list[tuple[str, int]]:
         """Selects users whose account will expire in the [now, now + renew_at] time
         window (see configuration for account_validity for information on what renew_at
         refers to).
@@ -628,14 +628,14 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         def select_users_txn(
             txn: LoggingTransaction, now_ms: int, renew_at: int
-        ) -> List[Tuple[str, int]]:
+        ) -> list[tuple[str, int]]:
             sql = (
                 "SELECT user_id, expiration_ts_ms FROM account_validity"
                 " WHERE email_sent = FALSE AND (expiration_ts_ms - ?) <= ?"
             )
             values = [now_ms, renew_at]
             txn.execute(sql, values)
-            return cast(List[Tuple[str, int]], txn.fetchall())
+            return cast(list[tuple[str, int]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_users_expiring_soon",
@@ -858,17 +858,17 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         )
         return True if res == UserTypes.SUPPORT else False
 
-    async def get_users_by_id_case_insensitive(self, user_id: str) -> Dict[str, str]:
+    async def get_users_by_id_case_insensitive(self, user_id: str) -> dict[str, str]:
         """Gets users that match user_id case insensitively.
 
         Returns:
              A mapping of user_id -> password_hash.
         """
 
-        def f(txn: LoggingTransaction) -> Dict[str, str]:
+        def f(txn: LoggingTransaction) -> dict[str, str]:
             sql = "SELECT name, password_hash FROM users WHERE lower(name) = lower(?)"
             txn.execute(sql, (user_id,))
-            result = cast(List[Tuple[str, str]], txn.fetchall())
+            result = cast(list[tuple[str, str]], txn.fetchall())
             return dict(result)
 
         return await self.db_pool.runInteraction("get_users_by_id_case_insensitive", f)
@@ -978,7 +978,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
     async def replace_user_external_id(
         self,
-        record_external_ids: List[Tuple[str, str]],
+        record_external_ids: list[tuple[str, str]],
         user_id: str,
     ) -> None:
         """Replace mappings from external user ids to a mxid in a single transaction.
@@ -1045,7 +1045,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             desc="get_user_by_external_id",
         )
 
-    async def get_external_ids_by_user(self, mxid: str) -> List[Tuple[str, str]]:
+    async def get_external_ids_by_user(self, mxid: str) -> list[tuple[str, str]]:
         """Look up external ids for the given user
 
         Args:
@@ -1055,7 +1055,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             Tuples of (auth_provider, external_id)
         """
         return cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="user_external_ids",
                 keyvalues={"user_id": mxid},
@@ -1075,7 +1075,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction("count_users", _count_users)
 
-    async def count_daily_user_type(self) -> Dict[str, int]:
+    async def count_daily_user_type(self) -> dict[str, int]:
         """
         Counts 1) native non guest users
                2) native guests users
@@ -1083,7 +1083,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         who registered on the homeserver in the past 24 hours
         """
 
-        def _count_daily_user_type(txn: LoggingTransaction) -> Dict[str, int]:
+        def _count_daily_user_type(txn: LoggingTransaction) -> dict[str, int]:
             yesterday = int(self.clock.time()) - (60 * 60 * 24)
 
             sql = """
@@ -1116,7 +1116,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 WHERE appservice_id IS NULL
             """
             )
-            (count,) = cast(Tuple[int], txn.fetchone())
+            (count,) = cast(tuple[int], txn.fetchone())
             return count
 
         return await self.db_pool.runInteraction("count_users", _count_users)
@@ -1196,9 +1196,9 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             {"user_id": user_id, "validated_at": validated_at, "added_at": added_at},
         )
 
-    async def user_get_threepids(self, user_id: str) -> List[ThreepidResult]:
+    async def user_get_threepids(self, user_id: str) -> list[ThreepidResult]:
         results = cast(
-            List[Tuple[str, str, int, int]],
+            list[tuple[str, str, int, int]],
             await self.db_pool.simple_select_list(
                 "user_threepids",
                 keyvalues={"user_id": user_id},
@@ -1253,7 +1253,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             desc="add_user_bound_threepid",
         )
 
-    async def user_get_bound_threepids(self, user_id: str) -> List[Tuple[str, str]]:
+    async def user_get_bound_threepids(self, user_id: str) -> list[tuple[str, str]]:
         """Get the threepids that a user has bound to an identity server through the homeserver
         The homeserver remembers where binds to an identity server occurred. Using this
         method can retrieve those threepids.
@@ -1267,7 +1267,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 address: The address of the threepid (e.g "bob@example.com")
         """
         return cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="user_threepid_id_server",
                 keyvalues={"user_id": user_id},
@@ -1302,7 +1302,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
     async def get_id_servers_user_bound(
         self, user_id: str, medium: str, address: str
-    ) -> List[str]:
+    ) -> list[str]:
         """Get the list of identity servers that the server proxied bind
         requests to for given user and threepid
 
@@ -1686,7 +1686,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         """
 
         def _use_registration_token_txn(txn: LoggingTransaction) -> None:
-            # Normally, res is Optional[Dict[str, Any]].
+            # Normally, res is Optional[dict[str, Any]].
             # Override type because the return type is only optional if
             # allow_none is True, and we don't want mypy throwing errors
             # about None not being indexable.
@@ -1716,7 +1716,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
     async def get_registration_tokens(
         self, valid: Optional[bool] = None
-    ) -> List[Tuple[str, Optional[int], int, int, Optional[int]]]:
+    ) -> list[tuple[str, Optional[int], int, int, Optional[int]]]:
         """List all registration tokens. Used by the admin API.
 
         Args:
@@ -1735,7 +1735,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         def select_registration_tokens_txn(
             txn: LoggingTransaction, now: int, valid: Optional[bool]
-        ) -> List[Tuple[str, Optional[int], int, int, Optional[int]]]:
+        ) -> list[tuple[str, Optional[int], int, int, Optional[int]]]:
             if valid is None:
                 # Return all tokens regardless of validity
                 txn.execute(
@@ -1765,7 +1765,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 txn.execute(sql, [now])
 
             return cast(
-                List[Tuple[str, Optional[int], int, int, Optional[int]]], txn.fetchall()
+                list[tuple[str, Optional[int], int, int, Optional[int]]], txn.fetchall()
             )
 
         return await self.db_pool.runInteraction(
@@ -1775,7 +1775,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             valid,
         )
 
-    async def get_one_registration_token(self, token: str) -> Optional[Dict[str, Any]]:
+    async def get_one_registration_token(self, token: str) -> Optional[dict[str, Any]]:
         """Get info about the given registration token. Used by the admin API.
 
         Args:
@@ -1892,8 +1892,8 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         )
 
     async def update_registration_token(
-        self, token: str, updatevalues: Dict[str, Optional[int]]
-    ) -> Optional[Dict[str, Any]]:
+        self, token: str, updatevalues: dict[str, Optional[int]]
+    ) -> Optional[dict[str, Any]]:
         """Update a registration token. Used by the admin API.
 
         Args:
@@ -1909,7 +1909,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         def _update_registration_token_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Dict[str, Any]]:
+        ) -> Optional[dict[str, Any]]:
             try:
                 self.db_pool.simple_update_one_txn(
                     txn,
@@ -2457,7 +2457,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         user_id: str,
         except_token_id: Optional[int] = None,
         device_id: Optional[str] = None,
-    ) -> List[Tuple[str, int, Optional[str]]]:
+    ) -> list[tuple[str, int, Optional[str]]]:
         """
         Invalidate access and refresh tokens belonging to a user
 
@@ -2471,14 +2471,14 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             A tuple of (token, token id, device id) for each of the deleted tokens
         """
 
-        def f(txn: LoggingTransaction) -> List[Tuple[str, int, Optional[str]]]:
+        def f(txn: LoggingTransaction) -> list[tuple[str, int, Optional[str]]]:
             keyvalues = {"user_id": user_id}
             if device_id is not None:
                 keyvalues["device_id"] = device_id
 
             items = keyvalues.items()
             where_clause = " AND ".join(k + " = ?" for k, _ in items)
-            values: List[Union[str, int]] = [v for _, v in items]
+            values: list[Union[str, int]] = [v for _, v in items]
             # Conveniently, refresh_tokens and access_tokens both use the user_id and device_id fields. Only caveat
             # is the `except_token_id` param that is tricky to get right, so for now we're just using the same where
             # clause and values before we handle that. This seems to be only used in the "set password" handler.
@@ -2517,7 +2517,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         self,
         user_id: str,
         device_ids: StrCollection,
-    ) -> List[Tuple[str, int, Optional[str]]]:
+    ) -> list[tuple[str, int, Optional[str]]]:
         """
         Invalidate access and refresh tokens belonging to a user
 
@@ -2530,7 +2530,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         def user_delete_access_tokens_for_devices_txn(
             txn: LoggingTransaction, batch_device_ids: StrCollection
-        ) -> List[Tuple[str, int, Optional[str]]]:
+        ) -> list[tuple[str, int, Optional[str]]]:
             self.db_pool.simple_delete_many_txn(
                 txn,
                 table="refresh_tokens",
@@ -2544,31 +2544,13 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             )
             args.append(user_id)
 
-            if self.database_engine.supports_returning:
-                sql = f"""
-                    DELETE FROM access_tokens
-                    WHERE {clause} AND user_id = ?
-                    RETURNING token, id, device_id
-                """
-                txn.execute(sql, args)
-                tokens_and_devices = txn.fetchall()
-            else:
-                tokens_and_devices = self.db_pool.simple_select_many_txn(
-                    txn,
-                    table="access_tokens",
-                    column="device_id",
-                    iterable=batch_device_ids,
-                    keyvalues={"user_id": user_id},
-                    retcols=("token", "id", "device_id"),
-                )
-
-                self.db_pool.simple_delete_many_txn(
-                    txn,
-                    table="access_tokens",
-                    keyvalues={"user_id": user_id},
-                    column="device_id",
-                    values=batch_device_ids,
-                )
+            sql = f"""
+                DELETE FROM access_tokens
+                WHERE {clause} AND user_id = ?
+                RETURNING token, id, device_id
+            """
+            txn.execute(sql, args)
+            tokens_and_devices = txn.fetchall()
 
             self._invalidate_cache_and_stream_bulk(
                 txn,
@@ -2686,7 +2668,7 @@ class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
 
         def _background_update_set_deactivated_flag_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[bool, int]:
+        ) -> tuple[bool, int]:
             txn.execute(
                 """
                 SELECT

@@ -75,7 +75,7 @@ class CommonMetricsTestCase(HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.metrics_manager = hs.get_common_usage_metrics_manager()
-        self.get_success(self.metrics_manager.setup())
+        self.metrics_manager.setup()
 
     def test_dau(self) -> None:
         """Tests that the daily active users count is correctly updated."""

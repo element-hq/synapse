@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import List, Optional, Tuple, cast
+from typing import Optional, cast
 
 from twisted.internet.testing import MemoryReactor
 
@@ -133,7 +133,7 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         room = self.helper.create_room_as(self.u_alice, tok=self.t_alice)
 
         res = cast(
-            List[Tuple[Optional[str], str]],
+            list[tuple[Optional[str], str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     "room_memberships",
@@ -165,7 +165,7 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         )
 
         res2 = cast(
-            List[Tuple[Optional[str], str]],
+            list[tuple[Optional[str], str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     "room_memberships",
@@ -408,7 +408,7 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
     def _assert_member_summary(
         self,
         actual_member_summary: MemberSummary,
-        expected_member_list: List[str],
+        expected_member_list: list[str],
         *,
         expected_member_count: Optional[int] = None,
     ) -> None:

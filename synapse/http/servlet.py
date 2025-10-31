@@ -27,26 +27,18 @@ import urllib.parse as urlparse
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
-    List,
     Literal,
     Mapping,
     Optional,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
     overload,
 )
 
+from pydantic import BaseModel, ValidationError
+
 from twisted.web.server import Request
 
-from synapse._pydantic_compat import (
-    BaseModel,
-    ErrorWrapper,
-    MissingError,
-    PydanticValueError,
-    ValidationError,
-)
 from synapse.api.errors import Codes, SynapseError
 from synapse.http import redact_uri
 from synapse.http.server import HttpServer
@@ -548,7 +540,7 @@ EnumT = TypeVar("EnumT", bound=enum.Enum)
 def parse_enum(
     request: Request,
     name: str,
-    E: Type[EnumT],
+    E: type[EnumT],
     default: EnumT,
 ) -> EnumT: ...
 
@@ -557,7 +549,7 @@ def parse_enum(
 def parse_enum(
     request: Request,
     name: str,
-    E: Type[EnumT],
+    E: type[EnumT],
     *,
     required: Literal[True],
 ) -> EnumT: ...
@@ -566,7 +558,7 @@ def parse_enum(
 def parse_enum(
     request: Request,
     name: str,
-    E: Type[EnumT],
+    E: type[EnumT],
     default: Optional[EnumT] = None,
     required: bool = False,
 ) -> Optional[EnumT]:
@@ -637,18 +629,18 @@ def parse_strings_from_args(
     *,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]: ...
+) -> Optional[list[str]]: ...
 
 
 @overload
 def parse_strings_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: List[str],
+    default: list[str],
     *,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> List[str]: ...
+) -> list[str]: ...
 
 
 @overload
@@ -659,29 +651,29 @@ def parse_strings_from_args(
     required: Literal[True],
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> List[str]: ...
+) -> list[str]: ...
 
 
 @overload
 def parse_strings_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[List[str]] = None,
+    default: Optional[list[str]] = None,
     *,
     required: bool = False,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]: ...
+) -> Optional[list[str]]: ...
 
 
 def parse_strings_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[List[str]] = None,
+    default: Optional[list[str]] = None,
     required: bool = False,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]:
+) -> Optional[list[str]]:
     """
     Parse a string parameter from the request query string list.
 
@@ -892,7 +884,7 @@ def parse_json_object_from_request(
 Model = TypeVar("Model", bound=BaseModel)
 
 
-def validate_json_object(content: JsonDict, model_type: Type[Model]) -> Model:
+def validate_json_object(content: JsonDict, model_type: type[Model]) -> Model:
     """Validate a deserialized JSON object using the given pydantic model.
 
     Raises:
@@ -900,20 +892,20 @@ def validate_json_object(content: JsonDict, model_type: Type[Model]) -> Model:
             if it wasn't a JSON object.
     """
     try:
-        instance = model_type.parse_obj(content)
+        instance = model_type.model_validate(content)
     except ValidationError as e:
+        err_type = e.errors()[0]["type"]
+
         # Choose a matrix error code. The catch-all is BAD_JSON, but we try to find a
         # more specific error if possible (which occasionally helps us to be spec-
         # compliant) This is a bit awkward because the spec's error codes aren't very
         # clear-cut: BAD_JSON arguably overlaps with MISSING_PARAM and INVALID_PARAM.
         errcode = Codes.BAD_JSON
 
-        raw_errors = e.raw_errors
-        if len(raw_errors) == 1 and isinstance(raw_errors[0], ErrorWrapper):
-            raw_error = raw_errors[0].exc
-            if isinstance(raw_error, MissingError):
+        if e.error_count() == 1:
+            if err_type == "missing":
                 errcode = Codes.MISSING_PARAM
-            elif isinstance(raw_error, PydanticValueError):
+            elif err_type == "value_error":
                 errcode = Codes.INVALID_PARAM
 
         raise SynapseError(HTTPStatus.BAD_REQUEST, str(e), errcode=errcode)
@@ -922,7 +914,7 @@ def validate_json_object(content: JsonDict, model_type: Type[Model]) -> Model:
 
 
 def parse_and_validate_json_object_from_request(
-    request: Request, model_type: Type[Model]
+    request: Request, model_type: type[Model]
 ) -> Model:
     """Parse a JSON object from the body of a twisted HTTP request, then deserialise and
     validate using the given pydantic model.
@@ -988,8 +980,8 @@ class ResolveRoomIdMixin:
         self.room_member_handler = hs.get_room_member_handler()
 
     async def resolve_room_id(
-        self, room_identifier: str, remote_room_hosts: Optional[List[str]] = None
-    ) -> Tuple[str, Optional[List[str]]]:
+        self, room_identifier: str, remote_room_hosts: Optional[list[str]] = None
+    ) -> tuple[str, Optional[list[str]]]:
         """
         Resolve a room identifier to a room ID, if necessary.
 

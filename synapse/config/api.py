@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Any, Iterable, Optional, Tuple
+from typing import Any, Iterable, Optional
 
 from synapse.api.constants import EventTypes
 from synapse.config._base import Config, ConfigError
@@ -46,7 +46,7 @@ class ApiConfig(Config):
 
     def _get_prejoin_state_entries(
         self, config: JsonDict
-    ) -> Iterable[Tuple[str, Optional[str]]]:
+    ) -> Iterable[tuple[str, Optional[str]]]:
         """Get the event types and state keys to include in the prejoin state."""
         room_prejoin_state_config = config.get("room_prejoin_state") or {}
 

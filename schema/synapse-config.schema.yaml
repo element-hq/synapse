@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.140/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.141/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -4695,8 +4695,9 @@ properties:
       pepper:
         type: ["string", "null"]
         description: >-
-          Set the value here to a secret random string for extra security. DO
-          NOT CHANGE THIS AFTER INITIAL SETUP!
+          A secret random string that will be appended to user's passwords
+          before they are hashed. This improves the security of short passwords.
+          DO NOT CHANGE THIS AFTER INITIAL SETUP!
         default: null
       policy:
         type: object
