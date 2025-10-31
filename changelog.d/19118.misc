@@ -1,1 +1,1 @@
-Fix Rust’s confusing lifetime lint.
+Fix a lint error related to lifetimes in Rust 1.90.
