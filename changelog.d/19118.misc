@@ -1,0 +1,1 @@
+Fix Rust’s confusing lifetime lint.
