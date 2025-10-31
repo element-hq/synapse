@@ -75,9 +75,6 @@ class Clock:
         self.cancel_all_delayed_calls()
 
     async def sleep(self, seconds: float) -> None:
-        """
-        Create an awaitable that sleeps for the given number of seconds.
-        """
         d: defer.Deferred[float] = defer.Deferred()
         # Start task in the `sentinel` logcontext, to avoid leaking the current context
         # into the reactor once it finishes.
