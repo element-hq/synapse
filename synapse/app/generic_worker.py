@@ -21,7 +21,6 @@
 #
 import logging
 import sys
-from typing import Dict, List
 
 from twisted.web.resource import Resource
 
@@ -112,7 +111,6 @@ from synapse.storage.databases.main.transactions import TransactionWorkerStore
 from synapse.storage.databases.main.ui_auth import UIAuthWorkerStore
 from synapse.storage.databases.main.user_directory import UserDirectoryStore
 from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerStore
-from synapse.util import SYNAPSE_VERSION
 from synapse.util.httpresourcetree import create_resource_tree
 
 logger = logging.getLogger("synapse.app.generic_worker")
@@ -182,7 +180,7 @@ class GenericWorkerServer(HomeServer):
 
         # We always include an admin resource that we populate with servlets as needed
         admin_resource = JsonResource(self, canonical_json=False)
-        resources: Dict[str, Resource] = {
+        resources: dict[str, Resource] = {
             # We always include a health resource.
             "/health": HealthResource(),
             "/_synapse/admin": admin_resource,
@@ -315,7 +313,7 @@ class GenericWorkerServer(HomeServer):
         self.get_replication_command_handler().start_replication(self)
 
 
-def load_config(argv_options: List[str]) -> HomeServerConfig:
+def load_config(argv_options: list[str]) -> HomeServerConfig:
     """
     Parse the commandline and config files (does not generate config)
 
@@ -359,7 +357,6 @@ def start(config: HomeServerConfig) -> None:
     hs = GenericWorkerServer(
         config.server.server_name,
         config=config,
-        version_string=f"Synapse/{SYNAPSE_VERSION}",
     )
 
     setup_logging(hs, config, use_worker_options=True)

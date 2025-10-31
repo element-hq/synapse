@@ -22,7 +22,7 @@ import contextlib
 import logging
 import time
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Generator, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Generator, Optional, Union
 
 import attr
 from zope.interface import implementer
@@ -266,7 +266,7 @@ class SynapseRequest(Request):
             return self.method.decode("ascii")
         return method
 
-    def get_authenticated_entity(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_authenticated_entity(self) -> tuple[Optional[str], Optional[str]]:
         """
         Get the "authenticated" entity of the request, which might be the user
         performing the action, or a user being puppeted by a server admin.
@@ -741,6 +741,7 @@ class SynapseSite(ProxySite):
 
     def __init__(
         self,
+        *,
         logger_name: str,
         site_tag: str,
         config: ListenerConfig,
@@ -782,7 +783,7 @@ class SynapseSite(ProxySite):
 
         self.access_logger = logging.getLogger(logger_name)
         self.server_version_string = server_version_string.encode("ascii")
-        self.connections: List[Protocol] = []
+        self.connections: list[Protocol] = []
 
     def buildProtocol(self, addr: IAddress) -> SynapseProtocol:
         protocol = SynapseProtocol(

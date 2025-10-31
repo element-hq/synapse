@@ -26,13 +26,10 @@ import threading
 from typing import (
     Callable,
     Collection,
-    Dict,
     Generic,
     MutableMapping,
     Optional,
-    Set,
     Sized,
-    Tuple,
     TypeVar,
     Union,
     cast,
@@ -203,7 +200,7 @@ class DeferredCache(Generic[KT, VT]):
         self,
         keys: Collection[KT],
         callback: Optional[Callable[[], None]] = None,
-    ) -> Tuple[Dict[KT, VT], Optional["defer.Deferred[Dict[KT, VT]]"], Collection[KT]]:
+    ) -> tuple[dict[KT, VT], Optional["defer.Deferred[dict[KT, VT]]"], Collection[KT]]:
         """Bulk lookup of items in the cache.
 
         Returns:
@@ -458,7 +455,7 @@ class CacheEntrySingle(CacheEntry[KT, VT]):
 
     def __init__(self, deferred: "defer.Deferred[VT]") -> None:
         self._deferred = ObservableDeferred(deferred, consumeErrors=True)
-        self._callbacks: Set[Callable[[], None]] = set()
+        self._callbacks: set[Callable[[], None]] = set()
 
     def deferred(self, key: KT) -> "defer.Deferred[VT]":
         return self._deferred.observe()
@@ -481,9 +478,9 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
     __slots__ = ["_deferred", "_callbacks", "_global_callbacks"]
 
     def __init__(self) -> None:
-        self._deferred: Optional[ObservableDeferred[Dict[KT, VT]]] = None
-        self._callbacks: Dict[KT, Set[Callable[[], None]]] = {}
-        self._global_callbacks: Set[Callable[[], None]] = set()
+        self._deferred: Optional[ObservableDeferred[dict[KT, VT]]] = None
+        self._callbacks: dict[KT, set[Callable[[], None]]] = {}
+        self._global_callbacks: set[Callable[[], None]] = set()
 
     def deferred(self, key: KT) -> "defer.Deferred[VT]":
         if not self._deferred:
@@ -513,7 +510,7 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
     def complete_bulk(
         self,
         cache: DeferredCache[KT, VT],
-        result: Dict[KT, VT],
+        result: dict[KT, VT],
     ) -> None:
         """Called when there is a result"""
         for key, value in result.items():

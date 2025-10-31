@@ -18,7 +18,7 @@
 #
 #
 
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
 
 from twisted.web.server import Request
 
@@ -41,7 +41,7 @@ class AdditionalResource(DirectServeJsonResource):
     def __init__(
         self,
         hs: "HomeServer",
-        handler: Callable[[Request], Awaitable[Optional[Tuple[int, Any]]]],
+        handler: Callable[[Request], Awaitable[Optional[tuple[int, Any]]]],
     ):
         """Initialise AdditionalResource
 
@@ -56,7 +56,7 @@ class AdditionalResource(DirectServeJsonResource):
         super().__init__(clock=hs.get_clock())
         self._handler = handler
 
-    async def _async_render(self, request: Request) -> Optional[Tuple[int, Any]]:
+    async def _async_render(self, request: Request) -> Optional[tuple[int, Any]]:
         # Cheekily pass the result straight through, so we don't need to worry
         # if its an awaitable or not.
         return await self._handler(request)

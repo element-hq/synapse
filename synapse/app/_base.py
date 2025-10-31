@@ -29,16 +29,15 @@ import traceback
 import warnings
 from textwrap import indent
 from threading import Thread
+from types import FrameType
 from typing import (
     TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
-    Dict,
-    List,
     NoReturn,
     Optional,
-    Tuple,
+    Union,
     cast,
 )
 from wsgiref.simple_server import WSGIServer
@@ -64,7 +63,6 @@ from twisted.web.resource import Resource
 import synapse.util.caches
 from synapse.api.constants import MAX_PDU_SIZE
 from synapse.app import check_bind_error
-from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.config import ConfigError
 from synapse.config._base import format_config_error
 from synapse.config.homeserver import HomeServerConfig
@@ -76,7 +74,6 @@ from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
 from synapse.logging.context import LoggingContext, PreserveLoggingContext
 from synapse.metrics import install_gc_manager, register_threadpool
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
@@ -99,8 +96,8 @@ reactor = cast(ISynapseReactor, _reactor)
 
 logger = logging.getLogger(__name__)
 
-_instance_id_to_sighup_callbacks_map: Dict[
-    str, List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
+_instance_id_to_sighup_callbacks_map: dict[
+    str, list[tuple[Callable[..., None], tuple[object, ...], dict[str, object]]]
 ] = {}
 """
 Map from homeserver instance_id to a list of callbacks.
@@ -112,7 +109,7 @@ P = ParamSpec("P")
 
 
 def register_sighup(
-    homeserver_instance_id: str,
+    hs: "HomeServer",
     func: Callable[P, None],
     *args: P.args,
     **kwargs: P.kwargs,
@@ -127,19 +124,25 @@ def register_sighup(
         *args, **kwargs: args and kwargs to be passed to the target function.
     """
 
-    _instance_id_to_sighup_callbacks_map.setdefault(homeserver_instance_id, []).append(
-        (func, args, kwargs)
+    # Wrap the function so we can run it within a logcontext
+    def _callback_wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
+        with LoggingContext(name="sighup", server_name=hs.hostname):
+            func(*args, **kwargs)
+
+    _instance_id_to_sighup_callbacks_map.setdefault(hs.get_instance_id(), []).append(
+        (_callback_wrapper, args, kwargs)
     )
 
 
-def unregister_sighups(instance_id: str) -> None:
+def unregister_sighups(homeserver_instance_id: str) -> None:
     """
     Unregister all sighup functions associated with this Synapse instance.
 
     Args:
-        instance_id: Unique ID for this Synapse process instance.
+        homeserver_instance_id: The unique ID for this Synapse process instance to
+            unregister hooks for (`hs.get_instance_id()`).
     """
-    _instance_id_to_sighup_callbacks_map.pop(instance_id, [])
+    _instance_id_to_sighup_callbacks_map.pop(homeserver_instance_id, [])
 
 
 def start_worker_reactor(
@@ -177,7 +180,7 @@ def start_worker_reactor(
 def start_reactor(
     appname: str,
     soft_file_limit: int,
-    gc_thresholds: Optional[Tuple[int, int, int]],
+    gc_thresholds: Optional[tuple[int, int, int]],
     pid_file: Optional[str],
     daemonize: bool,
     print_pidfile: bool,
@@ -310,7 +313,7 @@ def register_start(
 
 def listen_metrics(
     bind_addresses: StrCollection, port: int
-) -> List[Tuple[WSGIServer, Thread]]:
+) -> list[tuple[WSGIServer, Thread]]:
     """
     Start Prometheus metrics server.
 
@@ -331,7 +334,7 @@ def listen_metrics(
 
     from synapse.metrics import RegistryProxy
 
-    servers: List[Tuple[WSGIServer, Thread]] = []
+    servers: list[tuple[WSGIServer, Thread]] = []
     for host in bind_addresses:
         logger.info("Starting metrics listener on %s:%d", host, port)
         server, thread = start_http_server_prometheus(
@@ -346,7 +349,7 @@ def listen_manhole(
     port: int,
     manhole_settings: ManholeConfig,
     manhole_globals: dict,
-) -> List[Port]:
+) -> list[Port]:
     # twisted.conch.manhole 21.1.0 uses "int_from_bytes", which produces a confusing
     # warning. It's fixed by https://github.com/twisted/twisted/pull/1522), so
     # suppress the warning for now.
@@ -371,7 +374,7 @@ def listen_tcp(
     factory: ServerFactory,
     reactor: IReactorTCP = reactor,
     backlog: int = 50,
-) -> List[Port]:
+) -> list[Port]:
     """
     Create a TCP socket for a port and several addresses
 
@@ -396,7 +399,7 @@ def listen_unix(
     factory: ServerFactory,
     reactor: IReactorUNIX = reactor,
     backlog: int = 50,
-) -> List[Port]:
+) -> list[Port]:
     """
     Create a UNIX socket for a given path and 'mode' permission
 
@@ -420,18 +423,27 @@ def listen_http(
     max_request_body_size: int,
     context_factory: Optional[IOpenSSLContextFactory],
     reactor: ISynapseReactor = reactor,
-) -> List[Port]:
+) -> list[Port]:
+    """
+    Args:
+        listener_config: TODO
+        root_resource: TODO
+        version_string: A string to present for the Server header
+        max_request_body_size: TODO
+        context_factory: TODO
+        reactor: TODO
+    """
     assert listener_config.http_options is not None
 
     site_tag = listener_config.get_site_tag()
 
     site = SynapseSite(
-        "synapse.access.%s.%s"
+        logger_name="synapse.access.%s.%s"
         % ("https" if listener_config.is_tls() else "http", site_tag),
-        site_tag,
-        listener_config,
-        root_resource,
-        version_string,
+        site_tag=site_tag,
+        config=listener_config,
+        resource=root_resource,
+        server_version_string=version_string,
         max_request_body_size=max_request_body_size,
         reactor=reactor,
         hs=hs,
@@ -481,7 +493,7 @@ def listen_ssl(
     context_factory: IOpenSSLContextFactory,
     reactor: IReactorSSL = reactor,
     backlog: int = 50,
-) -> List[Port]:
+) -> list[Port]:
     """
     Create an TLS-over-TCP socket for a port and several addresses
 
@@ -535,6 +547,61 @@ def refresh_certificate(hs: "HomeServer") -> None:
         logger.info("Context factories updated.")
 
 
+_already_setup_sighup_handling = False
+"""
+Marks whether we've already successfully ran `setup_sighup_handling()`.
+"""
+
+
+def setup_sighup_handling() -> None:
+    """
+    Set up SIGHUP handling to call registered callbacks.
+
+    This can be called multiple times safely.
+    """
+    global _already_setup_sighup_handling
+    # We only need to set things up once per process.
+    if _already_setup_sighup_handling:
+        return
+
+    previous_sighup_handler: Union[
+        Callable[[int, Optional[FrameType]], Any], int, None
+    ] = None
+
+    # Set up the SIGHUP machinery.
+    if hasattr(signal, "SIGHUP"):
+
+        def handle_sighup(*args: Any, **kwargs: Any) -> None:
+            # Tell systemd our state, if we're using it. This will silently fail if
+            # we're not using systemd.
+            sdnotify(b"RELOADING=1")
+
+            if callable(previous_sighup_handler):
+                previous_sighup_handler(*args, **kwargs)
+
+            for sighup_callbacks in _instance_id_to_sighup_callbacks_map.values():
+                for func, args, kwargs in sighup_callbacks:
+                    func(*args, **kwargs)
+
+            sdnotify(b"READY=1")
+
+        # We defer running the sighup handlers until next reactor tick. This
+        # is so that we're in a sane state, e.g. flushing the logs may fail
+        # if the sighup happens in the middle of writing a log entry.
+        def run_sighup(*args: Any, **kwargs: Any) -> None:
+            # `callFromThread` should be "signal safe" as well as thread
+            # safe.
+            reactor.callFromThread(handle_sighup, *args, **kwargs)
+
+        # Register for the SIGHUP signal, chaining any existing handler as there can
+        # only be one handler per signal and we don't want to clobber any existing
+        # handlers (like the `multi_synapse` shard process in the context of Synapse Pro
+        # for small hosts)
+        previous_sighup_handler = signal.signal(signal.SIGHUP, run_sighup)
+
+    _already_setup_sighup_handling = True
+
+
 async def start(hs: "HomeServer", freeze: bool = True) -> None:
     """
     Start a Synapse server or worker.
@@ -574,45 +641,9 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
         name="gai_resolver", server_name=server_name, threadpool=resolver_threadpool
     )
 
-    # Set up the SIGHUP machinery.
-    if hasattr(signal, "SIGHUP"):
-
-        def handle_sighup(*args: Any, **kwargs: Any) -> "defer.Deferred[None]":
-            async def _handle_sighup(*args: Any, **kwargs: Any) -> None:
-                # Tell systemd our state, if we're using it. This will silently fail if
-                # we're not using systemd.
-                sdnotify(b"RELOADING=1")
-
-            for sighup_callbacks in _instance_id_to_sighup_callbacks_map.values():
-                for func, args, kwargs in sighup_callbacks:
-                    func(*args, **kwargs)
-
-                sdnotify(b"READY=1")
-
-            # It's okay to ignore the linter error here and call
-            # `run_as_background_process` directly because `_handle_sighup` operates
-            # outside of the scope of a specific `HomeServer` instance and holds no
-            # references to it which would prevent a clean shutdown.
-            return run_as_background_process(  # type: ignore[untracked-background-process]
-                "sighup",
-                server_name,
-                _handle_sighup,
-                *args,
-                **kwargs,
-            )
-
-        # We defer running the sighup handlers until next reactor tick. This
-        # is so that we're in a sane state, e.g. flushing the logs may fail
-        # if the sighup happens in the middle of writing a log entry.
-        def run_sighup(*args: Any, **kwargs: Any) -> None:
-            # `callFromThread` should be "signal safe" as well as thread
-            # safe.
-            reactor.callFromThread(handle_sighup, *args, **kwargs)
-
-        signal.signal(signal.SIGHUP, run_sighup)
-
-        register_sighup(hs.get_instance_id(), refresh_certificate, hs)
-        register_sighup(hs.get_instance_id(), reload_cache_config, hs.config)
+    setup_sighup_handling()
+    register_sighup(hs, refresh_certificate, hs)
+    register_sighup(hs, reload_cache_config, hs.config)
 
     # Apply the cache config.
     hs.config.caches.resize_all_caches()
@@ -673,15 +704,6 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
     # the forked process.
     if hs.config.worker.run_background_tasks:
         hs.start_background_tasks()
-
-        # TODO: This should be moved to same pattern we use for other background tasks:
-        # Add to `REQUIRED_ON_BACKGROUND_TASK_STARTUP` and rely on
-        # `start_background_tasks` to start it.
-        await hs.get_common_usage_metrics_manager().setup()
-
-        # TODO: This feels like another pattern that should refactored as one of the
-        # `REQUIRED_ON_BACKGROUND_TASK_STARTUP`
-        start_phone_stats_home(hs)
 
     if freeze:
         # We now freeze all allocated objects in the hopes that (almost)

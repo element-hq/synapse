@@ -23,7 +23,7 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import RoomCreationPreset
 from synapse.http.server import HttpServer
@@ -62,7 +62,7 @@ class VersionsRestServlet(RestServlet):
             in self.config.room.encryption_enabled_by_default_for_room_presets
         )
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         msc3881_enabled = self.config.experimental.msc3881_enabled
         msc3575_enabled = self.config.experimental.msc3575_enabled
 

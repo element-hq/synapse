@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Iterable, Optional
 
 from synapse.http.server import HttpServer, JsonResource
 from synapse.rest import admin
@@ -42,6 +42,7 @@ from synapse.rest.client import (
     login,
     login_token_request,
     logout,
+    matrixrtc,
     mutual_rooms,
     notifications,
     openid,
@@ -77,7 +78,7 @@ if TYPE_CHECKING:
 
 RegisterServletsFunc = Callable[["HomeServer", HttpServer], None]
 
-CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
+CLIENT_SERVLET_FUNCTIONS: tuple[RegisterServletsFunc, ...] = (
     versions.register_servlets,
     initial_sync.register_servlets,
     room.register_deprecated_servlets,
@@ -89,6 +90,7 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     presence.register_servlets,
     directory.register_servlets,
     voip.register_servlets,
+    matrixrtc.register_servlets,
     pusher.register_servlets,
     push_rule.register_servlets,
     logout.register_servlets,
@@ -126,7 +128,7 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     thread_subscriptions.register_servlets,
 )
 
-SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {
+SERVLET_GROUPS: dict[str, Iterable[RegisterServletsFunc]] = {
     "client": CLIENT_SERVLET_FUNCTIONS,
 }
 
@@ -141,7 +143,7 @@ class ClientRestResource(JsonResource):
        * etc
     """
 
-    def __init__(self, hs: "HomeServer", servlet_groups: Optional[List[str]] = None):
+    def __init__(self, hs: "HomeServer", servlet_groups: Optional[list[str]] = None):
         JsonResource.__init__(self, hs, canonical_json=False)
         if hs.config.media.can_load_media_repo:
             # This import is here to prevent a circular import failure

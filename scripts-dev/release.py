@@ -32,11 +32,13 @@ import time
 import urllib.request
 from os import path
 from tempfile import TemporaryDirectory
-from typing import Any, List, Match, Optional, Union
+from typing import Any, Match, Optional, Union
 
 import attr
 import click
 import git
+import github
+import github.Auth
 from click.exceptions import ClickException
 from git import GitCommandError, Repo
 from github import BadCredentialsException, Github
@@ -314,7 +316,10 @@ def _prepare() -> None:
     )
 
     print("Opening the changelog in your browser...")
-    print("Please ask #synapse-dev to give it a check.")
+    print(
+        "Please review it using the release notes review checklist: https://element-hq.github.io/synapse/develop/development/internal_documentation/release_notes_review_checklist.html"
+    )
+    print("And post it in #synapse-dev for cursory review from the team.")
     click.launch(
         f"https://github.com/element-hq/synapse/blob/{synapse_repo.active_branch.name}/CHANGES.md"
     )
@@ -397,7 +402,7 @@ def _tag(gh_token: Optional[str]) -> None:
         return
 
     # Create a new draft release
-    gh = Github(gh_token)
+    gh = Github(auth=github.Auth.Token(token=gh_token))
     gh_repo = gh.get_repo("element-hq/synapse")
     release = gh_repo.create_git_release(
         tag=tag_name,
@@ -428,7 +433,7 @@ def _publish(gh_token: str) -> None:
 
     if gh_token:
         # Test that the GH Token is valid before continuing.
-        gh = Github(gh_token)
+        gh = Github(auth=github.Auth.Token(token=gh_token))
         gh.get_user()
 
     # Make sure we're in a git repo.
@@ -441,7 +446,7 @@ def _publish(gh_token: str) -> None:
         return
 
     # Publish the draft release
-    gh = Github(gh_token)
+    gh = Github(auth=github.Auth.Token(token=gh_token))
     gh_repo = gh.get_repo("element-hq/synapse")
     for release in gh_repo.get_releases():
         if release.title == tag_name:
@@ -486,8 +491,13 @@ def _upload(gh_token: Optional[str]) -> None:
         click.echo(f"Tag {tag_name} ({tag.commit}) is not currently checked out!")
         click.get_current_context().abort()
 
+    if gh_token:
+        gh = Github(auth=github.Auth.Token(token=gh_token))
+    else:
+        # Use github anonymously.
+        gh = Github()
+
     # Query all the assets corresponding to this release.
-    gh = Github(gh_token)
     gh_repo = gh.get_repo("element-hq/synapse")
     gh_release = gh_repo.get_release(tag_name)
 
@@ -639,7 +649,16 @@ def _notify(message: str) -> None:
 
 
 @cli.command()
-def merge_back() -> None:
+# Although this option is not used, allow it anyways. Otherwise the user will
+# receive an error when providing it, which is annoying as other commands accept
+# it.
+@click.option(
+    "--gh-token",
+    "_gh_token",
+    envvar=["GH_TOKEN", "GITHUB_TOKEN"],
+    required=False,
+)
+def merge_back(_gh_token: Optional[str]) -> None:
     _merge_back()
 
 
@@ -687,7 +706,16 @@ def _merge_back() -> None:
 
 
 @cli.command()
-def announce() -> None:
+# Although this option is not used, allow it anyways. Otherwise the user will
+# receive an error when providing it, which is annoying as other commands accept
+# it.
+@click.option(
+    "--gh-token",
+    "_gh_token",
+    envvar=["GH_TOKEN", "GITHUB_TOKEN"],
+    required=False,
+)
+def announce(_gh_token: Optional[str]) -> None:
     _announce()
 
 
@@ -696,18 +724,31 @@ def _announce() -> None:
 
     current_version = get_package_version()
     tag_name = f"v{current_version}"
+    is_rc = "rc" in tag_name
 
-    click.echo(
-        f"""
+    release_text = f"""
+### Synapse {current_version} {"🧪" if is_rc else "🚀"}
+
 Hi everyone. Synapse {current_version} has just been released.
+"""
 
+    if "rc" in tag_name:
+        release_text += (
+            "\nThis is a release candidate. Please help us test it out "
+            "before the final release by deploying it to non-production environments, "
+            "and reporting any issues you find to "
+            "[the issue tracker](https://github.com/element-hq/synapse/issues). Thanks!\n"
+        )
+
+    release_text += f"""
 [notes](https://github.com/element-hq/synapse/releases/tag/{tag_name}) | \
 [docker](https://hub.docker.com/r/matrixdotorg/synapse/tags?name={tag_name}) | \
 [debs](https://packages.matrix.org/debian/) | \
 [pypi](https://pypi.org/project/matrix-synapse/{current_version}/)"""
-    )
 
-    if "rc" in tag_name:
+    click.echo(release_text)
+
+    if is_rc:
         click.echo(
             """
 Announce the RC in
@@ -732,7 +773,7 @@ Ask the designated people to do the blog and tweets."""
 def full(gh_token: str) -> None:
     if gh_token:
         # Test that the GH Token is valid before continuing.
-        gh = Github(gh_token)
+        gh = Github(auth=github.Auth.Token(token=gh_token))
         gh.get_user()
 
     click.echo("1. If this is a security release, read the security wiki page.")
@@ -801,8 +842,12 @@ def get_repo_and_check_clean_checkout(
         raise click.ClickException(
             f"{path} is not a git repository (expecting a {name} repository)."
         )
-    if repo.is_dirty():
-        raise click.ClickException(f"Uncommitted changes exist in {path}.")
+    while repo.is_dirty():
+        if not click.confirm(
+            f"Uncommitted changes exist in {path}. Commit or stash them. Ready to continue?"
+        ):
+            raise click.ClickException("Aborted.")
+
     return repo
 
 
@@ -814,7 +859,7 @@ def check_valid_gh_token(gh_token: Optional[str]) -> None:
         return
 
     try:
-        gh = Github(gh_token)
+        gh = Github(auth=github.Auth.Token(token=gh_token))
 
         # We need to lookup name to trigger a request.
         _name = gh.get_user().name
@@ -861,7 +906,7 @@ def get_changes_for_version(wanted_version: version.Version) -> str:
         start_line: int
         end_line: Optional[int] = None  # Is none if its the last entry
 
-    headings: List[VersionSection] = []
+    headings: list[VersionSection] = []
     for i, token in enumerate(tokens):
         # We look for level 1 headings (h1 tags).
         if token.type != "heading_open" or token.tag != "h1":

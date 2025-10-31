@@ -25,10 +25,8 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Counter as CounterType,
-    Dict,
     Iterable,
     Optional,
-    Tuple,
 )
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
@@ -157,7 +155,7 @@ class StatsHandler:
 
     async def _handle_deltas(
         self, deltas: Iterable[StateDelta]
-    ) -> Tuple[Dict[str, CounterType[str]], Dict[str, CounterType[str]]]:
+    ) -> tuple[dict[str, CounterType[str]], dict[str, CounterType[str]]]:
         """Called with the state deltas to process
 
         Returns:
@@ -165,10 +163,10 @@ class StatsHandler:
             mapping from room/user ID to changes in the various fields.
         """
 
-        room_to_stats_deltas: Dict[str, CounterType[str]] = {}
-        user_to_stats_deltas: Dict[str, CounterType[str]] = {}
+        room_to_stats_deltas: dict[str, CounterType[str]] = {}
+        user_to_stats_deltas: dict[str, CounterType[str]] = {}
 
-        room_to_state_updates: Dict[str, Dict[str, Any]] = {}
+        room_to_state_updates: dict[str, dict[str, Any]] = {}
 
         for delta in deltas:
             logger.debug(

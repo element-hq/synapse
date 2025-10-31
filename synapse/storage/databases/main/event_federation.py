@@ -25,15 +25,10 @@ from queue import Empty, PriorityQueue
 from typing import (
     TYPE_CHECKING,
     Collection,
-    Dict,
-    FrozenSet,
     Generator,
     Iterable,
-    List,
     Optional,
     Sequence,
-    Set,
-    Tuple,
     cast,
 )
 
@@ -132,9 +127,9 @@ class BackfillQueueNavigationItem:
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class StateDifference:
     # The event IDs in the auth difference.
-    auth_difference: Set[str]
+    auth_difference: set[str]
     # The event IDs in the conflicted state subgraph. Used in v2.1 only.
-    conflicted_subgraph: Optional[Set[str]]
+    conflicted_subgraph: Optional[set[str]]
 
 
 class _NoChainCoverIndex(Exception):
@@ -165,7 +160,7 @@ class EventFederationWorkerStore(
             )
 
         # Cache of event ID to list of auth event IDs and their depths.
-        self._event_auth_cache: LruCache[str, List[Tuple[str, int]]] = LruCache(
+        self._event_auth_cache: LruCache[str, list[tuple[str, int]]] = LruCache(
             max_size=500000,
             clock=self.hs.get_clock(),
             server_name=self.server_name,
@@ -199,7 +194,7 @@ class EventFederationWorkerStore(
 
     async def get_auth_chain(
         self, room_id: str, event_ids: Collection[str], include_given: bool = False
-    ) -> List[EventBase]:
+    ) -> list[EventBase]:
         """Get auth events for given event_ids. The events *must* be state events.
 
         Args:
@@ -222,7 +217,7 @@ class EventFederationWorkerStore(
         room_id: str,
         event_ids: Collection[str],
         include_given: bool = False,
-    ) -> Set[str]:
+    ) -> set[str]:
         """Get auth events for given event_ids. The events *must* be state events.
 
         Args:
@@ -267,7 +262,7 @@ class EventFederationWorkerStore(
         room_id: str,
         event_ids: Collection[str],
         include_given: bool,
-    ) -> Set[str]:
+    ) -> set[str]:
         """Calculates the auth chain IDs using the chain index."""
 
         # First we look up the chain ID/sequence numbers for the given events.
@@ -275,10 +270,10 @@ class EventFederationWorkerStore(
         initial_events = set(event_ids)
 
         # All the events that we've found that are reachable from the events.
-        seen_events: Set[str] = set()
+        seen_events: set[str] = set()
 
         # A map from chain ID to max sequence number of the given events.
-        event_chains: Dict[int, int] = {}
+        event_chains: dict[int, int] = {}
 
         sql = """
             SELECT event_id, chain_id, sequence_number
@@ -313,7 +308,7 @@ class EventFederationWorkerStore(
         # are reachable from any event.
 
         # A map from chain ID to max sequence number *reachable* from any event ID.
-        chains: Dict[int, int] = {}
+        chains: dict[int, int] = {}
         for links in self._get_chain_links(txn, set(event_chains.keys())):
             for chain_id in links:
                 if chain_id not in event_chains:
@@ -366,8 +361,8 @@ class EventFederationWorkerStore(
 
     @classmethod
     def _get_chain_links(
-        cls, txn: LoggingTransaction, chains_to_fetch: Set[int]
-    ) -> Generator[Dict[int, List[Tuple[int, int, int]]], None, None]:
+        cls, txn: LoggingTransaction, chains_to_fetch: set[int]
+    ) -> Generator[dict[int, list[tuple[int, int, int]]], None, None]:
         """Fetch all auth chain links from the given set of chains, and all
         links from those chains, recursively.
 
@@ -410,7 +405,7 @@ class EventFederationWorkerStore(
             )
             txn.execute(sql % (clause,), args)
 
-            links: Dict[int, List[Tuple[int, int, int]]] = {}
+            links: dict[int, list[tuple[int, int, int]]] = {}
 
             for (
                 origin_chain_id,
@@ -428,7 +423,7 @@ class EventFederationWorkerStore(
 
     def _get_auth_chain_ids_txn(
         self, txn: LoggingTransaction, event_ids: Collection[str], include_given: bool
-    ) -> Set[str]:
+    ) -> set[str]:
         """Calculates the auth chain IDs.
 
         This is used when we don't have a cover index for the room.
@@ -449,10 +444,10 @@ class EventFederationWorkerStore(
 
         front = set(event_ids)
         while front:
-            new_front: Set[str] = set()
+            new_front: set[str] = set()
             for chunk in batch_iter(front, 100):
                 # Pull the auth events either from the cache or DB.
-                to_fetch: List[str] = []  # Event IDs to fetch from DB
+                to_fetch: list[str] = []  # Event IDs to fetch from DB
                 for event_id in chunk:
                     res = self._event_auth_cache.get(event_id)
                     if res is None:
@@ -468,7 +463,7 @@ class EventFederationWorkerStore(
 
                     # Note we need to batch up the results by event ID before
                     # adding to the cache.
-                    to_cache: Dict[str, List[Tuple[str, int]]] = {}
+                    to_cache: dict[str, list[tuple[str, int]]] = {}
                     for event_id, auth_event_id, auth_event_depth in txn:
                         to_cache.setdefault(event_id, []).append(
                             (auth_event_id, auth_event_depth)
@@ -488,8 +483,8 @@ class EventFederationWorkerStore(
     async def get_auth_chain_difference(
         self,
         room_id: str,
-        state_sets: List[Set[str]],
-    ) -> Set[str]:
+        state_sets: list[set[str]],
+    ) -> set[str]:
         state_diff = await self.get_auth_chain_difference_extended(
             room_id, state_sets, None, None
         )
@@ -498,9 +493,9 @@ class EventFederationWorkerStore(
     async def get_auth_chain_difference_extended(
         self,
         room_id: str,
-        state_sets: List[Set[str]],
-        conflicted_set: Optional[Set[str]],
-        additional_backwards_reachable_conflicted_events: Optional[Set[str]],
+        state_sets: list[set[str]],
+        conflicted_set: Optional[set[str]],
+        additional_backwards_reachable_conflicted_events: Optional[set[str]],
     ) -> StateDifference:
         """ "Given sets of state events figure out the auth chain difference (as
         per state res v2 algorithm).
@@ -560,9 +555,9 @@ class EventFederationWorkerStore(
         self,
         txn: LoggingTransaction,
         room_id: str,
-        state_sets: List[Set[str]],
-        conflicted_set: Optional[Set[str]] = None,
-        additional_backwards_reachable_conflicted_events: Optional[Set[str]] = None,
+        state_sets: list[set[str]],
+        conflicted_set: Optional[set[str]] = None,
+        additional_backwards_reachable_conflicted_events: Optional[set[str]] = None,
     ) -> StateDifference:
         """Calculates the auth chain difference using the chain index.
 
@@ -587,14 +582,14 @@ class EventFederationWorkerStore(
                 )
 
         # Map from event_id -> (chain ID, seq no)
-        chain_info: Dict[str, Tuple[int, int]] = {}
+        chain_info: dict[str, tuple[int, int]] = {}
 
         # Map from chain ID -> seq no -> event Id
-        chain_to_event: Dict[int, Dict[int, str]] = {}
+        chain_to_event: dict[int, dict[int, str]] = {}
 
         # All the chains that we've found that are reachable from the state
         # sets.
-        seen_chains: Set[int] = set()
+        seen_chains: set[int] = set()
 
         # Fetch the chain cover index for the initial set of events we're
         # considering.
@@ -621,7 +616,7 @@ class EventFederationWorkerStore(
         events_missing_chain_info = initial_events.difference(chain_info)
 
         # The result set to return, i.e. the auth chain difference.
-        auth_difference_result: Set[str] = set()
+        auth_difference_result: set[str] = set()
 
         if events_missing_chain_info:
             # For some reason we have events we haven't calculated the chain
@@ -652,21 +647,21 @@ class EventFederationWorkerStore(
 
         # A subset of chain_info for conflicted events only, as we need to
         # loop all conflicted chain positions. Map from event_id -> (chain ID, seq no)
-        conflicted_chain_positions: Dict[str, Tuple[int, int]] = {}
+        conflicted_chain_positions: dict[str, tuple[int, int]] = {}
         # For each chain, remember the positions where conflicted events are.
         # We need this for calculating the forward reachable events.
-        conflicted_chain_to_seq: Dict[int, Set[int]] = {}  # chain_id => {seq_num}
+        conflicted_chain_to_seq: dict[int, set[int]] = {}  # chain_id => {seq_num}
         #  A subset of chain_info for additional backwards reachable events only, as we need to
         # loop all additional backwards reachable events for calculating backwards reachable events.
-        additional_backwards_reachable_positions: Dict[
-            str, Tuple[int, int]
+        additional_backwards_reachable_positions: dict[
+            str, tuple[int, int]
         ] = {}  # event_id => (chain_id, seq_num)
         # These next two fields are critical as the intersection of them is the conflicted subgraph.
         # We'll populate them when we walk the chain links.
         # chain_id => max(seq_num) backwards reachable (e.g 4 means 1,2,3,4 are backwards reachable)
-        conflicted_backwards_reachable: Dict[int, int] = {}
+        conflicted_backwards_reachable: dict[int, int] = {}
         # chain_id => min(seq_num) forwards reachable (e.g 4 means 4,5,6..n are forwards reachable)
-        conflicted_forwards_reachable: Dict[int, int] = {}
+        conflicted_forwards_reachable: dict[int, int] = {}
 
         # populate the v2.1 data structures
         if is_state_res_v21:
@@ -688,9 +683,9 @@ class EventFederationWorkerStore(
 
         # Corresponds to `state_sets`, except as a map from chain ID to max
         # sequence number reachable from the state set.
-        set_to_chain: List[Dict[int, int]] = []
+        set_to_chain: list[dict[int, int]] = []
         for state_set in state_sets:
-            chains: Dict[int, int] = {}
+            chains: dict[int, int] = {}
             set_to_chain.append(chains)
 
             for state_id in state_set:
@@ -802,7 +797,7 @@ class EventFederationWorkerStore(
 
         # Mapping from chain ID to the range of sequence numbers that should be
         # pulled from the database.
-        auth_diff_chain_to_gap: Dict[int, Tuple[int, int]] = {}
+        auth_diff_chain_to_gap: dict[int, tuple[int, int]] = {}
 
         for chain_id in seen_chains:
             min_seq_no = min(chains.get(chain_id, 0) for chains in set_to_chain)
@@ -820,10 +815,10 @@ class EventFederationWorkerStore(
                         auth_diff_chain_to_gap[chain_id] = (min_seq_no, max_seq_no)
                         break
 
-        conflicted_subgraph_result: Set[str] = set()
+        conflicted_subgraph_result: set[str] = set()
         # Mapping from chain ID to the range of sequence numbers that should be
         # pulled from the database.
-        conflicted_subgraph_chain_to_gap: Dict[int, Tuple[int, int]] = {}
+        conflicted_subgraph_chain_to_gap: dict[int, tuple[int, int]] = {}
         if is_state_res_v21:
             # also include the conflicted subgraph using backward/forward reachability info from all
             # the conflicted events. To calculate this, we want to extract the intersection between
@@ -882,9 +877,9 @@ class EventFederationWorkerStore(
         )
 
     def _fetch_event_ids_from_chains_txn(
-        self, txn: LoggingTransaction, chains: Dict[int, Tuple[int, int]]
-    ) -> Set[str]:
-        result: Set[str] = set()
+        self, txn: LoggingTransaction, chains: dict[int, tuple[int, int]]
+    ) -> set[str]:
+        result: set[str] = set()
         if isinstance(self.database_engine, PostgresEngine):
             # We can use `execute_values` to efficiently fetch the gaps when
             # using postgres.
@@ -918,10 +913,10 @@ class EventFederationWorkerStore(
         self,
         txn: LoggingTransaction,
         room_id: str,
-        state_sets: List[Set[str]],
-        events_missing_chain_info: Set[str],
+        state_sets: list[set[str]],
+        events_missing_chain_info: set[str],
         events_that_have_chain_index: Collection[str],
-    ) -> Set[str]:
+    ) -> set[str]:
         """Helper for `_get_auth_chain_difference_using_cover_index_txn` to
         handle the case where we haven't calculated the chain cover index for
         all events.
@@ -962,7 +957,7 @@ class EventFederationWorkerStore(
             WHERE tc.room_id = ?
         """
         txn.execute(sql, (room_id,))
-        event_to_auth_ids: Dict[str, Set[str]] = {}
+        event_to_auth_ids: dict[str, set[str]] = {}
         events_that_have_chain_index = set(events_that_have_chain_index)
         for event_id, auth_id, auth_id_has_chain in txn:
             s = event_to_auth_ids.setdefault(event_id, set())
@@ -982,7 +977,7 @@ class EventFederationWorkerStore(
             raise _NoChainCoverIndex(room_id)
 
         # Create a map from event IDs we care about to their partial auth chain.
-        event_id_to_partial_auth_chain: Dict[str, Set[str]] = {}
+        event_id_to_partial_auth_chain: dict[str, set[str]] = {}
         for event_id, auth_ids in event_to_auth_ids.items():
             if not any(event_id in state_set for state_set in state_sets):
                 continue
@@ -1005,7 +1000,7 @@ class EventFederationWorkerStore(
         #   1. Update the state sets to only include indexed events; and
         #   2. Create a new list containing the auth chains of the un-indexed
         #      events
-        unindexed_state_sets: List[Set[str]] = []
+        unindexed_state_sets: list[set[str]] = []
         for state_set in state_sets:
             unindexed_state_set = set()
             for event_id, auth_chain in event_id_to_partial_auth_chain.items():
@@ -1031,8 +1026,8 @@ class EventFederationWorkerStore(
         return union - intersection
 
     def _get_auth_chain_difference_txn(
-        self, txn: LoggingTransaction, state_sets: List[Set[str]]
-    ) -> Set[str]:
+        self, txn: LoggingTransaction, state_sets: list[set[str]]
+    ) -> set[str]:
         """Calculates the auth chain difference using a breadth first search.
 
         This is used when we don't have a cover index for the room.
@@ -1087,7 +1082,7 @@ class EventFederationWorkerStore(
         }
 
         # The sorted list of events whose auth chains we should walk.
-        search: List[Tuple[int, str]] = []
+        search: list[tuple[int, str]] = []
 
         # We need to get the depth of the initial events for sorting purposes.
         sql = """
@@ -1104,13 +1099,13 @@ class EventFederationWorkerStore(
 
             # I think building a temporary list with fetchall is more efficient than
             # just `search.extend(txn)`, but this is unconfirmed
-            search.extend(cast(List[Tuple[int, str]], txn.fetchall()))
+            search.extend(cast(list[tuple[int, str]], txn.fetchall()))
 
         # sort by depth
         search.sort()
 
         # Map from event to its auth events
-        event_to_auth_events: Dict[str, Set[str]] = {}
+        event_to_auth_events: dict[str, set[str]] = {}
 
         base_sql = """
             SELECT a.event_id, auth_id, depth
@@ -1129,8 +1124,8 @@ class EventFederationWorkerStore(
             # currently walking, either from cache or DB.
             search, chunk = search[:-100], search[-100:]
 
-            found: List[Tuple[str, str, int]] = []  # Results found
-            to_fetch: List[str] = []  # Event IDs to fetch from DB
+            found: list[tuple[str, str, int]] = []  # Results found
+            to_fetch: list[str] = []  # Event IDs to fetch from DB
             for _, event_id in chunk:
                 res = self._event_auth_cache.get(event_id)
                 if res is None:
@@ -1147,7 +1142,7 @@ class EventFederationWorkerStore(
                 # We parse the results and add the to the `found` set and the
                 # cache (note we need to batch up the results by event ID before
                 # adding to the cache).
-                to_cache: Dict[str, List[Tuple[str, int]]] = {}
+                to_cache: dict[str, list[tuple[str, int]]] = {}
                 for event_id, auth_event_id, auth_event_depth in txn:
                     to_cache.setdefault(event_id, []).append(
                         (auth_event_id, auth_event_depth)
@@ -1204,7 +1199,7 @@ class EventFederationWorkerStore(
         room_id: str,
         current_depth: int,
         limit: int,
-    ) -> List[Tuple[str, int]]:
+    ) -> list[tuple[str, int]]:
         """
         Get the backward extremities to backfill from in the room along with the
         approximate depth.
@@ -1235,7 +1230,7 @@ class EventFederationWorkerStore(
 
         def get_backfill_points_in_room_txn(
             txn: LoggingTransaction, room_id: str
-        ) -> List[Tuple[str, int]]:
+        ) -> list[tuple[str, int]]:
             # Assemble a tuple lookup of event_id -> depth for the oldest events
             # we know of in the room. Backwards extremeties are the oldest
             # events we know of in the room but we only know of them because
@@ -1336,7 +1331,7 @@ class EventFederationWorkerStore(
                 ),
             )
 
-            return cast(List[Tuple[str, int]], txn.fetchall())
+            return cast(list[tuple[str, int]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_backfill_points_in_room",
@@ -1346,14 +1341,14 @@ class EventFederationWorkerStore(
 
     async def get_max_depth_of(
         self, event_ids: Collection[str]
-    ) -> Tuple[Optional[str], int]:
+    ) -> tuple[Optional[str], int]:
         """Returns the event ID and depth for the event that has the max depth from a set of event IDs
 
         Args:
             event_ids: The event IDs to calculate the max depth of.
         """
         rows = cast(
-            List[Tuple[str, int]],
+            list[tuple[str, int]],
             await self.db_pool.simple_select_many_batch(
                 table="events",
                 column="event_id",
@@ -1378,14 +1373,14 @@ class EventFederationWorkerStore(
 
             return max_depth_event_id, current_max_depth
 
-    async def get_min_depth_of(self, event_ids: List[str]) -> Tuple[Optional[str], int]:
+    async def get_min_depth_of(self, event_ids: list[str]) -> tuple[Optional[str], int]:
         """Returns the event ID and depth for the event that has the min depth from a set of event IDs
 
         Args:
             event_ids: The event IDs to calculate the max depth of.
         """
         rows = cast(
-            List[Tuple[str, int]],
+            list[tuple[str, int]],
             await self.db_pool.simple_select_many_batch(
                 table="events",
                 column="event_id",
@@ -1410,7 +1405,7 @@ class EventFederationWorkerStore(
 
             return min_depth_event_id, current_min_depth
 
-    async def get_prev_events_for_room(self, room_id: str) -> List[str]:
+    async def get_prev_events_for_room(self, room_id: str) -> list[str]:
         """
         Gets a subset of the current forward extremities in the given room.
 
@@ -1431,7 +1426,7 @@ class EventFederationWorkerStore(
 
     def _get_prev_events_for_room_txn(
         self, txn: LoggingTransaction, room_id: str
-    ) -> List[str]:
+    ) -> list[str]:
         # we just use the 10 newest events. Older events will become
         # prev_events of future events.
 
@@ -1449,7 +1444,7 @@ class EventFederationWorkerStore(
 
     async def get_rooms_with_many_extremities(
         self, min_count: int, limit: int, room_id_filter: Iterable[str]
-    ) -> List[str]:
+    ) -> list[str]:
         """Get the top rooms with at least N extremities.
 
         Args:
@@ -1462,7 +1457,7 @@ class EventFederationWorkerStore(
             sorted by extremity count.
         """
 
-        def _get_rooms_with_many_extremities_txn(txn: LoggingTransaction) -> List[str]:
+        def _get_rooms_with_many_extremities_txn(txn: LoggingTransaction) -> list[str]:
             where_clause = "1=1"
             if room_id_filter:
                 where_clause = "room_id NOT IN (%s)" % (
@@ -1487,7 +1482,7 @@ class EventFederationWorkerStore(
         )
 
     @cached(max_entries=5000, iterable=True)
-    async def get_latest_event_ids_in_room(self, room_id: str) -> FrozenSet[str]:
+    async def get_latest_event_ids_in_room(self, room_id: str) -> frozenset[str]:
         event_ids = await self.db_pool.simple_select_onecol(
             table="event_forward_extremities",
             keyvalues={"room_id": room_id},
@@ -1610,7 +1605,7 @@ class EventFederationWorkerStore(
                 WHERE room_id = ?
         """
 
-        def get_forward_extremeties_for_room_txn(txn: LoggingTransaction) -> List[str]:
+        def get_forward_extremeties_for_room_txn(txn: LoggingTransaction) -> list[str]:
             txn.execute(sql, (stream_ordering, room_id))
             return [event_id for (event_id,) in txn]
 
@@ -1627,7 +1622,7 @@ class EventFederationWorkerStore(
 
     def _get_connected_prev_event_backfill_results_txn(
         self, txn: LoggingTransaction, event_id: str, limit: int
-    ) -> List[BackfillQueueNavigationItem]:
+    ) -> list[BackfillQueueNavigationItem]:
         """
         Find any events connected by prev_event the specified event_id.
 
@@ -1675,8 +1670,8 @@ class EventFederationWorkerStore(
         ]
 
     async def get_backfill_events(
-        self, room_id: str, seed_event_id_list: List[str], limit: int
-    ) -> List[EventBase]:
+        self, room_id: str, seed_event_id_list: list[str], limit: int
+    ) -> list[EventBase]:
         """Get a list of Events for a given topic that occurred before (and
         including) the events in seed_event_id_list. Return a list of max size `limit`
 
@@ -1704,9 +1699,9 @@ class EventFederationWorkerStore(
         self,
         txn: LoggingTransaction,
         room_id: str,
-        seed_event_id_list: List[str],
+        seed_event_id_list: list[str],
         limit: int,
-    ) -> Set[str]:
+    ) -> set[str]:
         """
         We want to make sure that we do a breadth-first, "depth" ordered search.
         We also handle navigating historical branches of history connected by
@@ -1719,7 +1714,7 @@ class EventFederationWorkerStore(
             limit,
         )
 
-        event_id_results: Set[str] = set()
+        event_id_results: set[str] = set()
 
         # In a PriorityQueue, the lowest valued entries are retrieved first.
         # We're using depth as the priority in the queue and tie-break based on
@@ -1727,7 +1722,7 @@ class EventFederationWorkerStore(
         # highest and newest-in-time message. We add events to the queue with a
         # negative depth so that we process the newest-in-time messages first
         # going backwards in time. stream_ordering follows the same pattern.
-        queue: "PriorityQueue[Tuple[int, int, str, str]]" = PriorityQueue()
+        queue: "PriorityQueue[tuple[int, int, str, str]]" = PriorityQueue()
 
         for seed_event_id in seed_event_id_list:
             event_lookup_result = self.db_pool.simple_select_one_txn(
@@ -1847,7 +1842,7 @@ class EventFederationWorkerStore(
     @trace
     async def get_event_ids_with_failed_pull_attempts(
         self, event_ids: StrCollection
-    ) -> Set[str]:
+    ) -> set[str]:
         """
         Filter the given list of `event_ids` and return events which have any failed
         pull attempts.
@@ -1860,7 +1855,7 @@ class EventFederationWorkerStore(
         """
 
         rows = cast(
-            List[Tuple[str]],
+            list[tuple[str]],
             await self.db_pool.simple_select_many_batch(
                 table="event_failed_pull_attempts",
                 column="event_id",
@@ -1877,7 +1872,7 @@ class EventFederationWorkerStore(
         self,
         room_id: str,
         event_ids: Collection[str],
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """
         Filter down the events to ones that we've failed to pull before recently. Uses
         exponential backoff.
@@ -1891,7 +1886,7 @@ class EventFederationWorkerStore(
             next timestamp at which we may try pulling them again.
         """
         event_failed_pull_attempts = cast(
-            List[Tuple[str, int, int]],
+            list[tuple[str, int, int]],
             await self.db_pool.simple_select_many_batch(
                 table="event_failed_pull_attempts",
                 column="event_id",
@@ -1932,10 +1927,10 @@ class EventFederationWorkerStore(
     async def get_missing_events(
         self,
         room_id: str,
-        earliest_events: List[str],
-        latest_events: List[str],
+        earliest_events: list[str],
+        latest_events: list[str],
         limit: int,
-    ) -> List[EventBase]:
+    ) -> list[EventBase]:
         ids = await self.db_pool.runInteraction(
             "get_missing_events",
             self._get_missing_events,
@@ -1950,13 +1945,13 @@ class EventFederationWorkerStore(
         self,
         txn: LoggingTransaction,
         room_id: str,
-        earliest_events: List[str],
-        latest_events: List[str],
+        earliest_events: list[str],
+        latest_events: list[str],
         limit: int,
-    ) -> List[str]:
+    ) -> list[str]:
         seen_events = set(earliest_events)
         front = set(latest_events) - seen_events
-        event_results: List[str] = []
+        event_results: list[str] = []
 
         query = (
             "SELECT prev_event_id FROM event_edges "
@@ -1983,7 +1978,7 @@ class EventFederationWorkerStore(
 
     @trace
     @tag_args
-    async def get_successor_events(self, event_id: str) -> List[str]:
+    async def get_successor_events(self, event_id: str) -> list[str]:
         """Fetch all events that have the given event as a prev event
 
         Args:
@@ -2045,66 +2040,34 @@ class EventFederationWorkerStore(
         Returns:
             The received_ts of the row that was deleted, if any.
         """
-        if self.db_pool.engine.supports_returning:
 
-            def _remove_received_event_from_staging_txn(
-                txn: LoggingTransaction,
-            ) -> Optional[int]:
-                sql = """
-                    DELETE FROM federation_inbound_events_staging
-                    WHERE origin = ? AND event_id = ?
-                    RETURNING received_ts
-                """
+        def _remove_received_event_from_staging_txn(
+            txn: LoggingTransaction,
+        ) -> Optional[int]:
+            sql = """
+                DELETE FROM federation_inbound_events_staging
+                WHERE origin = ? AND event_id = ?
+                RETURNING received_ts
+            """
 
-                txn.execute(sql, (origin, event_id))
-                row = cast(Optional[Tuple[int]], txn.fetchone())
+            txn.execute(sql, (origin, event_id))
+            row = cast(Optional[tuple[int]], txn.fetchone())
 
-                if row is None:
-                    return None
+            if row is None:
+                return None
 
-                return row[0]
+            return row[0]
 
-            return await self.db_pool.runInteraction(
-                "remove_received_event_from_staging",
-                _remove_received_event_from_staging_txn,
-                db_autocommit=True,
-            )
-
-        else:
-
-            def _remove_received_event_from_staging_txn(
-                txn: LoggingTransaction,
-            ) -> Optional[int]:
-                received_ts = self.db_pool.simple_select_one_onecol_txn(
-                    txn,
-                    table="federation_inbound_events_staging",
-                    keyvalues={
-                        "origin": origin,
-                        "event_id": event_id,
-                    },
-                    retcol="received_ts",
-                    allow_none=True,
-                )
-                self.db_pool.simple_delete_txn(
-                    txn,
-                    table="federation_inbound_events_staging",
-                    keyvalues={
-                        "origin": origin,
-                        "event_id": event_id,
-                    },
-                )
-
-                return received_ts
-
-            return await self.db_pool.runInteraction(
-                "remove_received_event_from_staging",
-                _remove_received_event_from_staging_txn,
-            )
+        return await self.db_pool.runInteraction(
+            "remove_received_event_from_staging",
+            _remove_received_event_from_staging_txn,
+            db_autocommit=True,
+        )
 
     async def get_next_staged_event_id_for_room(
         self,
         room_id: str,
-    ) -> Optional[Tuple[str, str]]:
+    ) -> Optional[tuple[str, str]]:
         """
         Get the next event ID in the staging area for the given room.
 
@@ -2114,7 +2077,7 @@ class EventFederationWorkerStore(
 
         def _get_next_staged_event_id_for_room_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Tuple[str, str]]:
+        ) -> Optional[tuple[str, str]]:
             sql = """
                 SELECT origin, event_id
                 FROM federation_inbound_events_staging
@@ -2125,7 +2088,7 @@ class EventFederationWorkerStore(
 
             txn.execute(sql, (room_id,))
 
-            return cast(Optional[Tuple[str, str]], txn.fetchone())
+            return cast(Optional[tuple[str, str]], txn.fetchone())
 
         return await self.db_pool.runInteraction(
             "get_next_staged_event_id_for_room", _get_next_staged_event_id_for_room_txn
@@ -2135,12 +2098,12 @@ class EventFederationWorkerStore(
         self,
         room_id: str,
         room_version: RoomVersion,
-    ) -> Optional[Tuple[str, EventBase]]:
+    ) -> Optional[tuple[str, EventBase]]:
         """Get the next event in the staging area for the given room."""
 
         def _get_next_staged_event_for_room_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Tuple[str, str, str]]:
+        ) -> Optional[tuple[str, str, str]]:
             sql = """
                 SELECT event_json, internal_metadata, origin
                 FROM federation_inbound_events_staging
@@ -2150,7 +2113,7 @@ class EventFederationWorkerStore(
             """
             txn.execute(sql, (room_id,))
 
-            return cast(Optional[Tuple[str, str, str]], txn.fetchone())
+            return cast(Optional[tuple[str, str, str]], txn.fetchone())
 
         row = await self.db_pool.runInteraction(
             "get_next_staged_event_for_room", _get_next_staged_event_for_room_txn
@@ -2199,7 +2162,7 @@ class EventFederationWorkerStore(
         # by other events in the queue). We do this so that we can always
         # backpaginate in all the events we have dropped.
         rows = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="federation_inbound_events_staging",
                 keyvalues={"room_id": room_id},
@@ -2210,8 +2173,8 @@ class EventFederationWorkerStore(
 
         # Find the set of events referenced by those in the queue, as well as
         # collecting all the event IDs in the queue.
-        referenced_events: Set[str] = set()
-        seen_events: Set[str] = set()
+        referenced_events: set[str] = set()
+        seen_events: set[str] = set()
         for event_id, event_json in rows:
             seen_events.add(event_id)
             event_d = db_to_json(event_json)
@@ -2272,7 +2235,7 @@ class EventFederationWorkerStore(
 
         return True
 
-    async def get_all_rooms_with_staged_incoming_events(self) -> List[str]:
+    async def get_all_rooms_with_staged_incoming_events(self) -> list[str]:
         """Get the room IDs of all events currently staged."""
         return await self.db_pool.simple_select_onecol(
             table="federation_inbound_events_staging",
@@ -2287,15 +2250,15 @@ class EventFederationWorkerStore(
 
         def _get_stats_for_federation_staging_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[int, int]:
+        ) -> tuple[int, int]:
             txn.execute("SELECT count(*) FROM federation_inbound_events_staging")
-            (count,) = cast(Tuple[int], txn.fetchone())
+            (count,) = cast(tuple[int], txn.fetchone())
 
             txn.execute(
                 "SELECT min(received_ts) FROM federation_inbound_events_staging"
             )
 
-            (received_ts,) = cast(Tuple[Optional[int]], txn.fetchone())
+            (received_ts,) = cast(tuple[Optional[int]], txn.fetchone())
 
             # If there is nothing in the staging area default it to 0.
             age = 0
@@ -2409,8 +2372,8 @@ class EventFederationStore(EventFederationWorkerStore):
 def _materialize(
     origin_chain_id: int,
     origin_sequence_number: int,
-    links: Dict[int, List[Tuple[int, int, int]]],
-    materialized: Dict[int, int],
+    links: dict[int, list[tuple[int, int, int]]],
+    materialized: dict[int, int],
     backwards: bool = True,
 ) -> None:
     """Helper function for fetching auth chain links. For a given origin chain
@@ -2468,10 +2431,10 @@ def _materialize(
 
 
 def _generate_forward_links(
-    links: Dict[int, List[Tuple[int, int, int]]],
-) -> Dict[int, List[Tuple[int, int, int]]]:
+    links: dict[int, list[tuple[int, int, int]]],
+) -> dict[int, list[tuple[int, int, int]]]:
     """Reverse the input links from the given backwards links"""
-    new_links: Dict[int, List[Tuple[int, int, int]]] = {}
+    new_links: dict[int, list[tuple[int, int, int]]] = {}
     for origin_chain_id, chain_links in links.items():
         for origin_seq_num, target_chain_id, target_seq_num in chain_links:
             new_links.setdefault(target_chain_id, []).append(
@@ -2481,9 +2444,9 @@ def _generate_forward_links(
 
 
 def accumulate_forwards_reachable_events(
-    conflicted_forwards_reachable: Dict[int, int],
-    back_links: Dict[int, List[Tuple[int, int, int]]],
-    conflicted_chain_positions: Dict[str, Tuple[int, int]],
+    conflicted_forwards_reachable: dict[int, int],
+    back_links: dict[int, list[tuple[int, int, int]]],
+    conflicted_chain_positions: dict[str, tuple[int, int]],
 ) -> None:
     """Accumulate new forwards reachable events using the back_links provided.
 

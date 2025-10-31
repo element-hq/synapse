@@ -23,13 +23,10 @@ import logging
 import urllib.parse
 from typing import (
     TYPE_CHECKING,
-    Dict,
     Iterable,
-    List,
     Mapping,
     Optional,
     Sequence,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -133,14 +130,14 @@ class ApplicationServiceApi(SimpleHttpClient):
         self.clock = hs.get_clock()
         self.config = hs.config.appservice
 
-        self.protocol_meta_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
+        self.protocol_meta_cache: ResponseCache[tuple[str, str]] = ResponseCache(
             clock=hs.get_clock(),
             name="as_protocol_meta",
             server_name=self.server_name,
             timeout_ms=HOUR_IN_MS,
         )
 
-    def _get_headers(self, service: "ApplicationService") -> Dict[bytes, List[bytes]]:
+    def _get_headers(self, service: "ApplicationService") -> dict[bytes, list[bytes]]:
         """This makes sure we have always the auth header and opentracing headers set."""
 
         # This is also ensured before in the functions. However this is needed to please
@@ -210,8 +207,8 @@ class ApplicationServiceApi(SimpleHttpClient):
         service: "ApplicationService",
         kind: str,
         protocol: str,
-        fields: Dict[bytes, List[bytes]],
-    ) -> List[JsonDict]:
+        fields: dict[bytes, list[bytes]],
+    ) -> list[JsonDict]:
         if kind == ThirdPartyEntityKind.USER:
             required_field = "userid"
         elif kind == ThirdPartyEntityKind.LOCATION:
@@ -225,7 +222,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         assert service.hs_token is not None
 
         try:
-            args: Mapping[bytes, Union[List[bytes], str]] = fields
+            args: Mapping[bytes, Union[list[bytes], str]] = fields
             if self.config.use_appservice_legacy_authorization:
                 args = {
                     **fields,
@@ -320,8 +317,8 @@ class ApplicationServiceApi(SimpleHttpClient):
         self,
         service: "ApplicationService",
         events: Sequence[EventBase],
-        ephemeral: List[JsonMapping],
-        to_device_messages: List[JsonMapping],
+        ephemeral: list[JsonMapping],
+        to_device_messages: list[JsonMapping],
         one_time_keys_count: TransactionOneTimeKeysCount,
         unused_fallback_keys: TransactionUnusedFallbackKeys,
         device_list_summary: DeviceListUpdates,
@@ -429,9 +426,9 @@ class ApplicationServiceApi(SimpleHttpClient):
         return False
 
     async def claim_client_keys(
-        self, service: "ApplicationService", query: List[Tuple[str, str, str, int]]
-    ) -> Tuple[
-        Dict[str, Dict[str, Dict[str, JsonDict]]], List[Tuple[str, str, str, int]]
+        self, service: "ApplicationService", query: list[tuple[str, str, str, int]]
+    ) -> tuple[
+        dict[str, dict[str, dict[str, JsonDict]]], list[tuple[str, str, str, int]]
     ]:
         """Claim one time keys from an application service.
 
@@ -457,7 +454,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         assert service.hs_token is not None
 
         # Create the expected payload shape.
-        body: Dict[str, Dict[str, List[str]]] = {}
+        body: dict[str, dict[str, list[str]]] = {}
         for user_id, device, algorithm, count in query:
             body.setdefault(user_id, {}).setdefault(device, []).extend(
                 [algorithm] * count
@@ -502,8 +499,8 @@ class ApplicationServiceApi(SimpleHttpClient):
         return response, missing
 
     async def query_keys(
-        self, service: "ApplicationService", query: Dict[str, List[str]]
-    ) -> Dict[str, Dict[str, Dict[str, JsonDict]]]:
+        self, service: "ApplicationService", query: dict[str, list[str]]
+    ) -> dict[str, dict[str, dict[str, JsonDict]]]:
         """Query the application service for keys.
 
         Note that any error (including a timeout) is treated as the application
@@ -545,7 +542,7 @@ class ApplicationServiceApi(SimpleHttpClient):
 
     def _serialize(
         self, service: "ApplicationService", events: Iterable[EventBase]
-    ) -> List[JsonDict]:
+    ) -> list[JsonDict]:
         time_now = self.clock.time_msec()
         return [
             serialize_event(

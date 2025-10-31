@@ -20,7 +20,7 @@
 
 import re
 from http import HTTPStatus
-from typing import Awaitable, Callable, Dict, NoReturn, Optional, Tuple
+from typing import Awaitable, Callable, NoReturn, Optional
 
 from twisted.internet.defer import Deferred
 from twisted.web.resource import Resource
@@ -70,7 +70,7 @@ class JsonResourceTests(unittest.TestCase):
 
         def _callback(
             request: SynapseRequest, **kwargs: object
-        ) -> Tuple[int, Dict[str, object]]:
+        ) -> tuple[int, dict[str, object]]:
             got_kwargs.update(kwargs)
             return 200, kwargs
 
@@ -192,7 +192,7 @@ class JsonResourceTests(unittest.TestCase):
 
         def _callback(
             request: SynapseRequest, **kwargs: object
-        ) -> Tuple[int, Dict[str, object]]:
+        ) -> tuple[int, dict[str, object]]:
             return 200, {"result": True}
 
         res = JsonResource(self.homeserver)
@@ -236,17 +236,17 @@ class OptionsResourceTests(unittest.TestCase):
         """Create a request from the method/path and return a channel with the response."""
         # Create a site and query for the resource.
         site = SynapseSite(
-            "test",
-            "site_tag",
-            parse_listener_def(
+            logger_name="test",
+            site_tag="site_tag",
+            config=parse_listener_def(
                 0,
                 {
                     "type": "http",
                     "port": 0,
                 },
             ),
-            self.resource,
-            "1.0",
+            resource=self.resource,
+            server_version_string="1",
             max_request_body_size=4096,
             reactor=self.reactor,
             hs=self.homeserver,
@@ -405,11 +405,11 @@ class CancellableDirectServeJsonResource(DirectServeJsonResource):
         self.clock = clock
 
     @cancellable
-    async def _async_render_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await self.clock.sleep(1.0)
         return HTTPStatus.OK, {"result": True}
 
-    async def _async_render_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def _async_render_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await self.clock.sleep(1.0)
         return HTTPStatus.OK, {"result": True}
 
@@ -422,11 +422,11 @@ class CancellableDirectServeHtmlResource(DirectServeHtmlResource):
         self.clock = clock
 
     @cancellable
-    async def _async_render_GET(self, request: SynapseRequest) -> Tuple[int, bytes]:
+    async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, bytes]:
         await self.clock.sleep(1.0)
         return HTTPStatus.OK, b"ok"
 
-    async def _async_render_POST(self, request: SynapseRequest) -> Tuple[int, bytes]:
+    async def _async_render_POST(self, request: SynapseRequest) -> tuple[int, bytes]:
         await self.clock.sleep(1.0)
         return HTTPStatus.OK, b"ok"
 

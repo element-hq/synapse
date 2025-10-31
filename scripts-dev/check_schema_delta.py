@@ -5,7 +5,7 @@
 # Also checks that schema deltas do not try and create or drop indices.
 
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 import click
 import git
@@ -52,16 +52,16 @@ def main(force_colors: bool) -> None:
 
     r = repo.git.show(f"origin/{DEVELOP_BRANCH}:synapse/storage/schema/__init__.py")
 
-    locals: Dict[str, Any] = {}
+    locals: dict[str, Any] = {}
     exec(r, locals)
     current_schema_version = locals["SCHEMA_VERSION"]
 
-    diffs: List[git.Diff] = repo.remote().refs[DEVELOP_BRANCH].commit.diff(None)
+    diffs: list[git.Diff] = repo.remote().refs[DEVELOP_BRANCH].commit.diff(None)
 
     # Get the schema version of the local file to check against current schema on develop
     with open("synapse/storage/schema/__init__.py") as file:
         local_schema = file.read()
-    new_locals: Dict[str, Any] = {}
+    new_locals: dict[str, Any] = {}
     exec(local_schema, new_locals)
     local_schema_version = new_locals["SCHEMA_VERSION"]
 

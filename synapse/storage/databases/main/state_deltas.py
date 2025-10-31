@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 import attr
 
@@ -79,7 +79,7 @@ class StateDeltasStore(SQLBaseStore):
 
     async def get_partial_current_state_deltas(
         self, prev_stream_id: int, max_stream_id: int
-    ) -> Tuple[int, List[StateDelta]]:
+    ) -> tuple[int, list[StateDelta]]:
         """Fetch a list of room state changes since the given stream id
 
         This may be the partial state if we're lazy joining the room.
@@ -114,7 +114,7 @@ class StateDeltasStore(SQLBaseStore):
 
         def get_current_state_deltas_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[int, List[StateDelta]]:
+        ) -> tuple[int, list[StateDelta]]:
             # First we calculate the max stream id that will give us less than
             # N results.
             # We arbitrarily limit to 100 stream_id entries to ensure we don't
@@ -193,7 +193,7 @@ class StateDeltasStore(SQLBaseStore):
         *,
         from_token: Optional[RoomStreamToken],
         to_token: Optional[RoomStreamToken],
-    ) -> List[StateDelta]:
+    ) -> list[StateDelta]:
         """
         Get the state deltas between two tokens.
 
@@ -239,7 +239,7 @@ class StateDeltasStore(SQLBaseStore):
         *,
         from_token: Optional[RoomStreamToken],
         to_token: Optional[RoomStreamToken],
-    ) -> List[StateDelta]:
+    ) -> list[StateDelta]:
         """
         Get the state deltas between two tokens.
 
@@ -275,7 +275,7 @@ class StateDeltasStore(SQLBaseStore):
         room_ids: StrCollection,
         from_token: RoomStreamToken,
         to_token: RoomStreamToken,
-    ) -> List[StateDelta]:
+    ) -> list[StateDelta]:
         """Get the state deltas between two tokens for the set of rooms."""
 
         room_ids = self._curr_state_delta_stream_cache.get_entities_changed(
@@ -287,7 +287,7 @@ class StateDeltasStore(SQLBaseStore):
         def get_current_state_deltas_for_rooms_txn(
             txn: LoggingTransaction,
             room_ids: StrCollection,
-        ) -> List[StateDelta]:
+        ) -> list[StateDelta]:
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "room_id", room_ids
             )

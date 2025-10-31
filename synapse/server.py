@@ -34,11 +34,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
-    List,
     Optional,
-    Tuple,
-    Type,
     TypeVar,
     cast,
 )
@@ -62,6 +58,7 @@ from synapse.api.auth_blocking import AuthBlocking
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
 from synapse.app._base import unregister_sighups
+from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.appservice.api import ApplicationServiceApi
 from synapse.appservice.scheduler import ApplicationServiceScheduler
 from synapse.config.homeserver import HomeServerConfig
@@ -175,6 +172,7 @@ from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
+from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches import CACHE_METRIC_REGISTRY
 from synapse.util.clock import Clock
 from synapse.util.distributor import Distributor
@@ -276,7 +274,7 @@ class ShutdownInfo:
 
     func: Callable[..., Any]
     trigger_id: _SystemEventID
-    kwargs: Dict[str, object]
+    kwargs: dict[str, object]
 
 
 class HomeServer(metaclass=abc.ABCMeta):
@@ -311,7 +309,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def DATASTORE_CLASS(self) -> Type["SQLBaseStore"]:
+    def DATASTORE_CLASS(self) -> type["SQLBaseStore"]:
         # This is overridden in derived application classes
         # (such as synapse.app.homeserver.SynapseHomeServer) and gives the class to be
         # instantiated during setup() for future return by get_datastores()
@@ -322,7 +320,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         hostname: str,
         config: HomeServerConfig,
         reactor: Optional[ISynapseReactor] = None,
-        version_string: str = "Synapse",
     ):
         """
         Args:
@@ -340,26 +337,26 @@ class HomeServer(metaclass=abc.ABCMeta):
         # the key we use to sign events and requests
         self.signing_key = config.key.signing_key[0]
         self.config = config
-        self._listening_services: List[Port] = []
-        self._metrics_listeners: List[Tuple[WSGIServer, Thread]] = []
+        self._listening_services: list[Port] = []
+        self._metrics_listeners: list[tuple[WSGIServer, Thread]] = []
         self.start_time: Optional[int] = None
 
         self._instance_id = random_string(5)
         self._instance_name = config.worker.instance_name
 
-        self.version_string = version_string
+        self.version_string = f"Synapse/{SYNAPSE_VERSION}"
 
         self.datastores: Optional[Databases] = None
 
-        self._module_web_resources: Dict[str, Resource] = {}
+        self._module_web_resources: dict[str, Resource] = {}
         self._module_web_resources_consumed = False
 
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
         self._is_shutdown = False
-        self._async_shutdown_handlers: List[ShutdownInfo] = []
-        self._sync_shutdown_handlers: List[ShutdownInfo] = []
+        self._async_shutdown_handlers: list[ShutdownInfo] = []
+        self._sync_shutdown_handlers: list[ShutdownInfo] = []
         self._background_processes: set[defer.Deferred[Optional[Any]]] = set()
 
     def run_as_background_process(
@@ -613,12 +610,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.datastores = Databases(self.DATASTORE_CLASS, self)
         logger.info("Finished setting up.")
 
-        # Register background tasks required by this server. This must be done
-        # somewhat manually due to the background tasks not being registered
-        # unless handlers are instantiated.
-        if self.config.worker.run_background_tasks:
-            self.start_background_tasks()
-
     # def __del__(self) -> None:
     #    """
     #    Called when an the homeserver is garbage collected.
@@ -649,6 +640,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         for i in self.REQUIRED_ON_BACKGROUND_TASK_STARTUP:
             getattr(self, "get_" + i + "_handler")()
         self.get_task_scheduler()
+        self.get_common_usage_metrics_manager().setup()
+        start_phone_stats_home(self)
 
     def get_reactor(self) -> ISynapseReactor:
         """
@@ -1111,7 +1104,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         return ReplicationDataHandler(self)
 
     @cache_in_self
-    def get_replication_streams(self) -> Dict[str, Stream]:
+    def get_replication_streams(self) -> dict[str, Stream]:
         return {stream.NAME: stream(self) for stream in STREAMS_MAP.values()}
 
     @cache_in_self

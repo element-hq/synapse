@@ -25,9 +25,7 @@ import re
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
-    Dict,
     Iterable,
-    List,
     Optional,
     Pattern,
     Sequence,
@@ -59,11 +57,11 @@ logger = logging.getLogger(__name__)
 
 # Type for the `device_one_time_keys_count` field in an appservice transaction
 #   user ID -> {device ID -> {algorithm -> count}}
-TransactionOneTimeKeysCount = Dict[str, Dict[str, Dict[str, int]]]
+TransactionOneTimeKeysCount = dict[str, dict[str, dict[str, int]]]
 
 # Type for the `device_unused_fallback_key_types` field in an appservice transaction
 #   user ID -> {device ID -> [algorithm]}
-TransactionUnusedFallbackKeys = Dict[str, Dict[str, List[str]]]
+TransactionUnusedFallbackKeys = dict[str, dict[str, list[str]]]
 
 
 class ApplicationServiceState(Enum):
@@ -145,7 +143,7 @@ class ApplicationService:
 
     def _check_namespaces(
         self, namespaces: Optional[JsonDict]
-    ) -> Dict[str, List[Namespace]]:
+    ) -> dict[str, list[Namespace]]:
         # Sanity check that it is of the form:
         # {
         #   users: [ {regex: "[A-z]+.*", exclusive: true}, ...],
@@ -155,7 +153,7 @@ class ApplicationService:
         if namespaces is None:
             namespaces = {}
 
-        result: Dict[str, List[Namespace]] = {}
+        result: dict[str, list[Namespace]] = {}
 
         for ns in ApplicationService.NS_LIST:
             result[ns] = []
@@ -388,7 +386,7 @@ class ApplicationService:
     def is_exclusive_room(self, room_id: str) -> bool:
         return self._is_exclusive(ApplicationService.NS_ROOMS, room_id)
 
-    def get_exclusive_user_regexes(self) -> List[Pattern[str]]:
+    def get_exclusive_user_regexes(self) -> list[Pattern[str]]:
         """Get the list of regexes used to determine if a user is exclusively
         registered by the AS
         """
@@ -417,8 +415,8 @@ class AppServiceTransaction:
         service: ApplicationService,
         id: int,
         events: Sequence[EventBase],
-        ephemeral: List[JsonMapping],
-        to_device_messages: List[JsonMapping],
+        ephemeral: list[JsonMapping],
+        to_device_messages: list[JsonMapping],
         one_time_keys_count: TransactionOneTimeKeysCount,
         unused_fallback_keys: TransactionUnusedFallbackKeys,
         device_list_summary: DeviceListUpdates,

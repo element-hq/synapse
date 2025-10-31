@@ -26,15 +26,11 @@ import typing
 from typing import (
     Any,
     ChainMap,
-    Dict,
     Iterable,
-    List,
     Mapping,
     MutableMapping,
     Optional,
     Protocol,
-    Set,
-    Tuple,
     Union,
     cast,
 )
@@ -91,7 +87,7 @@ class _EventSourceStore(Protocol):
         redact_behaviour: EventRedactBehaviour,
         get_prev_content: bool = False,
         allow_rejected: bool = False,
-    ) -> Dict[str, "EventBase"]: ...
+    ) -> dict[str, "EventBase"]: ...
 
 
 def validate_event_for_room_version(event: "EventBase") -> None:
@@ -993,7 +989,7 @@ def _check_power_levels(
     user_level = get_user_power_level(event.user_id, auth_events)
 
     # Check other levels:
-    levels_to_check: List[Tuple[str, Optional[str]]] = [
+    levels_to_check: list[tuple[str, Optional[str]]] = [
         ("users_default", None),
         ("events_default", None),
         ("state_default", None),
@@ -1191,7 +1187,7 @@ def _verify_third_party_invite(
     return False
 
 
-def get_public_keys(invite_event: "EventBase") -> List[Dict[str, Any]]:
+def get_public_keys(invite_event: "EventBase") -> list[dict[str, Any]]:
     public_keys = []
     if "public_key" in invite_event.content:
         o = {"public_key": invite_event.content["public_key"]}
@@ -1204,7 +1200,7 @@ def get_public_keys(invite_event: "EventBase") -> List[Dict[str, Any]]:
 
 def auth_types_for_event(
     room_version: RoomVersion, event: Union["EventBase", "EventBuilder"]
-) -> Set[Tuple[str, str]]:
+) -> set[tuple[str, str]]:
     """Given an event, return a list of (EventType, StateKey) that may be
     needed to auth the event. The returned list may be a superset of what
     would actually be required depending on the full state of the room.

@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Optional, Protocol, Tuple
+from typing import TYPE_CHECKING, Optional, Protocol
 
 from prometheus_client import Histogram
 
@@ -51,7 +51,7 @@ class Auth(Protocol):
         room_id: str,
         requester: Requester,
         allow_departed_users: bool = False,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, Optional[str]]:
         """Check if the user is in the room, or was at some point.
         Args:
             room_id: The room to check.
@@ -190,7 +190,7 @@ class Auth(Protocol):
 
     async def check_user_in_room_or_world_readable(
         self, room_id: str, requester: Requester, allow_departed_users: bool = False
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, Optional[str]]:
         """Checks that the user is or was in the room or the room is world
         readable. If it isn't then an exception is raised.
 

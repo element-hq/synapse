@@ -20,10 +20,11 @@
 #
 #
 import itertools
+import random
 import re
 import secrets
 import string
-from typing import Any, Iterable, Optional, Tuple
+from typing import Any, Iterable, Optional
 
 from netaddr import valid_ipv6
 
@@ -56,6 +57,10 @@ def random_string(length: int) -> str:
     """Generate a cryptographically secure string of random letters.
 
     Drawn from the characters: `a-z` and `A-Z`
+
+    Because this is generated from cryptographic sources, it takes a notable amount of
+    effort to generate (computationally expensive). If you don't need cryptographic
+    security, consider using `random_string_insecure_fast` for better performance.
     """
     return "".join(secrets.choice(string.ascii_letters) for _ in range(length))
 
@@ -66,6 +71,18 @@ def random_string_with_symbols(length: int) -> str:
     Drawn from the characters: `a-z`, `A-Z`, `0-9`, and `.,;:^&*-_+=#~@`
     """
     return "".join(secrets.choice(_string_with_symbols) for _ in range(length))
+
+
+def random_string_insecure_fast(length: int) -> str:
+    """
+    Generate a string of random letters (insecure, fast). This is a more performant but
+    insecure version of `random_string`.
+
+    WARNING: Not for security or cryptographic uses. Use `random_string` instead.
+
+    Drawn from the characters: `a-z` and `A-Z`
+    """
+    return "".join(random.choice(string.ascii_letters) for _ in range(length))
 
 
 def is_ascii(s: bytes) -> bool:
@@ -92,7 +109,7 @@ def assert_valid_client_secret(client_secret: str) -> None:
         )
 
 
-def parse_server_name(server_name: str) -> Tuple[str, Optional[int]]:
+def parse_server_name(server_name: str) -> tuple[str, Optional[int]]:
     """Split a server name into host/port parts.
 
     Args:
@@ -123,7 +140,7 @@ def parse_server_name(server_name: str) -> Tuple[str, Optional[int]]:
 VALID_HOST_REGEX = re.compile("\\A[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*\\Z")
 
 
-def parse_and_validate_server_name(server_name: str) -> Tuple[str, Optional[int]]:
+def parse_and_validate_server_name(server_name: str) -> tuple[str, Optional[int]]:
     """Split a server name into host/port parts and do some basic validation.
 
     Args:
@@ -190,7 +207,7 @@ def valid_id_server_location(id_server: str) -> bool:
     return "#" not in path and "?" not in path
 
 
-def parse_and_validate_mxc_uri(mxc: str) -> Tuple[str, Optional[int], str]:
+def parse_and_validate_mxc_uri(mxc: str) -> tuple[str, Optional[int], str]:
     """Parse the given string as an MXC URI
 
     Checks that the "server name" part is a valid server name

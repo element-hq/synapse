@@ -23,7 +23,7 @@
 to ensure idempotency when performing PUTs using the REST API."""
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Hashable, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Hashable
 
 from typing_extensions import ParamSpec
 
@@ -51,8 +51,8 @@ class HttpTransactionCache:
         self.hs = hs
         self.clock = self.hs.get_clock()
         # $txn_key: (ObservableDeferred<(res_code, res_json_body)>, timestamp)
-        self.transactions: Dict[
-            Hashable, Tuple[ObservableDeferred[Tuple[int, JsonDict]], int]
+        self.transactions: dict[
+            Hashable, tuple[ObservableDeferred[tuple[int, JsonDict]], int]
         ] = {}
         # Try to clean entries every 30 mins. This means entries will exist
         # for at *LEAST* 30 mins, and at *MOST* 60 mins.
@@ -103,10 +103,10 @@ class HttpTransactionCache:
         self,
         request: IRequest,
         requester: Requester,
-        fn: Callable[P, Awaitable[Tuple[int, JsonDict]]],
+        fn: Callable[P, Awaitable[tuple[int, JsonDict]]],
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> "Deferred[Tuple[int, JsonDict]]":
+    ) -> "Deferred[tuple[int, JsonDict]]":
         """Fetches the response for this transaction, or executes the given function
         to produce a response for this transaction.
 

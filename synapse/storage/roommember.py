@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import attr
 
@@ -84,6 +84,6 @@ class ProfileInfo:
 class MemberSummary:
     # A truncated list of (user_id, event_id) tuples for users of a given
     # membership type, suitable for use in calculating heroes for a room.
-    members: List[Tuple[str, str]]
+    members: list[tuple[str, str]]
     # The total number of users of a given membership type.
     count: int

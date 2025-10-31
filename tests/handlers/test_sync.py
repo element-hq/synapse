@@ -18,7 +18,7 @@
 #
 #
 from http import HTTPStatus
-from typing import Collection, ContextManager, List, Optional
+from typing import Collection, ContextManager, Optional
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
@@ -872,7 +872,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             # ... And the state should be empty
             self.assertEqual(sync_room_result.state, {})
 
-    def _patch_get_latest_events(self, latest_events: List[str]) -> ContextManager:
+    def _patch_get_latest_events(self, latest_events: list[str]) -> ContextManager:
         """Monkey-patch `get_prev_events_for_room`
 
         Returns a context manager which will replace the implementation of
@@ -902,7 +902,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
 
         async def _check_sigs_and_hash_for_pulled_events_and_fetch(
             dest: str, pdus: Collection[EventBase], room_version: RoomVersion
-        ) -> List[EventBase]:
+        ) -> list[EventBase]:
             return list(pdus)
 
         self.client._check_sigs_and_hash_for_pulled_events_and_fetch = (  # type: ignore[method-assign]
