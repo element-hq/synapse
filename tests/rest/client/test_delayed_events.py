@@ -15,7 +15,6 @@
 """Tests REST events for /delayed_events paths."""
 
 from http import HTTPStatus
-from typing import List, Tuple
 
 from parameterized import parameterized
 
@@ -646,7 +645,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-    def _get_delayed_events(self) -> Tuple[List[JsonDict], List[JsonDict]]:
+    def _get_delayed_events(self) -> tuple[list[JsonDict], list[JsonDict]]:
         channel = self.make_request(
             "GET",
             PATH_PREFIX,
@@ -659,7 +658,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         return scheduled, finalised
 
-    def _get_scheduled_delayed_events(self) -> List[JsonDict]:
+    def _get_scheduled_delayed_events(self) -> list[JsonDict]:
         channel = self.make_request(
             "GET",
             PATH_PREFIX + "?status=scheduled",
@@ -671,7 +670,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         return scheduled
 
-    def _get_finalised_delayed_events(self) -> List[JsonDict]:
+    def _get_finalised_delayed_events(self) -> list[JsonDict]:
         channel = self.make_request(
             "GET",
             PATH_PREFIX + "?status=finalised",
@@ -683,7 +682,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         return finalised
 
-    def _validate_scheduled_delayed_events(self, json_body: JsonDict) -> List[JsonDict]:
+    def _validate_scheduled_delayed_events(self, json_body: JsonDict) -> list[JsonDict]:
         key = "scheduled"
         self.assertIn(key, json_body)
 
@@ -692,7 +691,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         return scheduled
 
-    def _validate_finalised_delayed_events(self, json_body: JsonDict) -> List[JsonDict]:
+    def _validate_finalised_delayed_events(self, json_body: JsonDict) -> list[JsonDict]:
         key = "finalised"
         self.assertIn(key, json_body)
 

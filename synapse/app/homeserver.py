@@ -22,7 +22,7 @@
 import logging
 import os
 import sys
-from typing import Dict, Iterable, List, Optional
+from typing import Iterable, Optional
 
 from twisted.internet.tcp import Port
 from twisted.web.resource import EncodingResourceWrapper, Resource
@@ -99,7 +99,7 @@ class SynapseHomeServer(HomeServer):
         site_tag = listener_config.get_site_tag()
 
         # We always include a health resource.
-        resources: Dict[str, Resource] = {"/health": HealthResource()}
+        resources: dict[str, Resource] = {"/health": HealthResource()}
 
         for res in listener_config.http_options.resources:
             for name in res.names:
@@ -170,7 +170,7 @@ class SynapseHomeServer(HomeServer):
 
     def _configure_named_resource(
         self, name: str, compress: bool = False
-    ) -> Dict[str, Resource]:
+    ) -> dict[str, Resource]:
         """Build a resource map for a named resource
 
         Args:
@@ -180,7 +180,7 @@ class SynapseHomeServer(HomeServer):
         Returns:
             map from path to HTTP resource
         """
-        resources: Dict[str, Resource] = {}
+        resources: dict[str, Resource] = {}
         if name == "client":
             client_resource: Resource = ClientRestResource(self)
             if compress:
@@ -318,7 +318,7 @@ class SynapseHomeServer(HomeServer):
                 logger.warning("Unrecognized listener type: %s", listener.type)
 
 
-def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
+def load_or_generate_config(argv_options: list[str]) -> HomeServerConfig:
     """
     Parse the commandline and config files
 
@@ -430,9 +430,7 @@ def setup(
 
         await _base.start(hs, freeze)
 
-        # TODO: This should be moved to `SynapseHomeServer.start_background_tasks` (not
-        # `HomeServer.start_background_tasks`) (this way it matches the behavior of only
-        # running on `main`)
+        # TODO: Feels like this should be moved somewhere else.
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
     # Register a callback to be invoked once the reactor is running

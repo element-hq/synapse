@@ -22,9 +22,10 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
-from synapse._pydantic_compat import Extra, StrictStr
+from pydantic import ConfigDict, StrictStr
+
 from synapse.api import errors
 from synapse.api.errors import NotFoundError, SynapseError, UnrecognizedRequestError
 from synapse.http.server import HttpServer
@@ -56,7 +57,7 @@ class DevicesRestServlet(RestServlet):
         self.device_handler = hs.get_device_handler()
         self._msc3852_enabled = hs.config.experimental.msc3852_enabled
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         devices = await self.device_handler.get_devices_by_user(
             requester.user.to_string()
@@ -94,11 +95,11 @@ class DeleteDevicesRestServlet(RestServlet):
         self.auth_handler = hs.get_auth_handler()
 
     class PostBody(RequestBodyModel):
-        auth: Optional[AuthenticationData]
-        devices: List[StrictStr]
+        auth: Optional[AuthenticationData] = None
+        devices: list[StrictStr]
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         try:
@@ -108,11 +109,11 @@ class DeleteDevicesRestServlet(RestServlet):
                 # TODO: Can/should we remove this fallback now?
                 # deal with older clients which didn't pass a JSON dict
                 # the same as those that pass an empty dict
-                body = self.PostBody.parse_obj({})
+                body = self.PostBody.model_validate({})
             else:
                 raise e
 
-        if requester.app_service and requester.app_service.msc4190_device_management:
+        if requester.app_service:
             # MSC4190 can skip UIA for this endpoint
             pass
         else:
@@ -150,7 +151,7 @@ class DeviceRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, device_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         device = await self.device_handler.get_device(
             requester.user.to_string(), device_id
@@ -172,12 +173,12 @@ class DeviceRestServlet(RestServlet):
         return 200, device
 
     class DeleteBody(RequestBodyModel):
-        auth: Optional[AuthenticationData]
+        auth: Optional[AuthenticationData] = None
 
     @interactive_auth_handler
     async def on_DELETE(
         self, request: SynapseRequest, device_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         try:
@@ -188,11 +189,11 @@ class DeviceRestServlet(RestServlet):
                 # TODO: can/should we remove this fallback now?
                 # deal with older clients which didn't pass a JSON dict
                 # the same as those that pass an empty dict
-                body = self.DeleteBody.parse_obj({})
+                body = self.DeleteBody.model_validate({})
             else:
                 raise
 
-        if requester.app_service and requester.app_service.msc4190_device_management:
+        if requester.app_service:
             # MSC4190 allows appservices to delete devices through this endpoint without UIA
             # It's also allowed with MSC3861 enabled
             pass
@@ -217,17 +218,17 @@ class DeviceRestServlet(RestServlet):
         return 200, {}
 
     class PutBody(RequestBodyModel):
-        display_name: Optional[StrictStr]
+        display_name: Optional[StrictStr] = None
 
     async def on_PUT(
         self, request: SynapseRequest, device_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         body = parse_and_validate_json_object_from_request(request, self.PutBody)
 
         # MSC4190 allows appservices to create devices through this endpoint
-        if requester.app_service and requester.app_service.msc4190_device_management:
+        if requester.app_service:
             created = await self.device_handler.upsert_device(
                 user_id=requester.user.to_string(),
                 device_id=device_id,
@@ -247,8 +248,7 @@ class DehydratedDeviceDataModel(RequestBodyModel):
     Expects other freeform fields. Use .dict() to access them.
     """
 
-    class Config:
-        extra = Extra.allow
+    model_config = ConfigDict(extra="allow")
 
     algorithm: StrictStr
 
@@ -302,7 +302,7 @@ class DehydratedDeviceServlet(RestServlet):
         handler = hs.get_device_handler()
         self.device_handler = handler
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         dehydrated_device = await self.device_handler.get_dehydrated_device(
             requester.user.to_string()
@@ -316,9 +316,9 @@ class DehydratedDeviceServlet(RestServlet):
 
     class PutBody(RequestBodyModel):
         device_data: DehydratedDeviceDataModel
-        initial_device_display_name: Optional[StrictStr]
+        initial_device_display_name: Optional[StrictStr] = None
 
-    async def on_PUT(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_PUT(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         submission = parse_and_validate_json_object_from_request(request, self.PutBody)
         requester = await self.auth.get_user_by_req(request)
 
@@ -364,7 +364,7 @@ class ClaimDehydratedDeviceServlet(RestServlet):
     class PostBody(RequestBodyModel):
         device_id: StrictStr
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         submission = parse_and_validate_json_object_from_request(request, self.PostBody)
@@ -391,11 +391,11 @@ class DehydratedDeviceEventsServlet(RestServlet):
         self.store = hs.get_datastores().main
 
     class PostBody(RequestBodyModel):
-        next_batch: Optional[StrictStr]
+        next_batch: Optional[StrictStr] = None
 
     async def on_POST(
         self, request: SynapseRequest, device_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         next_batch = parse_and_validate_json_object_from_request(
@@ -501,7 +501,7 @@ class DehydratedDeviceV2Servlet(RestServlet):
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
         self.device_handler = handler
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         dehydrated_device = await self.device_handler.get_dehydrated_device(
@@ -515,7 +515,7 @@ class DehydratedDeviceV2Servlet(RestServlet):
         else:
             raise errors.NotFoundError("No dehydrated device available")
 
-    async def on_DELETE(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_DELETE(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         dehydrated_device = await self.device_handler.get_dehydrated_device(
@@ -539,11 +539,9 @@ class DehydratedDeviceV2Servlet(RestServlet):
         device_data: DehydratedDeviceDataModel
         device_id: StrictStr
         initial_device_display_name: Optional[StrictStr]
+        model_config = ConfigDict(extra="allow")
 
-        class Config:
-            extra = Extra.allow
-
-    async def on_PUT(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_PUT(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         submission = parse_and_validate_json_object_from_request(request, self.PutBody)
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()

@@ -14,7 +14,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import List, NewType, Optional, Tuple, Union
+from typing import NewType, Optional, Union
 
 import attr
 
@@ -98,7 +98,7 @@ class DelayedEventsStore(SQLBaseStore):
         content: JsonDict,
         delay: int,
         limit: int,
-    ) -> Tuple[DelayID, Timestamp]:
+    ) -> tuple[DelayID, Timestamp]:
         """
         Inserts a new delayed event in the DB.
 
@@ -324,8 +324,8 @@ class DelayedEventsStore(SQLBaseStore):
     async def get_scheduled_delayed_events_for_user(
         self,
         user_localpart: str,
-        delay_ids: Optional[List[str]],
-    ) -> List[JsonDict]:
+        delay_ids: Optional[list[str]],
+    ) -> list[JsonDict]:
         """Returns all scheduled delayed events for the given user."""
         # TODO: Support Pagination stream API ("next_batch" field)
         sql_where = "WHERE user_localpart = ? AND finalised_ts IS NULL"
@@ -369,17 +369,17 @@ class DelayedEventsStore(SQLBaseStore):
     async def get_finalised_delayed_events_for_user(
         self,
         user_localpart: str,
-        delay_ids: Optional[List[str]],
+        delay_ids: Optional[list[str]],
         current_ts: Timestamp,
         retention_period: int,
         retention_limit: int,
-    ) -> List[JsonDict]:
+    ) -> list[JsonDict]:
         """Returns all finalised delayed events for the given user."""
         # TODO: Support Pagination stream API ("next_batch" field)
 
         def get_finalised_delayed_events_for_user(
             txn: LoggingTransaction,
-        ) -> List[JsonDict]:
+        ) -> list[JsonDict]:
             # Clear up some space in the DB before returning any results.
             self._prune_expired_finalised_delayed_events(
                 txn, current_ts, retention_period
@@ -460,8 +460,8 @@ class DelayedEventsStore(SQLBaseStore):
 
     async def process_timeout_delayed_events(
         self, current_ts: Timestamp
-    ) -> Tuple[
-        List[DelayedEventDetails],
+    ) -> tuple[
+        list[DelayedEventDetails],
         Optional[Timestamp],
     ]:
         """
@@ -474,8 +474,8 @@ class DelayedEventsStore(SQLBaseStore):
 
         def process_timeout_delayed_events_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[
-            List[DelayedEventDetails],
+        ) -> tuple[
+            list[DelayedEventDetails],
             Optional[Timestamp],
         ]:
             sql_cols = ", ".join(
@@ -549,7 +549,7 @@ class DelayedEventsStore(SQLBaseStore):
         *,
         delay_id: str,
         user_localpart: str,
-    ) -> Tuple[
+    ) -> tuple[
         Optional[EventDetails],
         Optional[Timestamp],
     ]:
@@ -571,33 +571,29 @@ class DelayedEventsStore(SQLBaseStore):
 
         def process_target_delayed_event_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[
+        ) -> tuple[
             Optional[EventDetails],
             Optional[Timestamp],
         ]:
-            sql_cols = ", ".join(
-                (
-                    "room_id",
-                    "event_type",
-                    "state_key",
-                    "origin_server_ts",
-                    "content",
-                    "device_id",
-                )
-            )
-            sql_update = "UPDATE delayed_events SET is_processed = TRUE"
-            sql_where = """WHERE delay_id = ? AND user_localpart = ?
-                AND NOT is_processed
-                AND finalised_ts IS NULL
-                """
-            sql_args = (delay_id, user_localpart)
             txn.execute(
+                """
+                UPDATE delayed_events
+                SET is_processed = TRUE
+                WHERE delay_id = ? AND user_localpart = ?
+                    AND NOT is_processed
+                    AND finalised_ts IS NULL
+                RETURNING
+                    room_id,
+                    event_type,
+                    state_key,
+                    origin_server_ts,
+                    content,
+                    device_id
+                """,
                 (
-                    f"{sql_update} {sql_where} RETURNING {sql_cols}"
-                    if self.database_engine.supports_returning
-                    else f"SELECT {sql_cols} FROM delayed_events {sql_where}"
+                    delay_id,
+                    user_localpart,
                 ),
-                sql_args,
             )
             row = txn.fetchone()
             if not row:
@@ -622,9 +618,6 @@ class DelayedEventsStore(SQLBaseStore):
                         "Delayed event has already been cancelled",
                     )
                 return None, None
-            elif not self.database_engine.supports_returning:
-                txn.execute(f"{sql_update} {sql_where}", sql_args)
-                assert txn.rowcount == 1
 
             event = EventDetails(
                 RoomID.from_string(row[0]),

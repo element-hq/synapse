@@ -36,7 +36,7 @@
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 # See https://beta.ruff.rs/docs/rules/#error-e
@@ -78,6 +78,12 @@ select = [
     "LOG",
     # flake8-logging-format
     "G",
+    # pyupgrade
+    "UP006",
+]
+extend-safe-fixes = [
+    # pyupgrade
+    "UP006"
 ]
 
 [tool.ruff.lint.isort]
@@ -101,7 +107,7 @@ module-name = "synapse.synapse_rust"
 
 [tool.poetry]
 name = "matrix-synapse"
-version = "1.139.2"
+version = "1.141.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
 license = "AGPL-3.0-or-later OR LicenseRef-Element-Commercial"
@@ -159,7 +165,7 @@ synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
 update_synapse_database = "synapse._scripts.update_synapse_database:main"
 
 [tool.poetry.dependencies]
-python = "^3.9.0"
+python = "^3.10.0"
 
 # Mandatory Dependencies
 # ----------------------
@@ -195,7 +201,8 @@ bcrypt = ">=3.1.7"
 # Packagers that already took care of libwebp can lower that down to 5.4.0.
 Pillow = ">=10.0.1"
 # We use SortedDict.peekitem(), which was added in sortedcontainers 1.5.2.
-sortedcontainers = ">=1.5.2"
+# 2.0.5 updates collections.abc imports to avoid Python 3.10 incompatibility.
+sortedcontainers = ">=2.0.5"
 pymacaroons = ">=0.13.0"
 msgpack = ">=0.5.2"
 phonenumbers = ">=8.2.0"
@@ -211,9 +218,10 @@ netaddr = ">=0.7.18"
 # end up with a broken installation, with recent MarkupSafe but old Jinja, we
 # add a lower bound to the Jinja2 dependency.
 Jinja2 = ">=3.0"
-bleach = ">=1.4.3"
-# We use `assert_never`, which were added in `typing-extensions` 4.1.
-typing-extensions = ">=4.1"
+# 3.2.0 updates collections.abc imports to avoid Python 3.10 incompatibility.
+bleach = ">=3.2.0"
+# pydantic 2.12 depends on typing-extensions>=4.14.1
+typing-extensions = ">=4.14.1"
 # We enforce that we have a `cryptography` version that bundles an `openssl`
 # with the latest security patches.
 cryptography = ">=3.4.7"
@@ -222,9 +230,10 @@ ijson = ">=3.1.4"
 matrix-common = "^1.3.0"
 # We need packaging.verison.Version(...).major added in 20.0.
 packaging = ">=20.0"
-# We support pydantic v1 and pydantic v2 via the pydantic.v1 compat module.
-# See https://github.com/matrix-org/synapse/issues/15858
-pydantic = ">=1.7.4, <3"
+pydantic = [
+    { version = "~=2.8", python = "<3.14" },
+    { version = "~=2.12", python = ">=3.14" },
+]
 
 # This is for building the rust components during "poetry install", which
 # currently ignores the `build-system.requires` directive (c.f.
@@ -252,10 +261,12 @@ authlib = { version = ">=0.15.1", optional = true }
 # `contrib/systemd/log_config.yaml`.
 # Note: systemd-python 231 appears to have been yanked from pypi
 systemd-python = { version = ">=231", optional = true }
-lxml = { version = ">=4.5.2", optional = true }
+# 4.6.3 removes usage of _PyGen_Send which is unavailable in CPython as of Python 3.10.
+lxml = { version = ">=4.6.3", optional = true }
 sentry-sdk = { version = ">=0.7.2", optional = true }
 opentracing = { version = ">=2.2.0", optional = true }
-jaeger-client = { version = ">=4.0.0", optional = true }
+# 4.2.0 updates collections.abc imports to avoid Python 3.10 incompatibility.
+jaeger-client = { version = ">=4.2.0", optional = true }
 txredisapi = { version = ">=1.4.7", optional = true }
 hiredis = { version = "*", optional = true }
 Pympler = { version = "*", optional = true }
@@ -319,14 +330,12 @@ all = [
     #   - systemd: this is a system-based requirement
 ]
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 # We pin development dependencies in poetry.lock so that our tests don't start
 # failing on new releases. Keeping lower bounds loose here means that dependabot
 # can bump versions without having to update the content-hash in the lockfile.
 # This helps prevents merge conflicts when running a batch of dependabot updates.
 ruff = "0.12.10"
-# Type checking only works with the pydantic.v1 compat module from pydantic v2
-pydantic = "^2"
 
 # Typechecking
 lxml-stubs = ">=0.4.0"
@@ -356,7 +365,7 @@ click = ">=8.1.3"
 # GitPython was == 3.1.14; bumped to 3.1.20, the first release with type hints.
 GitPython = ">=3.1.20"
 markdown-it-py = ">=3.0.0"
-pygithub = ">=1.55"
+pygithub = ">=1.59"
 # The following are executed as commands by the release script.
 twine = "*"
 # Towncrier min version comes from https://github.com/matrix-org/synapse/pull/3425. Rationale unclear.
@@ -381,10 +390,10 @@ build-backend = "poetry.core.masonry.api"
 # Skip unsupported platforms (by us or by Rust).
 # See https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip for the list of build targets.
 # We skip:
-#  - CPython and PyPy 3.8: EOLed
+#  - CPython 3.8: EOLed
 #  - musllinux i686: excluded to reduce number of wheels we build.
 #    c.f. https://github.com/matrix-org/synapse/pull/12595#discussion_r963107677
-skip = "cp38* pp38* *-musllinux_i686"
+skip = "cp38* *-musllinux_i686"
 # Enable non-default builds.
 # "pypy" used to be included by default up until cibuildwheel 3.
 enable = "pypy"

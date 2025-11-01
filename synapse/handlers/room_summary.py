@@ -22,7 +22,7 @@
 import itertools
 import logging
 import re
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 
 import attr
 
@@ -83,9 +83,9 @@ class _PaginationSession:
     # The time the pagination session was created, in milliseconds.
     creation_time_ms: int
     # The queue of rooms which are still to process.
-    room_queue: List["_RoomQueueEntry"]
+    room_queue: list["_RoomQueueEntry"]
     # A set of rooms which have been processed.
-    processed_rooms: Set[str]
+    processed_rooms: set[str]
 
 
 class RoomSummaryHandler:
@@ -112,14 +112,16 @@ class RoomSummaryHandler:
         # If a user tries to fetch the same page multiple times in quick succession,
         # only process the first attempt and return its result to subsequent requests.
         self._pagination_response_cache: ResponseCache[
-            Tuple[
+            tuple[
                 str,
                 str,
+                bool,
+                bool,
                 bool,
                 Optional[int],
                 Optional[int],
                 Optional[str],
-                Optional[Tuple[str, ...]],
+                Optional[tuple[str, ...]],
             ]
         ] = ResponseCache(
             clock=hs.get_clock(),
@@ -133,10 +135,12 @@ class RoomSummaryHandler:
         requester: Requester,
         requested_room_id: str,
         suggested_only: bool = False,
+        omit_remote_room_hierarchy: bool = False,
+        admin_skip_room_visibility_check: bool = False,
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
-        remote_room_hosts: Optional[Tuple[str, ...]] = None,
+        remote_room_hosts: Optional[tuple[str, ...]] = None,
     ) -> JsonDict:
         """
         Implementation of the room hierarchy C-S API.
@@ -146,6 +150,11 @@ class RoomSummaryHandler:
             requested_room_id: The room ID to start the hierarchy at (the "root" room).
             suggested_only: Whether we should only return children with the "suggested"
                 flag set.
+            omit_remote_room_hierarchy: Whether to skip reaching out over
+                federation to get information on rooms which the server
+                is not currently joined to
+            admin_skip_room_visibility_check: Whether to skip checking if the room can
+                be accessed by the requester, used for the admin endpoints.
             max_depth: The maximum depth in the tree to explore, must be a
                 non-negative integer.
 
@@ -173,6 +182,8 @@ class RoomSummaryHandler:
                 requester.user.to_string(),
                 requested_room_id,
                 suggested_only,
+                omit_remote_room_hierarchy,
+                admin_skip_room_visibility_check,
                 max_depth,
                 limit,
                 from_token,
@@ -182,6 +193,8 @@ class RoomSummaryHandler:
             requester.user.to_string(),
             requested_room_id,
             suggested_only,
+            omit_remote_room_hierarchy,
+            admin_skip_room_visibility_check,
             max_depth,
             limit,
             from_token,
@@ -193,10 +206,12 @@ class RoomSummaryHandler:
         requester: str,
         requested_room_id: str,
         suggested_only: bool = False,
+        omit_remote_room_hierarchy: bool = False,
+        admin_skip_room_visibility_check: bool = False,
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
-        remote_room_hosts: Optional[Tuple[str, ...]] = None,
+        remote_room_hosts: Optional[tuple[str, ...]] = None,
     ) -> JsonDict:
         """See docstring for SpaceSummaryHandler.get_room_hierarchy."""
 
@@ -204,17 +219,18 @@ class RoomSummaryHandler:
         local_room = await self._store.is_host_joined(
             requested_room_id, self._server_name
         )
-        if local_room and not await self._is_local_room_accessible(
-            requested_room_id, requester
-        ):
-            raise UnstableSpecAuthError(
-                403,
-                "User %s not in room %s, and room previews are disabled"
-                % (requester, requested_room_id),
-                errcode=Codes.NOT_JOINED,
-            )
+        if not admin_skip_room_visibility_check:
+            if local_room and not await self._is_local_room_accessible(
+                requested_room_id, requester
+            ):
+                raise UnstableSpecAuthError(
+                    403,
+                    "User %s not in room %s, and room previews are disabled"
+                    % (requester, requested_room_id),
+                    errcode=Codes.NOT_JOINED,
+                )
 
-        if not local_room:
+        if not local_room and not omit_remote_room_hierarchy:
             room_hierarchy = await self._summarize_remote_room_hierarchy(
                 _RoomQueueEntry(requested_room_id, remote_room_hosts or ()),
                 False,
@@ -223,12 +239,13 @@ class RoomSummaryHandler:
             if not root_room_entry or not await self._is_remote_room_accessible(
                 requester, requested_room_id, root_room_entry.room
             ):
-                raise UnstableSpecAuthError(
-                    403,
-                    "User %s not in room %s, and room previews are disabled"
-                    % (requester, requested_room_id),
-                    errcode=Codes.NOT_JOINED,
-                )
+                if not admin_skip_room_visibility_check:
+                    raise UnstableSpecAuthError(
+                        403,
+                        "User %s not in room %s, and room previews are disabled"
+                        % (requester, requested_room_id),
+                        errcode=Codes.NOT_JOINED,
+                    )
 
         # If this is continuing a previous session, pull the persisted data.
         if from_token:
@@ -240,13 +257,18 @@ class RoomSummaryHandler:
             except StoreError:
                 raise SynapseError(400, "Unknown pagination token", Codes.INVALID_PARAM)
 
-            # If the requester, room ID, suggested-only, or max depth were modified
-            # the session is invalid.
+            # If the requester, room ID, suggested-only, max depth,
+            # omit_remote_room_hierarchy, or admin_skip_room_visibility_check
+            # were modified the session is invalid.
             if (
                 requester != pagination_session["requester"]
                 or requested_room_id != pagination_session["room_id"]
                 or suggested_only != pagination_session["suggested_only"]
                 or max_depth != pagination_session["max_depth"]
+                or omit_remote_room_hierarchy
+                != pagination_session["omit_remote_room_hierarchy"]
+                or admin_skip_room_visibility_check
+                != pagination_session["admin_skip_room_visibility_check"]
             ):
                 raise SynapseError(400, "Unknown pagination token", Codes.INVALID_PARAM)
 
@@ -262,7 +284,7 @@ class RoomSummaryHandler:
             # Rooms we have already processed.
             processed_rooms = set()
 
-        rooms_result: List[JsonDict] = []
+        rooms_result: list[JsonDict] = []
 
         # Cap the limit to a server-side maximum.
         if limit is None:
@@ -286,12 +308,12 @@ class RoomSummaryHandler:
             # federation. The rationale for caching these and *maybe* using them
             # is to prefer any information local to the homeserver before trusting
             # data received over federation.
-            children_room_entries: Dict[str, JsonDict] = {}
+            children_room_entries: dict[str, JsonDict] = {}
             # A set of room IDs which are children that did not have information
             # returned over federation and are known to be inaccessible to the
             # current server. We should not reach out over federation to try to
             # summarise these rooms.
-            inaccessible_children: Set[str] = set()
+            inaccessible_children: set[str] = set()
 
             # If the room is known locally, summarise it!
             is_in_room = await self._store.is_host_joined(room_id, self._server_name)
@@ -301,6 +323,7 @@ class RoomSummaryHandler:
                     None,
                     room_id,
                     suggested_only,
+                    admin_skip_room_visibility_check=admin_skip_room_visibility_check,
                 )
 
             # Otherwise, attempt to use information for federation.
@@ -321,7 +344,7 @@ class RoomSummaryHandler:
 
                 # If the above isn't true, attempt to fetch the room
                 # information over federation.
-                else:
+                elif not omit_remote_room_hierarchy:
                     (
                         room_entry,
                         children_room_entries,
@@ -378,6 +401,8 @@ class RoomSummaryHandler:
                     "room_id": requested_room_id,
                     "suggested_only": suggested_only,
                     "max_depth": max_depth,
+                    "omit_remote_room_hierarchy": omit_remote_room_hierarchy,
+                    "admin_skip_room_visibility_check": admin_skip_room_visibility_check,
                     # The stored state.
                     "room_queue": [
                         attr.astuple(room_entry) for room_entry in room_queue
@@ -418,8 +443,8 @@ class RoomSummaryHandler:
             # Room is inaccessible to the requesting server.
             raise SynapseError(404, "Unknown room: %s" % (requested_room_id,))
 
-        children_rooms_result: List[JsonDict] = []
-        inaccessible_children: List[str] = []
+        children_rooms_result: list[JsonDict] = []
+        inaccessible_children: list[str] = []
 
         # Iterate through each child and potentially add it, but not its children,
         # to the response.
@@ -460,6 +485,7 @@ class RoomSummaryHandler:
         room_id: str,
         suggested_only: bool,
         include_children: bool = True,
+        admin_skip_room_visibility_check: bool = False,
     ) -> Optional["_RoomEntry"]:
         """
         Generate a room entry and a list of event entries for a given room.
@@ -476,11 +502,16 @@ class RoomSummaryHandler:
                 Otherwise, all children are returned.
             include_children:
                 Whether to include the events of any children.
+            admin_skip_room_visibility_check: Whether to skip checking if the room
+                can be accessed by the requester, used for the admin endpoints.
 
         Returns:
             A room entry if the room should be returned. None, otherwise.
         """
-        if not await self._is_local_room_accessible(room_id, requester, origin):
+        if (
+            not admin_skip_room_visibility_check
+            and not await self._is_local_room_accessible(room_id, requester, origin)
+        ):
             return None
 
         room_entry = await self._build_room_entry(room_id, for_federation=bool(origin))
@@ -496,7 +527,7 @@ class RoomSummaryHandler:
             # we only care about suggested children
             child_events = filter(_is_suggested_child_event, child_events)
 
-        stripped_events: List[JsonDict] = [
+        stripped_events: list[JsonDict] = [
             {
                 "type": e.type,
                 "state_key": e.state_key,
@@ -510,7 +541,7 @@ class RoomSummaryHandler:
 
     async def _summarize_remote_room_hierarchy(
         self, room: "_RoomQueueEntry", suggested_only: bool
-    ) -> Tuple[Optional["_RoomEntry"], Dict[str, JsonDict], Set[str]]:
+    ) -> tuple[Optional["_RoomEntry"], dict[str, JsonDict], set[str]]:
         """
         Request room entries and a list of event entries for a given room by querying a remote server.
 
@@ -835,7 +866,7 @@ class RoomSummaryHandler:
         self,
         requester: Optional[str],
         room_id: str,
-        remote_room_hosts: Optional[List[str]] = None,
+        remote_room_hosts: Optional[list[str]] = None,
     ) -> JsonDict:
         """
         Implementation of the room summary C-S API from MSC3266
@@ -995,7 +1026,7 @@ _INVALID_ORDER_CHARS_RE = re.compile(r"[^\x20-\x7E]")
 
 def _child_events_comparison_key(
     child: EventBase,
-) -> Tuple[bool, Optional[str], int, str]:
+) -> tuple[bool, Optional[str], int, str]:
     """
     Generate a value for comparing two child events for ordering.
 

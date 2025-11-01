@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from twisted.web.server import Request
 
@@ -52,7 +52,7 @@ class ReplicationAddedDelayedEventRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
-    ) -> Tuple[int, Dict[str, Optional[JsonMapping]]]:
+    ) -> tuple[int, dict[str, Optional[JsonMapping]]]:
         self.handler.on_added(int(content["next_send_ts"]))
 
         return 200, {}

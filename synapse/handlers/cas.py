@@ -20,7 +20,7 @@
 #
 import logging
 import urllib.parse
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Optional
 from xml.etree import ElementTree as ET
 
 import attr
@@ -54,7 +54,7 @@ class CasError(Exception):
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class CasResponse:
     username: str
-    attributes: Dict[str, List[Optional[str]]]
+    attributes: dict[str, list[Optional[str]]]
 
 
 class CasHandler:
@@ -99,7 +99,7 @@ class CasHandler:
 
         self._sso_handler.register_identity_provider(self)
 
-    def _build_service_param(self, args: Dict[str, str]) -> str:
+    def _build_service_param(self, args: dict[str, str]) -> str:
         """
         Generates a value to use as the "service" parameter when redirecting or
         querying the CAS service.
@@ -116,7 +116,7 @@ class CasHandler:
         )
 
     async def _validate_ticket(
-        self, ticket: str, service_args: Dict[str, str]
+        self, ticket: str, service_args: dict[str, str]
     ) -> CasResponse:
         """
         Validate a CAS ticket with the server, and return the parsed the response.
@@ -186,7 +186,7 @@ class CasHandler:
 
         # Iterate through the nodes and pull out the user and any extra attributes.
         user = None
-        attributes: Dict[str, List[Optional[str]]] = {}
+        attributes: dict[str, list[Optional[str]]] = {}
         for child in root[0]:
             if child.tag.endswith("user"):
                 user = child.text

@@ -20,7 +20,7 @@
 #
 
 import urllib.parse
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Optional
 from unittest.mock import AsyncMock, patch
 
 from twisted.internet.testing import MemoryReactor
@@ -48,7 +48,7 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
     ]
     hijack_auth = False
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         # We need to enable msc1849 support for aggregations
         config = super().default_config()
 
@@ -69,7 +69,7 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         res = self.helper.send(self.room, body="Hi!", tok=self.user_token)
         self.parent_id = res["event_id"]
 
-    def _create_user(self, localpart: str) -> Tuple[str, str]:
+    def _create_user(self, localpart: str) -> tuple[str, str]:
         user_id = self.register_user(localpart, "abc123")
         access_token = self.login(localpart, "abc123")
 
@@ -123,7 +123,7 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(expected_response_code, channel.code, channel.json_body)
         return channel
 
-    def _get_related_events(self) -> List[str]:
+    def _get_related_events(self) -> list[str]:
         """
         Requests /relations on the parent ID and returns a list of event IDs.
         """
@@ -149,7 +149,7 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, channel.json_body)
         return channel.json_body["unsigned"].get("m.relations", {})
 
-    def _find_event_in_chunk(self, events: List[JsonDict]) -> JsonDict:
+    def _find_event_in_chunk(self, events: list[JsonDict]) -> JsonDict:
         """
         Find the parent event in a chunk of events and assert that it has the proper bundled aggregations.
         """
@@ -846,7 +846,7 @@ class RelationPaginationTestCase(BaseRelationsTestCase):
             expected_event_ids.append(channel.json_body["event_id"])
 
         prev_token: Optional[str] = ""
-        found_event_ids: List[str] = []
+        found_event_ids: list[str] = []
         for _ in range(20):
             from_token = ""
             if prev_token:
@@ -1484,9 +1484,9 @@ class RelationIgnoredUserTestCase(BaseRelationsTestCase):
     def _test_ignored_user(
         self,
         relation_type: str,
-        allowed_event_ids: List[str],
-        ignored_event_ids: List[str],
-    ) -> Tuple[JsonDict, JsonDict]:
+        allowed_event_ids: list[str],
+        ignored_event_ids: list[str],
+    ) -> tuple[JsonDict, JsonDict]:
         """
         Fetch the relations and ensure they're all there, then ignore user2, and
         repeat.
@@ -1600,7 +1600,7 @@ class RelationRedactionTestCase(BaseRelationsTestCase):
         )
         self.assertEqual(200, channel.code, channel.json_body)
 
-    def _get_threads(self) -> List[Tuple[str, str]]:
+    def _get_threads(self) -> list[tuple[str, str]]:
         """Request the threads in the room and returns a list of thread ID and latest event ID."""
         # Request the threads in the room.
         channel = self.make_request(
@@ -1793,7 +1793,7 @@ class RelationRedactionTestCase(BaseRelationsTestCase):
 
 
 class ThreadsTestCase(BaseRelationsTestCase):
-    def _get_threads(self, body: JsonDict) -> List[Tuple[str, str]]:
+    def _get_threads(self, body: JsonDict) -> list[tuple[str, str]]:
         return [
             (
                 ev["event_id"],

@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import attr
 
@@ -119,7 +119,7 @@ class RetentionConfig(Config):
                 " greater than 'allowed_lifetime_max'"
             )
 
-        self.retention_purge_jobs: List[RetentionPurgeJob] = []
+        self.retention_purge_jobs: list[RetentionPurgeJob] = []
         for purge_job_config in retention_config.get("purge_jobs", []):
             interval_config = purge_job_config.get("interval")
 

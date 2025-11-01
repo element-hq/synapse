@@ -28,13 +28,10 @@ from typing import (
     BinaryIO,
     Callable,
     Collection,
-    Dict,
     Generator,
     Iterable,
-    List,
     Mapping,
     Optional,
-    Tuple,
     Union,
 )
 
@@ -238,7 +235,7 @@ class TransportLayerClient:
 
     async def timestamp_to_event(
         self, destination: str, room_id: str, timestamp: int, direction: Direction
-    ) -> Union[JsonDict, List]:
+    ) -> Union[JsonDict, list]:
         """
         Calls a remote federating server at `destination` asking for their
         closest event to the given timestamp in the given direction.
@@ -428,7 +425,7 @@ class TransportLayerClient:
         omit_members: bool,
     ) -> "SendJoinResponse":
         path = _create_v2_path("/send_join/%s/%s", room_id, event_id)
-        query_params: Dict[str, str] = {}
+        query_params: dict[str, str] = {}
         # lazy-load state on join
         query_params["omit_members"] = "true" if omit_members else "false"
 
@@ -442,7 +439,7 @@ class TransportLayerClient:
 
     async def send_leave_v1(
         self, destination: str, room_id: str, event_id: str, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         path = _create_v1_path("/send_leave/%s/%s", room_id, event_id)
 
         return await self.client.put_json(
@@ -508,7 +505,7 @@ class TransportLayerClient:
 
     async def send_invite_v1(
         self, destination: str, room_id: str, event_id: str, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         path = _create_v1_path("/invite/%s/%s", room_id, event_id)
 
         return await self.client.put_json(
@@ -533,7 +530,7 @@ class TransportLayerClient:
         remote_server: str,
         limit: Optional[int] = None,
         since_token: Optional[str] = None,
-        search_filter: Optional[Dict] = None,
+        search_filter: Optional[dict] = None,
         include_all_networks: bool = False,
         third_party_instance_id: Optional[str] = None,
     ) -> JsonDict:
@@ -546,7 +543,7 @@ class TransportLayerClient:
 
         if search_filter:
             # this uses MSC2197 (Search Filtering over Federation)
-            data: Dict[str, Any] = {"include_all_networks": include_all_networks}
+            data: dict[str, Any] = {"include_all_networks": include_all_networks}
             if third_party_instance_id:
                 data["third_party_instance_id"] = third_party_instance_id
             if limit:
@@ -570,7 +567,7 @@ class TransportLayerClient:
                     )
                 raise
         else:
-            args: Dict[str, Union[str, Iterable[str]]] = {
+            args: dict[str, Union[str, Iterable[str]]] = {
                 "include_all_networks": "true" if include_all_networks else "false"
             }
             if third_party_instance_id:
@@ -854,7 +851,7 @@ class TransportLayerClient:
         )
 
     async def get_account_status(
-        self, destination: str, user_ids: List[str]
+        self, destination: str, user_ids: list[str]
     ) -> JsonDict:
         """
         Args:
@@ -878,7 +875,7 @@ class TransportLayerClient:
         max_timeout_ms: int,
         download_ratelimiter: Ratelimiter,
         ip_address: str,
-    ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+    ) -> tuple[int, dict[bytes, list[bytes]]]:
         path = f"/_matrix/media/r0/download/{destination}/{media_id}"
         return await self.client.get_file(
             destination,
@@ -905,7 +902,7 @@ class TransportLayerClient:
         max_timeout_ms: int,
         download_ratelimiter: Ratelimiter,
         ip_address: str,
-    ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+    ) -> tuple[int, dict[bytes, list[bytes]]]:
         path = f"/_matrix/media/v3/download/{destination}/{media_id}"
         return await self.client.get_file(
             destination,
@@ -936,7 +933,7 @@ class TransportLayerClient:
         max_timeout_ms: int,
         download_ratelimiter: Ratelimiter,
         ip_address: str,
-    ) -> Tuple[int, Dict[bytes, List[bytes]], bytes]:
+    ) -> tuple[int, dict[bytes, list[bytes]], bytes]:
         path = f"/_matrix/federation/v1/media/download/{media_id}"
         return await self.client.federation_get_file(
             destination,
@@ -993,9 +990,9 @@ class SendJoinResponse:
     """The parsed response of a `/send_join` request."""
 
     # The list of auth events from the /send_join response.
-    auth_events: List[EventBase]
+    auth_events: list[EventBase]
     # The list of state from the /send_join response.
-    state: List[EventBase]
+    state: list[EventBase]
     # The raw join event from the /send_join response.
     event_dict: JsonDict
     # The parsed join event from the /send_join response. This will be None if
@@ -1006,19 +1003,19 @@ class SendJoinResponse:
     members_omitted: bool = False
 
     # List of servers in the room
-    servers_in_room: Optional[List[str]] = None
+    servers_in_room: Optional[list[str]] = None
 
 
 @attr.s(slots=True, auto_attribs=True)
 class StateRequestResponse:
     """The parsed response of a `/state` request."""
 
-    auth_events: List[EventBase]
-    state: List[EventBase]
+    auth_events: list[EventBase]
+    state: list[EventBase]
 
 
 @ijson.coroutine
-def _event_parser(event_dict: JsonDict) -> Generator[None, Tuple[str, Any], None]:
+def _event_parser(event_dict: JsonDict) -> Generator[None, tuple[str, Any], None]:
     """Helper function for use with `ijson.kvitems_coro` to parse key-value pairs
     to add them to a given dictionary.
     """
@@ -1030,7 +1027,7 @@ def _event_parser(event_dict: JsonDict) -> Generator[None, Tuple[str, Any], None
 
 @ijson.coroutine
 def _event_list_parser(
-    room_version: RoomVersion, events: List[EventBase]
+    room_version: RoomVersion, events: list[EventBase]
 ) -> Generator[None, JsonDict, None]:
     """Helper function for use with `ijson.items_coro` to parse an array of
     events and add them to the given list.
@@ -1086,7 +1083,7 @@ class SendJoinParser(ByteParser[SendJoinResponse]):
     def __init__(self, room_version: RoomVersion, v1_api: bool):
         self._response = SendJoinResponse([], [], event_dict={})
         self._room_version = room_version
-        self._coros: List[Generator[None, bytes, None]] = []
+        self._coros: list[Generator[None, bytes, None]] = []
 
         # The V1 API has the shape of `[200, {...}]`, which we handle by
         # prefixing with `item.*`.
@@ -1159,7 +1156,7 @@ class _StateParser(ByteParser[StateRequestResponse]):
     def __init__(self, room_version: RoomVersion):
         self._response = StateRequestResponse([], [])
         self._room_version = room_version
-        self._coros: List[Generator[None, bytes, None]] = [
+        self._coros: list[Generator[None, bytes, None]] = [
             ijson.items_coro(
                 _event_list_parser(room_version, self._response.state),
                 "pdus.item",

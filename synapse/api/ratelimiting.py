@@ -20,7 +20,7 @@
 #
 #
 
-from typing import TYPE_CHECKING, Dict, Hashable, Optional, Tuple
+from typing import TYPE_CHECKING, Hashable, Optional
 
 from synapse.api.errors import LimitExceededError
 from synapse.config.ratelimiting import RatelimitSettings
@@ -92,7 +92,7 @@ class Ratelimiter:
         #   * The number of tokens currently in the bucket,
         #   * The time point when the bucket was last completely empty, and
         #   * The rate_hz (leak rate) of this particular bucket.
-        self.actions: Dict[Hashable, Tuple[float, float, float]] = {}
+        self.actions: dict[Hashable, tuple[float, float, float]] = {}
 
         self.clock.looping_call(self._prune_message_counts, 60 * 1000)
 
@@ -109,7 +109,7 @@ class Ratelimiter:
 
     def _get_action_counts(
         self, key: Hashable, time_now_s: float
-    ) -> Tuple[float, float, float]:
+    ) -> tuple[float, float, float]:
         """Retrieve the action counts, with a fallback representing an empty bucket."""
         return self.actions.get(key, (0.0, time_now_s, 0.0))
 
@@ -122,7 +122,7 @@ class Ratelimiter:
         update: bool = True,
         n_actions: int = 1,
         _time_now_s: Optional[float] = None,
-    ) -> Tuple[bool, float]:
+    ) -> tuple[bool, float]:
         """Can the entity (e.g. user or IP address) perform the action?
 
         Checks if the user has ratelimiting disabled in the database by looking

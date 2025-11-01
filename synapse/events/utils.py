@@ -27,8 +27,6 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
-    List,
     Mapping,
     Match,
     MutableMapping,
@@ -239,7 +237,7 @@ def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDic
     return allowed_fields
 
 
-def _copy_field(src: JsonDict, dst: JsonDict, field: List[str]) -> None:
+def _copy_field(src: JsonDict, dst: JsonDict, field: list[str]) -> None:
     """Copy the field in 'src' to 'dst'.
 
     For example, if src={"foo":{"bar":5}} and dst={}, and field=["foo","bar"]
@@ -292,7 +290,7 @@ def _escape_slash(m: Match[str]) -> str:
     return m.group(0)
 
 
-def _split_field(field: str) -> List[str]:
+def _split_field(field: str) -> list[str]:
     """
     Splits strings on unescaped dots and removes escaping.
 
@@ -333,7 +331,7 @@ def _split_field(field: str) -> List[str]:
     return result
 
 
-def only_fields(dictionary: JsonDict, fields: List[str]) -> JsonDict:
+def only_fields(dictionary: JsonDict, fields: list[str]) -> JsonDict:
     """Return a new dict with only the fields in 'dictionary' which are present
     in 'fields'.
 
@@ -419,7 +417,7 @@ class SerializeEventConfig:
     # the transaction_id in the unsigned section of the event.
     requester: Optional[Requester] = None
     # List of event fields to include. If empty, all fields will be returned.
-    only_event_fields: Optional[List[str]] = None
+    only_event_fields: Optional[list[str]] = None
     # Some events can have stripped room state stored in the `unsigned` field.
     # This is required for invite and knock functionality. If this option is
     # False, that state will be removed from the event before it is returned.
@@ -573,7 +571,7 @@ class EventClientSerializer:
     def __init__(self, hs: "HomeServer") -> None:
         self._store = hs.get_datastores().main
         self._auth = hs.get_auth()
-        self._add_extra_fields_to_unsigned_client_event_callbacks: List[
+        self._add_extra_fields_to_unsigned_client_event_callbacks: list[
             ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
         ] = []
 
@@ -583,7 +581,7 @@ class EventClientSerializer:
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
-        bundle_aggregations: Optional[Dict[str, "BundledAggregations"]] = None,
+        bundle_aggregations: Optional[dict[str, "BundledAggregations"]] = None,
     ) -> JsonDict:
         """Serializes a single event.
 
@@ -641,7 +639,7 @@ class EventClientSerializer:
         event: EventBase,
         time_now: int,
         config: SerializeEventConfig,
-        bundled_aggregations: Dict[str, "BundledAggregations"],
+        bundled_aggregations: dict[str, "BundledAggregations"],
         serialized_event: JsonDict,
     ) -> None:
         """Potentially injects bundled aggregations into the unsigned portion of the serialized event.
@@ -718,8 +716,8 @@ class EventClientSerializer:
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
-        bundle_aggregations: Optional[Dict[str, "BundledAggregations"]] = None,
-    ) -> List[JsonDict]:
+        bundle_aggregations: Optional[dict[str, "BundledAggregations"]] = None,
+    ) -> list[JsonDict]:
         """Serializes multiple events.
 
         Args:
@@ -763,7 +761,7 @@ PowerLevelsContent = Mapping[str, Union[_PowerLevel, Mapping[str, _PowerLevel]]]
 
 def copy_and_fixup_power_levels_contents(
     old_power_levels: PowerLevelsContent,
-) -> Dict[str, Union[int, Dict[str, int]]]:
+) -> dict[str, Union[int, dict[str, int]]]:
     """Copy the content of a power_levels event, unfreezing immutabledicts along the way.
 
     We accept as input power level values which are strings, provided they represent an
@@ -779,11 +777,11 @@ def copy_and_fixup_power_levels_contents(
     if not isinstance(old_power_levels, collections.abc.Mapping):
         raise TypeError("Not a valid power-levels content: %r" % (old_power_levels,))
 
-    power_levels: Dict[str, Union[int, Dict[str, int]]] = {}
+    power_levels: dict[str, Union[int, dict[str, int]]] = {}
 
     for k, v in old_power_levels.items():
         if isinstance(v, collections.abc.Mapping):
-            h: Dict[str, int] = {}
+            h: dict[str, int] = {}
             power_levels[k] = h
             for k1, v1 in v.items():
                 _copy_power_level_value_as_integer(v1, h, k1)

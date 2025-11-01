@@ -21,7 +21,6 @@
 #
 import logging
 import sys
-from typing import Dict, List
 
 from twisted.web.resource import Resource
 
@@ -181,7 +180,7 @@ class GenericWorkerServer(HomeServer):
 
         # We always include an admin resource that we populate with servlets as needed
         admin_resource = JsonResource(self, canonical_json=False)
-        resources: Dict[str, Resource] = {
+        resources: dict[str, Resource] = {
             # We always include a health resource.
             "/health": HealthResource(),
             "/_synapse/admin": admin_resource,
@@ -314,7 +313,7 @@ class GenericWorkerServer(HomeServer):
         self.get_replication_command_handler().start_replication(self)
 
 
-def load_config(argv_options: List[str]) -> HomeServerConfig:
+def load_config(argv_options: list[str]) -> HomeServerConfig:
     """
     Parse the commandline and config files (does not generate config)
 

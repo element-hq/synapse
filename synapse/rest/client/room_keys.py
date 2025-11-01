@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.server import HttpServer
@@ -52,7 +52,7 @@ class RoomKeysServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, room_id: Optional[str], session_id: Optional[str]
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """
         Uploads one or more encrypted E2E room keys for backup purposes.
         room_id: the ID of the room the keys are for (optional)
@@ -147,7 +147,7 @@ class RoomKeysServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: Optional[str], session_id: Optional[str]
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """
         Retrieves one or more encrypted E2E room keys for backup purposes.
         Symmetric with the PUT version of the API.
@@ -234,7 +234,7 @@ class RoomKeysServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, room_id: Optional[str], session_id: Optional[str]
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """
         Deletes one or more encrypted E2E room keys for a user for backup purposes.
 
@@ -267,7 +267,7 @@ class RoomKeysNewVersionServlet(RestServlet):
         self.auth = hs.get_auth()
         self.e2e_room_keys_handler = hs.get_e2e_room_keys_handler()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         """
         Retrieve the version information about the most current backup version (if any)
 
@@ -293,7 +293,7 @@ class RoomKeysNewVersionServlet(RestServlet):
                 raise SynapseError(404, "No backup found", Codes.NOT_FOUND)
         return 200, info
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         """
         Create a new backup version for this user's room_keys with the given
         info.  The version is allocated by the server and returned to the user
@@ -345,7 +345,7 @@ class RoomKeysVersionServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, version: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """
         Retrieve the version information about a given version of the user's
         room_keys backup.
@@ -374,7 +374,7 @@ class RoomKeysVersionServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, version: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """
         Delete the information about a given version of the user's
         room_keys backup. Doesn't delete the actual room data.
@@ -391,7 +391,7 @@ class RoomKeysVersionServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, version: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """
         Update the information about a given version of the user's room_keys backup.
 

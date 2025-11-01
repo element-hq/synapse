@@ -17,7 +17,7 @@
 import logging
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
@@ -62,7 +62,7 @@ class UpdateDelayedEventServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, delay_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         body = parse_json_object_from_request(request)
@@ -105,7 +105,7 @@ class DelayedEventsServlet(RestServlet):
         self.auth = hs.get_auth()
         self.delayed_events_handler = hs.get_delayed_events_handler()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]

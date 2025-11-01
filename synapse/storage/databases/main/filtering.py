@@ -20,7 +20,7 @@
 #
 #
 
-from typing import TYPE_CHECKING, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Optional, Union, cast
 
 from canonicaljson import encode_canonical_json
 
@@ -187,7 +187,7 @@ class FilteringWorkerStore(SQLBaseStore):
 
             sql = "SELECT MAX(filter_id) FROM user_filters WHERE full_user_id = ?"
             txn.execute(sql, (user_id.to_string(),))
-            max_id = cast(Tuple[Optional[int]], txn.fetchone())[0]
+            max_id = cast(tuple[Optional[int]], txn.fetchone())[0]
             if max_id is None:
                 filter_id = 0
             else:

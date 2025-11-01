@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, List, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 from twisted.python.failure import Failure
 
@@ -91,7 +91,7 @@ class PaginationHandler:
 
         self.pagination_lock = ReadWriteLock()
         # IDs of rooms in which there currently an active purge *or delete* operation.
-        self._purges_in_progress_by_room: Set[str] = set()
+        self._purges_in_progress_by_room: set[str] = set()
         self._event_serializer = hs.get_event_client_serializer()
 
         self._retention_default_max_lifetime = (
@@ -279,7 +279,7 @@ class PaginationHandler:
     async def _purge_history(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         """
         Scheduler action to purge some history of a room.
         """
@@ -343,7 +343,7 @@ class PaginationHandler:
 
     async def get_delete_tasks_by_room(
         self, room_id: str, only_active: Optional[bool] = False
-    ) -> List[ScheduledTask]:
+    ) -> list[ScheduledTask]:
         """Get complete, failed or active delete tasks by room
 
         Args:
@@ -363,7 +363,7 @@ class PaginationHandler:
     async def _purge_room(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         """
         Scheduler action to purge a room.
         """
@@ -523,7 +523,7 @@ class PaginationHandler:
             # We use a `Set` because there can be multiple events at a given depth
             # and we only care about looking at the unique continum of depths to
             # find gaps.
-            event_depths: Set[int] = {event.depth for event in events}
+            event_depths: set[int] = {event.depth for event in events}
             sorted_event_depths = sorted(event_depths)
 
             # Inspect the depths of the returned events to see if there are any gaps
@@ -691,7 +691,7 @@ class PaginationHandler:
     async def _shutdown_and_purge_room(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         """
         Scheduler action to shutdown and purge a room.
         """

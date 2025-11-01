@@ -26,13 +26,10 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Generator,
     Iterable,
-    List,
     Mapping,
     Optional,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -559,7 +556,7 @@ class ModuleApi:
         check_3pid_auth: Optional[CHECK_3PID_AUTH_CALLBACK] = None,
         on_logged_out: Optional[ON_LOGGED_OUT_CALLBACK] = None,
         auth_checkers: Optional[
-            Dict[Tuple[str, Tuple[str, ...]], CHECK_AUTH_CALLBACK]
+            dict[tuple[str, tuple[str, ...]], CHECK_AUTH_CALLBACK]
         ] = None,
         is_3pid_allowed: Optional[IS_3PID_ALLOWED_CALLBACK] = None,
         get_username_for_registration: Optional[
@@ -829,7 +826,7 @@ class ModuleApi:
         user_id = UserID.from_string(f"@{localpart}:{server_name}")
         return await self._store.get_profileinfo(user_id)
 
-    async def get_threepids_for_user(self, user_id: str) -> List[Dict[str, str]]:
+    async def get_threepids_for_user(self, user_id: str) -> list[dict[str, str]]:
         """Look up the threepids (email addresses and phone numbers) associated with the
         given Matrix user ID.
 
@@ -865,8 +862,8 @@ class ModuleApi:
         self,
         localpart: str,
         displayname: Optional[str] = None,
-        emails: Optional[List[str]] = None,
-    ) -> Generator["defer.Deferred[Any]", Any, Tuple[str, str]]:
+        emails: Optional[list[str]] = None,
+    ) -> Generator["defer.Deferred[Any]", Any, tuple[str, str]]:
         """Registers a new user with given localpart and optional displayname, emails.
 
         Also returns an access token for the new user.
@@ -896,7 +893,7 @@ class ModuleApi:
         self,
         localpart: str,
         displayname: Optional[str] = None,
-        emails: Optional[List[str]] = None,
+        emails: Optional[list[str]] = None,
         admin: bool = False,
     ) -> "defer.Deferred[str]":
         """Registers a new user with given localpart and optional displayname, emails.
@@ -931,7 +928,7 @@ class ModuleApi:
         user_id: str,
         device_id: Optional[str] = None,
         initial_display_name: Optional[str] = None,
-    ) -> "defer.Deferred[Tuple[str, str, Optional[int], Optional[str]]]":
+    ) -> "defer.Deferred[tuple[str, str, Optional[int], Optional[str]]]":
         """Register a device for a user and generate an access token.
 
         Added in Synapse v1.2.0.
@@ -1085,7 +1082,7 @@ class ModuleApi:
         )
 
     async def invalidate_cache(
-        self, cached_func: CachedFunction, keys: Tuple[Any, ...]
+        self, cached_func: CachedFunction, keys: tuple[Any, ...]
     ) -> None:
         """Invalidate a cache entry of a cached function across workers. The cached function
         needs to be registered on all workers first with `register_cached_function`.
@@ -1138,7 +1135,7 @@ class ModuleApi:
 
     @defer.inlineCallbacks
     def get_state_events_in_room(
-        self, room_id: str, types: Iterable[Tuple[str, Optional[str]]]
+        self, room_id: str, types: Iterable[tuple[str, Optional[str]]]
     ) -> Generator[defer.Deferred, Any, Iterable[EventBase]]:
         """Gets current state events for the given room.
 
@@ -1170,7 +1167,7 @@ class ModuleApi:
         room_id: str,
         new_membership: str,
         content: Optional[JsonDict] = None,
-        remote_room_hosts: Optional[List[str]] = None,
+        remote_room_hosts: Optional[list[str]] = None,
     ) -> EventBase:
         """Updates the membership of a user to the given value.
 
@@ -1346,7 +1343,7 @@ class ModuleApi:
             )
 
     async def set_presence_for_users(
-        self, users: Mapping[str, Tuple[str, Optional[str]]]
+        self, users: Mapping[str, tuple[str, Optional[str]]]
     ) -> None:
         """
         Update the internal presence state of users.
@@ -1490,7 +1487,7 @@ class ModuleApi:
         content: JsonDict,
         tweaks: Optional[JsonMapping] = None,
         default_payload: Optional[JsonMapping] = None,
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         """Send an HTTP push notification that is forwarded to the registered push gateway
         for the specified user/device.
 
@@ -1554,9 +1551,9 @@ class ModuleApi:
 
     def read_templates(
         self,
-        filenames: List[str],
+        filenames: list[str],
         custom_template_directory: Optional[str] = None,
-    ) -> List[jinja2.Template]:
+    ) -> list[jinja2.Template]:
         """Read and load the content of the template files at the given location.
         By default, Synapse will look for these templates in its configured template
         directory, but another directory to search in can be provided.
@@ -1595,7 +1592,7 @@ class ModuleApi:
 
     async def get_user_ip_and_agents(
         self, user_id: str, since_ts: int = 0
-    ) -> List[UserIpAndAgent]:
+    ) -> list[UserIpAndAgent]:
         """
         Return the list of user IPs and agents for a user.
 
@@ -1638,7 +1635,7 @@ class ModuleApi:
     async def get_room_state(
         self,
         room_id: str,
-        event_filter: Optional[Iterable[Tuple[str, Optional[str]]]] = None,
+        event_filter: Optional[Iterable[tuple[str, Optional[str]]]] = None,
     ) -> StateMap[EventBase]:
         """Returns the current state of the given room.
 
@@ -1803,7 +1800,7 @@ class ModuleApi:
         await self._store.add_user_bound_threepid(user_id, medium, address, id_server)
 
     def check_push_rule_actions(
-        self, actions: List[Union[str, Dict[str, str]]]
+        self, actions: list[Union[str, dict[str, str]]]
     ) -> None:
         """Checks if the given push rule actions are valid according to the Matrix
         specification.
@@ -1827,7 +1824,7 @@ class ModuleApi:
         scope: str,
         kind: str,
         rule_id: str,
-        actions: List[Union[str, Dict[str, str]]],
+        actions: list[Union[str, dict[str, str]]],
     ) -> None:
         """Changes the actions of an existing push rule for the given user.
 
@@ -1866,7 +1863,7 @@ class ModuleApi:
 
     async def get_monthly_active_users_by_service(
         self, start_timestamp: Optional[int] = None, end_timestamp: Optional[int] = None
-    ) -> List[Tuple[str, str]]:
+    ) -> list[tuple[str, str]]:
         """Generates list of monthly active users and their services.
         Please see corresponding storage docstring for more details.
 
@@ -1912,7 +1909,7 @@ class ModuleApi:
             return RoomAlias.from_string(room_alias_str)
         return None
 
-    async def lookup_room_alias(self, room_alias: str) -> Tuple[str, List[str]]:
+    async def lookup_room_alias(self, room_alias: str) -> tuple[str, list[str]]:
         """
         Get the room ID associated with a room alias.
 
@@ -1942,7 +1939,7 @@ class ModuleApi:
         config: JsonDict,
         ratelimit: bool = True,
         creator_join_profile: Optional[JsonDict] = None,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, Optional[str]]:
         """Creates a new room.
 
         Added in Synapse v1.65.0.

@@ -27,12 +27,9 @@ from typing import (
     Any,
     BinaryIO,
     Callable,
-    Dict,
-    List,
     Mapping,
     Optional,
     Protocol,
-    Tuple,
     Union,
 )
 
@@ -135,10 +132,10 @@ RawHeaders = Union[Mapping[str, "RawHeaderValue"], Mapping[bytes, "RawHeaderValu
 # the entries can either be Lists or bytes.
 RawHeaderValue = Union[
     StrSequence,
-    List[bytes],
-    List[Union[str, bytes]],
-    Tuple[bytes, ...],
-    Tuple[Union[str, bytes], ...],
+    list[bytes],
+    list[Union[str, bytes]],
+    tuple[bytes, ...],
+    tuple[Union[str, bytes], ...],
 ]
 
 
@@ -205,7 +202,7 @@ class _IPBlockingResolver:
     def resolveHostName(
         self, recv: IResolutionReceiver, hostname: str, portNumber: int = 0
     ) -> IResolutionReceiver:
-        addresses: List[IAddress] = []
+        addresses: list[IAddress] = []
 
         def _callback() -> None:
             has_bad_ip = False
@@ -349,7 +346,7 @@ class BaseHttpClient:
     def __init__(
         self,
         hs: "HomeServer",
-        treq_args: Optional[Dict[str, Any]] = None,
+        treq_args: Optional[dict[str, Any]] = None,
     ):
         self.hs = hs
         self.server_name = hs.hostname
@@ -479,7 +476,7 @@ class BaseHttpClient:
     async def post_urlencoded_get_json(
         self,
         uri: str,
-        args: Optional[Mapping[str, Union[str, List[str]]]] = None,
+        args: Optional[Mapping[str, Union[str, list[str]]]] = None,
         headers: Optional[RawHeaders] = None,
     ) -> Any:
         """
@@ -707,7 +704,7 @@ class BaseHttpClient:
         max_size: Optional[int] = None,
         headers: Optional[RawHeaders] = None,
         is_allowed_content_type: Optional[Callable[[str], bool]] = None,
-    ) -> Tuple[int, Dict[bytes, List[bytes]], str, int]:
+    ) -> tuple[int, dict[bytes, list[bytes]], str, int]:
         """GETs a file from a given URL
         Args:
             url: The URL to GET
@@ -815,7 +812,7 @@ class SimpleHttpClient(BaseHttpClient):
     def __init__(
         self,
         hs: "HomeServer",
-        treq_args: Optional[Dict[str, Any]] = None,
+        treq_args: Optional[dict[str, Any]] = None,
         ip_allowlist: Optional[IPSet] = None,
         ip_blocklist: Optional[IPSet] = None,
         use_proxy: bool = False,

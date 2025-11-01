@@ -22,8 +22,10 @@
 from contextlib import contextmanager
 from os import PathLike
 from pathlib import Path
-from typing import Generator, Optional, Union
+from typing import Generator, Optional, Union, cast
 from unittest.mock import patch
+
+from packaging.markers import default_environment as packaging_default_environment
 
 from synapse.util.check_dependencies import (
     DependencyException,
@@ -77,6 +79,22 @@ class TestDependencyChecker(TestCase):
         with patch(
             "synapse.util.check_dependencies.metadata.distribution",
             mock_distribution,
+        ):
+            yield
+
+    @contextmanager
+    def mock_python_version(self, version: str) -> Generator[None, None, None]:
+        """Override the marker environment to report the supplied `python_version`."""
+
+        def fake_default_environment() -> dict[str, str]:
+            env = cast(dict[str, str], dict(packaging_default_environment()))
+            env["python_version"] = version
+            env["python_full_version"] = f"{version}.0"
+            return env
+
+        with patch(
+            "synapse.util.check_dependencies.default_environment",
+            side_effect=fake_default_environment,
         ):
             yield
 
@@ -191,3 +209,35 @@ class TestDependencyChecker(TestCase):
             with self.mock_installed_package(old):
                 # We also ignore old versions of setuptools_rust
                 check_requirements()
+
+    def test_python_version_markers_respected(self) -> None:
+        """
+        Tests that python_version markers are properly respected.
+
+        Specifically that older versions of dependencies can be installed in
+        environments with older Python versions.
+        """
+        requirements = [
+            "pydantic ~= 2.8; python_version < '3.14'",
+            "pydantic ~= 2.12; python_version >= '3.14'",
+        ]
+
+        with patch(
+            "synapse.util.check_dependencies.metadata.requires",
+            return_value=requirements,
+        ):
+            with self.mock_python_version("3.9"):
+                with self.mock_installed_package(DummyDistribution("2.12.3")):
+                    check_requirements()
+                with self.mock_installed_package(DummyDistribution("2.8.1")):
+                    check_requirements()
+                with self.mock_installed_package(DummyDistribution("2.7.0")):
+                    self.assertRaises(DependencyException, check_requirements)
+
+            with self.mock_python_version("3.14"):
+                with self.mock_installed_package(DummyDistribution("2.12.3")):
+                    check_requirements()
+                with self.mock_installed_package(DummyDistribution("2.8.1")):
+                    self.assertRaises(DependencyException, check_requirements)
+                with self.mock_installed_package(DummyDistribution("2.7.0")):
+                    self.assertRaises(DependencyException, check_requirements)

@@ -22,7 +22,7 @@ import platform
 import sqlite3
 import struct
 import threading
-from typing import TYPE_CHECKING, Any, List, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from synapse.storage.engines import BaseDatabaseEngine
 from synapse.storage.engines._base import AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER
@@ -68,11 +68,6 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
         """Do we support using `a = ANY(?)` and passing a list"""
         return False
 
-    @property
-    def supports_returning(self) -> bool:
-        """Do we support the `RETURNING` clause in insert/update/delete?"""
-        return sqlite3.sqlite_version_info >= (3, 35, 0)
-
     def check_database(
         self, db_conn: sqlite3.Connection, allow_outdated_version: bool = False
     ) -> None:
@@ -80,8 +75,8 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
             # Synapse is untested against older SQLite versions, and we don't want
             # to let users upgrade to a version of Synapse with broken support for their
             # sqlite version, because it risks leaving them with a half-upgraded db.
-            if sqlite3.sqlite_version_info < (3, 27, 0):
-                raise RuntimeError("Synapse requires sqlite 3.27 or above.")
+            if sqlite3.sqlite_version_info < (3, 37, 2):
+                raise RuntimeError("Synapse requires sqlite 3.37.2 or above.")
 
     def check_new_database(self, txn: Cursor) -> None:
         """Gets called when setting up a brand new database. This allows us to
@@ -182,7 +177,7 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
 # Following functions taken from: https://github.com/coleifer/peewee
 
 
-def _parse_match_info(buf: bytes) -> List[int]:
+def _parse_match_info(buf: bytes) -> list[int]:
     bufsize = len(buf)
     return [struct.unpack("@I", buf[i : i + 4])[0] for i in range(0, bufsize, 4)]
 

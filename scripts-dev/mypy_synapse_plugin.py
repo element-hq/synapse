@@ -24,7 +24,7 @@ can crop up, e.g the cache descriptors.
 """
 
 import enum
-from typing import Callable, Mapping, Optional, Tuple, Type, Union
+from typing import Callable, Mapping, Optional, Union
 
 import attr
 import mypy.types
@@ -184,8 +184,8 @@ should be in the source code.
 
 # Unbound at this point because we don't know the mypy version yet.
 # This is set in the `plugin(...)` function below.
-MypyPydanticPluginClass: Type[Plugin]
-MypyZopePluginClass: Type[Plugin]
+MypyPydanticPluginClass: type[Plugin]
+MypyZopePluginClass: type[Plugin]
 
 
 class SynapsePlugin(Plugin):
@@ -795,7 +795,7 @@ AT_CACHED_MUTABLE_RETURN = ErrorCode(
 
 def is_cacheable(
     rt: mypy.types.Type, signature: CallableType, verbose: bool
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, Optional[str]]:
     """
     Check if a particular type is cachable.
 
@@ -905,7 +905,7 @@ def is_cacheable(
         return False, f"Don't know how to handle {type(rt).__qualname__} return type"
 
 
-def plugin(version: str) -> Type[SynapsePlugin]:
+def plugin(version: str) -> type[SynapsePlugin]:
     global MypyPydanticPluginClass, MypyZopePluginClass
     # This is the entry point of the plugin, and lets us deal with the fact
     # that the mypy plugin interface is *not* stable by looking at the version
