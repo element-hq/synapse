@@ -11,16 +11,9 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Stores delayed events that have either been sent, cancelled, or not sent due to an error (MSC4140)
-CREATE TABLE finalised_delayed_events (
-    delay_id TEXT NOT NULL,
-    user_localpart TEXT NOT NULL,
-    error bytea,
-    event_id TEXT,
-    finalised_ts BIGINT NOT NULL,
-    PRIMARY KEY (user_localpart, delay_id),
-    FOREIGN KEY (user_localpart, delay_id)
-        REFERENCES delayed_events (user_localpart, delay_id) ON DELETE CASCADE
-);
+-- Store when delayed events have either been sent, cancelled, or not sent due to an error (MSC4140)
+ALTER TABLE delayed_events ADD COLUMN finalised_error bytea;
+ALTER TABLE delayed_events ADD COLUMN finalised_event_id TEXT;
+ALTER TABLE delayed_events ADD COLUMN finalised_ts BIGINT;
 
-CREATE INDEX finalised_delayed_events_finalised_ts ON finalised_delayed_events (finalised_ts);
+CREATE INDEX delayed_events_finalised_ts ON delayed_events (finalised_ts);

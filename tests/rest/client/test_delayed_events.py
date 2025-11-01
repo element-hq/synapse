@@ -133,8 +133,8 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertDictEqual(scheduled_event, finalised_event_info["delayed_event"])
         self.assertEqual("send", finalised_event_info["outcome"])
         self.assertEqual("delay", finalised_event_info["reason"])
-        self.assertNotIn("error", finalised_event_info)
-        self.assertIsNotNone(finalised_event_info["event_id"])
+        self.assertNotIn("finalised_error", finalised_event_info)
+        self.assertIsNotNone(finalised_event_info["finalised_event_id"])
 
         content = self.helper.get_state(
             self.room_id,
@@ -271,8 +271,8 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertDictEqual(scheduled_event, finalised_event_info["delayed_event"])
         self.assertEqual("cancel", finalised_event_info["outcome"])
         self.assertEqual("action", finalised_event_info["reason"])
-        self.assertNotIn("error", finalised_event_info)
-        self.assertNotIn("event_id", finalised_event_info)
+        self.assertNotIn("finalised_error", finalised_event_info)
+        self.assertNotIn("finalised_event_id", finalised_event_info)
 
         self.reactor.advance(1)
         content = self.helper.get_state(
@@ -376,8 +376,8 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertDictEqual(scheduled_event, finalised_event_info["delayed_event"])
         self.assertEqual("send", finalised_event_info["outcome"])
         self.assertEqual("action", finalised_event_info["reason"])
-        self.assertNotIn("error", finalised_event_info)
-        self.assertIsNotNone(finalised_event_info["event_id"])
+        self.assertNotIn("finalised_error", finalised_event_info)
+        self.assertIsNotNone(finalised_event_info["finalised_event_id"])
 
         content = self.helper.get_state(
             self.room_id,
@@ -494,8 +494,8 @@ class DelayedEventsTestCase(HomeserverTestCase):
         finalised_event_info = finalised[0]
         self.assertEqual("send", finalised_event_info["outcome"])
         self.assertEqual("delay", finalised_event_info["reason"])
-        self.assertNotIn("error", finalised_event_info)
-        self.assertIsNotNone(finalised_event_info["event_id"])
+        self.assertNotIn("finalised_error", finalised_event_info)
+        self.assertIsNotNone(finalised_event_info["finalised_event_id"])
 
         content = self.helper.get_state(
             self.room_id,
@@ -627,15 +627,15 @@ class DelayedEventsTestCase(HomeserverTestCase):
         finalised_event_info = finalised[0]
         self.assertDictEqual(scheduled_event, finalised_event_info["delayed_event"])
         self.assertEqual("cancel", finalised_event_info["outcome"])
-        self.assertEqual("error", finalised_event_info["reason"])
+        self.assertEqual("finalised_error", finalised_event_info["reason"])
         self.assert_dict(
             {
                 "errcode": "M_UNKNOWN",
                 "org.matrix.msc4140.errcode": "M_CANCELLED_BY_STATE_UPDATE",
             },
-            finalised_event_info["error"],
+            finalised_event_info["finalised_error"],
         )
-        self.assertNotIn("event_id", finalised_event_info)
+        self.assertNotIn("finalised_event_id", finalised_event_info)
 
         self.reactor.advance(1)
         content = self.helper.get_state(

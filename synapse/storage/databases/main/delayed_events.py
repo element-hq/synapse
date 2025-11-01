@@ -118,10 +118,7 @@ class DelayedEventsStore(SQLBaseStore):
                 """
                 SELECT COUNT(*) FROM delayed_events
                 WHERE user_localpart = ?
-                    AND (delay_id, user_localpart) NOT IN (
-                        SELECT delay_id, user_localpart
-                        FROM finalised_delayed_events
-                    )
+                    AND finalised_ts IS NULL
                 """,
                 (user_localpart,),
             )
@@ -196,10 +193,7 @@ class DelayedEventsStore(SQLBaseStore):
                 SET send_ts = ? + delay
                 WHERE delay_id = ? AND user_localpart = ?
                     AND NOT is_processed
-                    AND (delay_id, user_localpart) NOT IN (
-                        SELECT delay_id, user_localpart
-                        FROM finalised_delayed_events
-                    )
+                    AND finalised_ts IS NULL
                 """,
                 (
                     current_ts,
@@ -208,18 +202,24 @@ class DelayedEventsStore(SQLBaseStore):
                 ),
             )
             if txn.rowcount == 0:
-                sent = self.db_pool.simple_select_one_onecol_txn(
-                    txn,
-                    "finalised_delayed_events",
-                    keyvalues={"delay_id": delay_id, "user_localpart": user_localpart},
-                    retcol="event_id IS NOT NULL",
-                    allow_none=True,
+                txn.execute(
+                    """
+                    SELECT finalised_event_id IS NOT NULL
+                    FROM delayed_events
+                    WHERE delay_id = ? AND user_localpart = ?
+                        AND finalised_ts IS NOT NULL
+                    """,
+                    (
+                        delay_id,
+                        user_localpart,
+                    ),
                 )
-                if sent is None:
+                row = txn.fetchone()
+                if not row:
                     raise NotFoundError("Delayed event not found")
                 raise SynapseError(
                     HTTPStatus.CONFLICT,
-                    f"Delayed event has already been {'sent' if sent else 'cancelled'}",
+                    f"Delayed event has already been {'sent' if row[0] else 'cancelled'}",
                 )
 
             next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
@@ -238,10 +238,7 @@ class DelayedEventsStore(SQLBaseStore):
             """
             SELECT 1 WHERE EXISTS (
                 SELECT * FROM delayed_events
-                WHERE (delay_id, user_localpart) NOT IN (
-                    SELECT delay_id, user_localpart
-                    FROM finalised_delayed_events
-                )
+                WHERE finalised_ts IS NULL
             )
             """,
         )
@@ -258,12 +255,14 @@ class DelayedEventsStore(SQLBaseStore):
                 txn, current_ts, retention_period
             )
 
-            for user_localpart in self.db_pool.simple_select_onecol_txn(
-                txn,
-                "finalised_delayed_events",
-                keyvalues={},
-                retcol="DISTINCT(user_localpart)",
-            ):
+            txn.execute(
+                """
+                SELECT DISTINCT(user_localpart)
+                FROM delayed_events
+                WHERE finalised_ts IS NOT NULL
+                """
+            )
+            for [user_localpart] in txn.fetchall():
                 self._prune_excess_finalised_delayed_events_for_user(
                     txn, user_localpart, retention_limit
                 )
@@ -282,11 +281,7 @@ class DelayedEventsStore(SQLBaseStore):
         txn.execute(
             """
             DELETE FROM delayed_events
-            WHERE (delay_id, user_localpart) IN (
-                SELECT delay_id, user_localpart
-                FROM finalised_delayed_events
-                WHERE ? - finalised_ts > ?
-            )
+            WHERE ? - finalised_ts > ?
             """,
             (
                 current_ts,
@@ -301,20 +296,21 @@ class DelayedEventsStore(SQLBaseStore):
         Delete the oldest finalised delayed events for the given user,
         such that no more of them remain than the given retention limit.
         """
-        num_existing = self.db_pool.simple_select_one_onecol_txn(
-            txn,
-            "finalised_delayed_events",
-            keyvalues={"user_localpart": user_localpart},
-            retcol="COUNT(*)",
+        txn.execute(
+            """
+            SELECT COUNT(*) FROM delayed_events
+            WHERE user_localpart = ?
+                AND finalised_ts IS NOT NULL
+            """,
+            (user_localpart,),
         )
+        num_existing: int = txn.fetchall()[0][0]
         if num_existing > retention_limit:
             txn.execute(
                 """
                 DELETE FROM delayed_events
-                WHERE (delay_id, user_localpart) IN (
-                    SELECT delay_id, user_localpart
-                    FROM finalised_delayed_events
-                    WHERE user_localpart = ?
+                WHERE user_localpart = ?
+                    AND finalised_ts IS NOT NULL
                     ORDER BY finalised_ts
                     LIMIT ?
                 )
@@ -332,11 +328,7 @@ class DelayedEventsStore(SQLBaseStore):
     ) -> List[JsonDict]:
         """Returns all scheduled delayed events for the given user."""
         # TODO: Support Pagination stream API ("next_batch" field)
-        sql_where = """WHERE user_localpart = ?
-            AND (delay_id, user_localpart) NOT IN (
-                SELECT delay_id, user_localpart
-                FROM finalised_delayed_events
-            )"""
+        sql_where = "WHERE user_localpart = ? AND finalised_ts IS NULL"
         sql_args = [user_localpart]
         if delay_ids:
             delay_id_clause_sql, delay_id_clause_args = make_in_list_sql_clause(
@@ -396,7 +388,7 @@ class DelayedEventsStore(SQLBaseStore):
                 txn, user_localpart, retention_limit
             )
 
-            sql_where = "WHERE user_localpart = ?"
+            sql_where = "WHERE user_localpart = ? AND finalised_ts IS NOT NULL"
             sql_args = [user_localpart]
             if delay_ids:
                 delay_id_clause_sql, delay_id_clause_args = make_in_list_sql_clause(
@@ -414,12 +406,10 @@ class DelayedEventsStore(SQLBaseStore):
                     delay,
                     send_ts,
                     content,
-                    error,
-                    event_id,
+                    finalised_error,
+                    finalised_event_id,
                     finalised_ts
                 FROM delayed_events
-                JOIN finalised_delayed_events
-                USING (delay_id, user_localpart)
                 {sql_where}
                 ORDER BY finalised_ts
                 """,
@@ -442,14 +432,22 @@ class DelayedEventsStore(SQLBaseStore):
                     },
                     "outcome": "cancel" if row[8] is None else "send",
                     "reason": (
-                        "error"
+                        "finalised_error"
                         if row[7] is not None
                         else "action"
                         if row[9] < row[5]
                         else "delay"
                     ),
-                    **({"error": db_to_json(row[7])} if row[7] is not None else {}),
-                    **({"event_id": str(row[8])} if row[8] is not None else {}),
+                    **(
+                        {"finalised_error": db_to_json(row[7])}
+                        if row[7] is not None
+                        else {}
+                    ),
+                    **(
+                        {"finalised_event_id": str(row[8])}
+                        if row[8] is not None
+                        else {}
+                    ),
                     "origin_server_ts": Timestamp(row[9]),
                 }
                 for row in txn
@@ -496,10 +494,8 @@ class DelayedEventsStore(SQLBaseStore):
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
             sql_where = """WHERE send_ts <= ?
                 AND NOT is_processed
-                AND (delay_id, user_localpart) NOT IN (
-                    SELECT delay_id, user_localpart
-                    FROM finalised_delayed_events
-                )"""
+                AND finalised_ts IS NULL
+                """
             sql_args = (current_ts,)
             sql_order = "ORDER BY send_ts"
             if isinstance(self.database_engine, PostgresEngine):
@@ -592,10 +588,8 @@ class DelayedEventsStore(SQLBaseStore):
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
             sql_where = """WHERE delay_id = ? AND user_localpart = ?
                 AND NOT is_processed
-                AND (delay_id, user_localpart) NOT IN (
-                    SELECT delay_id, user_localpart
-                    FROM finalised_delayed_events
-                )"""
+                AND finalised_ts IS NULL
+                """
             sql_args = (delay_id, user_localpart)
             txn.execute(
                 (
@@ -606,17 +600,23 @@ class DelayedEventsStore(SQLBaseStore):
                 sql_args,
             )
             row = txn.fetchone()
-            if row is None:
-                sent = self.db_pool.simple_select_one_onecol_txn(
-                    txn,
-                    "finalised_delayed_events",
-                    keyvalues={"delay_id": delay_id, "user_localpart": user_localpart},
-                    retcol="event_id IS NOT NULL",
-                    allow_none=True,
+            if not row:
+                txn.execute(
+                    """
+                    SELECT finalised_event_id IS NOT NULL
+                    FROM delayed_events
+                    WHERE delay_id = ? AND user_localpart = ?
+                        AND finalised_ts IS NOT NULL
+                    """,
+                    (
+                        delay_id,
+                        user_localpart,
+                    ),
                 )
-                if sent is None:
+                row = txn.fetchone()
+                if not row:
                     raise NotFoundError("Delayed event not found")
-                elif not sent:
+                elif not row[0]:
                     raise SynapseError(
                         HTTPStatus.CONFLICT,
                         "Delayed event has already been cancelled",
@@ -667,43 +667,35 @@ class DelayedEventsStore(SQLBaseStore):
         ) -> Optional[Timestamp]:
             txn.execute(
                 """
-                WITH matching_delayed_events AS (
-                    SELECT * FROM delayed_events
-                    WHERE delay_id = ? AND user_localpart = ?
-                        AND NOT is_processed
-                        AND (delay_id, user_localpart) NOT IN (
-                            SELECT delay_id, user_localpart
-                            FROM finalised_delayed_events
-                        )
-                )
-                INSERT INTO finalised_delayed_events (
-                    delay_id,
-                    user_localpart,
-                    finalised_ts
-                )
-                SELECT
-                    delay_id,
-                    user_localpart,
-                    ?
-                FROM matching_delayed_events
-                RETURNING 1
+                UPDATE delayed_events
+                SET finalised_ts = ?
+                WHERE delay_id = ? AND user_localpart = ?
+                    AND NOT is_processed
+                    AND finalised_ts IS NULL
                 """,
                 (
+                    finalised_ts,
                     delay_id,
                     user_localpart,
-                    finalised_ts,
                 ),
             )
-            if not txn.fetchall():
-                sent = self.db_pool.simple_select_one_onecol_txn(
-                    txn,
-                    "finalised_delayed_events",
-                    keyvalues={"delay_id": delay_id, "user_localpart": user_localpart},
-                    retcol="event_id IS NOT NULL",
+            if txn.rowcount == 0:
+                txn.execute(
+                    """
+                    SELECT finalised_event_id IS NOT NULL
+                    FROM delayed_events
+                    WHERE delay_id = ? AND user_localpart = ?
+                        AND finalised_ts IS NOT NULL
+                    """,
+                    (
+                        delay_id,
+                        user_localpart,
+                    ),
                 )
-                if sent is None:
+                row = txn.fetchone()
+                if not row:
                     raise NotFoundError("Delayed event not found")
-                elif sent:
+                elif row[0]:
                     raise SynapseError(
                         HTTPStatus.CONFLICT,
                         "Delayed event has already been sent",
@@ -742,36 +734,22 @@ class DelayedEventsStore(SQLBaseStore):
         ) -> Optional[Timestamp]:
             txn.execute(
                 """
-                WITH matching_delayed_events AS (
-                    SELECT * FROM delayed_events
-                    WHERE room_id = ? AND event_type = ? AND state_key = ?
-                        AND user_localpart <> ?
-                        AND NOT is_processed
-                        AND (delay_id, user_localpart) NOT IN (
-                            SELECT delay_id, user_localpart
-                            FROM finalised_delayed_events
-                        )
-                )
-                INSERT INTO finalised_delayed_events (
-                    delay_id,
-                    user_localpart,
-                    error,
-                    finalised_ts
-                )
-                SELECT
-                    delay_id,
-                    user_localpart,
-                    ?,
-                    ?
-                FROM matching_delayed_events
+                UPDATE delayed_events
+                SET
+                    finalised_error = ?,
+                    finalised_ts = ?
+                WHERE room_id = ? AND event_type = ? AND state_key = ?
+                    AND user_localpart <> ?
+                    AND NOT is_processed
+                    AND finalised_ts IS NULL
                 """,
                 (
+                    _generate_cancelled_by_state_update_json(),
+                    finalised_ts,
                     room_id,
                     event_type,
                     state_key,
                     not_from_localpart,
-                    _generate_cancelled_by_state_update_json(),
-                    finalised_ts,
                 ),
             )
             return self._get_next_delayed_event_send_ts_txn(txn)
@@ -800,42 +778,23 @@ class DelayedEventsStore(SQLBaseStore):
             event_id = None
             send_error = result_or_error
 
-        sql = """
-            WITH matching_delayed_events AS (
-                SELECT * FROM delayed_events
-                WHERE delay_id = ? AND user_localpart = ?
-                    AND is_processed
-                    AND (delay_id, user_localpart) NOT IN (
-                        SELECT delay_id, user_localpart
-                        FROM finalised_delayed_events
-                    )
-            )
-            INSERT INTO finalised_delayed_events (
-                delay_id,
-                user_localpart,
-                error,
-                event_id,
-                finalised_ts
-            )
-            SELECT
-                delay_id,
-                user_localpart,
-                ?,
-                ?,
-                ?
-            FROM matching_delayed_events
-        """
-        # TODO: Find why this is needed. An error gets thrown othersie
-        if isinstance(self.database_engine, PostgresEngine):
-            sql += "RETURNING *"
         await self.db_pool.execute(
             "finalise_processed_delayed_event",
-            sql,
-            delay_id,
-            user_localpart,
+            """
+            UPDATE delayed_events
+            SET
+                finalised_error = ?,
+                finalised_event_id = ?,
+                finalised_ts = ?
+            WHERE delay_id = ? AND user_localpart = ?
+                AND is_processed
+                AND finalised_ts IS NULL
+            """,
             json_encoder.encode(send_error) if send_error is not None else None,
             event_id,
             finalised_ts,
+            delay_id,
+            user_localpart,
         )
 
     async def finalise_processed_delayed_state_events(
@@ -852,34 +811,20 @@ class DelayedEventsStore(SQLBaseStore):
         await self.db_pool.execute(
             "finalise_processed_delayed_state_events",
             """
-            WITH matching_delayed_events AS (
-                SELECT * FROM delayed_events
-                WHERE room_id = ? AND event_type = ? AND state_key = ?
-                    AND user_localpart <> ?
-                    AND is_processed
-                    AND (delay_id, user_localpart) NOT IN (
-                        SELECT delay_id, user_localpart
-                        FROM finalised_delayed_events
-                    )
-            )
-            INSERT INTO finalised_delayed_events (
-                delay_id,
-                user_localpart,
-                error,
-                finalised_ts
-            )
-            SELECT
-                delay_id,
-                user_localpart,
-                ?,
-                ?
-            FROM matching_delayed_events
+            UPDATE delayed_events
+            SET
+                finalised_error = ?,
+                finalised_ts = ?
+            WHERE room_id = ? AND event_type = ? AND state_key = ?
+                AND user_localpart <> ?
+                AND is_processed
+                AND finalised_ts IS NULL
             """,
+            _generate_cancelled_by_state_update_json(),
+            finalised_ts,
             room_id,
             event_type,
             state_key,
-            _generate_cancelled_by_state_update_json(),
-            finalised_ts,
         )
 
     async def unprocess_delayed_events(self) -> None:
@@ -891,10 +836,7 @@ class DelayedEventsStore(SQLBaseStore):
             """
             UPDATE delayed_events SET is_processed = FALSE
             WHERE is_processed
-                AND (delay_id, user_localpart) NOT IN (
-                    SELECT delay_id, user_localpart
-                    FROM finalised_delayed_events
-                )
+                AND finalised_ts IS NULL
             """,
         )
 
@@ -915,10 +857,7 @@ class DelayedEventsStore(SQLBaseStore):
             """
             SELECT MIN(send_ts) FROM delayed_events
             WHERE NOT is_processed
-                AND (delay_id, user_localpart) NOT IN (
-                    SELECT delay_id, user_localpart
-                    FROM finalised_delayed_events
-                )
+                AND finalised_ts IS NULL
             """
         )
         resp = txn.fetchone()
