@@ -359,9 +359,7 @@ async def start(admin_command_server: AdminCmdServer, args: argparse.Namespace) 
     """
     # This needs a logcontext unlike other entrypoints because we're not using
     # `register_start(...)` to run this function.
-    with LoggingContext(
-        name="start", server_name=admin_command_server.server.server_name
-    ):
+    with LoggingContext(name="start", server_name=admin_command_server.hostname):
         await _base.start(admin_command_server)
         await args.func(admin_command_server, args)
 
