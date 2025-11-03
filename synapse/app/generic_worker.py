@@ -409,14 +409,11 @@ def setup(hs: GenericWorkerServer) -> None:
     # Start the tracer
     init_tracer(hs)  # noqa
 
-    try:
-        hs.setup()
+    hs.setup()
 
-        # Ensure the replication streamer is always started in case we write to any
-        # streams. Will no-op if no streams can be written to by this worker.
-        hs.get_replication_streamer()
-    except Exception as e:
-        handle_startup_exception(e)
+    # Ensure the replication streamer is always started in case we write to any
+    # streams. Will no-op if no streams can be written to by this worker.
+    hs.get_replication_streamer()
 
 
 async def start(
@@ -458,7 +455,10 @@ def main() -> None:
             redirect_stdio_to_logs()
 
         hs = create_homeserver(homeserver_config)
-        setup(hs)
+        try:
+            setup(hs)
+        except Exception as e:
+            handle_startup_exception(e)
 
         # Register a callback to be invoked once the reactor is running
         register_start(hs, start, hs)

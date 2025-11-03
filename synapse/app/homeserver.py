@@ -419,10 +419,7 @@ def setup(
     # Start the tracer
     init_tracer(hs)  # noqa
 
-    try:
-        hs.setup()
-    except Exception as e:
-        handle_startup_exception(e)
+    hs.setup()
 
 
 async def start(
@@ -495,7 +492,10 @@ def main() -> None:
             redirect_stdio_to_logs()
 
         hs = create_homeserver(homeserver_config)
-        setup(hs)
+        try:
+            setup(hs)
+        except Exception as e:
+            handle_startup_exception(e)
 
         # Register a callback to be invoked once the reactor is running
         register_start(hs, start, hs)
