@@ -648,6 +648,16 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
     # Apply the cache config.
     hs.config.caches.resize_all_caches()
 
+    # Load the OIDC provider metadatas, if OIDC is enabled.
+    if hs.config.oidc.oidc_enabled:
+        oidc = hs.get_oidc_handler()
+        # Loading the provider metadata also ensures the provider config is valid.
+        #
+        # FIXME: It feels a bit strange to validate and block on startup as one of these
+        # OIDC providers could be temporarily unavailable and cause Synapse to be unable
+        # to start.
+        await oidc.load_metadata()
+
     # Load the certificate from disk.
     refresh_certificate(hs)
 
