@@ -93,10 +93,10 @@ class Ratelimiter:
         #   * The number of tokens currently in the bucket,
         #   * The time point when the bucket was last completely empty, and
         #   * The rate_hz (leak rate) of this particular bucket.
-        self.actions: dict[Hashable, tuple[float, float, float]] = {}
+        self.actions: dict[Hashable, tuple[int, float, float]] = {}
 
         # Records when actions should potentially be pruned.
-        self._timer = WheelTimer()
+        self._timer: WheelTimer[Hashable] = WheelTimer()
 
         self.clock.looping_call(self._prune_message_counts, 15 * 1000)
 
@@ -113,9 +113,9 @@ class Ratelimiter:
 
     def _get_action_counts(
         self, key: Hashable, time_now_s: float
-    ) -> tuple[float, float, float]:
+    ) -> tuple[int, float, float]:
         """Retrieve the action counts, with a fallback representing an empty bucket."""
-        return self.actions.get(key, (0.0, time_now_s, self.rate_hz))
+        return self.actions.get(key, (0, time_now_s, self.rate_hz))
 
     async def can_do_action(
         self,
