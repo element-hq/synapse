@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, NewType, Optional, Union
 
 import attr
 
-from synapse.api.errors import NotFoundError, SynapseError, cs_error
+from synapse.api.errors import NotFoundError, StoreError, SynapseError, cs_error
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
     DatabasePool,
@@ -791,23 +791,36 @@ class DelayedEventsStore(SQLBaseStore):
             event_id = None
             send_error = result_or_error
 
-        await self.db_pool.execute(
+        def finalise_processed_delayed_event_txn(txn: LoggingTransaction) -> None:
+            table = "delayed_events"
+            txn.execute(
+                f"""
+                UPDATE {table}
+                SET
+                    finalised_error = ?,
+                    finalised_event_id = ?,
+                    finalised_ts = ?
+                WHERE delay_id = ? AND user_localpart = ?
+                    AND is_processed
+                    AND finalised_ts IS NULL
+                """,
+                (
+                    json_encoder.encode(send_error) if send_error is not None else None,
+                    event_id,
+                    finalised_ts,
+                    delay_id,
+                    user_localpart,
+                ),
+            )
+            rowcount = txn.rowcount
+            if rowcount == 0:
+                raise StoreError(404, "No row found (%s)" % (table,))
+            if rowcount > 1:
+                raise StoreError(500, "More than one row matched (%s)" % (table,))
+
+        await self.db_pool.runInteraction(
             "finalise_processed_delayed_event",
-            """
-            UPDATE delayed_events
-            SET
-                finalised_error = ?,
-                finalised_event_id = ?,
-                finalised_ts = ?
-            WHERE delay_id = ? AND user_localpart = ?
-                AND is_processed
-                AND finalised_ts IS NULL
-            """,
-            json_encoder.encode(send_error) if send_error is not None else None,
-            event_id,
-            finalised_ts,
-            delay_id,
-            user_localpart,
+            finalise_processed_delayed_event_txn,
         )
 
     async def finalise_processed_delayed_state_events(
