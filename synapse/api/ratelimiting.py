@@ -217,8 +217,9 @@ class Ratelimiter:
             allowed = True
             action_count = action_count + n_actions
 
-        if update:
-            self.actions[key] = (action_count, time_start, rate_hz)
+        # Only record the action if we're allowed to perform it.
+        if allowed and update:
+            self._record_action_inner(key, action_count, n_actions, time_start, rate_hz)
 
         if rate_hz > 0:
             # Find out when the count of existing actions expires
@@ -264,6 +265,17 @@ class Ratelimiter:
         key = self._get_key(requester, key)
         time_now_s = _time_now_s if _time_now_s is not None else self.clock.time()
         action_count, time_start, rate_hz = self._get_action_counts(key, time_now_s)
+        self._record_action_inner(key, action_count, n_actions, time_start, rate_hz)
+
+    def _record_action_inner(
+        self,
+        key: Hashable,
+        action_count: int,
+        n_actions: int,
+        time_start: float,
+        rate_hz: float,
+    ) -> None:
+        """Helper to atomically update the action count for a given key."""
         self.actions[key] = (action_count + n_actions, time_start, rate_hz)
 
     def _prune_message_counts(self) -> None:
