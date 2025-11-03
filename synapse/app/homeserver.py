@@ -447,14 +447,6 @@ async def start(
             False otherwise the homeserver cannot be garbage collected after `shutdown`.
     """
 
-    # TODO: Feels like this should be moved somewhere else.
-    #
-    # Load the OIDC provider metadatas, if OIDC is enabled.
-    if hs.config.oidc.oidc_enabled:
-        oidc = hs.get_oidc_handler()
-        # Loading the provider metadata also ensures the provider config is valid.
-        await oidc.load_metadata()
-
     await _base.start(hs, freeze=freeze)
 
     # TODO: Feels like this should be moved somewhere else.
