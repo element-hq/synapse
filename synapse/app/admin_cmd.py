@@ -64,7 +64,7 @@ from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.databases.main.tags import TagsWorkerStore
 from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerStore
-from synapse.types import JsonMapping, StateMap
+from synapse.types import ISynapseReactor, JsonMapping, StateMap
 from synapse.util.logcontext import LoggingContext
 
 logger = logging.getLogger("synapse.app.admin_cmd")
@@ -289,7 +289,21 @@ def load_config(argv_options: list[str]) -> tuple[HomeServerConfig, argparse.Nam
     return config, args
 
 
-def start(config: HomeServerConfig, args: argparse.Namespace) -> None:
+def create_homeserver(
+    config: HomeServerConfig,
+    reactor: Optional[ISynapseReactor] = None,
+) -> AdminCmdServer:
+    """
+    Create a homeserver instance for the Synapse admin command process.
+
+    Args:
+        config: The configuration for the homeserver.
+        reactor: Optionally provide a reactor to use. Can be useful in different
+            scenarios that you want control over the reactor, such as tests.
+
+    Returns:
+        A homeserver instance.
+    """
     if config.worker.worker_app is not None:
         assert config.worker.worker_app == "synapse.app.admin_cmd"
 
@@ -312,33 +326,62 @@ def start(config: HomeServerConfig, args: argparse.Namespace) -> None:
 
     synapse.events.USE_FROZEN_DICTS = config.server.use_frozen_dicts
 
-    ss = AdminCmdServer(
+    admin_command_server = AdminCmdServer(
         config.server.server_name,
         config=config,
+        reactor=reactor,
     )
 
-    setup_logging(ss, config, use_worker_options=True)
+    return admin_command_server
 
-    ss.setup()
 
-    # We use task.react as the basic run command as it correctly handles tearing
-    # down the reactor when the deferreds resolve and setting the return value.
-    # We also make sure that `_base.start` gets run before we actually run the
-    # command.
+def setup(admin_command_server: AdminCmdServer) -> None:
+    """
+    Setup a `AdminCmdServer` instance.
 
-    async def run() -> None:
-        with LoggingContext(name="command", server_name=config.server.server_name):
-            await _base.start(ss)
-            await args.func(ss, args)
-
-    _base.start_worker_reactor(
-        "synapse-admin-cmd",
-        config,
-        run_command=lambda: task.react(lambda _reactor: defer.ensureDeferred(run())),
+    Args:
+        admin_command_server: The homeserver to setup.
+    """
+    setup_logging(
+        admin_command_server, admin_command_server.config, use_worker_options=True
     )
+
+    admin_command_server.setup()
+
+
+async def start(admin_command_server: AdminCmdServer, args: argparse.Namespace) -> None:
+    """
+    Should be called once the reactor is running.
+
+    Args:
+        admin_command_server: The homeserver to setup.
+        args: Command line arguments.
+    """
+    # This needs a logcontext unlike other entrypoints because we're not using
+    # `register_start(...)` to run this function.
+    with LoggingContext(name="start", server_name=admin_command_server.hostname):
+        # We make sure that `_base.start` gets run before we actually run the command.
+        await _base.start(admin_command_server)
+        # Run the command
+        await args.func(admin_command_server, args)
+
+
+def main() -> None:
+    homeserver_config, args = load_config(sys.argv[1:])
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
+        admin_command_server = create_homeserver(homeserver_config)
+        setup(admin_command_server)
+
+        _base.start_worker_reactor(
+            "synapse-admin-cmd",
+            admin_command_server.config,
+            # We use task.react as the basic run command as it correctly handles tearing
+            # down the reactor when the deferreds resolve and setting the return value.
+            run_command=lambda: task.react(
+                lambda _reactor: defer.ensureDeferred(start(admin_command_server, args))
+            ),
+        )
 
 
 if __name__ == "__main__":
-    homeserver_config, args = load_config(sys.argv[1:])
-    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
-        start(homeserver_config, args)
+    main()

@@ -142,6 +142,7 @@ from synapse.http.client import (
     SimpleHttpClient,
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
+from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import (
     all_later_gauges_to_clean_up_on_shutdown,
@@ -506,7 +507,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         for background_process in list(self._background_processes):
             try:
-                background_process.cancel()
+                with PreserveLoggingContext():
+                    background_process.cancel()
             except Exception:
                 pass
         self._background_processes.clear()

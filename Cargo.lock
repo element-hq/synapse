@@ -589,9 +589,9 @@ dependencies = [
 
 [[package]]
 name = "icu_segmenter"
-version = "2.0.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e185fc13b6401c138cf40db12b863b35f5edf31b88192a545857b41aeaf7d3d3"
+checksum = "38e30e593cf9c3ca2f51aa312eb347cd1ba95715e91a842ec3fc9058eab2af4b"
 dependencies = [
  "core_maths",
  "displaydoc",
