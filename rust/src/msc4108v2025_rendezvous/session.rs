@@ -74,10 +74,7 @@ impl Session {
 
     /// The sequence token for the session.
     pub fn sequence_token(&self) -> String {
-        let encoded = URL_SAFE_NO_PAD.encode(self.hash);
-        format!("\"{encoded}\"")
-            .parse()
-            .expect("base64-encoded hash as sequence token should be valid")
+        URL_SAFE_NO_PAD.encode(self.hash)
     }
 
     pub fn get_response(&self) -> GetResponse {
