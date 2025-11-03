@@ -360,7 +360,9 @@ async def start(admin_command_server: AdminCmdServer, args: argparse.Namespace) 
     # This needs a logcontext unlike other entrypoints because we're not using
     # `register_start(...)` to run this function.
     with LoggingContext(name="start", server_name=admin_command_server.hostname):
+        # We make sure that `_base.start` gets run before we actually run the command.
         await _base.start(admin_command_server)
+        # Run the command
         await args.func(admin_command_server, args)
 
 
@@ -375,8 +377,6 @@ def main() -> None:
             admin_command_server.config,
             # We use task.react as the basic run command as it correctly handles tearing
             # down the reactor when the deferreds resolve and setting the return value.
-            # We also make sure that `_base.start` gets run before we actually run the
-            # command.
             run_command=lambda: task.react(
                 lambda _reactor: defer.ensureDeferred(start(admin_command_server, args))
             ),
