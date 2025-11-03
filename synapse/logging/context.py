@@ -603,25 +603,57 @@ class LoggingContextFilter(logging.Filter):
         self._default_request = request
 
     def filter(self, record: logging.LogRecord) -> Literal[True]:
-        """Add each fields from the logging contexts to the record.
+        """
+        Add each field from the logging context to the record.
+
+        Please be mindful of 3rd-party code outside of Synapse (like in the case of
+        Synapse Pro for small hosts) as this is running as a global log record filter.
+        Other code may have set their own attributes on the record and the log record
+        may not be relevant to Synapse at all so we should not mangle it.
+
+        We can have some defaults but we should avoid overwriting existing attributes on
+        any log record unless we actually have a Synapse logcontext (not just the
+        default sentinel logcontext).
+
         Returns:
             True to include the record in the log output.
         """
         context = current_context()
         record.request = self._default_request
-        record.server_name = "unknown_server_from_no_context"
+
+        # Avoid overwriting an existing `server_name` on the record. This is running in
+        # the context of a global log record filter so there may be 3rd-party code that
+        # adds their own `server_name` and we don't want to interfere with that
+        # (clobber).
+        if not hasattr(record, "server_name"):
+            record.server_name = "unknown_server_from_no_logcontext"
 
         # context should never be None, but if it somehow ends up being, then
         # we end up in a death spiral of infinite loops, so let's check, for
         # robustness' sake.
         if context is not None:
-            record.server_name = context.server_name
+
+            def safe_set(attr: str, value: Any) -> None:
+                """
+                Only write the attribute if it hasn't already been set or we actually have
+                a Synapse logcontext (indicating that this log record is relevant to
+                Synapse).
+                """
+                if context is not SENTINEL_CONTEXT or not hasattr(record, attr):
+                    setattr(record, attr, value)
+
+            safe_set("server_name", context.server_name)
+
             # Logging is interested in the request ID. Note that for backwards
             # compatibility this is stored as the "request" on the record.
-            record.request = str(context)
+            safe_set("request", str(context))
 
             # Add some data from the HTTP request.
             request = context.request
+            # The sentinel logcontext has no request so if we get past this point, we
+            # know we have some actual Synapse logcontext and don't need to worry about
+            # using `safe_set`. We'll consider this an optimization since this is a
+            # pretty hot-path.
             if request is None:
                 return True
 
