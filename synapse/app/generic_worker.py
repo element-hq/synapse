@@ -21,6 +21,7 @@
 #
 import logging
 import sys
+from typing import Optional
 
 from twisted.web.resource import Resource
 
@@ -111,6 +112,7 @@ from synapse.storage.databases.main.transactions import TransactionWorkerStore
 from synapse.storage.databases.main.ui_auth import UIAuthWorkerStore
 from synapse.storage.databases.main.user_directory import UserDirectoryStore
 from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerStore
+from synapse.types import ISynapseReactor
 from synapse.util.httpresourcetree import create_resource_tree
 
 logger = logging.getLogger("synapse.app.generic_worker")
@@ -332,7 +334,30 @@ def load_config(argv_options: list[str]) -> HomeServerConfig:
     return config
 
 
-def start(config: HomeServerConfig) -> None:
+def create_homeserver(
+    config: HomeServerConfig,
+    reactor: Optional[ISynapseReactor] = None,
+) -> GenericWorkerServer:
+    """
+    Create a homeserver instance for the Synapse worker process.
+
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
+
+    Args:
+        config: The configuration for the homeserver.
+        reactor: Optionally provide a reactor to use. Can be useful in different
+            scenarios that you want control over the reactor, such as tests.
+
+    Returns:
+        A homeserver instance.
+    """
+
     # For backwards compatibility let any of the old app names.
     assert config.worker.worker_app in (
         "synapse.app.appservice",
@@ -357,38 +382,88 @@ def start(config: HomeServerConfig) -> None:
     hs = GenericWorkerServer(
         config.server.server_name,
         config=config,
+        reactor=reactor,
     )
 
-    setup_logging(hs, config, use_worker_options=True)
+    return hs
+
+
+def setup(hs: GenericWorkerServer) -> None:
+    """
+    Setup a `GenericWorkerServer` (worker) instance.
+
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
+
+    Args:
+        hs: The homeserver to setup.
+    """
+
+    setup_logging(hs, hs.config, use_worker_options=True)
 
     # Start the tracer
     init_tracer(hs)  # noqa
 
-    try:
-        hs.setup()
+    hs.setup()
 
-        # Ensure the replication streamer is always started in case we write to any
-        # streams. Will no-op if no streams can be written to by this worker.
-        hs.get_replication_streamer()
-    except Exception as e:
-        handle_startup_exception(e)
+    # Ensure the replication streamer is always started in case we write to any
+    # streams. Will no-op if no streams can be written to by this worker.
+    hs.get_replication_streamer()
 
-    async def start() -> None:
-        await _base.start(hs)
 
-    register_start(hs, start)
+async def start(
+    hs: GenericWorkerServer,
+    *,
+    freeze: bool = True,
+) -> None:
+    """
+    Should be called once the reactor is running.
 
-    # redirect stdio to the logs, if configured.
-    if not hs.config.logging.no_redirect_stdio:
-        redirect_stdio_to_logs()
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
 
-    _base.start_worker_reactor("synapse-generic-worker", config)
+    Args:
+        hs: The homeserver to setup.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+    """
+
+    await _base.start(hs, freeze=freeze)
 
 
 def main() -> None:
     homeserver_config = load_config(sys.argv[1:])
+
+    # Create a logging context as soon as possible so we can start associating
+    # everything with this homeserver.
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
-        start(homeserver_config)
+        # redirect stdio to the logs, if configured.
+        if not homeserver_config.logging.no_redirect_stdio:
+            redirect_stdio_to_logs()
+
+        hs = create_homeserver(homeserver_config)
+        try:
+            setup(hs)
+        except Exception as e:
+            handle_startup_exception(e)
+
+        # Register a callback to be invoked once the reactor is running
+        register_start(hs, start, hs)
+
+        _base.start_worker_reactor("synapse-generic-worker", homeserver_config)
 
 
 if __name__ == "__main__":
