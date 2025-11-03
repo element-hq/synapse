@@ -357,8 +357,13 @@ async def start(admin_command_server: AdminCmdServer, args: argparse.Namespace) 
         admin_command_server: The homeserver to setup.
         args: Command line arguments.
     """
-    await _base.start(admin_command_server)
-    await args.func(admin_command_server, args)
+    # This needs a logcontext unlike other entrypoints because we're not using
+    # `register_start(...)` to run this function.
+    with LoggingContext(
+        name="start", server_name=admin_command_server.server.server_name
+    ):
+        await _base.start(admin_command_server)
+        await args.func(admin_command_server, args)
 
 
 def main() -> None:
