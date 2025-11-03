@@ -228,6 +228,21 @@ class TestRatelimiter(unittest.HomeserverTestCase):
 
         self.assertNotIn("test_id_1", limiter.actions)
 
+    def test_pruning_record_action(self) -> None:
+        """Test that entries added by record_action also get pruned."""
+        limiter = Ratelimiter(
+            store=self.hs.get_datastores().main,
+            clock=self.clock,
+            cfg=RatelimitSettings(key="", per_second=0.1, burst_count=1),
+        )
+        limiter.record_action(None, key="test_id_1", n_actions=1, _time_now_s=0)
+
+        self.assertIn("test_id_1", limiter.actions)
+
+        self.reactor.advance(60)
+
+        self.assertNotIn("test_id_1", limiter.actions)
+
     def test_db_user_override(self) -> None:
         """Test that users that have ratelimiting disabled in the DB aren't
         ratelimited.

@@ -115,7 +115,7 @@ class Ratelimiter:
         self, key: Hashable, time_now_s: float
     ) -> tuple[float, float, float]:
         """Retrieve the action counts, with a fallback representing an empty bucket."""
-        return self.actions.get(key, (0.0, time_now_s, 0.0))
+        return self.actions.get(key, (0.0, time_now_s, self.rate_hz))
 
     async def can_do_action(
         self,
