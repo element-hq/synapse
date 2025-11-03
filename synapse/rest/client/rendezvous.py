@@ -68,9 +68,55 @@ class MSC4108RendezvousServlet(RestServlet):
         self._handler.handle_post(request)
 
 
+class MSC4108v2025CreateRendezvousServlet(RestServlet):
+    PATTERNS = client_patterns(
+        "/io.element.msc4108/rendezvous$", releases=[], v1=False, unstable=True
+    )
+
+    def __init__(self, hs: "HomeServer") -> None:
+        super().__init__()
+        self._handler = hs.get_msc4108v2025_rendezvous_handler()
+        self.auth = hs.get_auth()
+        self.require_authentication = (
+            hs.config.experimental.msc4108v2025_requires_authentication
+        )
+
+    async def on_POST(self, request: SynapseRequest) -> None:
+        if self.require_authentication:
+            # This will raise if the user is not authenticated
+            await self.auth.get_user_by_req(request)
+        self._handler.handle_post(request)
+
+
+class MSC4108v2025UpdateRendezvousServlet(RestServlet):
+    PATTERNS = client_patterns(
+        "/io.element.msc4108/rendezvous/(?P<rendezvous_id>[^/]+)$",
+        releases=[],
+        v1=False,
+        unstable=True,
+    )
+
+    def __init__(self, hs: "HomeServer") -> None:
+        super().__init__()
+        self._handler = hs.get_msc4108v2025_rendezvous_handler()
+
+    def on_GET(self, request: SynapseRequest, rendezvous_id: str) -> None:
+        self._handler.handle_get(request, rendezvous_id)
+
+    def on_PUT(self, request: SynapseRequest, rendezvous_id: str) -> None:
+        self._handler.handle_put(request, rendezvous_id)
+
+    def on_DELETE(self, request: SynapseRequest, rendezvous_id: str) -> None:
+        self._handler.handle_delete(request, rendezvous_id)
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if hs.config.experimental.msc4108_enabled:
         MSC4108RendezvousServlet(hs).register(http_server)
 
     if hs.config.experimental.msc4108_delegation_endpoint is not None:
         MSC4108DelegationRendezvousServlet(hs).register(http_server)
+
+    if hs.config.experimental.msc4108v2025_enabled:
+        MSC4108v2025CreateRendezvousServlet(hs).register(http_server)
+        MSC4108v2025UpdateRendezvousServlet(hs).register(http_server)
