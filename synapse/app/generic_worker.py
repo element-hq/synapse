@@ -364,14 +364,11 @@ def start(config: HomeServerConfig) -> None:
     # Start the tracer
     init_tracer(hs)  # noqa
 
-    try:
-        hs.setup()
+    hs.setup()
 
-        # Ensure the replication streamer is always started in case we write to any
-        # streams. Will no-op if no streams can be written to by this worker.
-        hs.get_replication_streamer()
-    except Exception as e:
-        handle_startup_exception(e)
+    # Ensure the replication streamer is always started in case we write to any
+    # streams. Will no-op if no streams can be written to by this worker.
+    hs.get_replication_streamer()
 
     async def start() -> None:
         await _base.start(hs)
@@ -388,7 +385,10 @@ def start(config: HomeServerConfig) -> None:
 def main() -> None:
     homeserver_config = load_config(sys.argv[1:])
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
-        start(homeserver_config)
+        try:
+            start(homeserver_config)
+        except Exception as e:
+            handle_startup_exception(e)
 
 
 if __name__ == "__main__":
