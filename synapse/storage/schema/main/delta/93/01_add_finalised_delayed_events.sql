@@ -16,4 +16,5 @@ ALTER TABLE delayed_events ADD COLUMN finalised_error bytea;
 ALTER TABLE delayed_events ADD COLUMN finalised_event_id TEXT;
 ALTER TABLE delayed_events ADD COLUMN finalised_ts BIGINT;
 
-CREATE INDEX delayed_events_finalised_ts ON delayed_events (finalised_ts);
+INSERT INTO background_updates (update_name, progress_json) VALUES
+  ('delayed_events_finalised_ts', '{}');

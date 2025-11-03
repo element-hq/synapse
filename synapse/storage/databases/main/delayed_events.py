@@ -14,13 +14,15 @@
 
 import logging
 from http import HTTPStatus
-from typing import NewType, Optional, Union
+from typing import TYPE_CHECKING, NewType, Optional, Union
 
 import attr
 
 from synapse.api.errors import NotFoundError, SynapseError, cs_error
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
     LoggingTransaction,
     make_in_list_sql_clause,
 )
@@ -28,6 +30,9 @@ from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID
 from synapse.util import stringutils
 from synapse.util.json import json_encoder
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +64,21 @@ class DelayedEventDetails(EventDetails):
 
 
 class DelayedEventsStore(SQLBaseStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="delayed_events_finalised_ts",
+            index_name="delayed_events_finalised_ts",
+            table="delayed_events",
+            columns=("finalised_ts",),
+        )
+
     async def get_delayed_events_stream_pos(self) -> int:
         """
         Gets the stream position of the background process to watch for state events
