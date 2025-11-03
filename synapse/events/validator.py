@@ -22,8 +22,8 @@ import collections.abc
 from typing import Union, cast
 
 import jsonschema
+from pydantic import Field, StrictBool, StrictStr
 
-from synapse._pydantic_compat import Field, StrictBool, StrictStr
 from synapse.api.constants import (
     MAX_ALIAS_LENGTH,
     EventContentFields,

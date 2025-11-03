@@ -23,7 +23,8 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-from synapse._pydantic_compat import StrictStr
+from pydantic import StrictStr
+
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
