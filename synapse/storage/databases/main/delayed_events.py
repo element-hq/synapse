@@ -148,7 +148,7 @@ class DelayedEventsStore(SQLBaseStore):
                     HTTPStatus.BAD_REQUEST,
                     "The maximum number of delayed events has been reached.",
                     additional_fields={
-                        "org.matrix.msc4140.errcode": "M_MAX_DELAY_UNSUPPORTED",
+                        "org.matrix.msc4140.errcode": "M_MAX_DELAYED_EVENTS_EXCEEDED",
                     },
                 )
 

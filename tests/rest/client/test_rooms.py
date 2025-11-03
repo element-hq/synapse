@@ -2572,7 +2572,7 @@ class RoomDelayedEventTestCase(RoomBase):
             else:
                 self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
                 self.assertEqual(
-                    "M_MAX_DELAY_UNSUPPORTED",
+                    "M_MAX_DELAYED_EVENTS_EXCEEDED",
                     channel.json_body.get("org.matrix.msc4140.errcode"),
                     channel.json_body,
                 )
