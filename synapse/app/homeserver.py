@@ -498,7 +498,7 @@ def main() -> None:
         setup(hs)
 
         # Register a callback to be invoked once the reactor is running
-        register_start(hs, lambda: start(hs))
+        register_start(hs, start, hs)
 
         start_reactor(homeserver_config)
 
