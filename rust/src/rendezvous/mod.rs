@@ -29,7 +29,7 @@ use pyo3::{
     exceptions::PyValueError,
     pyclass, pymethods,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
-    Bound, IntoPyObject, Py, PyAny, PyObject, PyResult, Python,
+    Bound, IntoPyObject, Py, PyAny, PyResult, Python,
 };
 use ulid::Ulid;
 
@@ -56,7 +56,7 @@ fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
 #[pyclass]
 struct RendezvousHandler {
     base: Uri,
-    clock: PyObject,
+    clock: Py<PyAny>,
     sessions: BTreeMap<Ulid, Session>,
     capacity: usize,
     max_content_length: u64,
