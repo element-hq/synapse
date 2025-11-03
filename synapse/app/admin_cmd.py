@@ -326,54 +326,56 @@ def create_homeserver(
 
     synapse.events.USE_FROZEN_DICTS = config.server.use_frozen_dicts
 
-    ss = AdminCmdServer(
+    admin_command_server = AdminCmdServer(
         config.server.server_name,
         config=config,
         reactor=reactor,
     )
 
-    return ss
+    return admin_command_server
 
 
-def setup(ss: AdminCmdServer) -> None:
+def setup(admin_command_server: AdminCmdServer) -> None:
     """
     Setup a `AdminCmdServer` instance.
 
     Args:
-        ss: The homeserver to setup.
+        admin_command_server: The homeserver to setup.
     """
-    setup_logging(ss, ss.config, use_worker_options=True)
+    setup_logging(
+        admin_command_server, admin_command_server.config, use_worker_options=True
+    )
 
-    ss.setup()
+    admin_command_server.setup()
 
 
-async def start(ss: AdminCmdServer, args: argparse.Namespace) -> None:
+async def start(admin_command_server: AdminCmdServer, args: argparse.Namespace) -> None:
     """
     Should be called once the reactor is running.
 
     Args:
-        ss: The homeserver to setup.
+        admin_command_server: The homeserver to setup.
         args: Command line arguments.
     """
-    await _base.start(ss)
-    await args.func(ss, args)
+    await _base.start(admin_command_server)
+    await args.func(admin_command_server, args)
 
 
 def main() -> None:
     homeserver_config, args = load_config(sys.argv[1:])
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
-        ss = create_homeserver(homeserver_config)
-        setup(ss)
+        admin_command_server = create_homeserver(homeserver_config)
+        setup(admin_command_server)
 
         _base.start_worker_reactor(
             "synapse-admin-cmd",
-            ss.config,
+            admin_command_server.config,
             # We use task.react as the basic run command as it correctly handles tearing
             # down the reactor when the deferreds resolve and setting the return value.
             # We also make sure that `_base.start` gets run before we actually run the
             # command.
             run_command=lambda: task.react(
-                lambda _reactor: defer.ensureDeferred(start(ss, args))
+                lambda _reactor: defer.ensureDeferred(start(admin_command_server, args))
             ),
         )
 
