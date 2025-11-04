@@ -16,20 +16,23 @@ export VIRTUALENV_NO_DOWNLOAD=1
 # to select the lowest possible versions, rather than resorting to this sed script.
 
 # Patch the project definitions in-place:
-# - Replace all lower and tilde bounds with exact bounds
-# - Replace all caret bounds---but not the one that defines the supported Python version!
-# - Delete all lines referring to psycopg2 --- so no testing of postgres support.
+# - `-E` use extended regex syntax.
+# - Don't modify the line that defines required Python versions.
+# - Replace all lower and tilde bounds with exact bounds.
+# - Replace all caret bounds with exact bounds.
+# - Delete all lines referring to psycopg2 - so no testing of postgres support.
 # - Use pyopenssl 17.0, which is the oldest version that works with
 #   a `cryptography` compiled against OpenSSL 1.1.
 # - Omit systemd: we're not logging to journal here.
 
-sed -i \
-   -e "s/[~>]=/==/g" \
-   -e '/^python = "^/!s/\^/==/g' \
-   -e "/psycopg2/d" \
-   -e 's/pyOpenSSL = "==16.0.0"/pyOpenSSL = "==17.0.0"/' \
-   -e '/systemd/d' \
-   pyproject.toml
+sed -i -E '
+  /^\s*requires-python\s*=/b
+  s/[~>]=/==/g
+  s/\^/==/g
+  /psycopg2/d
+  s/pyOpenSSL = "==16\.0\.0"/pyOpenSSL = "==17.0.0"/
+  /systemd/d
+' pyproject.toml
 
 echo "::group::Patched pyproject.toml"
 cat pyproject.toml
