@@ -119,10 +119,18 @@ stacking them up. You can monitor the currently running background updates with
 
 # Upgrading to v1.142.0
 
-## Minimum supported Python version
+## Python 3.10+ is now required
 
 The minimum supported Python version has been increased from v3.9 to v3.10.
 You will need Python 3.10+ to run Synapse v1.142.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+## SQLite 3.40.0+ is now required.
+
+The minimum supported SQLite version has been increased from 3.27.0 to 3.40.0.
 
 If you use current versions of the
 [matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
