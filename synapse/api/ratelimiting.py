@@ -95,7 +95,9 @@ class Ratelimiter:
         #   * The rate_hz (leak rate) of this particular bucket.
         self.actions: dict[Hashable, tuple[int, float, float]] = {}
 
-        # Records when actions should potentially be pruned.
+        # Records when actions should potentially be pruned. Note that we don't
+        # need to be accurate here, as this is just a cleanup job of `actions`
+        # and doesn't affect correctness.
         self._timer: WheelTimer[Hashable] = WheelTimer()
 
         self.clock.looping_call(self._prune_message_counts, 15 * 1000)
@@ -294,7 +296,13 @@ class Ratelimiter:
 
         self.actions[key] = (action_count, time_start, rate_hz)
 
-        prune_time_s += 0.1  # Add a buffer to ensure we don't try and prune too early
+        # We need to make sure that we only call prune *after* the entry
+        # expires, otherwise the scheduled prune may not actually prune it. This
+        # is just a cleanup job, so it doesn't matter if entries aren't pruned
+        # immediately after they expire. Hence we schedule the prune a little
+        # after the entry is due to expire.
+        prune_time_s += 0.1
+
         self._timer.insert(int(time_now_s * 1000), key, int(prune_time_s * 1000))
 
     def _prune_message_counts(self) -> None:
