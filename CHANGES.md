@@ -1,4 +1,4 @@
-# Synapse 1.142.0rc1 (2025-11-04)
+# Synapse 1.142.0rc2 (2025-11-04)
 
 ## Dropped support for Python 3.9
 
@@ -28,6 +28,16 @@ At present, publishing MacOS Python wheels will continue for the next release
 of these wheels downstream, please reach out to us in
 [#synapse-dev:matrix.org](https://matrix.to/#/#synapse-dev:matrix.org). We'd
 love to hear from you!
+
+
+## Internal Changes
+
+- Manually skip building Python 3.9 wheels, to prevent errors in the release workflow. ([\#19119](https://github.com/element-hq/synapse/issues/19119))
+
+
+
+
+# Synapse 1.142.0rc1 (2025-11-04)
 
 ## Features
 
