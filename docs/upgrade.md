@@ -128,7 +128,7 @@ If you use current versions of the
 [matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
 Docker images, no action is required.
 
-## SQLite 3.40.0+ is now required.
+## SQLite 3.40.0+ is now required
 
 The minimum supported SQLite version has been increased from 3.27.0 to 3.40.0.
 

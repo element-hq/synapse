@@ -7,7 +7,7 @@ deprecation
 policy](https://element-hq.github.io/synapse/latest/deprecation_policy.html#platform-dependencies),
 as it is now [end of life](https://endoflife.date/python).
 
-## SQLite 3.40.0+ is now required.
+## SQLite 3.40.0+ is now required
 
 The minimum supported SQLite version has been increased from 3.27.0 to 3.40.0.
 
