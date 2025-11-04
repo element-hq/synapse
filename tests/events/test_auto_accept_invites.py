@@ -19,9 +19,8 @@
 #
 #
 import asyncio
-from asyncio import Future
 from http import HTTPStatus
-from typing import Any, Awaitable, Optional, TypeVar, cast
+from typing import Any, Optional, TypeVar, cast
 from unittest.mock import Mock
 
 import attr
@@ -787,18 +786,10 @@ TV = TypeVar("TV")
 
 
 async def make_awaitable(value: T) -> T:
+    """
+    Makes a fresh awaitable, suitable for mocking an `async` function.
+    """
     return value
-
-
-def make_multiple_awaitable(result: TV) -> Awaitable[TV]:
-    """
-    Makes an awaitable, suitable for mocking an `async` function.
-    This uses Futures as they can be awaited multiple times so can be returned
-    to multiple callers.
-    """
-    future: Future[TV] = Future()
-    future.set_result(result)
-    return future
 
 
 def create_module(
@@ -809,7 +800,7 @@ def create_module(
     module_api = Mock(spec=ModuleApi)
     module_api.is_mine.side_effect = lambda a: a.split(":")[1] == "test"
     module_api.worker_name = worker_name
-    module_api.sleep.return_value = make_multiple_awaitable(None)
+    module_api.sleep.return_value = lambda *_args, **_kwargs: make_awaitable(None)
     module_api.get_userinfo_by_id.return_value = UserInfo(
         user_id=UserID.from_string("@user:test"),
         is_admin=False,
