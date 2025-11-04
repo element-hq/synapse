@@ -291,7 +291,7 @@ def load_config(argv_options: list[str]) -> tuple[HomeServerConfig, argparse.Nam
 
 def create_homeserver(
     config: HomeServerConfig,
-    reactor: Optional[ISynapseReactor] = None,
+    reactor: ISynapseReactor | None = None,
 ) -> AdminCmdServer:
     """
     Create a homeserver instance for the Synapse admin command process.
