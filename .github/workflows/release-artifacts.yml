@@ -143,9 +143,9 @@ jobs:
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==3.2.1
 
-      - name: Only build a single wheel on PR
+      - name: TEMP. Build Python 3.14 wheels in PR
         if: startsWith(github.ref, 'refs/pull/')
-        run: echo "CIBW_BUILD="cp310-manylinux_*"" >> $GITHUB_ENV
+        run: echo "CIBW_BUILD="cp310-manylinux_* cp314-manylinux_*"" >> $GITHUB_ENV
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
