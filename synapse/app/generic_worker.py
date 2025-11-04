@@ -449,15 +449,20 @@ def main() -> None:
     # Create a logging context as soon as possible so we can start associating
     # everything with this homeserver.
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
-        # redirect stdio to the logs, if configured.
-        if not homeserver_config.logging.no_redirect_stdio:
-            redirect_stdio_to_logs()
-
+        # Initialize and setup the homeserver
         hs = create_homeserver(homeserver_config)
         try:
             setup(hs)
         except Exception as e:
             handle_startup_exception(e)
+
+        # For problems immediately apparent during initialization, we want to log to
+        # stderr in the terminal so that they are obvious and visible to the operator.
+        #
+        # Now that we're past the initialization stage, we can redirect anything printed
+        # to stdio to the logs, if configured.
+        if not homeserver_config.logging.no_redirect_stdio:
+            redirect_stdio_to_logs()
 
         # Register a callback to be invoked once the reactor is running
         register_start(hs, start, hs)

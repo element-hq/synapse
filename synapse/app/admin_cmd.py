@@ -369,6 +369,7 @@ async def start(admin_command_server: AdminCmdServer, args: argparse.Namespace) 
 def main() -> None:
     homeserver_config, args = load_config(sys.argv[1:])
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
+        # Initialize and setup the homeserver
         admin_command_server = create_homeserver(homeserver_config)
         setup(admin_command_server)
 
