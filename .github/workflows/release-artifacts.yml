@@ -154,7 +154,8 @@ jobs:
           # for, and so need extra build deps.
           #
           # cp39-*: Python 3.9 is EOL.
-          CIBW_TEST_SKIP: pp3*-* cp39-* *i686* *musl*
+          # cp3??t-*: Free-threaded builds are not currently supported.
+          CIBW_TEST_SKIP: pp3*-* cp39-* cp3??t-* *i686* *musl*
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
