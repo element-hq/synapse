@@ -1,1 +1,0 @@
-Update release scripts to prevent building wheels for free-threaded Python, as Synapse does not currently support it.
