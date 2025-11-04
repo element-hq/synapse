@@ -449,19 +449,19 @@ def _publish(gh_token: str) -> None:
     gh = Github(auth=github.Auth.Token(token=gh_token))
     gh_repo = gh.get_repo("element-hq/synapse")
     for release in gh_repo.get_releases():
-        if release.title == tag_name:
+        if release.name == tag_name:
             break
     else:
         raise ClickException(f"Failed to find GitHub release for {tag_name}")
 
-    assert release.title == tag_name
+    assert release.name == tag_name
 
     if not release.draft:
         click.echo("Release already published.")
         return
 
     release = release.update_release(
-        name=release.title,
+        name=release.name,
         message=release.body,
         tag_name=release.tag_name,
         prerelease=release.prerelease,
