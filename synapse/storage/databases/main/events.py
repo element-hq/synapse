@@ -75,7 +75,6 @@ from synapse.types import (
     MutableStateMap,
     StateMap,
     StrCollection,
-    get_domain_from_id,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -97,7 +96,7 @@ persist_event_counter = Counter(
 event_counter = Counter(
     "synapse_storage_events_persisted_events_sep",
     "",
-    labelnames=["type", "origin_type", "origin_entity", SERVER_NAME_LABEL],
+    labelnames=["type", "origin_type", SERVER_NAME_LABEL],
 )
 
 # State event type/key pairs that we need to gather to fill in the
@@ -376,18 +375,14 @@ class PersistEventsStore:
             for event, context in events_and_contexts:
                 if context.app_service:
                     origin_type = "local"
-                    origin_entity = context.app_service.id
                 elif self.hs.is_mine_id(event.sender):
                     origin_type = "local"
-                    origin_entity = "*client*"
                 else:
                     origin_type = "remote"
-                    origin_entity = get_domain_from_id(event.sender)
 
                 event_counter.labels(
                     type=event.type,
                     origin_type=origin_type,
-                    origin_entity=origin_entity,
                     **{SERVER_NAME_LABEL: self.server_name},
                 ).inc()
 
