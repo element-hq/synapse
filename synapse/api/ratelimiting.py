@@ -27,6 +27,7 @@ from synapse.config.ratelimiting import RatelimitSettings
 from synapse.storage.databases.main import DataStore
 from synapse.types import Requester
 from synapse.util.clock import Clock
+from synapse.util.wheel_timer import WheelTimer
 
 if TYPE_CHECKING:
     # To avoid circular imports:
@@ -92,9 +93,14 @@ class Ratelimiter:
         #   * The number of tokens currently in the bucket,
         #   * The time point when the bucket was last completely empty, and
         #   * The rate_hz (leak rate) of this particular bucket.
-        self.actions: dict[Hashable, tuple[float, float, float]] = {}
+        self.actions: dict[Hashable, tuple[int, float, float]] = {}
 
-        self.clock.looping_call(self._prune_message_counts, 60 * 1000)
+        # Records when actions should potentially be pruned. Note that we don't
+        # need to be accurate here, as this is just a cleanup job of `actions`
+        # and doesn't affect correctness.
+        self._timer: WheelTimer[Hashable] = WheelTimer()
+
+        self.clock.looping_call(self._prune_message_counts, 15 * 1000)
 
     def _get_key(
         self, requester: Optional[Requester], key: Optional[Hashable]
@@ -109,9 +115,9 @@ class Ratelimiter:
 
     def _get_action_counts(
         self, key: Hashable, time_now_s: float
-    ) -> tuple[float, float, float]:
+    ) -> tuple[int, float, float]:
         """Retrieve the action counts, with a fallback representing an empty bucket."""
-        return self.actions.get(key, (0.0, time_now_s, 0.0))
+        return self.actions.get(key, (0, time_now_s, self.rate_hz))
 
     async def can_do_action(
         self,
@@ -217,8 +223,11 @@ class Ratelimiter:
             allowed = True
             action_count = action_count + n_actions
 
-        if update:
-            self.actions[key] = (action_count, time_start, rate_hz)
+        # Only record the action if we're allowed to perform it.
+        if allowed and update:
+            self._record_action_inner(
+                key, action_count, time_start, rate_hz, time_now_s
+            )
 
         if rate_hz > 0:
             # Find out when the count of existing actions expires
@@ -264,7 +273,37 @@ class Ratelimiter:
         key = self._get_key(requester, key)
         time_now_s = _time_now_s if _time_now_s is not None else self.clock.time()
         action_count, time_start, rate_hz = self._get_action_counts(key, time_now_s)
-        self.actions[key] = (action_count + n_actions, time_start, rate_hz)
+        self._record_action_inner(
+            key, action_count + n_actions, time_start, rate_hz, time_now_s
+        )
+
+    def _record_action_inner(
+        self,
+        key: Hashable,
+        action_count: int,
+        time_start: float,
+        rate_hz: float,
+        time_now_s: float,
+    ) -> None:
+        """Helper to atomically update the action count for a given key."""
+        prune_time_s = time_start + action_count / rate_hz
+
+        # If the prune time is in the past, we can just remove the entry rather
+        # than inserting and immediately pruning.
+        if prune_time_s <= time_now_s:
+            self.actions.pop(key, None)
+            return
+
+        self.actions[key] = (action_count, time_start, rate_hz)
+
+        # We need to make sure that we only call prune *after* the entry
+        # expires, otherwise the scheduled prune may not actually prune it. This
+        # is just a cleanup job, so it doesn't matter if entries aren't pruned
+        # immediately after they expire. Hence we schedule the prune a little
+        # after the entry is due to expire.
+        prune_time_s += 0.1
+
+        self._timer.insert(int(time_now_s * 1000), key, int(prune_time_s * 1000))
 
     def _prune_message_counts(self) -> None:
         """Remove message count entries that have not exceeded their defined
@@ -272,18 +311,24 @@ class Ratelimiter:
         """
         time_now_s = self.clock.time()
 
-        # We create a copy of the key list here as the dictionary is modified during
-        # the loop
-        for key in list(self.actions.keys()):
-            action_count, time_start, rate_hz = self.actions[key]
+        # Pull out all the keys that *might* need pruning. We still need to
+        # verify they haven't since been updated.
+        to_prune = self._timer.fetch(int(time_now_s * 1000))
+
+        for key in to_prune:
+            value = self.actions.get(key)
+            if value is None:
+                continue
+
+            action_count, time_start, rate_hz = value
 
             # Rate limit = "seconds since we started limiting this action" * rate_hz
             # If this limit has not been exceeded, wipe our record of this action
             time_delta = time_now_s - time_start
             if action_count - time_delta * rate_hz > 0:
                 continue
-            else:
-                del self.actions[key]
+
+            del self.actions[key]
 
     async def ratelimit(
         self,
