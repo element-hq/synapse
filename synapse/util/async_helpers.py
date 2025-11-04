@@ -1029,7 +1029,8 @@ class DeferredEvent:
 
     def set(self) -> None:
         if not self._deferred.called:
-            self._deferred.callback(None)
+            with PreserveLoggingContext():
+                self._deferred.callback(None)
 
     def clear(self) -> None:
         if self._deferred.called:
