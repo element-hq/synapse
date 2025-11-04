@@ -248,7 +248,7 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
         self.room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
         self.intially_unjoined_room_id = "!example:otherhs"
 
-    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 2}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.01, "burst_count": 2}})
     def test_local_users_joining_on_another_worker_contribute_to_rate_limit(
         self,
     ) -> None:
