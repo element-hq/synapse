@@ -1,1 +1,0 @@
-Refactor and align app entrypoints (avoid `exit(1)` in our composable functions).

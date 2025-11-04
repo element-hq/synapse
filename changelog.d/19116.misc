@@ -1,1 +1,0 @@
-Move exception handling up the stack (avoid `exit(1)` in our composable functions).

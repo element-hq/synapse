@@ -1,1 +1,0 @@
-Prevent uv `/usr/local/.lock` file from appearing in built Synapse docker images.

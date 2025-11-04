@@ -1,1 +1,0 @@
-Move `oidc.load_metadata()` startup into `_base.start()`.

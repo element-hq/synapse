@@ -1,1 +1,0 @@
-Be mindful of other logging context filters in 3rd-party code and avoid overwriting log record fields unless we know the log record is relevant to Synapse.
