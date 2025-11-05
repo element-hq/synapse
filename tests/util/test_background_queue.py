@@ -41,7 +41,7 @@ class BackgroundQueueTests(HomeserverTestCase):
     def test_simple_call(self) -> None:
         """Test that items added to the queue are processed."""
         # Register a deferred to be the return value of the callback.
-        callback_result_deferred = Deferred[None]()
+        callback_result_deferred: Deferred[None] = Deferred()
         self._process_item_mock.side_effect = callback_result_deferred
 
         # Adding an item should cause the callback to be invoked.
@@ -65,7 +65,7 @@ class BackgroundQueueTests(HomeserverTestCase):
         times out after being idle."""
 
         # Register a deferred to be the return value of the callback.
-        callback_result_deferred = Deferred[None]()
+        callback_result_deferred: Deferred[None] = Deferred()
         self._process_item_mock.side_effect = callback_result_deferred
 
         # Adding an item should cause the callback to be invoked.
@@ -83,7 +83,7 @@ class BackgroundQueueTests(HomeserverTestCase):
         self.queue.add(2)
 
         # The callback should be invoked again.
-        callback_result_deferred = Deferred[None]()
+        callback_result_deferred: Deferred[None] = Deferred()
         self._process_item_mock.side_effect = callback_result_deferred
         self._process_item_mock.assert_called_once_with(2)
         self._process_item_mock.reset_mock()
