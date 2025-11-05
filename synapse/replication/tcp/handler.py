@@ -70,7 +70,7 @@ from synapse.replication.tcp.streams._base import (
     DeviceListsStream,
     ThreadSubscriptionsStream,
 )
-from synapse.util.async_helpers import BackgroundQueue
+from synapse.util.bacckground_queue import BackgroundQueue
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
