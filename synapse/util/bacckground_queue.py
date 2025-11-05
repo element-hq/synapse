@@ -71,32 +71,39 @@ class BackgroundQueue(Generic[T]):
         self._queue: collections.deque[T] = collections.deque()
 
         # Indicates if a background process is running, and if so whether there
-        # is new data in the queue.
-        self._event: Optional[DeferredEvent] = None
+        # is new data in the queue. Used to signal to an existing background
+        # process that there is new data added to the queue.
+        self._wakeup_event: Optional[DeferredEvent] = None
 
     def add(self, item: T) -> None:
         """Add an item into the queue."""
 
         self._queue.append(item)
-        if self._event is None:
+        if self._wakeup_event is None:
             self._hs.run_as_background_process(self._name, self._process_queue)
         else:
-            self._event.set()
+            self._wakeup_event.set()
 
     async def _process_queue(self) -> None:
         """Process items in the queue until it is empty."""
 
         # Make sure we're the only background process.
-        if self._event is not None:
-            self._event.set()
+        if self._wakeup_event is not None:
+            # If there is already a background process then we signal it to wake
+            # up and exit. We do not want multiple background processes running
+            # at a time.
+            self._wakeup_event.set()
             return
 
-        self._event = DeferredEvent(self._hs.get_clock())
+        self._wakeup_event = DeferredEvent(self._hs.get_clock())
 
         try:
             while True:
-                # Clear the event before checking the queue.
-                self._event.clear()
+                # Clear the event before checking the queue. If we cleared after
+                # we run the risk of the wakeup signal racing with us checking
+                # the queue. (This can't really happen in Python due to the
+                # single threaded nature, but let's be a bit defensive anyway.)
+                self._wakeup_event.clear()
 
                 while self._queue:
                     item = self._queue.popleft()
@@ -113,14 +120,14 @@ class BackgroundQueue(Generic[T]):
                 # data immediately even though there isn't. That's fine, we'll
                 # just loop round, clear the event, recheck the queue, and then
                 # wait here again.
-                new_data = await self._event.wait(
+                new_data = await self._wakeup_event.wait(
                     timeout_seconds=self._timeout_ms / 1000
                 )
                 if not new_data:
                     # Timed out waiting for new data, so exit the loop
                     break
         finally:
-            self._event = None
+            self._wakeup_event = None
 
     def __len__(self) -> int:
         return len(self._queue)
