@@ -20,7 +20,6 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.server import HomeServer
-from synapse.util.async_helpers import DoneAwaitable
 from synapse.util.background_queue import BackgroundQueue
 from synapse.util.clock import Clock
 
