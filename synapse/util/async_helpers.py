@@ -1029,7 +1029,8 @@ class DeferredEvent:
 
     def set(self) -> None:
         if not self._deferred.called:
-            self._deferred.callback(None)
+            with PreserveLoggingContext():
+                self._deferred.callback(None)
 
     def clear(self) -> None:
         if self._deferred.called:
@@ -1042,26 +1043,15 @@ class DeferredEvent:
         if self.is_set():
             return True
 
-        # Create a deferred that gets called in N seconds
-        sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
-        call = self._clock.call_later(
-            timeout_seconds,
-            sleep_deferred.callback,
-            None,
-        )
-
         try:
             await make_deferred_yieldable(
-                defer.DeferredList(
-                    [sleep_deferred, self._deferred],
-                    fireOnOneCallback=True,
-                    fireOnOneErrback=True,
-                    consumeErrors=True,
+                timeout_deferred(
+                    deferred=stop_cancellation(self._deferred),
+                    timeout=timeout_seconds,
+                    clock=self._clock,
                 )
             )
-        finally:
-            # Cancel the sleep if we were woken up
-            if call.active():
-                call.cancel()
+        except defer.TimeoutError:
+            pass
 
         return self.is_set()

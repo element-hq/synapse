@@ -25,6 +25,8 @@ from typing import (
     TypeVar,
 )
 
+from twisted.internet import defer
+
 from synapse.util.async_helpers import DeferredEvent
 from synapse.util.constants import MILLISECONDS_PER_SECOND
 
@@ -110,6 +112,8 @@ class BackgroundQueue(Generic[T]):
                     item = self._queue.popleft()
                     try:
                         await self._callback(item)
+                    except defer.CancelledError:
+                        raise
                     except Exception:
                         logger.exception("Error processing background queue item")
 

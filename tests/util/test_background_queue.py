@@ -18,11 +18,13 @@ from unittest.mock import Mock
 from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
+from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.server import HomeServer
+from synapse.util.async_helpers import DoneAwaitable
 from synapse.util.background_queue import BackgroundQueue
 from synapse.util.clock import Clock
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, logcontext_clean
 
 
 class BackgroundQueueTests(HomeserverTestCase):
@@ -38,11 +40,14 @@ class BackgroundQueueTests(HomeserverTestCase):
             timeout_ms=1000,
         )
 
+    @logcontext_clean
     def test_simple_call(self) -> None:
         """Test that items added to the queue are processed."""
         # Register a deferred to be the return value of the callback.
         callback_result_deferred: Deferred[None] = Deferred()
-        self._process_item_mock.side_effect = callback_result_deferred
+        self._process_item_mock.side_effect = lambda _: make_deferred_yieldable(
+            callback_result_deferred
+        )
 
         # Adding an item should cause the callback to be invoked.
         self.queue.add(1)
@@ -57,16 +62,20 @@ class BackgroundQueueTests(HomeserverTestCase):
 
         # Once the first callback completes, the second item should be
         # processed.
-        callback_result_deferred.callback(None)
+        with PreserveLoggingContext():
+            callback_result_deferred.callback(None)
         self._process_item_mock.assert_called_once_with(2)
 
+    @logcontext_clean
     def test_timeout(self) -> None:
         """Test that the background process wakes up if its idle, and that it
         times out after being idle."""
 
         # Register a deferred to be the return value of the callback.
         callback_result_deferred: Deferred[None] = Deferred()
-        self._process_item_mock.side_effect = callback_result_deferred
+        self._process_item_mock.side_effect = lambda _: make_deferred_yieldable(
+            callback_result_deferred
+        )
 
         # Adding an item should cause the callback to be invoked.
         self.queue.add(1)
@@ -75,7 +84,8 @@ class BackgroundQueueTests(HomeserverTestCase):
         self._process_item_mock.reset_mock()
 
         # Let the callback complete.
-        callback_result_deferred.callback(None)
+        with PreserveLoggingContext():
+            callback_result_deferred.callback(None)
 
         # Advance the clock by less than the timeout, and add another item.
         self.reactor.advance(0.5)
@@ -84,12 +94,15 @@ class BackgroundQueueTests(HomeserverTestCase):
 
         # The callback should be invoked again.
         callback_result_deferred = Deferred()
-        self._process_item_mock.side_effect = callback_result_deferred
+        self._process_item_mock.side_effect = lambda _: make_deferred_yieldable(
+            callback_result_deferred
+        )
         self._process_item_mock.assert_called_once_with(2)
         self._process_item_mock.reset_mock()
 
         # Let the callback complete.
-        callback_result_deferred.callback(None)
+        with PreserveLoggingContext():
+            callback_result_deferred.callback(None)
 
         # Advance the clock by more than the timeout.
         self.reactor.advance(1.5)
