@@ -28,7 +28,6 @@ import logging
 import typing
 from contextlib import asynccontextmanager
 from typing import (
-    TYPE_CHECKING,
     Any,
     AsyncContextManager,
     AsyncIterator,
