@@ -268,7 +268,7 @@ class ReplicationCommandHandler:
             stream_name: BackgroundQueue[_StreamCommandQueueItem](
                 hs,
                 "process-replication-data",
-                self._unsafe_process,
+                self._unsafe_process_item,
             )
             for stream_name in self._streams
         }
@@ -356,8 +356,12 @@ class ReplicationCommandHandler:
 
         queue.add((cmd, conn))
 
-    async def _unsafe_process(self, item: _StreamCommandQueueItem) -> None:
-        """Process a single command from the stream queue"""
+    async def _unsafe_process_item(self, item: _StreamCommandQueueItem) -> None:
+        """Process a single command from the stream queue.
+
+        This should only be called one at a time per stream, and is called from
+        the stream's BackgroundQueue.
+        """
         cmd, conn = item
         stream_name = cmd.stream_name
         await self._process_command(cmd, conn, stream_name)
