@@ -128,7 +128,12 @@ class BackgroundQueue(Generic[T]):
                     # Timed out waiting for new data, so exit the loop
                     break
         finally:
+            # This background process is exiting, so clear the wakeup event to
+            # indicate that a new one should be started when new data arrives.
             self._wakeup_event = None
+
+            # The queue must be empty here.
+            assert not self._queue
 
     def __len__(self) -> int:
         return len(self._queue)
