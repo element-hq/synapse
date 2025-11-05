@@ -264,7 +264,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config: Optional[dict[str, Any]] = None
-    if "config" in args:
+    if "config" in args and args.config:
         config = _read_config_files(args.config)
 
     if args.shared_secret:
