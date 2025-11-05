@@ -1,3 +1,126 @@
+# Synapse 1.142.0rc3 (2025-11-04)
+
+## Dropped support for Python 3.9
+
+This release drops support for Python 3.9, in line with our [dependency
+deprecation
+policy](https://element-hq.github.io/synapse/latest/deprecation_policy.html#platform-dependencies),
+as it is now [end of life](https://endoflife.date/python).
+
+## SQLite 3.40.0+ is now required
+
+The minimum supported SQLite version has been increased from 3.27.0 to 3.40.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+
+## Deprecation of MacOS Python wheels
+
+The team has decided to deprecate and eventually stop publishing python wheels
+for MacOS. This is a burden on the team, and we're not aware of any parties
+that use them. Synapse docker images will continue to work on MacOS, as will
+building Synapse from source (though note this requires a Rust compiler).
+
+At present, publishing MacOS Python wheels will continue for the next release
+(1.143.0), but will not be available after that (1.144.0+). If you do make use
+of these wheels downstream, please reach out to us in
+[#synapse-dev:matrix.org](https://matrix.to/#/#synapse-dev:matrix.org). We'd
+love to hear from you!
+
+
+## Internal Changes
+
+- Update release scripts to prevent building wheels for free-threaded Python, as Synapse does not currently support it. ([\#19140](https://github.com/element-hq/synapse/issues/19140))
+
+
+# Synapse 1.142.0rc2 (2025-11-04)
+
+
+## Internal Changes
+
+- Manually skip building Python 3.9 wheels, to prevent errors in the release workflow. ([\#19119](https://github.com/element-hq/synapse/issues/19119))
+
+
+
+
+# Synapse 1.142.0rc1 (2025-11-04)
+
+## Features
+
+- Add support for Python 3.14. ([\#19055](https://github.com/element-hq/synapse/issues/19055), [\#19134](https://github.com/element-hq/synapse/issues/19134))
+- Add an [Admin API](https://element-hq.github.io/synapse/latest/usage/administration/admin_api/index.html)
+  to allow an admin to fetch the space/room hierarchy for a given space. ([\#19021](https://github.com/element-hq/synapse/issues/19021))
+
+## Bugfixes
+
+- Fix a bug introduced in 1.111.0 where failed attempts to download authenticated remote media would not be handled correctly. ([\#19062](https://github.com/element-hq/synapse/issues/19062))
+- Update the `oidc_session_no_samesite` cookie to have the `Secure` attribute, so the only difference between it and the paired `oidc_session` cookie, is the configuration of the `SameSite` attribute as described in the comments / cookie names. Contributed by @kieranlane. ([\#19079](https://github.com/element-hq/synapse/issues/19079))
+- Fix a bug introduced in 1.140.0 where lost logcontext warnings would be emitted from timeouts in sync and requests made by Synapse itself. ([\#19090](https://github.com/element-hq/synapse/issues/19090))
+- Fix a bug introdued in 1.140.0 where lost logcontext warning were emitted when using `HomeServer.shutdown()`. ([\#19108](https://github.com/element-hq/synapse/issues/19108))
+
+## Improved Documentation
+
+- Update the link to the Debian oldstable package for SQLite. ([\#19047](https://github.com/element-hq/synapse/issues/19047))
+- Point out additional Redis configuration options available in the worker docs. Contributed by @servisbryce. ([\#19073](https://github.com/element-hq/synapse/issues/19073))
+- Update the list of Debian releases that the downstream Debian package is maintained for. ([\#19100](https://github.com/element-hq/synapse/issues/19100))
+- Add [a page](https://element-hq.github.io/synapse/latest/development/internal_documentation/release_notes_review_checklist.html) to the documentation describing the steps the Synapse team takes to review the release notes before publishing them. ([\#19109](https://github.com/element-hq/synapse/issues/19109))
+
+## Deprecations and Removals
+
+- Drop support for Python 3.9. ([\#19099](https://github.com/element-hq/synapse/issues/19099))
+- Remove support for SQLite < 3.37.2. ([\#19047](https://github.com/element-hq/synapse/issues/19047))
+
+## Internal Changes
+
+- Fix CI linter for schema delta files to correctly handle all types of `CREATE TABLE` syntax. ([\#19020](https://github.com/element-hq/synapse/issues/19020))
+- Use type hinting generics in standard collections, as per [PEP 585](https://peps.python.org/pep-0585/), added in Python 3.9. ([\#19046](https://github.com/element-hq/synapse/issues/19046))
+- Always treat `RETURNING` as supported by SQL engines, now that the minimum-supported versions of both SQLite and PostgreSQL support it. ([\#19047](https://github.com/element-hq/synapse/issues/19047))
+- Move `oidc.load_metadata()` startup into `_base.start()`. ([\#19056](https://github.com/element-hq/synapse/issues/19056))
+- Remove logcontext problems caused by awaiting raw `deferLater(...)`. ([\#19058](https://github.com/element-hq/synapse/issues/19058))
+- Prevent duplicate logging setup when running multiple Synapse instances. ([\#19067](https://github.com/element-hq/synapse/issues/19067))
+- Be mindful of other logging context filters in 3rd-party code and avoid overwriting log record fields unless we know the log record is relevant to Synapse. ([\#19068](https://github.com/element-hq/synapse/issues/19068))
+- Update pydantic to v2. ([\#19071](https://github.com/element-hq/synapse/issues/19071))
+- Update deprecated code in the release script to prevent a warning message from being printed. ([\#19080](https://github.com/element-hq/synapse/issues/19080))
+- Update the deprecated poetry development dependencies group name in `pyproject.toml`. ([\#19081](https://github.com/element-hq/synapse/issues/19081))
+- Remove `pp38*` skip selector from cibuildwheel to silence warning. ([\#19085](https://github.com/element-hq/synapse/issues/19085))
+- Don't immediately exit the release script if the checkout is dirty. Instead, allow the user to clear the dirty changes and retry. ([\#19088](https://github.com/element-hq/synapse/issues/19088))
+- Update the release script's generated announcement text to include a title and extra text for RC's. ([\#19089](https://github.com/element-hq/synapse/issues/19089))
+- Fix lints on main branch. ([\#19092](https://github.com/element-hq/synapse/issues/19092))
+- Use cheaper random string function in logcontext utilities. ([\#19094](https://github.com/element-hq/synapse/issues/19094))
+- Avoid clobbering other `SIGHUP` handlers in 3rd-party code. ([\#19095](https://github.com/element-hq/synapse/issues/19095))
+- Prevent duplicate GitHub draft releases being created during the Synapse release process. ([\#19096](https://github.com/element-hq/synapse/issues/19096))
+- Use Pillow's `Image.getexif` method instead of the experimental `Image._getexif`. ([\#19098](https://github.com/element-hq/synapse/issues/19098))
+- Prevent uv `/usr/local/.lock` file from appearing in built Synapse docker images. ([\#19107](https://github.com/element-hq/synapse/issues/19107))
+- Allow Synapse's runtime dependency checking code to take packaging markers (i.e. `python <= 3.14`) into account when checking dependencies. ([\#19110](https://github.com/element-hq/synapse/issues/19110))
+- Move exception handling up the stack (avoid `exit(1)` in our composable functions). ([\#19116](https://github.com/element-hq/synapse/issues/19116))
+- Fix a lint error related to lifetimes in Rust 1.90. ([\#19118](https://github.com/element-hq/synapse/issues/19118))
+- Refactor and align app entrypoints (avoid `exit(1)` in our composable functions). ([\#19121](https://github.com/element-hq/synapse/issues/19121), [\#19131](https://github.com/element-hq/synapse/issues/19131))
+- Speed up pruning of ratelimiters. ([\#19129](https://github.com/element-hq/synapse/issues/19129))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/download-artifact from 5.0.0 to 6.0.0. ([\#19102](https://github.com/element-hq/synapse/issues/19102))
+* Bump actions/upload-artifact from 4 to 5. ([\#19106](https://github.com/element-hq/synapse/issues/19106))
+* Bump hiredis from 3.2.1 to 3.3.0. ([\#19103](https://github.com/element-hq/synapse/issues/19103))
+* Bump icu_segmenter from 2.0.0 to 2.0.1. ([\#19126](https://github.com/element-hq/synapse/issues/19126))
+* Bump idna from 3.10 to 3.11. ([\#19053](https://github.com/element-hq/synapse/issues/19053))
+* Bump ijson from 3.4.0 to 3.4.0.post0. ([\#19051](https://github.com/element-hq/synapse/issues/19051))
+* Bump markdown-it-py from 3.0.0 to 4.0.0. ([\#19123](https://github.com/element-hq/synapse/issues/19123))
+* Bump msgpack from 1.1.1 to 1.1.2. ([\#19050](https://github.com/element-hq/synapse/issues/19050))
+* Bump psycopg2 from 2.9.10 to 2.9.11. ([\#19125](https://github.com/element-hq/synapse/issues/19125))
+* Bump pyyaml from 6.0.2 to 6.0.3. ([\#19105](https://github.com/element-hq/synapse/issues/19105))
+* Bump regex from 1.11.3 to 1.12.2. ([\#19074](https://github.com/element-hq/synapse/issues/19074))
+* Bump reqwest from 0.12.23 to 0.12.24. ([\#19077](https://github.com/element-hq/synapse/issues/19077))
+* Bump ruff from 0.12.10 to 0.14.3. ([\#19124](https://github.com/element-hq/synapse/issues/19124))
+* Bump sigstore/cosign-installer from 3.10.0 to 4.0.0. ([\#19075](https://github.com/element-hq/synapse/issues/19075))
+* Bump stefanzweifel/git-auto-commit-action from 6.0.1 to 7.0.0. ([\#19052](https://github.com/element-hq/synapse/issues/19052))
+* Bump tokio from 1.47.1 to 1.48.0. ([\#19076](https://github.com/element-hq/synapse/issues/19076))
+* Bump types-psycopg2 from 2.9.21.20250915 to 2.9.21.20251012. ([\#19054](https://github.com/element-hq/synapse/issues/19054))
+
 # Synapse 1.141.0 (2025-10-29)
 
 ## Deprecation of MacOS Python wheels

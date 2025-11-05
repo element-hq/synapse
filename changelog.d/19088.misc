@@ -1,1 +1,0 @@
-Don't immediately exit the release script if the checkout is dirty. Instead, allow the user to clear the dirty changes and retry.

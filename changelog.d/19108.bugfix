@@ -1,1 +1,0 @@
-Fix lost logcontext when using `HomeServer.shutdown()`.

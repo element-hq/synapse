@@ -1,1 +1,0 @@
-Fix a bug introduced in 1.111.0 where failed attempts to download authenticated remote media would not be handled correctly.
