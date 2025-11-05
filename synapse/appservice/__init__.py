@@ -101,7 +101,8 @@ class ApplicationService:
         protocols: Optional[Iterable[str]] = None,
         rate_limited: bool = True,
         ip_range_whitelist: Optional[IPSet] = None,
-        supports_ephemeral: bool = False,
+        receive_ephemeral: bool = False,
+        msc2409_push_ephemeral: bool = False,
         msc3202_transaction_extensions: bool = False,
         msc4190_device_management: bool = False,
     ):
@@ -126,7 +127,8 @@ class ApplicationService:
         self.namespaces = self._check_namespaces(namespaces)
         self.id = id
         self.ip_range_whitelist = ip_range_whitelist
-        self.supports_ephemeral = supports_ephemeral
+        self.receive_ephemeral = receive_ephemeral
+        self.msc2409_push_ephemeral = msc2409_push_ephemeral
         self.msc3202_transaction_extensions = msc3202_transaction_extensions
         self.msc4190_device_management = msc4190_device_management
 

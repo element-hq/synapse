@@ -354,12 +354,19 @@ class ApplicationServiceApi(SimpleHttpClient):
 
         # Never send ephemeral events to appservices that do not support it
         body: JsonDict = {"events": serialized_events}
-        if service.supports_ephemeral:
+        if service.msc2409_push_ephemeral:
             body.update(
                 {
                     # TODO: Update to stable prefixes once MSC2409 completes FCP merge.
                     "de.sorunome.msc2409.ephemeral": ephemeral,
                     "de.sorunome.msc2409.to_device": to_device_messages,
+                }
+            )
+
+        if service.receive_ephemeral:
+            body.update(
+                {
+                    "ephemeral": ephemeral,
                 }
             )
 

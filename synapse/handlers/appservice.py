@@ -315,9 +315,13 @@ class ApplicationServicesHandler:
                     StreamKeyType.TYPING,
                     StreamKeyType.RECEIPT,
                     StreamKeyType.PRESENCE,
-                    StreamKeyType.TO_DEVICE,
                 )
-                and service.supports_ephemeral
+                and (service.receive_ephemeral or service.msc2409_push_ephemeral)
+            )
+            # A previous version of MSC2409 supported sending to-device messages
+            # to the appservice, but this was removed in the stable version.
+            or (
+                stream_key == StreamKeyType.TO_DEVICE and service.msc2409_push_ephemeral
             )
             or (
                 stream_key == StreamKeyType.DEVICE_LIST
