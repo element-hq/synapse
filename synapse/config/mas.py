@@ -69,7 +69,7 @@ class MasConfig(Config):
             parsed = MasConfigModel(**mas_config)
         except ValidationError as e:
             raise ConfigError(
-                "Could not validate Matrix Authentication Service configuration",
+                f"Could not validate Matrix Authentication Service configuration: {e.errors()[0]['msg']}",
                 path=("matrix_authentication_service",),
             ) from e
 
