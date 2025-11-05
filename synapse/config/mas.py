@@ -37,7 +37,8 @@ class MasConfigModel(ParseModel):
     enabled: StrictBool = False
     endpoint: AnyHttpUrl = AnyHttpUrl("http://localhost:8080")
     secret: Optional[StrictStr] = Field(default=None)
-    secret_path: Optional[FilePath] = Field(default=None)
+    # We set `strict=False` to allow `str` instances.
+    secret_path: Optional[FilePath] = Field(default=None, strict=False)
 
     @model_validator(mode="after")
     def verify_secret(self) -> Self:
