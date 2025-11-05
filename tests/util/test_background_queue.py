@@ -83,7 +83,7 @@ class BackgroundQueueTests(HomeserverTestCase):
         self.queue.add(2)
 
         # The callback should be invoked again.
-        callback_result_deferred: Deferred[None] = Deferred()
+        callback_result_deferred = Deferred()
         self._process_item_mock.side_effect = callback_result_deferred
         self._process_item_mock.assert_called_once_with(2)
         self._process_item_mock.reset_mock()
