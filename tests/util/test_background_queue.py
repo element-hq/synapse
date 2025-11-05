@@ -19,7 +19,7 @@ from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
-from synapse.util.bacckground_queue import BackgroundQueue
+from synapse.util.background_queue import BackgroundQueue
 from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
