@@ -130,7 +130,7 @@ class UploadServlet(BaseUploadServlet):
 
         logger.info("Uploaded content with URI '%s'", content_uri)
 
-        respond_with_json(
+        await respond_with_json(
             request, 200, {"content_uri": str(content_uri)}, send_cors=True
         )
 
@@ -184,4 +184,4 @@ class AsyncUploadServlet(BaseUploadServlet):
                 raise SynapseError(400, "Bad content")
 
             logger.info("Uploaded content for media ID %r", media_id)
-            respond_with_json(request, 200, {}, send_cors=True)
+            await respond_with_json(request, 200, {}, send_cors=True)

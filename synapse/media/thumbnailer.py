@@ -690,7 +690,7 @@ class ThumbnailProvider:
             logger.info("Failed to find any generated thumbnails")
 
             assert request.path is not None
-            respond_with_json(
+            await respond_with_json(
                 request,
                 400,
                 cs_error(
