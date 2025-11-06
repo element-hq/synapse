@@ -25,7 +25,6 @@ from typing import (
     Iterable,
     Mapping,
     NoReturn,
-    Optional,
     cast,
 )
 from unittest import mock
@@ -242,7 +241,7 @@ class DescriptorTestCase(unittest.TestCase):
         """The wrapped function returns a failure"""
 
         class Cls:
-            result: Optional[Deferred] = None
+            result: Deferred | None = None
             call_count = 0
             server_name = "test_server"  # nb must be called this for @cached
             _, clock = get_clock()  # nb must be called this for @cached

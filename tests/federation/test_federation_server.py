@@ -20,7 +20,6 @@
 #
 import logging
 from http import HTTPStatus
-from typing import Optional, Union
 from unittest.mock import Mock
 
 from parameterized import parameterized
@@ -192,12 +191,12 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
         async def post_json(
             destination: str,
             path: str,
-            data: Optional[JsonDict] = None,
+            data: JsonDict | None = None,
             long_retries: bool = False,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
             ignore_backoff: bool = False,
-            args: Optional[QueryParams] = None,
-        ) -> Union[JsonDict, list]:
+            args: QueryParams | None = None,
+        ) -> JsonDict | list:
             # If it asks us for new missing events, give them NOTHING
             if path.startswith("/_matrix/federation/v1/get_missing_events/"):
                 return {"events": []}

@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -192,7 +192,7 @@ class ReplicationRemoteRejectInviteRestServlet(ReplicationEndpoint):
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
         invite_event_id: str,
-        txn_id: Optional[str],
+        txn_id: str | None,
         requester: Requester,
         content: JsonDict,
     ) -> JsonDict:
@@ -260,7 +260,7 @@ class ReplicationRemoteRescindKnockRestServlet(ReplicationEndpoint):
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
         knock_event_id: str,
-        txn_id: Optional[str],
+        txn_id: str | None,
         requester: Requester,
         content: JsonDict,
     ) -> JsonDict:

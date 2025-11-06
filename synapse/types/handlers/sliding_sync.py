@@ -25,7 +25,6 @@ from typing import (
     Generic,
     Mapping,
     MutableMapping,
-    Optional,
     Sequence,
     TypeVar,
     cast,
@@ -166,12 +165,12 @@ class SlidingSyncResult:
         @attr.s(slots=True, frozen=True, auto_attribs=True)
         class StrippedHero:
             user_id: str
-            display_name: Optional[str]
-            avatar_url: Optional[str]
+            display_name: str | None
+            avatar_url: str | None
 
-        name: Optional[str]
-        avatar: Optional[str]
-        heroes: Optional[list[StrippedHero]]
+        name: str | None
+        avatar: str | None
+        heroes: list[StrippedHero] | None
         is_dm: bool
         initial: bool
         unstable_expanded_timeline: bool
@@ -179,18 +178,18 @@ class SlidingSyncResult:
         required_state: list[EventBase]
         # Should be empty for invite/knock rooms with `stripped_state`
         timeline_events: list[EventBase]
-        bundled_aggregations: Optional[dict[str, "BundledAggregations"]]
+        bundled_aggregations: dict[str, "BundledAggregations"] | None
         # Optional because it's only relevant to invite/knock rooms
         stripped_state: list[JsonDict]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        prev_batch: Optional[StreamToken]
+        prev_batch: StreamToken | None
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        limited: Optional[bool]
+        limited: bool | None
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        num_live: Optional[int]
-        bump_stamp: Optional[int]
-        joined_count: Optional[int]
-        invited_count: Optional[int]
+        num_live: int | None
+        bump_stamp: int | None
+        joined_count: int | None
+        invited_count: int | None
         notification_count: int
         highlight_count: int
 
@@ -281,7 +280,7 @@ class SlidingSyncResult:
             """
 
             # Only present on incremental syncs
-            device_list_updates: Optional[DeviceListUpdates]
+            device_list_updates: DeviceListUpdates | None
             device_one_time_keys_count: Mapping[str, int]
             device_unused_fallback_key_types: Sequence[str]
 
@@ -364,7 +363,7 @@ class SlidingSyncResult:
             @attr.s(slots=True, frozen=True, auto_attribs=True)
             class ThreadSubscription:
                 # always present when `subscribed`
-                automatic: Optional[bool]
+                automatic: bool | None
 
                 # the same as our stream_id; useful for clients to resolve
                 # race conditions locally
@@ -377,10 +376,10 @@ class SlidingSyncResult:
                 bump_stamp: int
 
             # room_id -> event_id (of thread root) -> the subscription change
-            subscribed: Optional[Mapping[str, Mapping[str, ThreadSubscription]]]
+            subscribed: Mapping[str, Mapping[str, ThreadSubscription]] | None
             # room_id -> event_id (of thread root) -> the unsubscription
-            unsubscribed: Optional[Mapping[str, Mapping[str, ThreadUnsubscription]]]
-            prev_batch: Optional[ThreadSubscriptionsToken]
+            unsubscribed: Mapping[str, Mapping[str, ThreadUnsubscription]] | None
+            prev_batch: ThreadSubscriptionsToken | None
 
             def __bool__(self) -> bool:
                 return (
@@ -389,12 +388,12 @@ class SlidingSyncResult:
                     or bool(self.prev_batch)
                 )
 
-        to_device: Optional[ToDeviceExtension] = None
-        e2ee: Optional[E2eeExtension] = None
-        account_data: Optional[AccountDataExtension] = None
-        receipts: Optional[ReceiptsExtension] = None
-        typing: Optional[TypingExtension] = None
-        thread_subscriptions: Optional[ThreadSubscriptionsExtension] = None
+        to_device: ToDeviceExtension | None = None
+        e2ee: E2eeExtension | None = None
+        account_data: AccountDataExtension | None = None
+        receipts: ReceiptsExtension | None = None
+        typing: TypingExtension | None = None
+        thread_subscriptions: ThreadSubscriptionsExtension | None = None
 
         def __bool__(self) -> bool:
             return bool(
@@ -730,7 +729,7 @@ class HaveSentRoom(Generic[T]):
     """
 
     status: HaveSentRoomFlag
-    last_token: Optional[T]
+    last_token: T | None
 
     @staticmethod
     def live() -> "HaveSentRoom[T]":

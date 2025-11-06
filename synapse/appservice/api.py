@@ -25,10 +25,8 @@ from typing import (
     TYPE_CHECKING,
     Iterable,
     Mapping,
-    Optional,
     Sequence,
     TypeVar,
-    Union,
 )
 
 from prometheus_client import Counter
@@ -222,7 +220,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         assert service.hs_token is not None
 
         try:
-            args: Mapping[bytes, Union[list[bytes], str]] = fields
+            args: Mapping[bytes, list[bytes] | str] = fields
             if self.config.use_appservice_legacy_authorization:
                 args = {
                     **fields,
@@ -258,11 +256,11 @@ class ApplicationServiceApi(SimpleHttpClient):
 
     async def get_3pe_protocol(
         self, service: "ApplicationService", protocol: str
-    ) -> Optional[JsonDict]:
+    ) -> JsonDict | None:
         if service.url is None:
             return {}
 
-        async def _get() -> Optional[JsonDict]:
+        async def _get() -> JsonDict | None:
             # This is required by the configuration.
             assert service.hs_token is not None
             try:
@@ -300,7 +298,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         key = (service.id, protocol)
         return await self.protocol_meta_cache.wrap(key, _get)
 
-    async def ping(self, service: "ApplicationService", txn_id: Optional[str]) -> None:
+    async def ping(self, service: "ApplicationService", txn_id: str | None) -> None:
         # The caller should check that url is set
         assert service.url is not None, "ping called without URL being set"
 
@@ -322,7 +320,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         one_time_keys_count: TransactionOneTimeKeysCount,
         unused_fallback_keys: TransactionUnusedFallbackKeys,
         device_list_summary: DeviceListUpdates,
-        txn_id: Optional[int] = None,
+        txn_id: int | None = None,
     ) -> bool:
         """
         Push data to an application service.

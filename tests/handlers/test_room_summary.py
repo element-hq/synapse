@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 from unittest import mock
 
 from twisted.internet.defer import ensureDeferred
@@ -49,7 +49,7 @@ from tests.unittest import override_config
 
 
 def _create_event(
-    room_id: str, order: Optional[Any] = None, origin_server_ts: int = 0
+    room_id: str, order: Any | None = None, origin_server_ts: int = 0
 ) -> mock.Mock:
     result = mock.Mock(name=room_id)
     result.room_id = room_id
@@ -151,8 +151,8 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         space_id: str,
         room_id: str,
         token: str,
-        order: Optional[str] = None,
-        via: Optional[list[str]] = None,
+        order: str | None = None,
+        via: list[str] | None = None,
     ) -> None:
         """Add a child room to a space."""
         if via is None:
@@ -393,7 +393,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         self._assert_hierarchy(result2, [(self.space, [self.room])])
 
     def _create_room_with_join_rule(
-        self, join_rule: str, room_version: Optional[str] = None, **extra_content: Any
+        self, join_rule: str, room_version: str | None = None, **extra_content: Any
     ) -> str:
         """Create a room with the given join rule and add it to the space."""
         room_id = self.helper.create_room_as(
@@ -740,7 +740,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> tuple[Optional[_RoomEntry], dict[str, JsonDict], set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return requested_room_entry, {subroom: child_room}, set()
 
         # Add a room to the space which is on another server.
@@ -793,7 +793,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> tuple[Optional[_RoomEntry], dict[str, JsonDict], set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return requested_room_entry, {fed_subroom: child_room}, set()
 
         expected = [
@@ -921,7 +921,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> tuple[Optional[_RoomEntry], dict[str, JsonDict], set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return subspace_room_entry, dict(children_rooms), set()
 
         # Add a room to the space which is on another server.
@@ -985,7 +985,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> tuple[Optional[_RoomEntry], dict[str, JsonDict], set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return fed_room_entry, {}, set()
 
         # Add a room to the space which is on another server.
@@ -1120,7 +1120,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> tuple[Optional[_RoomEntry], dict[str, JsonDict], set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return requested_room_entry, {fed_subroom: child_room}, set()
 
         expected = [
@@ -1233,7 +1233,7 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> tuple[Optional[_RoomEntry], dict[str, JsonDict], set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return requested_room_entry, {}, set()
 
         with mock.patch(

@@ -27,10 +27,8 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
-    Optional,
     TypedDict,
     TypeVar,
-    Union,
 )
 from urllib.parse import urlencode, urlparse
 
@@ -102,10 +100,10 @@ _SESSION_COOKIES = [
 class Token(TypedDict):
     access_token: str
     token_type: str
-    id_token: Optional[str]
-    refresh_token: Optional[str]
+    id_token: str | None
+    refresh_token: str | None
     expires_in: int
-    scope: Optional[str]
+    scope: str | None
 
 
 #: A JWK, as per RFC7517 sec 4. The type could be more precise than that, but
@@ -206,7 +204,7 @@ class OidcHandler:
         # are two.
 
         for cookie_name, _ in _SESSION_COOKIES:
-            session: Optional[bytes] = request.getCookie(cookie_name)
+            session: bytes | None = request.getCookie(cookie_name)
             if session is not None:
                 break
         else:
@@ -335,7 +333,7 @@ class OidcHandler:
 
         # Now that we know the audience and the issuer, we can figure out from
         # what provider it is coming from
-        oidc_provider: Optional[OidcProvider] = None
+        oidc_provider: OidcProvider | None = None
         for provider in self._providers.values():
             if provider.issuer == issuer and provider.client_id in audience:
                 oidc_provider = provider
@@ -351,7 +349,7 @@ class OidcHandler:
 class OidcError(Exception):
     """Used to catch errors when calling the token_endpoint"""
 
-    def __init__(self, error: str, error_description: Optional[str] = None):
+    def __init__(self, error: str, error_description: str | None = None):
         self.error = error
         self.error_description = error_description
 
@@ -398,7 +396,7 @@ class OidcProvider:
         self._scopes = provider.scopes
         self._user_profile_method = provider.user_profile_method
 
-        client_secret: Optional[Union[str, JwtClientSecret]] = None
+        client_secret: str | JwtClientSecret | None = None
         if provider.client_secret:
             client_secret = provider.client_secret
         elif provider.client_secret_jwt_key:
@@ -904,8 +902,8 @@ class OidcProvider:
         alg_values: list[str],
         token: str,
         claims_cls: type[C],
-        claims_options: Optional[dict] = None,
-        claims_params: Optional[dict] = None,
+        claims_options: dict | None = None,
+        claims_params: dict | None = None,
     ) -> C:
         """Decode and validate a JWT, re-fetching the JWKS as needed.
 
@@ -1005,8 +1003,8 @@ class OidcProvider:
     async def handle_redirect_request(
         self,
         request: SynapseRequest,
-        client_redirect_url: Optional[bytes],
-        ui_auth_session_id: Optional[str] = None,
+        client_redirect_url: bytes | None,
+        ui_auth_session_id: str | None = None,
     ) -> str:
         """Handle an incoming request to /login/sso/redirect
 
@@ -1235,7 +1233,7 @@ class OidcProvider:
         token: Token,
         request: SynapseRequest,
         client_redirect_url: str,
-        sid: Optional[str],
+        sid: str | None,
     ) -> None:
         """Given a UserInfo response, complete the login flow
 
@@ -1300,7 +1298,7 @@ class OidcProvider:
 
             return UserAttributes(**attributes)
 
-        async def grandfather_existing_users() -> Optional[str]:
+        async def grandfather_existing_users() -> str | None:
             if self._allow_existing_users:
                 # If allowing existing users we want to generate a single localpart
                 # and attempt to match it.
@@ -1444,8 +1442,8 @@ class OidcProvider:
         # If the `sub` claim was included in the logout token, we check that it matches
         # that it matches the right user. We can have cases where the `sub` claim is not
         # the ID saved in database, so we let admins disable this check in config.
-        sub: Optional[str] = claims.get("sub")
-        expected_user_id: Optional[str] = None
+        sub: str | None = claims.get("sub")
+        expected_user_id: str | None = None
         if sub is not None and not self._config.backchannel_logout_ignore_sub:
             expected_user_id = await self._store.get_user_by_external_id(
                 self.idp_id, sub
@@ -1473,7 +1471,7 @@ class LogoutToken(JWTClaims):  # type: ignore[misc]
 
     REGISTERED_CLAIMS = ["iss", "sub", "aud", "iat", "jti", "events", "sid"]
 
-    def validate(self, now: Optional[int] = None, leeway: int = 0) -> None:
+    def validate(self, now: int | None = None, leeway: int = 0) -> None:
         """Validate everything in claims payload."""
         super().validate(now, leeway)
         self.validate_sid()
@@ -1584,10 +1582,10 @@ class JwtClientSecret:
 
 
 class UserAttributeDict(TypedDict):
-    localpart: Optional[str]
+    localpart: str | None
     confirm_localpart: bool
-    display_name: Optional[str]
-    picture: Optional[str]  # may be omitted by older `OidcMappingProviders`
+    display_name: str | None
+    picture: str | None  # may be omitted by older `OidcMappingProviders`
     emails: list[str]
 
 
@@ -1674,9 +1672,9 @@ env.filters.update(
 class JinjaOidcMappingConfig:
     subject_template: Template
     picture_template: Template
-    localpart_template: Optional[Template]
-    display_name_template: Optional[Template]
-    email_template: Optional[Template]
+    localpart_template: Template | None
+    display_name_template: Template | None
+    email_template: Template | None
     extra_attributes: dict[str, Template]
     confirm_localpart: bool = False
 
@@ -1710,7 +1708,7 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
         subject_template = parse_template_config_with_claim("subject", "sub")
         picture_template = parse_template_config_with_claim("picture", "picture")
 
-        def parse_template_config(option_name: str) -> Optional[Template]:
+        def parse_template_config(option_name: str) -> Template | None:
             if option_name not in config:
                 return None
             try:
@@ -1768,7 +1766,7 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
             # a usable mxid.
             localpart += str(failures) if failures else ""
 
-        def render_template_field(template: Optional[Template]) -> Optional[str]:
+        def render_template_field(template: Template | None) -> str | None:
             if template is None:
                 return None
             return template.render(user=userinfo).strip()

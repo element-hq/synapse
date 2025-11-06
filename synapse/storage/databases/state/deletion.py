@@ -20,7 +20,6 @@ from typing import (
     AsyncIterator,
     Collection,
     Mapping,
-    Optional,
 )
 
 from synapse.events.snapshot import EventPersistencePair
@@ -506,7 +505,7 @@ class StateDeletionDataStore:
 
     async def get_next_state_group_collection_to_delete(
         self,
-    ) -> Optional[tuple[str, Mapping[int, int]]]:
+    ) -> tuple[str, Mapping[int, int]] | None:
         """Get the next set of state groups to try and delete
 
         Returns:
@@ -520,7 +519,7 @@ class StateDeletionDataStore:
     def _get_next_state_group_collection_to_delete_txn(
         self,
         txn: LoggingTransaction,
-    ) -> Optional[tuple[str, Mapping[int, int]]]:
+    ) -> tuple[str, Mapping[int, int]] | None:
         """Implementation of `get_next_state_group_collection_to_delete`"""
 
         # We want to return chunks of state groups that were marked for deletion

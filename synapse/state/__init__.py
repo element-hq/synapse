@@ -96,10 +96,10 @@ class _StateCacheEntry:
 
     def __init__(
         self,
-        state: Optional[StateMap[str]],
-        state_group: Optional[int],
-        prev_group: Optional[int] = None,
-        delta_ids: Optional[StateMap[str]] = None,
+        state: StateMap[str] | None,
+        state_group: int | None,
+        prev_group: int | None = None,
+        delta_ids: StateMap[str] | None = None,
     ):
         if state is None and state_group is None and prev_group is None:
             raise Exception("One of state, state_group or prev_group must be not None")
@@ -111,7 +111,7 @@ class _StateCacheEntry:
         #
         # This can be None if we have a `state_group` (as then we can fetch the
         # state from the DB.)
-        self._state: Optional[StateMap[str]] = (
+        self._state: StateMap[str] | None = (
             immutabledict(state) if state is not None else None
         )
 
@@ -120,7 +120,7 @@ class _StateCacheEntry:
         self.state_group = state_group
 
         self.prev_group = prev_group
-        self.delta_ids: Optional[StateMap[str]] = (
+        self.delta_ids: StateMap[str] | None = (
             immutabledict(delta_ids) if delta_ids is not None else None
         )
 
@@ -206,7 +206,7 @@ class StateHandler:
         self,
         room_id: str,
         event_ids: StrCollection,
-        state_filter: Optional[StateFilter] = None,
+        state_filter: StateFilter | None = None,
         await_full_state: bool = True,
     ) -> StateMap[str]:
         """Fetch the state after each of the given event IDs. Resolve them and return.
@@ -283,9 +283,9 @@ class StateHandler:
     async def calculate_context_info(
         self,
         event: EventBase,
-        state_ids_before_event: Optional[StateMap[str]] = None,
-        partial_state: Optional[bool] = None,
-        state_group_before_event: Optional[int] = None,
+        state_ids_before_event: StateMap[str] | None = None,
+        partial_state: bool | None = None,
+        state_group_before_event: int | None = None,
     ) -> UnpersistedEventContextBase:
         """
         Calulates the contents of an unpersisted event context, other than the current
@@ -456,8 +456,8 @@ class StateHandler:
     async def compute_event_context(
         self,
         event: EventBase,
-        state_ids_before_event: Optional[StateMap[str]] = None,
-        partial_state: Optional[bool] = None,
+        state_ids_before_event: StateMap[str] | None = None,
+        partial_state: bool | None = None,
     ) -> EventContext:
         """Build an EventContext structure for a non-outlier event.
 
@@ -670,7 +670,7 @@ class StateResolutionHandler:
         room_id: str,
         room_version: str,
         state_groups_ids: Mapping[int, StateMap[str]],
-        event_map: Optional[dict[str, EventBase]],
+        event_map: dict[str, EventBase] | None,
         state_res_store: "StateResolutionStore",
     ) -> _StateCacheEntry:
         """Resolves conflicts between a set of state groups
@@ -770,7 +770,7 @@ class StateResolutionHandler:
         room_id: str,
         room_version: str,
         state_sets: Sequence[StateMap[str]],
-        event_map: Optional[dict[str, EventBase]],
+        event_map: dict[str, EventBase] | None,
         state_res_store: "StateResolutionStore",
     ) -> StateMap[str]:
         """
@@ -934,7 +934,7 @@ def _make_state_cache_entry(
 
     # failing that, look for the closest match.
     prev_group = None
-    delta_ids: Optional[StateMap[str]] = None
+    delta_ids: StateMap[str] | None = None
 
     for old_group, old_state in state_groups_ids.items():
         if old_state.keys() - new_state.keys():
@@ -991,8 +991,8 @@ class StateResolutionStore:
         self,
         room_id: str,
         state_sets: list[set[str]],
-        conflicted_state: Optional[set[str]],
-        additional_backwards_reachable_conflicted_events: Optional[set[str]],
+        conflicted_state: set[str] | None,
+        additional_backwards_reachable_conflicted_events: set[str] | None,
     ) -> Awaitable[StateDifference]:
         """ "Given sets of state events figure out the auth chain difference (as
         per state res v2 algorithm).

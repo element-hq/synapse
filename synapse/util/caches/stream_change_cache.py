@@ -21,7 +21,7 @@
 
 import logging
 import math
-from typing import Collection, Mapping, Optional, Union
+from typing import Collection, Mapping
 
 import attr
 from sortedcontainers import SortedDict
@@ -45,7 +45,7 @@ class AllEntitiesChangedResult:
     that callers do the correct checks.
     """
 
-    _entities: Optional[list[EntityType]]
+    _entities: list[EntityType] | None
 
     @property
     def hit(self) -> bool:
@@ -78,7 +78,7 @@ class StreamChangeCache:
         server_name: str,
         current_stream_pos: int,
         max_size: int = 10000,
-        prefilled_cache: Optional[Mapping[EntityType, int]] = None,
+        prefilled_cache: Mapping[EntityType, int] | None = None,
     ) -> None:
         """
         Args:
@@ -182,7 +182,7 @@ class StreamChangeCache:
 
     def get_entities_changed(
         self, entities: Collection[EntityType], stream_pos: int, _perf_factor: int = 1
-    ) -> Union[set[EntityType], frozenset[EntityType]]:
+    ) -> set[EntityType] | frozenset[EntityType]:
         """
         Returns the subset of the given entities that have had changes after the given position.
 
@@ -352,7 +352,7 @@ class StreamChangeCache:
             for entity in r:
                 self._entity_to_key.pop(entity, None)
 
-    def get_max_pos_of_last_change(self, entity: EntityType) -> Optional[int]:
+    def get_max_pos_of_last_change(self, entity: EntityType) -> int | None:
         """Returns an upper bound of the stream id of the last change to an
         entity.
 

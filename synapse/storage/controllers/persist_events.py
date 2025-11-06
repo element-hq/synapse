@@ -34,9 +34,7 @@ from typing import (
     Generator,
     Generic,
     Iterable,
-    Optional,
     TypeVar,
-    Union,
 )
 
 import attr
@@ -164,7 +162,7 @@ class _UpdateCurrentStateTask:
         return isinstance(task, _UpdateCurrentStateTask)
 
 
-_EventPersistQueueTask = Union[_PersistEventsTask, _UpdateCurrentStateTask]
+_EventPersistQueueTask = _PersistEventsTask | _UpdateCurrentStateTask
 _PersistResult = TypeVar("_PersistResult")
 
 
@@ -674,7 +672,7 @@ class EventsPersistenceStorageController:
 
     async def _calculate_new_forward_extremities_and_state_delta(
         self, room_id: str, ev_ctx_rm: list[EventPersistencePair]
-    ) -> tuple[Optional[set[str]], Optional[DeltaState]]:
+    ) -> tuple[set[str] | None, DeltaState | None]:
         """Calculates the new forward extremities and state delta for a room
         given events to persist.
 
@@ -861,7 +859,7 @@ class EventsPersistenceStorageController:
         events_context: list[EventPersistencePair],
         old_latest_event_ids: AbstractSet[str],
         new_latest_event_ids: set[str],
-    ) -> tuple[Optional[StateMap[str]], Optional[StateMap[str]], set[str]]:
+    ) -> tuple[StateMap[str] | None, StateMap[str] | None, set[str]]:
         """Calculate the current state dict after adding some new events to
         a room
 

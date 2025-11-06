@@ -20,7 +20,7 @@
 #
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 from twisted.internet.protocol import Factory
 from twisted.internet.testing import MemoryReactor
@@ -44,7 +44,7 @@ from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
 
-test_server_connection_factory: Optional[TestServerTLSConnectionFactory] = None
+test_server_connection_factory: TestServerTLSConnectionFactory | None = None
 
 
 class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
@@ -67,7 +67,7 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         return conf
 
     def make_worker_hs(
-        self, worker_app: str, extra_config: Optional[dict] = None, **kwargs: Any
+        self, worker_app: str, extra_config: dict | None = None, **kwargs: Any
     ) -> HomeServer:
         worker_hs = super().make_worker_hs(worker_app, extra_config, **kwargs)
         # Force the media paths onto the replication resource.
@@ -282,7 +282,7 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         return conf
 
     def make_worker_hs(
-        self, worker_app: str, extra_config: Optional[dict] = None, **kwargs: Any
+        self, worker_app: str, extra_config: dict | None = None, **kwargs: Any
     ) -> HomeServer:
         worker_hs = super().make_worker_hs(worker_app, extra_config, **kwargs)
         # Force the media paths onto the replication resource.

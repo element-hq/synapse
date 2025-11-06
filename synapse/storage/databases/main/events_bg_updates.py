@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 
 import attr
 
@@ -109,7 +109,7 @@ class _JoinedRoomStreamOrderingUpdate:
     # The most recent event stream_ordering for the room
     most_recent_event_stream_ordering: int
     # The most recent event `bump_stamp` for the room
-    most_recent_bump_stamp: Optional[int]
+    most_recent_bump_stamp: int | None
 
 
 class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseStore):
@@ -1038,7 +1038,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         last_room_id: str,
         last_depth: int,
         last_stream: int,
-        batch_size: Optional[int],
+        batch_size: int | None,
         single_room: bool,
     ) -> _CalculateChainCover:
         """Calculate the chain cover for `batch_size` events, ordered by
@@ -1889,14 +1889,14 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         ) -> list[
             tuple[
                 str,
-                Optional[str],
-                Optional[str],
+                str | None,
+                str | None,
                 str,
                 str,
                 str,
                 str,
                 int,
-                Optional[str],
+                str | None,
                 bool,
             ]
         ]:
@@ -1982,14 +1982,14 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 list[
                     tuple[
                         str,
-                        Optional[str],
-                        Optional[str],
+                        str | None,
+                        str | None,
                         str,
                         str,
                         str,
                         str,
                         int,
-                        Optional[str],
+                        str | None,
                         bool,
                     ]
                 ],
@@ -2023,7 +2023,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _find_previous_invite_or_knock_membership_txn(
             txn: LoggingTransaction, room_id: str, user_id: str, event_id: str
-        ) -> Optional[tuple[str, str]]:
+        ) -> tuple[str, str] | None:
             # Find the previous invite/knock event before the leave event
             #
             # Here are some notes on how we landed on this query:
@@ -2598,7 +2598,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
             # Find the next room ID to process, with a relevant room version.
             room_ids: list[str] = []
-            max_room_id: Optional[str] = None
+            max_room_id: str | None = None
             for room_id, room_version_str in txn:
                 max_room_id = room_id
 
@@ -2704,7 +2704,7 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
 
     # If we have nothing written to the `sliding_sync_joined_rooms` table, there is
     # nothing to clean up
-    row = cast(Optional[tuple[int]], txn.fetchone())
+    row = cast(tuple[int] | None, txn.fetchone())
     max_stream_ordering_sliding_sync_joined_rooms_table = None
     depends_on = None
     if row is not None:
@@ -2830,7 +2830,7 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
 
     # If we have nothing written to the `sliding_sync_membership_snapshots` table,
     # there is nothing to clean up
-    row = cast(Optional[tuple[int]], txn.fetchone())
+    row = cast(tuple[int] | None, txn.fetchone())
     max_stream_ordering_sliding_sync_membership_snapshots_table = None
     if row is not None:
         (max_stream_ordering_sliding_sync_membership_snapshots_table,) = row

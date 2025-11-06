@@ -23,7 +23,7 @@
 import hashlib
 import logging
 import os
-from typing import TYPE_CHECKING, Any, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Iterator
 
 import attr
 import jsonschema
@@ -110,7 +110,7 @@ class TrustedKeyServer:
     server_name: str
 
     # map from key id to key object, or None to disable signature verification.
-    verify_keys: Optional[dict[str, VerifyKey]] = None
+    verify_keys: dict[str, VerifyKey] | None = None
 
 
 class KeyConfig(Config):
@@ -219,7 +219,7 @@ class KeyConfig(Config):
         if form_secret_path:
             if form_secret:
                 raise ConfigError(CONFLICTING_FORM_SECRET_OPTS_ERROR)
-            self.form_secret: Optional[str] = read_file(
+            self.form_secret: str | None = read_file(
                 form_secret_path, ("form_secret_path",)
             ).strip()
         else:
@@ -279,7 +279,7 @@ class KeyConfig(Config):
             raise ConfigError("Error reading %s: %s" % (name, str(e)))
 
     def read_old_signing_keys(
-        self, old_signing_keys: Optional[JsonDict]
+        self, old_signing_keys: JsonDict | None
     ) -> dict[str, "VerifyKeyWithExpiry"]:
         if old_signing_keys is None:
             return {}
@@ -408,7 +408,7 @@ def _parse_key_servers(
         server_name = server["server_name"]
         result = TrustedKeyServer(server_name=server_name)
 
-        verify_keys: Optional[dict[str, str]] = server.get("verify_keys")
+        verify_keys: dict[str, str] | None = server.get("verify_keys")
         if verify_keys is not None:
             result.verify_keys = {}
             for key_id, key_base64 in verify_keys.items():

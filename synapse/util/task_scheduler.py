@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from twisted.python.failure import Failure
 
@@ -116,7 +116,7 @@ class TaskScheduler:
             str,
             Callable[
                 [ScheduledTask],
-                Awaitable[tuple[TaskStatus, Optional[JsonMapping], Optional[str]]],
+                Awaitable[tuple[TaskStatus, JsonMapping | None, str | None]],
             ],
         ] = {}
         self._run_background_tasks = hs.config.worker.run_background_tasks
@@ -143,7 +143,7 @@ class TaskScheduler:
         self,
         function: Callable[
             [ScheduledTask],
-            Awaitable[tuple[TaskStatus, Optional[JsonMapping], Optional[str]]],
+            Awaitable[tuple[TaskStatus, JsonMapping | None, str | None]],
         ],
         action_name: str,
     ) -> None:
@@ -167,9 +167,9 @@ class TaskScheduler:
         self,
         action: str,
         *,
-        resource_id: Optional[str] = None,
-        timestamp: Optional[int] = None,
-        params: Optional[JsonMapping] = None,
+        resource_id: str | None = None,
+        timestamp: int | None = None,
+        params: JsonMapping | None = None,
     ) -> str:
         """Schedule a new potentially resumable task. A function matching the specified
         `action` should've been registered with `register_action` before the task is run.
@@ -220,10 +220,10 @@ class TaskScheduler:
         self,
         id: str,
         *,
-        timestamp: Optional[int] = None,
-        status: Optional[TaskStatus] = None,
-        result: Optional[JsonMapping] = None,
-        error: Optional[str] = None,
+        timestamp: int | None = None,
+        status: TaskStatus | None = None,
+        result: JsonMapping | None = None,
+        error: str | None = None,
     ) -> bool:
         """Update some task-associated values. This is exposed publicly so it can
         be used inside task functions, mainly to update the result or resume
@@ -263,7 +263,7 @@ class TaskScheduler:
             error=error,
         )
 
-    async def get_task(self, id: str) -> Optional[ScheduledTask]:
+    async def get_task(self, id: str) -> ScheduledTask | None:
         """Get a specific task description by id.
 
         Args:
@@ -278,11 +278,11 @@ class TaskScheduler:
     async def get_tasks(
         self,
         *,
-        actions: Optional[list[str]] = None,
-        resource_id: Optional[str] = None,
-        statuses: Optional[list[TaskStatus]] = None,
-        max_timestamp: Optional[int] = None,
-        limit: Optional[int] = None,
+        actions: list[str] | None = None,
+        resource_id: str | None = None,
+        statuses: list[TaskStatus] | None = None,
+        max_timestamp: int | None = None,
+        limit: int | None = None,
     ) -> list[ScheduledTask]:
         """Get a list of tasks. Returns all the tasks if no args are provided.
 

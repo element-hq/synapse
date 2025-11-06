@@ -13,7 +13,7 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import (
     AnyHttpUrl,
@@ -36,8 +36,8 @@ from ._base import Config, ConfigError, RootConfig
 class MasConfigModel(ParseModel):
     enabled: StrictBool = False
     endpoint: AnyHttpUrl = AnyHttpUrl("http://localhost:8080")
-    secret: Optional[StrictStr] = Field(default=None)
-    secret_path: Optional[FilePath] = Field(default=None)
+    secret: StrictStr | None = Field(default=None)
+    secret_path: FilePath | None = Field(default=None)
 
     @model_validator(mode="after")
     def verify_secret(self) -> Self:

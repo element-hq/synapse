@@ -19,7 +19,7 @@
 #
 import logging
 import urllib.parse
-from typing import Any, Generator, Optional
+from typing import Any, Generator
 from urllib.request import (  # type: ignore[attr-defined]
     proxy_bypass_environment,
 )
@@ -101,13 +101,13 @@ class MatrixFederationAgent:
         server_name: str,
         reactor: ISynapseReactor,
         clock: Clock,
-        tls_client_options_factory: Optional[FederationPolicyForHTTPS],
+        tls_client_options_factory: FederationPolicyForHTTPS | None,
         user_agent: bytes,
-        ip_allowlist: Optional[IPSet],
+        ip_allowlist: IPSet | None,
         ip_blocklist: IPSet,
-        proxy_config: Optional[ProxyConfig] = None,
-        _srv_resolver: Optional[SrvResolver] = None,
-        _well_known_resolver: Optional[WellKnownResolver] = None,
+        proxy_config: ProxyConfig | None = None,
+        _srv_resolver: SrvResolver | None = None,
+        _well_known_resolver: WellKnownResolver | None = None,
     ):
         """
         Args:
@@ -172,8 +172,8 @@ class MatrixFederationAgent:
         self,
         method: bytes,
         uri: bytes,
-        headers: Optional[Headers] = None,
-        bodyProducer: Optional[IBodyProducer] = None,
+        headers: Headers | None = None,
+        bodyProducer: IBodyProducer | None = None,
     ) -> Generator[defer.Deferred, Any, IResponse]:
         """
         Args:
@@ -259,9 +259,9 @@ class MatrixHostnameEndpointFactory:
         *,
         reactor: IReactorCore,
         proxy_reactor: IReactorCore,
-        tls_client_options_factory: Optional[FederationPolicyForHTTPS],
-        srv_resolver: Optional[SrvResolver],
-        proxy_config: Optional[ProxyConfig],
+        tls_client_options_factory: FederationPolicyForHTTPS | None,
+        srv_resolver: SrvResolver | None,
+        proxy_config: ProxyConfig | None,
     ):
         self._reactor = reactor
         self._proxy_reactor = proxy_reactor
@@ -310,9 +310,9 @@ class MatrixHostnameEndpoint:
         *,
         reactor: IReactorCore,
         proxy_reactor: IReactorCore,
-        tls_client_options_factory: Optional[FederationPolicyForHTTPS],
+        tls_client_options_factory: FederationPolicyForHTTPS | None,
         srv_resolver: SrvResolver,
-        proxy_config: Optional[ProxyConfig],
+        proxy_config: ProxyConfig | None,
         parsed_uri: URI,
     ):
         self._reactor = reactor

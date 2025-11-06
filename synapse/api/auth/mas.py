@@ -13,7 +13,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 from pydantic import (
@@ -74,11 +74,11 @@ class ServerMetadata(BaseModel):
 class IntrospectionResponse(BaseModel):
     retrieved_at_ms: StrictInt
     active: StrictBool
-    scope: Optional[StrictStr] = None
-    username: Optional[StrictStr] = None
-    sub: Optional[StrictStr] = None
-    device_id: Optional[StrictStr] = None
-    expires_in: Optional[StrictInt] = None
+    scope: StrictStr | None = None
+    username: StrictStr | None = None
+    sub: StrictStr | None = None
+    device_id: StrictStr | None = None
+    expires_in: StrictInt | None = None
     model_config = ConfigDict(extra="allow")
 
     def get_scope_set(self) -> set[str]:

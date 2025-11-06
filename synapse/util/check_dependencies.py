@@ -28,7 +28,7 @@ require. But this is probably just symptomatic of Python's package management.
 
 import logging
 from importlib import metadata
-from typing import Any, Iterable, NamedTuple, Optional, Sequence, cast
+from typing import Any, Iterable, NamedTuple, Sequence, cast
 
 from packaging.markers import Marker, Value, Variable, default_environment
 from packaging.requirements import Requirement
@@ -153,7 +153,7 @@ def _values_from_marker_value(value: Value) -> set[str]:
     return {str(raw)}
 
 
-def _extras_from_marker(marker: Optional[Marker]) -> set[str]:
+def _extras_from_marker(marker: Marker | None) -> set[str]:
     """Return every `extra` referenced in the supplied marker tree."""
 
     extras: set[str] = set()
@@ -214,7 +214,7 @@ def _marker_applies_for_any_extra(requirement: Requirement, extras: set[str]) ->
     )
 
 
-def _not_installed(requirement: Requirement, extra: Optional[str] = None) -> str:
+def _not_installed(requirement: Requirement, extra: str | None = None) -> str:
     if extra:
         return (
             f"Synapse {VERSION} needs {requirement.name} for {extra}, "
@@ -225,7 +225,7 @@ def _not_installed(requirement: Requirement, extra: Optional[str] = None) -> str
 
 
 def _incorrect_version(
-    requirement: Requirement, got: str, extra: Optional[str] = None
+    requirement: Requirement, got: str, extra: str | None = None
 ) -> str:
     if extra:
         return (
@@ -238,7 +238,7 @@ def _incorrect_version(
         )
 
 
-def _no_reported_version(requirement: Requirement, extra: Optional[str] = None) -> str:
+def _no_reported_version(requirement: Requirement, extra: str | None = None) -> str:
     if extra:
         return (
             f"Synapse {VERSION} needs {requirement} for {extra}, "
@@ -251,7 +251,7 @@ def _no_reported_version(requirement: Requirement, extra: Optional[str] = None) 
         )
 
 
-def check_requirements(extra: Optional[str] = None) -> None:
+def check_requirements(extra: str | None = None) -> None:
     """Check Synapse's dependencies are present and correctly versioned.
 
     If provided, `extra` must be the name of an packaging extra (e.g. "saml2" in

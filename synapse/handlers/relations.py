@@ -25,7 +25,6 @@ from typing import (
     Collection,
     Iterable,
     Mapping,
-    Optional,
     Sequence,
 )
 
@@ -75,9 +74,9 @@ class BundledAggregations:
     Some values require additional processing during serialization.
     """
 
-    references: Optional[JsonDict] = None
-    replace: Optional[EventBase] = None
-    thread: Optional[_ThreadAggregation] = None
+    references: JsonDict | None = None
+    replace: EventBase | None = None
+    thread: _ThreadAggregation | None = None
 
     def __bool__(self) -> bool:
         return bool(self.references or self.replace or self.thread)
@@ -101,8 +100,8 @@ class RelationsHandler:
         pagin_config: PaginationConfig,
         recurse: bool,
         include_original_event: bool,
-        relation_type: Optional[str] = None,
-        event_type: Optional[str] = None,
+        relation_type: str | None = None,
+        event_type: str | None = None,
     ) -> JsonDict:
         """Get related events of a event, ordered by topological ordering.
 
@@ -553,7 +552,7 @@ class RelationsHandler:
         room_id: str,
         include: ThreadsListInclude,
         limit: int = 5,
-        from_token: Optional[ThreadsNextBatch] = None,
+        from_token: ThreadsNextBatch | None = None,
     ) -> JsonDict:
         """Get related events of a event, ordered by topological ordering.
 

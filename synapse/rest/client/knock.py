@@ -69,7 +69,7 @@ class KnockRoomAliasServlet(RestServlet):
         if RoomID.is_valid(room_identifier):
             room_id = room_identifier
 
-            # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+            # twisted.web.server.Request.args is incorrectly defined as Any | None
             args: dict[bytes, list[bytes]] = request.args  # type: ignore
             # Prefer via over server_name (deprecated with MSC4156)
             remote_room_hosts = parse_strings_from_args(args, "via", required=False)

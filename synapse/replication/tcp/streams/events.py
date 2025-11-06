@@ -20,7 +20,7 @@
 #
 import heapq
 from collections import defaultdict
-from typing import TYPE_CHECKING, Iterable, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Iterable, TypeVar, cast
 
 import attr
 
@@ -93,7 +93,7 @@ class BaseEventsStreamRow:
     TypeId: str
 
     @classmethod
-    def from_data(cls: type[T], data: Iterable[Optional[str]]) -> T:
+    def from_data(cls: type[T], data: Iterable[str | None]) -> T:
         """Parse the data from the replication stream into a row.
 
         By default we just call the constructor with the data list as arguments
@@ -111,10 +111,10 @@ class EventsStreamEventRow(BaseEventsStreamRow):
     event_id: str
     room_id: str
     type: str
-    state_key: Optional[str]
-    redacts: Optional[str]
-    relates_to: Optional[str]
-    membership: Optional[str]
+    state_key: str | None
+    redacts: str | None
+    relates_to: str | None
+    membership: str | None
     rejected: bool
     outlier: bool
 
@@ -126,7 +126,7 @@ class EventsStreamCurrentStateRow(BaseEventsStreamRow):
     room_id: str
     type: str
     state_key: str
-    event_id: Optional[str]
+    event_id: str | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -282,6 +282,6 @@ class EventsStream(_StreamFromIdGen):
 
     @classmethod
     def parse_row(cls, row: StreamRow) -> "EventsStreamRow":
-        (typ, data) = cast(tuple[str, Iterable[Optional[str]]], row)
+        (typ, data) = cast(tuple[str, Iterable[str | None]], row)
         event_stream_row_data = TypeToRow[typ].from_data(data)
         return EventsStreamRow(typ, event_stream_row_data)

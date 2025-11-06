@@ -24,7 +24,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Mapping, Optional, Sequence
+from typing import Mapping, Sequence
 
 from twisted.internet import defer, task
 
@@ -136,7 +136,7 @@ class FileExfiltrationWriter(ExfiltrationWriter):
             to a temporary directory.
     """
 
-    def __init__(self, user_id: str, directory: Optional[str] = None):
+    def __init__(self, user_id: str, directory: str | None = None):
         self.user_id = user_id
 
         if directory:
@@ -291,7 +291,7 @@ def load_config(argv_options: list[str]) -> tuple[HomeServerConfig, argparse.Nam
 
 def create_homeserver(
     config: HomeServerConfig,
-    reactor: Optional[ISynapseReactor] = None,
+    reactor: ISynapseReactor | None = None,
 ) -> AdminCmdServer:
     """
     Create a homeserver instance for the Synapse admin command process.

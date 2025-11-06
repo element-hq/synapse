@@ -101,7 +101,7 @@ class MonthlyActiveUsersTestCase(unittest.HomeserverTestCase):
 
         # Test each of the registered users is marked as active
         timestamp = self.get_success(self.store.user_last_seen_monthly_active(user1))
-        # Mypy notes that one shouldn't compare Optional[int] to 0 with assertGreater.
+        # Mypy notes that one shouldn't compare int | None to 0 with assertGreater.
         # Check that timestamp really is an int.
         assert timestamp is not None
         self.assertGreater(timestamp, 0)

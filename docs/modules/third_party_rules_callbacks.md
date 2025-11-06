@@ -16,7 +16,7 @@ _First introduced in Synapse v1.39.0_
 async def check_event_allowed(
     event: "synapse.events.EventBase",
     state_events: "synapse.types.StateMap",
-) -> Tuple[bool, Optional[dict]]
+) -> tuple[bool, dict | None]
 ```
 
 **<span style="color:red">
@@ -340,7 +340,7 @@ class EventCensorer:
         self,
         event: "synapse.events.EventBase",
         state_events: "synapse.types.StateMap",
-    ) -> Tuple[bool, Optional[dict]]:
+    ) -> Tuple[bool, dict | None]:
         event_dict = event.get_dict()
         new_event_content = await self.api.http_client.post_json_get_json(
             uri=self._endpoint, post_json=event_dict,

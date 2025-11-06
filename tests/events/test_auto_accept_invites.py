@@ -20,7 +20,7 @@
 #
 import asyncio
 from http import HTTPStatus
-from typing import Any, Optional, TypeVar, cast
+from typing import Any, TypeVar, cast
 from unittest.mock import Mock
 
 import attr
@@ -525,7 +525,7 @@ def generate_request_key() -> SyncRequestKey:
 def sync_join(
     testcase: HomeserverTestCase,
     user_id: str,
-    since_token: Optional[StreamToken] = None,
+    since_token: StreamToken | None = None,
 ) -> tuple[list[JoinedSyncResult], StreamToken]:
     """Perform a sync request for the given user and return the user join updates
     they've received, as well as the next_batch token.
@@ -766,7 +766,7 @@ class MockEvent:
     type: str
     content: dict[str, Any]
     room_id: str = "!someroom"
-    state_key: Optional[str] = None
+    state_key: str | None = None
 
     def is_state(self) -> bool:
         """Checks if the event is a state event by checking if it has a state key."""
@@ -793,7 +793,7 @@ async def make_awaitable(value: T) -> T:
 
 
 def create_module(
-    config_override: Optional[dict[str, Any]] = None, worker_name: Optional[str] = None
+    config_override: dict[str, Any] | None = None, worker_name: str | None = None
 ) -> InviteAutoAccepter:
     # Create a mock based on the ModuleApi spec, but override some mocked functions
     # because some capabilities are needed for running the tests.

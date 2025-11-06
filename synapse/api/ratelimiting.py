@@ -102,9 +102,7 @@ class Ratelimiter:
 
         self.clock.looping_call(self._prune_message_counts, 15 * 1000)
 
-    def _get_key(
-        self, requester: Optional[Requester], key: Optional[Hashable]
-    ) -> Hashable:
+    def _get_key(self, requester: Requester | None, key: Hashable | None) -> Hashable:
         """Use the requester's MXID as a fallback key if no key is provided."""
         if key is None:
             if not requester:
@@ -121,13 +119,13 @@ class Ratelimiter:
 
     async def can_do_action(
         self,
-        requester: Optional[Requester],
-        key: Optional[Hashable] = None,
-        rate_hz: Optional[float] = None,
-        burst_count: Optional[int] = None,
+        requester: Requester | None,
+        key: Hashable | None = None,
+        rate_hz: float | None = None,
+        burst_count: int | None = None,
         update: bool = True,
         n_actions: int = 1,
-        _time_now_s: Optional[float] = None,
+        _time_now_s: float | None = None,
     ) -> tuple[bool, float]:
         """Can the entity (e.g. user or IP address) perform the action?
 
@@ -247,10 +245,10 @@ class Ratelimiter:
 
     def record_action(
         self,
-        requester: Optional[Requester],
-        key: Optional[Hashable] = None,
+        requester: Requester | None,
+        key: Hashable | None = None,
         n_actions: int = 1,
-        _time_now_s: Optional[float] = None,
+        _time_now_s: float | None = None,
     ) -> None:
         """Record that an action(s) took place, even if they violate the rate limit.
 
@@ -332,14 +330,14 @@ class Ratelimiter:
 
     async def ratelimit(
         self,
-        requester: Optional[Requester],
-        key: Optional[Hashable] = None,
-        rate_hz: Optional[float] = None,
-        burst_count: Optional[int] = None,
+        requester: Requester | None,
+        key: Hashable | None = None,
+        rate_hz: float | None = None,
+        burst_count: int | None = None,
         update: bool = True,
         n_actions: int = 1,
-        _time_now_s: Optional[float] = None,
-        pause: Optional[float] = 0.5,
+        _time_now_s: float | None = None,
+        pause: float | None = 0.5,
     ) -> None:
         """Checks if an action can be performed. If not, raises a LimitExceededError
 
@@ -396,7 +394,7 @@ class RequestRatelimiter:
         store: DataStore,
         clock: Clock,
         rc_message: RatelimitSettings,
-        rc_admin_redaction: Optional[RatelimitSettings],
+        rc_admin_redaction: RatelimitSettings | None,
     ):
         self.store = store
         self.clock = clock
@@ -412,7 +410,7 @@ class RequestRatelimiter:
         # Check whether ratelimiting room admin message redaction is enabled
         # by the presence of rate limits in the config
         if rc_admin_redaction:
-            self.admin_redaction_ratelimiter: Optional[Ratelimiter] = Ratelimiter(
+            self.admin_redaction_ratelimiter: Ratelimiter | None = Ratelimiter(
                 store=self.store,
                 clock=self.clock,
                 cfg=rc_admin_redaction,

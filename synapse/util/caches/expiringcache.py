@@ -27,9 +27,7 @@ from typing import (
     Generic,
     Iterable,
     Literal,
-    Optional,
     TypeVar,
-    Union,
     overload,
 )
 
@@ -146,7 +144,7 @@ class ExpiringCache(Generic[KT, VT]):
 
         return entry.value
 
-    def pop(self, key: KT, default: T = SENTINEL) -> Union[VT, T]:
+    def pop(self, key: KT, default: T = SENTINEL) -> VT | T:
         """Removes and returns the value with the given key from the cache.
 
         If the key isn't in the cache then `default` will be returned if
@@ -173,12 +171,12 @@ class ExpiringCache(Generic[KT, VT]):
         return key in self._cache
 
     @overload
-    def get(self, key: KT, default: Literal[None] = None) -> Optional[VT]: ...
+    def get(self, key: KT, default: Literal[None] = None) -> VT | None: ...
 
     @overload
-    def get(self, key: KT, default: T) -> Union[VT, T]: ...
+    def get(self, key: KT, default: T) -> VT | T: ...
 
-    def get(self, key: KT, default: Optional[T] = None) -> Union[VT, Optional[T]]:
+    def get(self, key: KT, default: T | None = None) -> VT | T | None:
         try:
             return self[key]
         except KeyError:

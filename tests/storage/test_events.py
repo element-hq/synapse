@@ -20,7 +20,6 @@
 #
 
 import logging
-from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -168,7 +167,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         self.assert_extremities([self.remote_event_1.event_id])
 
     def persist_event(
-        self, event: EventBase, state: Optional[StateMap[str]] = None
+        self, event: EventBase, state: StateMap[str] | None = None
     ) -> None:
         """Persist the event, with optional state"""
         context = self.get_success(

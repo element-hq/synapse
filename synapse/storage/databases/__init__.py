@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Generic, Optional, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.storage._base import SQLBaseStore
@@ -64,7 +64,7 @@ class Databases(Generic[DataStoreT]):
     databases: list[DatabasePool]
     main: "DataStore"  # FIXME: https://github.com/matrix-org/synapse/issues/11165: actually an instance of `main_store_class`
     state: StateGroupDataStore
-    persist_events: Optional[PersistEventsStore]
+    persist_events: PersistEventsStore | None
     state_deletion: StateDeletionDataStore
 
     def __init__(self, main_store_class: type[DataStoreT], hs: "HomeServer"):
@@ -72,10 +72,10 @@ class Databases(Generic[DataStoreT]):
         # store.
 
         self.databases = []
-        main: Optional[DataStoreT] = None
-        state: Optional[StateGroupDataStore] = None
-        state_deletion: Optional[StateDeletionDataStore] = None
-        persist_events: Optional[PersistEventsStore] = None
+        main: DataStoreT | None = None
+        state: StateGroupDataStore | None = None
+        state_deletion: StateDeletionDataStore | None = None
+        persist_events: PersistEventsStore | None = None
 
         server_name = hs.hostname
 

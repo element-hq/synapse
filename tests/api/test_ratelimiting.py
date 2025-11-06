@@ -1,5 +1,3 @@
-from typing import Optional
-
 from synapse.api.ratelimiting import LimitExceededError, Ratelimiter
 from synapse.appservice import ApplicationService
 from synapse.config.ratelimiting import RatelimitSettings
@@ -489,7 +487,7 @@ class TestRatelimiter(unittest.HomeserverTestCase):
         # and limiter name.
         async def get_ratelimit_override_for_user(
             user_id: str, limiter_name: str
-        ) -> Optional[RatelimitOverride]:
+        ) -> RatelimitOverride | None:
             if user_id == test_user_id:
                 return RatelimitOverride(
                     per_second=0.1,

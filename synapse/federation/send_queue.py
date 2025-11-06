@@ -42,7 +42,6 @@ from typing import (
     TYPE_CHECKING,
     Hashable,
     Iterable,
-    Optional,
     Sized,
 )
 
@@ -217,7 +216,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         destination: str,
         edu_type: str,
         content: JsonDict,
-        key: Optional[Hashable] = None,
+        key: Hashable | None = None,
     ) -> None:
         """As per FederationSender"""
         if self.is_mine_server_name(destination):

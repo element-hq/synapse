@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional, cast
+from typing import cast
 
 from canonicaljson import json
 
@@ -67,7 +67,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         room: RoomID,
         user: UserID,
         membership: str,
-        extra_content: Optional[JsonDict] = None,
+        extra_content: JsonDict | None = None,
     ) -> EventBase:
         content = {"membership": membership}
         content.update(extra_content or {})
@@ -248,8 +248,8 @@ class RedactionTestCase(unittest.HomeserverTestCase):
             async def build(
                 self,
                 prev_event_ids: list[str],
-                auth_event_ids: Optional[list[str]],
-                depth: Optional[int] = None,
+                auth_event_ids: list[str] | None,
+                depth: int | None = None,
             ) -> EventBase:
                 built_event = await self._base_builder.build(
                     prev_event_ids=prev_event_ids, auth_event_ids=auth_event_ids

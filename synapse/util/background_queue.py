@@ -21,7 +21,6 @@ from typing import (
     Awaitable,
     Callable,
     Generic,
-    Optional,
     TypeVar,
 )
 
@@ -76,7 +75,7 @@ class BackgroundQueue(Generic[T]):
         # Indicates if a background process is running, and if so whether there
         # is new data in the queue. Used to signal to an existing background
         # process that there is new data added to the queue.
-        self._wakeup_event: Optional[DeferredEvent] = None
+        self._wakeup_event: DeferredEvent | None = None
 
     def add(self, item: T) -> None:
         """Add an item into the queue."""

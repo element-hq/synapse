@@ -21,7 +21,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable
 
 from synapse.api.constants import EduTypes, EventTypes, Membership, PresenceState
 from synapse.api.errors import AuthError, SynapseError
@@ -58,7 +58,7 @@ class EventStreamHandler:
         timeout: int = 0,
         as_client_event: bool = True,
         affect_presence: bool = True,
-        room_id: Optional[str] = None,
+        room_id: str | None = None,
     ) -> JsonDict:
         """Fetches the events stream for a given user."""
 
@@ -152,10 +152,10 @@ class EventHandler:
     async def get_event(
         self,
         user: UserID,
-        room_id: Optional[str],
+        room_id: str | None,
         event_id: str,
         show_redacted: bool = False,
-    ) -> Optional[EventBase]:
+    ) -> EventBase | None:
         """Retrieve a single specified event.
 
         Args:

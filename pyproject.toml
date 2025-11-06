@@ -80,10 +80,15 @@ select = [
     "G",
     # pyupgrade
     "UP006",
+    "UP007",
+    "UP045",
 ]
 extend-safe-fixes = [
-    # pyupgrade
-    "UP006"
+    # pyupgrade rules compatible with Python >= 3.9
+    "UP006",
+    "UP007",
+    # pyupgrade rules compatible with Python >= 3.10
+    "UP045",
 ]
 
 [tool.ruff.lint.isort]

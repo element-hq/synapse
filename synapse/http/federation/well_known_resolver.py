@@ -22,7 +22,7 @@ import logging
 import random
 import time
 from io import BytesIO
-from typing import Callable, Optional
+from typing import Callable
 
 import attr
 
@@ -80,7 +80,7 @@ logger = logging.getLogger(__name__)
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class WellKnownLookupResult:
-    delegated_server: Optional[bytes]
+    delegated_server: bytes | None
 
 
 class WellKnownResolver:
@@ -93,8 +93,8 @@ class WellKnownResolver:
         clock: Clock,
         agent: IAgent,
         user_agent: bytes,
-        well_known_cache: Optional[TTLCache[bytes, Optional[bytes]]] = None,
-        had_well_known_cache: Optional[TTLCache[bytes, bool]] = None,
+        well_known_cache: TTLCache[bytes, bytes | None] | None = None,
+        had_well_known_cache: TTLCache[bytes, bool] | None = None,
     ):
         """
         Args:
@@ -156,7 +156,7 @@ class WellKnownResolver:
                 # label metrics)
                 server_name=self.server_name,
             ):
-                result: Optional[bytes]
+                result: bytes | None
                 cache_period: float
 
                 result, cache_period = await self._fetch_well_known(server_name)
@@ -320,7 +320,7 @@ class WellKnownResolver:
 
 def _cache_period_from_headers(
     headers: Headers, time_now: Callable[[], float] = time.time
-) -> Optional[float]:
+) -> float | None:
     cache_controls = _parse_cache_control(headers)
 
     if b"no-store" in cache_controls:
@@ -348,7 +348,7 @@ def _cache_period_from_headers(
     return None
 
 
-def _parse_cache_control(headers: Headers) -> dict[bytes, Optional[bytes]]:
+def _parse_cache_control(headers: Headers) -> dict[bytes, bytes | None]:
     cache_controls = {}
     cache_control_headers = headers.getRawHeaders(b"cache-control") or []
     for hdr in cache_control_headers:

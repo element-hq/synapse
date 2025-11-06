@@ -19,7 +19,7 @@
 #
 #
 import re
-from typing import Any, Optional, cast
+from typing import Any, cast
 from unittest import mock
 from unittest.mock import Mock, patch
 
@@ -110,7 +110,7 @@ class GetUserDirectoryTables:
         thing missing is an unused room_id column.
         """
         rows = cast(
-            list[tuple[str, Optional[str], Optional[str]]],
+            list[tuple[str, str | None, str | None]],
             await self.store.db_pool.simple_select_list(
                 "user_directory",
                 None,

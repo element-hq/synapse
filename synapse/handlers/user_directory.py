@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -116,7 +116,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         self._hs = hs
 
         # The current position in the current_state_delta stream
-        self.pos: Optional[int] = None
+        self.pos: int | None = None
 
         # Guard to ensure we only process deltas one at a time
         self._is_processing = False
@@ -124,7 +124,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         # Guard to ensure we only have one process for refreshing remote profiles
         self._is_refreshing_remote_profiles = False
         # Handle to cancel the `call_later` of `kick_off_remote_profile_refresh_process`
-        self._refresh_remote_profiles_call_later: Optional[IDelayedCall] = None
+        self._refresh_remote_profiles_call_later: IDelayedCall | None = None
 
         # Guard to ensure we only have one process for refreshing remote profiles
         # for the given servers.
@@ -299,8 +299,8 @@ class UserDirectoryHandler(StateDeltasHandler):
     async def _handle_room_publicity_change(
         self,
         room_id: str,
-        prev_event_id: Optional[str],
-        event_id: Optional[str],
+        prev_event_id: str | None,
+        event_id: str | None,
         typ: str,
     ) -> None:
         """Handle a room having potentially changed from/to world_readable/publicly
@@ -372,8 +372,8 @@ class UserDirectoryHandler(StateDeltasHandler):
     async def _handle_room_membership_event(
         self,
         room_id: str,
-        prev_event_id: Optional[str],
-        event_id: Optional[str],
+        prev_event_id: str | None,
+        event_id: str | None,
         state_key: str,
     ) -> None:
         """Process a single room membershp event.
@@ -519,7 +519,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         self,
         user_id: str,
         room_id: str,
-        prev_event_id: Optional[str],
+        prev_event_id: str | None,
         event_id: str,
     ) -> None:
         """Check member event changes for any profile changes and update the

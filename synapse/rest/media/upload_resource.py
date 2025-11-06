@@ -22,7 +22,7 @@
 
 import logging
 import re
-from typing import IO, TYPE_CHECKING, Optional
+from typing import IO, TYPE_CHECKING
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import respond_with_json
@@ -56,7 +56,7 @@ class BaseUploadServlet(RestServlet):
 
     async def _get_file_metadata(
         self, request: SynapseRequest, user_id: str
-    ) -> tuple[int, Optional[str], str]:
+    ) -> tuple[int, str | None, str]:
         raw_content_length = request.getHeader("Content-Length")
         if raw_content_length is None:
             raise SynapseError(msg="Request must specify a Content-Length", code=400)
@@ -82,7 +82,7 @@ class BaseUploadServlet(RestServlet):
         upload_name_bytes = parse_bytes_from_args(args, "filename")
         if upload_name_bytes:
             try:
-                upload_name: Optional[str] = upload_name_bytes.decode("utf8")
+                upload_name: str | None = upload_name_bytes.decode("utf8")
             except UnicodeDecodeError:
                 raise SynapseError(
                     msg="Invalid UTF-8 filename parameter: %r" % (upload_name_bytes,),

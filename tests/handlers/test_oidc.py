@@ -19,7 +19,7 @@
 #
 #
 import os
-from typing import Any, Awaitable, ContextManager, Optional
+from typing import Any, Awaitable, ContextManager
 from unittest.mock import ANY, AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -221,7 +221,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
         return _build_callback_request(code, state, session), grant
 
     def assertRenderedError(
-        self, error: str, error_description: Optional[str] = None
+        self, error: str, error_description: str | None = None
     ) -> tuple[Any, ...]:
         self.render_error.assert_called_once()
         args = self.render_error.call_args[0]

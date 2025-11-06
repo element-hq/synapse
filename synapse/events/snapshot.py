@@ -51,7 +51,7 @@ class UnpersistedEventContextBase(ABC):
 
     def __init__(self, storage_controller: "StorageControllers"):
         self._storage: "StorageControllers" = storage_controller
-        self.app_service: Optional[ApplicationService] = None
+        self.app_service: ApplicationService | None = None
 
     @abstractmethod
     async def persist(
@@ -134,20 +134,20 @@ class EventContext(UnpersistedEventContextBase):
 
     _storage: "StorageControllers"
     state_group_deltas: dict[tuple[int, int], StateMap[str]]
-    rejected: Optional[str] = None
-    _state_group: Optional[int] = None
-    state_group_before_event: Optional[int] = None
-    _state_delta_due_to_event: Optional[StateMap[str]] = None
-    app_service: Optional[ApplicationService] = None
+    rejected: str | None = None
+    _state_group: int | None = None
+    state_group_before_event: int | None = None
+    _state_delta_due_to_event: StateMap[str] | None = None
+    app_service: ApplicationService | None = None
 
     partial_state: bool = False
 
     @staticmethod
     def with_state(
         storage: "StorageControllers",
-        state_group: Optional[int],
-        state_group_before_event: Optional[int],
-        state_delta_due_to_event: Optional[StateMap[str]],
+        state_group: int | None,
+        state_group_before_event: int | None,
+        state_delta_due_to_event: StateMap[str] | None,
         partial_state: bool,
         state_group_deltas: dict[tuple[int, int], StateMap[str]],
     ) -> "EventContext":
@@ -227,7 +227,7 @@ class EventContext(UnpersistedEventContextBase):
         return context
 
     @property
-    def state_group(self) -> Optional[int]:
+    def state_group(self) -> int | None:
         """The ID of the state group for this event.
 
         Note that state events are persisted with a state group which includes the new
@@ -354,13 +354,13 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
     """
 
     _storage: "StorageControllers"
-    state_group_before_event: Optional[int]
-    state_group_after_event: Optional[int]
-    state_delta_due_to_event: Optional[StateMap[str]]
-    prev_group_for_state_group_before_event: Optional[int]
-    delta_ids_to_state_group_before_event: Optional[StateMap[str]]
+    state_group_before_event: int | None
+    state_group_after_event: int | None
+    state_delta_due_to_event: StateMap[str] | None
+    prev_group_for_state_group_before_event: int | None
+    delta_ids_to_state_group_before_event: StateMap[str] | None
     partial_state: bool
-    state_map_before_event: Optional[StateMap[str]] = None
+    state_map_before_event: StateMap[str] | None = None
 
     @classmethod
     async def batch_persist_unpersisted_contexts(
@@ -511,7 +511,7 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
 
 def _encode_state_group_delta(
     state_group_delta: dict[tuple[int, int], StateMap[str]],
-) -> list[tuple[int, int, Optional[list[tuple[str, str, str]]]]]:
+) -> list[tuple[int, int, list[tuple[str, str, str]] | None]]:
     if not state_group_delta:
         return []
 
@@ -538,8 +538,8 @@ def _decode_state_group_delta(
 
 
 def _encode_state_dict(
-    state_dict: Optional[StateMap[str]],
-) -> Optional[list[tuple[str, str, str]]]:
+    state_dict: StateMap[str] | None,
+) -> list[tuple[str, str, str]] | None:
     """Since dicts of (type, state_key) -> event_id cannot be serialized in
     JSON we need to convert them to a form that can.
     """
@@ -550,8 +550,8 @@ def _encode_state_dict(
 
 
 def _decode_state_dict(
-    input: Optional[list[tuple[str, str, str]]],
-) -> Optional[StateMap[str]]:
+    input: list[tuple[str, str, str]] | None,
+) -> StateMap[str] | None:
     """Decodes a state dict encoded using `_encode_state_dict` above"""
     if input is None:
         return None

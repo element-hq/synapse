@@ -19,7 +19,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
@@ -497,7 +496,7 @@ class UserMediaStatisticsTestCase(unittest.HomeserverTestCase):
             self.assertIn("media_length", c)
 
     def _order_test(
-        self, order_type: str, expected_user_list: list[str], dir: Optional[str] = None
+        self, order_type: str, expected_user_list: list[str], dir: str | None = None
     ) -> None:
         """Request the list of users in a certain order. Assert that order is what
         we expect

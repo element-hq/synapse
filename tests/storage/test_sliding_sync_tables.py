@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import Optional, cast
+from typing import cast
 
 import attr
 from parameterized import parameterized
@@ -55,12 +55,12 @@ class _SlidingSyncJoinedRoomResult:
     # `event.internal_metadata.stream_ordering` is marked optional because it only
     # exists for persisted events but in the context of these tests, we're only working
     # with persisted events and we're making comparisons so we will find any mismatch.
-    event_stream_ordering: Optional[int]
-    bump_stamp: Optional[int]
-    room_type: Optional[str]
-    room_name: Optional[str]
+    event_stream_ordering: int | None
+    bump_stamp: int | None
+    room_type: str | None
+    room_name: str | None
     is_encrypted: bool
-    tombstone_successor_room_id: Optional[str]
+    tombstone_successor_room_id: str | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -75,12 +75,12 @@ class _SlidingSyncMembershipSnapshotResult:
     # `event.internal_metadata.stream_ordering` is marked optional because it only
     # exists for persisted events but in the context of these tests, we're only working
     # with persisted events and we're making comparisons so we will find any mismatch.
-    event_stream_ordering: Optional[int]
+    event_stream_ordering: int | None
     has_known_state: bool
-    room_type: Optional[str]
-    room_name: Optional[str]
+    room_type: str | None
+    room_name: str | None
     is_encrypted: bool
-    tombstone_successor_room_id: Optional[str]
+    tombstone_successor_room_id: str | None
     # Make this default to "not forgotten" because it doesn't apply to many tests and we
     # don't want to force all of the tests to deal with it.
     forgotten: bool = False
@@ -207,7 +207,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
     def _create_remote_invite_room_for_user(
         self,
         invitee_user_id: str,
-        unsigned_invite_room_state: Optional[list[StrippedStateEvent]],
+        unsigned_invite_room_state: list[StrippedStateEvent] | None,
     ) -> tuple[str, EventBase]:
         """
         Create a fake invite for a remote room and persist it.
@@ -2246,7 +2246,7 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
         ]
     )
     def test_non_join_remote_invite_no_stripped_state(
-        self, _description: str, stripped_state: Optional[list[StrippedStateEvent]]
+        self, _description: str, stripped_state: list[StrippedStateEvent] | None
     ) -> None:
         """
         Test remote invite with no stripped state provided shows up in

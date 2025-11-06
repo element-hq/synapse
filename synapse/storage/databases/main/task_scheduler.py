@@ -19,7 +19,7 @@
 #
 #
 
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
@@ -63,11 +63,11 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
     async def get_scheduled_tasks(
         self,
         *,
-        actions: Optional[list[str]] = None,
-        resource_id: Optional[str] = None,
-        statuses: Optional[list[TaskStatus]] = None,
-        max_timestamp: Optional[int] = None,
-        limit: Optional[int] = None,
+        actions: list[str] | None = None,
+        resource_id: str | None = None,
+        statuses: list[TaskStatus] | None = None,
+        max_timestamp: int | None = None,
+        limit: int | None = None,
     ) -> list[ScheduledTask]:
         """Get a list of scheduled tasks from the DB.
 
@@ -152,9 +152,9 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
         id: str,
         timestamp: int,
         *,
-        status: Optional[TaskStatus] = None,
-        result: Optional[JsonMapping] = None,
-        error: Optional[str] = None,
+        status: TaskStatus | None = None,
+        result: JsonMapping | None = None,
+        error: str | None = None,
     ) -> bool:
         """Update a scheduled task in the DB with some new value(s).
 
@@ -182,7 +182,7 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
         )
         return nb_rows > 0
 
-    async def get_scheduled_task(self, id: str) -> Optional[ScheduledTask]:
+    async def get_scheduled_task(self, id: str) -> ScheduledTask | None:
         """Get a specific `ScheduledTask` from its id.
 
         Args:
@@ -191,7 +191,7 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
         Returns: the task if available, `None` otherwise
         """
         row = cast(
-            Optional[ScheduledTaskRow],
+            ScheduledTaskRow | None,
             await self.db_pool.simple_select_one(
                 table="scheduled_tasks",
                 keyvalues={"id": id},

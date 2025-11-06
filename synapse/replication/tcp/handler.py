@@ -26,9 +26,7 @@ from typing import (
     Awaitable,
     Iterable,
     Iterator,
-    Optional,
     TypeVar,
-    Union,
 )
 
 from prometheus_client import Counter
@@ -115,9 +113,7 @@ tcp_command_queue_gauge = LaterGauge(
 
 
 # the type of the entries in _command_queues_by_stream
-_StreamCommandQueueItem = tuple[
-    Union[RdataCommand, PositionCommand], IReplicationConnection
-]
+_StreamCommandQueueItem = tuple[RdataCommand | PositionCommand, IReplicationConnection]
 
 
 class ReplicationCommandHandler:
@@ -245,7 +241,7 @@ class ReplicationCommandHandler:
         self._pending_batches: dict[str, list[Any]] = {}
 
         # The factory used to create connections.
-        self._factory: Optional[ReconnectingClientFactory] = None
+        self._factory: ReconnectingClientFactory | None = None
 
         # The currently connected connections. (The list of places we need to send
         # outgoing replication commands to.)
@@ -341,7 +337,7 @@ class ReplicationCommandHandler:
             self._channels_to_subscribe_to.append(channel_name)
 
     def _add_command_to_stream_queue(
-        self, conn: IReplicationConnection, cmd: Union[RdataCommand, PositionCommand]
+        self, conn: IReplicationConnection, cmd: RdataCommand | PositionCommand
     ) -> None:
         """Queue the given received command for processing
 
@@ -368,7 +364,7 @@ class ReplicationCommandHandler:
 
     async def _process_command(
         self,
-        cmd: Union[PositionCommand, RdataCommand],
+        cmd: PositionCommand | RdataCommand,
         conn: IReplicationConnection,
         stream_name: str,
     ) -> None:
@@ -459,7 +455,7 @@ class ReplicationCommandHandler:
 
     def on_USER_SYNC(
         self, conn: IReplicationConnection, cmd: UserSyncCommand
-    ) -> Optional[Awaitable[None]]:
+    ) -> Awaitable[None] | None:
         user_sync_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         if self._is_presence_writer:
@@ -475,7 +471,7 @@ class ReplicationCommandHandler:
 
     def on_CLEAR_USER_SYNC(
         self, conn: IReplicationConnection, cmd: ClearUserSyncsCommand
-    ) -> Optional[Awaitable[None]]:
+    ) -> Awaitable[None] | None:
         if self._is_presence_writer:
             return self._presence_handler.update_external_syncs_clear(cmd.instance_id)
         else:
@@ -491,7 +487,7 @@ class ReplicationCommandHandler:
 
     def on_USER_IP(
         self, conn: IReplicationConnection, cmd: UserIpCommand
-    ) -> Optional[Awaitable[None]]:
+    ) -> Awaitable[None] | None:
         user_ip_cache_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         if self._is_master or self._should_insert_client_ips:
@@ -833,7 +829,7 @@ class ReplicationCommandHandler:
         self,
         instance_id: str,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         is_syncing: bool,
         last_sync_ms: int,
     ) -> None:
@@ -848,7 +844,7 @@ class ReplicationCommandHandler:
         access_token: str,
         ip: str,
         user_agent: str,
-        device_id: Optional[str],
+        device_id: str | None,
         last_seen: int,
     ) -> None:
         """Tell the master that the user made a request."""
@@ -858,7 +854,7 @@ class ReplicationCommandHandler:
     def send_remote_server_up(self, server: str) -> None:
         self.send_command(RemoteServerUpCommand(server))
 
-    def stream_update(self, stream_name: str, token: Optional[int], data: Any) -> None:
+    def stream_update(self, stream_name: str, token: int | None, data: Any) -> None:
         """Called when a new update is available to stream to Redis subscribers.
 
         We need to check if the client is interested in the stream or not

@@ -21,7 +21,7 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
@@ -45,7 +45,7 @@ async def calculate_room_name(
     user_id: str,
     fallback_to_members: bool = True,
     fallback_to_single_member: bool = True,
-) -> Optional[str]:
+) -> str | None:
     """
     Works out a user-facing name for the given room as per Matrix
     spec recommendations.

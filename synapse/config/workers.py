@@ -22,7 +22,7 @@
 
 import argparse
 import logging
-from typing import Any, Optional, Union
+from typing import Any
 
 import attr
 from pydantic import (
@@ -79,7 +79,7 @@ MAIN_PROCESS_INSTANCE_MAP_NAME = "main"
 logger = logging.getLogger(__name__)
 
 
-def _instance_to_list_converter(obj: Union[str, list[str]]) -> list[str]:
+def _instance_to_list_converter(obj: str | list[str]) -> list[str]:
     """Helper for allowing parsing a string or list of strings to a config
     option expecting a list of strings.
     """
@@ -119,7 +119,7 @@ class InstanceUnixLocationConfig(ParseModel):
         return f"{self.path}"
 
 
-InstanceLocationConfig = Union[InstanceTcpLocationConfig, InstanceUnixLocationConfig]
+InstanceLocationConfig = InstanceTcpLocationConfig | InstanceUnixLocationConfig
 
 
 @attr.s
@@ -190,7 +190,7 @@ class OutboundFederationRestrictedTo:
         locations: list of instance locations to connect to proxy via.
     """
 
-    instances: Optional[list[str]]
+    instances: list[str] | None
     locations: list[InstanceLocationConfig] = attr.Factory(list)
 
     def __contains__(self, instance: str) -> bool:
@@ -246,7 +246,7 @@ class WorkerConfig(Config):
         if worker_replication_secret_path:
             if worker_replication_secret:
                 raise ConfigError(CONFLICTING_WORKER_REPLICATION_SECRET_OPTS_ERROR)
-            self.worker_replication_secret: Optional[str] = read_file(
+            self.worker_replication_secret: str | None = read_file(
                 worker_replication_secret_path, ("worker_replication_secret_path",)
             ).strip()
         else:
@@ -341,7 +341,7 @@ class WorkerConfig(Config):
                     % MAIN_PROCESS_INSTANCE_MAP_NAME
                 )
 
-        # type-ignore: the expression `Union[A, B]` is not a Type[Union[A, B]] currently
+        # type-ignore: the expression `A | B` is not a `type[A | B]` currently
         self.instance_map: dict[str, InstanceLocationConfig] = (
             parse_and_validate_mapping(
                 instance_map,
