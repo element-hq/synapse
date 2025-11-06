@@ -26,8 +26,6 @@ from typing import (
     Callable,
     Collection,
     Literal,
-    Optional,
-    Union,
 )
 from unittest.mock import Mock
 from urllib.parse import urlencode
@@ -141,14 +139,11 @@ class TestSpamChecker:
     async def check_login_for_spam(
         self,
         user_id: str,
-        device_id: Optional[str],
-        initial_display_name: Optional[str],
-        request_info: Collection[tuple[Optional[str], str]],
-        auth_provider_id: Optional[str] = None,
-    ) -> Union[
-        Literal["NOT_SPAM"],
-        tuple["synapse.module_api.errors.Codes", JsonDict],
-    ]:
+        device_id: str | None,
+        initial_display_name: str | None,
+        request_info: Collection[tuple[str | None, str]],
+        auth_provider_id: str | None = None,
+    ) -> Literal["NOT_SPAM"] | tuple["synapse.module_api.errors.Codes", JsonDict]:
         return "NOT_SPAM"
 
 
@@ -165,14 +160,11 @@ class DenyAllSpamChecker:
     async def check_login_for_spam(
         self,
         user_id: str,
-        device_id: Optional[str],
-        initial_display_name: Optional[str],
-        request_info: Collection[tuple[Optional[str], str]],
-        auth_provider_id: Optional[str] = None,
-    ) -> Union[
-        Literal["NOT_SPAM"],
-        tuple["synapse.module_api.errors.Codes", JsonDict],
-    ]:
+        device_id: str | None,
+        initial_display_name: str | None,
+        request_info: Collection[tuple[str | None, str]],
+        auth_provider_id: str | None = None,
+    ) -> Literal["NOT_SPAM"] | tuple["synapse.module_api.errors.Codes", JsonDict]:
         # Return an odd set of values to ensure that they get correctly passed
         # to the client.
         return Codes.LIMIT_EXCEEDED, {"extra": "value"}
@@ -984,7 +976,7 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         # it should redirect us to the auth page of the OIDC server
         self.assertEqual(oidc_uri_path, fake_oidc_server.authorization_endpoint)
 
-    def _make_sso_redirect_request(self, idp_prov: Optional[str] = None) -> FakeChannel:
+    def _make_sso_redirect_request(self, idp_prov: str | None = None) -> FakeChannel:
         """Send a request to /_matrix/client/r0/login/sso/redirect
 
         ... possibly specifying an IDP provider
@@ -1888,8 +1880,8 @@ class UsernamePickerTestCase(HomeserverTestCase):
 async def mock_get_file(
     url: str,
     output_stream: BinaryIO,
-    max_size: Optional[int] = None,
-    headers: Optional[RawHeaders] = None,
-    is_allowed_content_type: Optional[Callable[[str], bool]] = None,
+    max_size: int | None = None,
+    headers: RawHeaders | None = None,
+    is_allowed_content_type: Callable[[str], bool] | None = None,
 ) -> tuple[int, dict[bytes, list[bytes]], str, int]:
     return 0, {b"Content-Type": [b"image/png"]}, "", 200

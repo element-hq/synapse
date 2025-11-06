@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Mapping, Optional, cast
+from typing import TYPE_CHECKING, Mapping, cast
 
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.database import (
@@ -129,7 +129,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
         )
 
     async def get_monthly_active_users_by_service(
-        self, start_timestamp: Optional[int] = None, end_timestamp: Optional[int] = None
+        self, start_timestamp: int | None = None, end_timestamp: int | None = None
     ) -> list[tuple[str, str]]:
         """Generates list of monthly active users and their services.
         Please see "get_monthly_active_count_by_service" docstring for more details
@@ -194,7 +194,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
         return users
 
     @cached(num_args=1)
-    async def user_last_seen_monthly_active(self, user_id: str) -> Optional[int]:
+    async def user_last_seen_monthly_active(self, user_id: str) -> int | None:
         """
         Checks if a given user is part of the monthly active user group
 

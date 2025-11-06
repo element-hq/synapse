@@ -21,7 +21,7 @@
 import importlib.resources as importlib_resources
 import json
 import re
-from typing import Any, Iterable, Optional, Pattern
+from typing import Any, Iterable, Pattern
 from urllib import parse as urlparse
 
 import attr
@@ -39,7 +39,7 @@ class OEmbedEndpointConfig:
     # The patterns to match.
     url_patterns: list[Pattern[str]]
     # The supported formats.
-    formats: Optional[list[str]]
+    formats: list[str] | None
 
 
 class OembedConfig(Config):

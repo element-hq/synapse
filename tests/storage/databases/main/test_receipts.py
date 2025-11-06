@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence
 
 from twisted.internet.testing import MemoryReactor
 
@@ -52,7 +52,7 @@ class ReceiptsBackgroundUpdateStoreTestCase(HomeserverTestCase):
         index_name: str,
         table: str,
         receipts: dict[tuple[str, str, str], Sequence[dict[str, Any]]],
-        expected_unique_receipts: dict[tuple[str, str, str], Optional[dict[str, Any]]],
+        expected_unique_receipts: dict[tuple[str, str, str], dict[str, Any] | None],
     ) -> None:
         """Test that the background update to uniqueify non-thread receipts in
         the given receipts table works properly.

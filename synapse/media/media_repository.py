@@ -24,7 +24,7 @@ import logging
 import os
 import shutil
 from io import BytesIO
-from typing import IO, TYPE_CHECKING, Optional
+from typing import IO, TYPE_CHECKING
 
 import attr
 from matrix_common.types.mxc_uri import MXCUri
@@ -170,7 +170,7 @@ class MediaRepository:
             )
 
         if hs.config.media.url_preview_enabled:
-            self.url_previewer: Optional[UrlPreviewer] = UrlPreviewer(
+            self.url_previewer: UrlPreviewer | None = UrlPreviewer(
                 hs, self, self.media_storage
             )
         else:
@@ -208,7 +208,7 @@ class MediaRepository:
             local_media, remote_media, self.clock.time_msec()
         )
 
-    def mark_recently_accessed(self, server_name: Optional[str], media_id: str) -> None:
+    def mark_recently_accessed(self, server_name: str | None, media_id: str) -> None:
         """Mark the given media as recently accessed.
 
         Args:
@@ -298,11 +298,11 @@ class MediaRepository:
     async def create_or_update_content(
         self,
         media_type: str,
-        upload_name: Optional[str],
+        upload_name: str | None,
         content: IO,
         content_length: int,
         auth_user: UserID,
-        media_id: Optional[str] = None,
+        media_id: str | None = None,
     ) -> MXCUri:
         """Create or update the content of the given media ID.
 
@@ -354,7 +354,7 @@ class MediaRepository:
 
         # This is the total size of media uploaded by the user in the last
         # `time_period_ms` milliseconds, or None if we haven't checked yet.
-        uploaded_media_size: Optional[int] = None
+        uploaded_media_size: int | None = None
 
         for limit in media_upload_limits:
             # We only need to check the amount of media uploaded by the user in
@@ -422,7 +422,7 @@ class MediaRepository:
 
     async def get_cached_remote_media_info(
         self, origin: str, media_id: str
-    ) -> Optional[RemoteMedia]:
+    ) -> RemoteMedia | None:
         """
         Get cached remote media info for a given origin/media ID combo. If the requested
         media is not found locally, it will not be requested over federation and the
@@ -439,7 +439,7 @@ class MediaRepository:
 
     async def get_local_media_info(
         self, request: SynapseRequest, media_id: str, max_timeout_ms: int
-    ) -> Optional[LocalMedia]:
+    ) -> LocalMedia | None:
         """Gets the info dictionary for given local media ID. If the media has
         not been uploaded yet, this function will wait up to ``max_timeout_ms``
         milliseconds for the media to be uploaded.
@@ -495,7 +495,7 @@ class MediaRepository:
         self,
         request: SynapseRequest,
         media_id: str,
-        name: Optional[str],
+        name: str | None,
         max_timeout_ms: int,
         allow_authenticated: bool = True,
         federation: bool = False,
@@ -555,7 +555,7 @@ class MediaRepository:
         request: SynapseRequest,
         server_name: str,
         media_id: str,
-        name: Optional[str],
+        name: str | None,
         max_timeout_ms: int,
         ip_address: str,
         use_federation_endpoint: bool,
@@ -696,7 +696,7 @@ class MediaRepository:
         ip_address: str,
         use_federation_endpoint: bool,
         allow_authenticated: bool,
-    ) -> tuple[Optional[Responder], RemoteMedia]:
+    ) -> tuple[Responder | None, RemoteMedia]:
         """Looks for media in local cache, if not there then attempt to
         download from remote server.
 
@@ -1065,7 +1065,7 @@ class MediaRepository:
         t_height: int,
         t_method: str,
         t_type: str,
-    ) -> Optional[BytesIO]:
+    ) -> BytesIO | None:
         m_width = thumbnailer.width
         m_height = thumbnailer.height
 
@@ -1099,7 +1099,7 @@ class MediaRepository:
         t_method: str,
         t_type: str,
         url_cache: bool,
-    ) -> Optional[tuple[str, FileInfo]]:
+    ) -> tuple[str, FileInfo] | None:
         input_path = await self.media_storage.ensure_media_is_in_local_cache(
             FileInfo(None, media_id, url_cache=url_cache)
         )
@@ -1175,7 +1175,7 @@ class MediaRepository:
         t_height: int,
         t_method: str,
         t_type: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         input_path = await self.media_storage.ensure_media_is_in_local_cache(
             FileInfo(server_name, file_id)
         )
@@ -1247,12 +1247,12 @@ class MediaRepository:
     @trace
     async def _generate_thumbnails(
         self,
-        server_name: Optional[str],
+        server_name: str | None,
         media_id: str,
         file_id: str,
         media_type: str,
         url_cache: bool = False,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Generate and store thumbnails for an image.
 
         Args:

@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Optional
+from typing import Any
 
 from synapse.config._base import Config
 from synapse.config._util import validate_config
@@ -32,7 +32,7 @@ class FederationConfig(Config):
         federation_config = config.setdefault("federation", {})
 
         # FIXME: federation_domain_whitelist needs sytests
-        self.federation_domain_whitelist: Optional[dict] = None
+        self.federation_domain_whitelist: dict | None = None
         federation_domain_whitelist = config.get("federation_domain_whitelist", None)
 
         if federation_domain_whitelist is not None:

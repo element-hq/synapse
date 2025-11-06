@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -155,7 +154,7 @@ class HTTPPusherTests(HomeserverTestCase):
         self.assertEqual(notification_event_ids, sent_event_ids[2:])
 
     def _request_notifications(
-        self, from_token: Optional[str], limit: int, expected_count: int
+        self, from_token: str | None, limit: int, expected_count: int
     ) -> tuple[list[str], str]:
         """
         Make a request to /notifications to get the latest events to be notified about.

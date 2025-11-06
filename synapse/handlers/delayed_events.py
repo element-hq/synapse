@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -76,10 +76,10 @@ class DelayedEventsHandler:
             cfg=self._config.ratelimiting.rc_delayed_event_mgmt,
         )
 
-        self._next_delayed_event_call: Optional[IDelayedCall] = None
+        self._next_delayed_event_call: IDelayedCall | None = None
 
         # The current position in the current_state_delta stream
-        self._event_pos: Optional[int] = None
+        self._event_pos: int | None = None
 
         # Guard to ensure we only process event deltas one at a time
         self._event_processing = False
@@ -343,8 +343,8 @@ class DelayedEventsHandler:
         *,
         room_id: str,
         event_type: str,
-        state_key: Optional[str],
-        origin_server_ts: Optional[int],
+        state_key: str | None,
+        origin_server_ts: int | None,
         content: JsonDict,
         delay: int,
     ) -> str:
@@ -547,7 +547,7 @@ class DelayedEventsHandler:
                     finalised_ts=finalised_ts,
                 )
 
-    def _schedule_next_at_or_none(self, next_send_ts: Optional[Timestamp]) -> None:
+    def _schedule_next_at_or_none(self, next_send_ts: Timestamp | None) -> None:
         if next_send_ts is not None:
             self._schedule_next_at(next_send_ts)
         elif self._next_delayed_event_call is not None:
@@ -571,7 +571,7 @@ class DelayedEventsHandler:
     async def get_delayed_events_for_user(
         self,
         requester: Requester,
-        delay_ids: Optional[list[str]],
+        delay_ids: list[str] | None,
         get_scheduled: bool,
         get_finalised: bool,
     ) -> dict[str, list[JsonDict]]:
@@ -609,7 +609,7 @@ class DelayedEventsHandler:
     async def _send_event(
         self,
         event: DelayedEventDetails,
-        txn_id: Optional[str] = None,
+        txn_id: str | None = None,
     ) -> Timestamp:
         user_id = UserID(event.user_localpart, self._config.server.server_name)
         user_id_str = user_id.to_string()
@@ -688,7 +688,7 @@ class DelayedEventsHandler:
     def _get_current_ts(self) -> Timestamp:
         return Timestamp(self._clock.time_msec())
 
-    def _next_send_ts_changed(self, next_send_ts: Optional[Timestamp]) -> bool:
+    def _next_send_ts_changed(self, next_send_ts: Timestamp | None) -> bool:
         # The DB alone knows if the next send time changed after adding/modifying
         # a delayed event, but if we were to ever miss updating our delayed call's
         # firing time, we may miss other updates. So, keep track of changes to the

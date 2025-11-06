@@ -138,7 +138,6 @@ from typing import (
     Hashable,
     Iterable,
     Literal,
-    Optional,
 )
 
 import attr
@@ -266,7 +265,7 @@ class AbstractFederationSender(metaclass=abc.ABCMeta):
         destination: str,
         edu_type: str,
         content: JsonDict,
-        key: Optional[Hashable] = None,
+        key: Hashable | None = None,
     ) -> None:
         """Construct an Edu object, and queue it for sending
 
@@ -410,7 +409,7 @@ class FederationSender(AbstractFederationSender):
         self.is_mine_id = hs.is_mine_id
         self.is_mine_server_name = hs.is_mine_server_name
 
-        self._presence_router: Optional["PresenceRouter"] = None
+        self._presence_router: "PresenceRouter" | None = None
         self._transaction_manager = TransactionManager(hs)
 
         self._instance_name = hs.get_instance_name()
@@ -481,7 +480,7 @@ class FederationSender(AbstractFederationSender):
 
     def _get_per_destination_queue(
         self, destination: str
-    ) -> Optional[PerDestinationQueue]:
+    ) -> PerDestinationQueue | None:
         """Get or create a PerDestinationQueue for the given destination
 
         Args:
@@ -605,7 +604,7 @@ class FederationSender(AbstractFederationSender):
                         )
                         return
 
-                    destinations: Optional[Collection[str]] = None
+                    destinations: Collection[str] | None = None
                     if not event.prev_event_ids():
                         # If there are no prev event IDs then the state is empty
                         # and so no remote servers in the room
@@ -1010,7 +1009,7 @@ class FederationSender(AbstractFederationSender):
         destination: str,
         edu_type: str,
         content: JsonDict,
-        key: Optional[Hashable] = None,
+        key: Hashable | None = None,
     ) -> None:
         """Construct an Edu object, and queue it for sending
 
@@ -1038,7 +1037,7 @@ class FederationSender(AbstractFederationSender):
 
         self.send_edu(edu, key)
 
-    def send_edu(self, edu: Edu, key: Optional[Hashable]) -> None:
+    def send_edu(self, edu: Edu, key: Hashable | None) -> None:
         """Queue an EDU for sending
 
         Args:
@@ -1134,7 +1133,7 @@ class FederationSender(AbstractFederationSender):
         In order to reduce load spikes, adds a delay between each destination.
         """
 
-        last_processed: Optional[str] = None
+        last_processed: str | None = None
 
         while not self._is_shutdown:
             destinations_to_wake = (

@@ -20,7 +20,7 @@
 #
 #
 
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, cast
 
 from canonicaljson import encode_canonical_json
 
@@ -72,7 +72,7 @@ class FilteringWorkerStore(SQLBaseStore):
 
         lower_bound_id = progress.get("lower_bound_id", "")
 
-        def _get_last_id(txn: LoggingTransaction) -> Optional[str]:
+        def _get_last_id(txn: LoggingTransaction) -> str | None:
             sql = """
                     SELECT user_id FROM user_filters
                     WHERE user_id > ?
@@ -151,7 +151,7 @@ class FilteringWorkerStore(SQLBaseStore):
 
     @cached(num_args=2)
     async def get_user_filter(
-        self, user_id: UserID, filter_id: Union[int, str]
+        self, user_id: UserID, filter_id: int | str
     ) -> JsonMapping:
         # filter_id is BIGINT UNSIGNED, so if it isn't a number, fail
         # with a coherent error message rather than 500 M_UNKNOWN.
@@ -187,7 +187,7 @@ class FilteringWorkerStore(SQLBaseStore):
 
             sql = "SELECT MAX(filter_id) FROM user_filters WHERE full_user_id = ?"
             txn.execute(sql, (user_id.to_string(),))
-            max_id = cast(tuple[Optional[int]], txn.fetchone())[0]
+            max_id = cast(tuple[int | None], txn.fetchone())[0]
             if max_id is None:
                 filter_id = 0
             else:

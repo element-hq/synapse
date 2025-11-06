@@ -15,7 +15,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from pydantic import StrictStr
 
@@ -53,7 +53,7 @@ class MasUpsertDeviceResource(MasBaseResource):
     class PostBody(RequestBodyModel):
         localpart: StrictStr
         device_id: StrictStr
-        display_name: Optional[StrictStr] = None
+        display_name: StrictStr | None = None
 
     async def _async_render_POST(
         self, request: "SynapseRequest"

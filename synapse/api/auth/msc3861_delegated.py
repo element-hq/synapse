@@ -20,7 +20,7 @@
 #
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import urlencode
 
 from authlib.oauth2 import ClientAuth
@@ -102,25 +102,25 @@ class IntrospectionResult:
             return []
         return scope_to_list(value)
 
-    def get_sub(self) -> Optional[str]:
+    def get_sub(self) -> str | None:
         value = self._inner.get("sub")
         if not isinstance(value, str):
             return None
         return value
 
-    def get_username(self) -> Optional[str]:
+    def get_username(self) -> str | None:
         value = self._inner.get("username")
         if not isinstance(value, str):
             return None
         return value
 
-    def get_name(self) -> Optional[str]:
+    def get_name(self) -> str | None:
         value = self._inner.get("name")
         if not isinstance(value, str):
             return None
         return value
 
-    def get_device_id(self) -> Optional[str]:
+    def get_device_id(self) -> str | None:
         value = self._inner.get("device_id")
         if value is not None and not isinstance(value, str):
             raise AuthError(
@@ -174,7 +174,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._clock = hs.get_clock()
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
-        self._admin_token: Callable[[], Optional[str]] = self._config.admin_token
+        self._admin_token: Callable[[], str | None] = self._config.admin_token
         self._force_tracing_for_users = hs.config.tracing.force_tracing_for_users
 
         self._rust_http_client = HttpClient(
@@ -247,7 +247,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         metadata = await self._issuer_metadata.get()
         return metadata.issuer or self._config.issuer
 
-    async def account_management_url(self) -> Optional[str]:
+    async def account_management_url(self) -> str | None:
         """
         Get the configured account management URL
 

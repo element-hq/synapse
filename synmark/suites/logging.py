@@ -22,7 +22,6 @@ import logging
 import logging.config
 import warnings
 from io import StringIO
-from typing import Optional
 from unittest.mock import Mock
 
 from pyperf import perf_counter
@@ -58,7 +57,7 @@ class LineCounter(LineOnlyReceiver):
 class Factory(ServerFactory):
     protocol = LineCounter
     wait_for: int
-    on_done: Optional[Deferred]
+    on_done: Deferred | None
 
 
 async def main(reactor: ISynapseReactor, loops: int) -> float:

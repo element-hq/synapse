@@ -20,7 +20,6 @@
 #
 
 import logging
-from typing import Optional
 
 from zope.interface import implementer
 
@@ -119,9 +118,9 @@ class ReplicationAgent(_AgentBase):
         reactor: ISynapseReactor,
         instance_map: dict[str, InstanceLocationConfig],
         contextFactory: IPolicyForHTTPS,
-        connectTimeout: Optional[float] = None,
-        bindAddress: Optional[bytes] = None,
-        pool: Optional[HTTPConnectionPool] = None,
+        connectTimeout: float | None = None,
+        bindAddress: bytes | None = None,
+        pool: HTTPConnectionPool | None = None,
     ):
         """
         Create a ReplicationAgent.
@@ -149,8 +148,8 @@ class ReplicationAgent(_AgentBase):
         self,
         method: bytes,
         uri: bytes,
-        headers: Optional[Headers] = None,
-        bodyProducer: Optional[IBodyProducer] = None,
+        headers: Headers | None = None,
+        bodyProducer: IBodyProducer | None = None,
     ) -> "defer.Deferred[IResponse]":
         """
         Issue a request to the server indicated by the given uri.

@@ -35,7 +35,6 @@ from typing import (
     Iterator,
     Literal,
     Mapping,
-    Optional,
     Sequence,
     TypeVar,
     cast,
@@ -213,10 +212,10 @@ class LoggingDatabaseConnection:
     def cursor(
         self,
         *,
-        txn_name: Optional[str] = None,
-        after_callbacks: Optional[list["_CallbackListEntry"]] = None,
-        async_after_callbacks: Optional[list["_AsyncCallbackListEntry"]] = None,
-        exception_callbacks: Optional[list["_CallbackListEntry"]] = None,
+        txn_name: str | None = None,
+        after_callbacks: list["_CallbackListEntry"] | None = None,
+        async_after_callbacks: list["_AsyncCallbackListEntry"] | None = None,
+        exception_callbacks: list["_CallbackListEntry"] | None = None,
     ) -> "LoggingTransaction":
         if not txn_name:
             txn_name = self.default_txn_name
@@ -246,10 +245,10 @@ class LoggingDatabaseConnection:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[types.TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: types.TracebackType | None,
+    ) -> bool | None:
         return self.conn.__exit__(exc_type, exc_value, traceback)
 
     # Proxy through any unknown lookups to the DB conn class.
@@ -307,9 +306,9 @@ class LoggingTransaction:
         name: str,
         server_name: str,
         database_engine: BaseDatabaseEngine,
-        after_callbacks: Optional[list[_CallbackListEntry]] = None,
-        async_after_callbacks: Optional[list[_AsyncCallbackListEntry]] = None,
-        exception_callbacks: Optional[list[_CallbackListEntry]] = None,
+        after_callbacks: list[_CallbackListEntry] | None = None,
+        async_after_callbacks: list[_AsyncCallbackListEntry] | None = None,
+        exception_callbacks: list[_CallbackListEntry] | None = None,
     ):
         self.txn = txn
         self.name = name
@@ -379,10 +378,10 @@ class LoggingTransaction:
         assert self.exception_callbacks is not None
         self.exception_callbacks.append((callback, args, kwargs))
 
-    def fetchone(self) -> Optional[tuple]:
+    def fetchone(self) -> tuple | None:
         return self.txn.fetchone()
 
-    def fetchmany(self, size: Optional[int] = None) -> list[tuple]:
+    def fetchmany(self, size: int | None = None) -> list[tuple]:
         return self.txn.fetchmany(size=size)
 
     def fetchall(self) -> list[tuple]:
@@ -398,7 +397,7 @@ class LoggingTransaction:
     @property
     def description(
         self,
-    ) -> Optional[Sequence[Any]]:
+    ) -> Sequence[Any] | None:
         return self.txn.description
 
     def execute_batch(self, sql: str, args: Iterable[Iterable[Any]]) -> None:
@@ -429,7 +428,7 @@ class LoggingTransaction:
         self,
         sql: str,
         values: Iterable[Iterable[Any]],
-        template: Optional[str] = None,
+        template: str | None = None,
         fetch: bool = True,
     ) -> list[tuple]:
         """Corresponds to psycopg2.extras.execute_values. Only available when
@@ -536,9 +535,9 @@ class LoggingTransaction:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[types.TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: types.TracebackType | None,
     ) -> None:
         self.close()
 
@@ -920,7 +919,7 @@ class DatabasePool:
         func: Callable[..., R],
         *args: Any,
         db_autocommit: bool = False,
-        isolation_level: Optional[int] = None,
+        isolation_level: int | None = None,
         **kwargs: Any,
     ) -> R:
         """Starts a transaction on the database and runs a given function
@@ -1002,7 +1001,7 @@ class DatabasePool:
         func: Callable[Concatenate[LoggingDatabaseConnection, P], R],
         *args: Any,
         db_autocommit: bool = False,
-        isolation_level: Optional[int] = None,
+        isolation_level: int | None = None,
         **kwargs: Any,
     ) -> R:
         """Wraps the .runWithConnection() method on the underlying db_pool.
@@ -1240,8 +1239,8 @@ class DatabasePool:
         table: str,
         keyvalues: dict[str, Any],
         values: dict[str, Any],
-        insertion_values: Optional[dict[str, Any]] = None,
-        where_clause: Optional[str] = None,
+        insertion_values: dict[str, Any] | None = None,
+        where_clause: str | None = None,
         desc: str = "simple_upsert",
     ) -> bool:
         """Insert a row with values + insertion_values; on conflict, update with values.
@@ -1334,8 +1333,8 @@ class DatabasePool:
         table: str,
         keyvalues: Mapping[str, Any],
         values: Mapping[str, Any],
-        insertion_values: Optional[Mapping[str, Any]] = None,
-        where_clause: Optional[str] = None,
+        insertion_values: Mapping[str, Any] | None = None,
+        where_clause: str | None = None,
     ) -> bool:
         """
         Pick the UPSERT method which works best on the platform. Either the
@@ -1379,8 +1378,8 @@ class DatabasePool:
         table: str,
         keyvalues: Mapping[str, Any],
         values: Mapping[str, Any],
-        insertion_values: Optional[Mapping[str, Any]] = None,
-        where_clause: Optional[str] = None,
+        insertion_values: Mapping[str, Any] | None = None,
+        where_clause: str | None = None,
         lock: bool = True,
     ) -> bool:
         """
@@ -1460,8 +1459,8 @@ class DatabasePool:
         table: str,
         keyvalues: Mapping[str, Any],
         values: Mapping[str, Any],
-        insertion_values: Optional[Mapping[str, Any]] = None,
-        where_clause: Optional[str] = None,
+        insertion_values: Mapping[str, Any] | None = None,
+        where_clause: str | None = None,
     ) -> bool:
         """
         Use the native UPSERT functionality in PostgreSQL.
@@ -1728,7 +1727,7 @@ class DatabasePool:
         retcols: Collection[str],
         allow_none: Literal[True] = True,
         desc: str = "simple_select_one",
-    ) -> Optional[tuple[Any, ...]]: ...
+    ) -> tuple[Any, ...] | None: ...
 
     async def simple_select_one(
         self,
@@ -1737,7 +1736,7 @@ class DatabasePool:
         retcols: Collection[str],
         allow_none: bool = False,
         desc: str = "simple_select_one",
-    ) -> Optional[tuple[Any, ...]]:
+    ) -> tuple[Any, ...] | None:
         """Executes a SELECT query on the named table, which is expected to
         return a single row, returning multiple columns from it.
 
@@ -1777,7 +1776,7 @@ class DatabasePool:
         retcol: str,
         allow_none: Literal[True] = True,
         desc: str = "simple_select_one_onecol",
-    ) -> Optional[Any]: ...
+    ) -> Any | None: ...
 
     async def simple_select_one_onecol(
         self,
@@ -1786,7 +1785,7 @@ class DatabasePool:
         retcol: str,
         allow_none: bool = False,
         desc: str = "simple_select_one_onecol",
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Executes a SELECT query on the named table, which is expected to
         return a single row, returning a single column from it.
 
@@ -1828,7 +1827,7 @@ class DatabasePool:
         keyvalues: dict[str, Any],
         retcol: str,
         allow_none: Literal[True] = True,
-    ) -> Optional[Any]: ...
+    ) -> Any | None: ...
 
     @classmethod
     def simple_select_one_onecol_txn(
@@ -1838,7 +1837,7 @@ class DatabasePool:
         keyvalues: dict[str, Any],
         retcol: str,
         allow_none: bool = False,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         ret = cls.simple_select_onecol_txn(
             txn, table=table, keyvalues=keyvalues, retcol=retcol
         )
@@ -1871,7 +1870,7 @@ class DatabasePool:
     async def simple_select_onecol(
         self,
         table: str,
-        keyvalues: Optional[dict[str, Any]],
+        keyvalues: dict[str, Any] | None,
         retcol: str,
         desc: str = "simple_select_onecol",
     ) -> list[Any]:
@@ -1899,7 +1898,7 @@ class DatabasePool:
     async def simple_select_list(
         self,
         table: str,
-        keyvalues: Optional[dict[str, Any]],
+        keyvalues: dict[str, Any] | None,
         retcols: Collection[str],
         desc: str = "simple_select_list",
     ) -> list[tuple[Any, ...]]:
@@ -1931,7 +1930,7 @@ class DatabasePool:
         cls,
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Optional[dict[str, Any]],
+        keyvalues: dict[str, Any] | None,
         retcols: Iterable[str],
     ) -> list[tuple[Any, ...]]:
         """Executes a SELECT query on the named table, which may return zero or
@@ -1967,7 +1966,7 @@ class DatabasePool:
         column: str,
         iterable: Iterable[Any],
         retcols: Collection[str],
-        keyvalues: Optional[dict[str, Any]] = None,
+        keyvalues: dict[str, Any] | None = None,
         desc: str = "simple_select_many_batch",
         batch_size: int = 100,
     ) -> list[tuple[Any, ...]]:
@@ -2249,7 +2248,7 @@ class DatabasePool:
         keyvalues: dict[str, Any],
         retcols: Collection[str],
         allow_none: Literal[True] = True,
-    ) -> Optional[tuple[Any, ...]]: ...
+    ) -> tuple[Any, ...] | None: ...
 
     @staticmethod
     def simple_select_one_txn(
@@ -2258,7 +2257,7 @@ class DatabasePool:
         keyvalues: dict[str, Any],
         retcols: Collection[str],
         allow_none: bool = False,
-    ) -> Optional[tuple[Any, ...]]:
+    ) -> tuple[Any, ...] | None:
         select_sql = "SELECT %s FROM %s" % (", ".join(retcols), table)
 
         if keyvalues:
@@ -2529,9 +2528,9 @@ class DatabasePool:
         start: int,
         limit: int,
         retcols: Iterable[str],
-        filters: Optional[dict[str, Any]] = None,
-        keyvalues: Optional[dict[str, Any]] = None,
-        exclude_keyvalues: Optional[dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
+        keyvalues: dict[str, Any] | None = None,
+        exclude_keyvalues: dict[str, Any] | None = None,
         order_direction: str = "ASC",
     ) -> list[tuple[Any, ...]]:
         """

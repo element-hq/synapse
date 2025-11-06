@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -76,7 +75,7 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
     def _create_id_generator(
         self,
         instance_name: str = "master",
-        writers: Optional[list[str]] = None,
+        writers: list[str] | None = None,
     ) -> MultiWriterIdGenerator:
         def _create(conn: LoggingDatabaseConnection) -> MultiWriterIdGenerator:
             return MultiWriterIdGenerator(
@@ -113,7 +112,7 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
             self._replicate(instance_name)
 
     def _insert_row(
-        self, instance_name: str, stream_id: int, table: Optional[str] = None
+        self, instance_name: str, stream_id: int, table: str | None = None
     ) -> None:
         """Insert one row as the given instance with given stream_id."""
 
@@ -144,7 +143,7 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
         self,
         instance_name: str,
         number: int,
-        table: Optional[str] = None,
+        table: str | None = None,
         update_stream_table: bool = True,
     ) -> None:
         """Insert N rows as the given instance, inserting with stream IDs pulled

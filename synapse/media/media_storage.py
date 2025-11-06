@@ -34,9 +34,7 @@ from typing import (
     AsyncIterator,
     BinaryIO,
     Callable,
-    Optional,
     Sequence,
-    Union,
     cast,
 )
 from uuid import uuid4
@@ -79,7 +77,7 @@ class SHA256TransparentIOWriter:
         self._hash = hashlib.sha256()
         self._source = source
 
-    def write(self, buffer: Union[bytes, bytearray]) -> int:
+    def write(self, buffer: bytes | bytearray) -> int:
         """Wrapper for source.write()
 
         Args:
@@ -260,7 +258,7 @@ class MediaStorage:
 
             raise e from None
 
-    async def fetch_media(self, file_info: FileInfo) -> Optional[Responder]:
+    async def fetch_media(self, file_info: FileInfo) -> Responder | None:
         """Attempts to fetch media described by file_info from the local cache
         and configured storage providers.
 
@@ -420,9 +418,9 @@ class FileResponder(Responder):
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         self.open_file.close()
 
@@ -476,7 +474,7 @@ class MultipartFileConsumer:
         file_content_type: str,
         json_object: JsonDict,
         disposition: str,
-        content_length: Optional[int],
+        content_length: int | None,
     ) -> None:
         self.clock = clock
         self.wrapped_consumer = wrapped_consumer
@@ -488,8 +486,8 @@ class MultipartFileConsumer:
 
         # The producer that registered with us, and if it's a push or pull
         # producer.
-        self.producer: Optional["interfaces.IProducer"] = None
-        self.streaming: Optional[bool] = None
+        self.producer: "interfaces.IProducer" | None = None
+        self.streaming: bool | None = None
 
         # Whether the wrapped consumer has asked us to pause.
         self.paused = False
@@ -618,7 +616,7 @@ class MultipartFileConsumer:
             # repeatedly calling  `resumeProducing` in a loop.
             run_in_background(self._resumeProducingRepeatedly)
 
-    def content_length(self) -> Optional[int]:
+    def content_length(self) -> int | None:
         """
         Calculate the content length of the multipart response
         in bytes.
@@ -671,7 +669,7 @@ class Header:
         self,
         name: bytes,
         value: Any,
-        params: Optional[list[tuple[Any, Any]]] = None,
+        params: list[tuple[Any, Any]] | None = None,
     ):
         self.name = name
         self.value = value
@@ -693,7 +691,7 @@ class Header:
             return h.read()
 
 
-def escape(value: Union[str, bytes]) -> str:
+def escape(value: str | bytes) -> str:
     """
     This function prevents header values from corrupting the request,
     a newline in the file name parameter makes form-data request unreadable

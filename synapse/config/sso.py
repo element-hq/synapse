@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import attr
 
@@ -44,8 +44,8 @@ class SsoAttributeRequirement:
 
     attribute: str
     # If neither `value` nor `one_of` is given, the attribute must simply exist.
-    value: Optional[str] = None
-    one_of: Optional[list[str]] = None
+    value: str | None = None
+    one_of: list[str] | None = None
 
     JSON_SCHEMA = {
         "type": "object",

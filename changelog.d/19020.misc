@@ -1,1 +1,0 @@
-Fix CI linter for schema delta files to correctly handle all types of `CREATE TABLE` syntax.

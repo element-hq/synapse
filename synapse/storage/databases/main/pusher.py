@@ -25,7 +25,6 @@ from typing import (
     Any,
     Iterable,
     Iterator,
-    Optional,
     cast,
 )
 
@@ -51,7 +50,7 @@ logger = logging.getLogger(__name__)
 PusherRow = tuple[
     int,  # id
     str,  # user_name
-    Optional[int],  # access_token
+    int | None,  # access_token
     str,  # profile_tag
     str,  # kind
     str,  # app_id
@@ -365,7 +364,7 @@ class PusherWorkerStore(SQLBaseStore):
         return bool(updated)
 
     async def update_pusher_failing_since(
-        self, app_id: str, pushkey: str, user_id: str, failing_since: Optional[int]
+        self, app_id: str, pushkey: str, user_id: str, failing_since: int | None
     ) -> None:
         await self.db_pool.simple_update(
             table="pushers",
@@ -378,7 +377,7 @@ class PusherWorkerStore(SQLBaseStore):
         self, pusher_id: int
     ) -> dict[str, ThrottleParams]:
         res = cast(
-            list[tuple[str, Optional[int], Optional[int]]],
+            list[tuple[str, int | None, int | None]],
             await self.db_pool.simple_select_list(
                 "pusher_throttle",
                 {"pusher": pusher_id},
@@ -607,7 +606,7 @@ class PusherBackgroundUpdatesStore(SQLBaseStore):
                 (last_pusher_id, batch_size),
             )
 
-            rows = cast(list[tuple[int, Optional[str], Optional[str]]], txn.fetchall())
+            rows = cast(list[tuple[int, str | None, str | None]], txn.fetchall())
             if len(rows) == 0:
                 return 0
 
@@ -666,13 +665,13 @@ class PusherStore(PusherWorkerStore, PusherBackgroundUpdatesStore):
         device_display_name: str,
         pushkey: str,
         pushkey_ts: int,
-        lang: Optional[str],
-        data: Optional[JsonDict],
+        lang: str | None,
+        data: JsonDict | None,
         last_stream_ordering: int,
         profile_tag: str = "",
         enabled: bool = True,
-        device_id: Optional[str] = None,
-        access_token_id: Optional[int] = None,
+        device_id: str | None = None,
+        access_token_id: int | None = None,
     ) -> None:
         async with self._pushers_id_gen.get_next() as stream_id:
             await self.db_pool.simple_upsert(

@@ -24,7 +24,7 @@ import logging
 import re
 from collections import Counter
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Mapping
 
 from pydantic import StrictBool, StrictStr, field_validator
 
@@ -147,7 +147,7 @@ class KeyUploadServlet(RestServlet):
             key: StrictStr
             """The key, encoded using unpadded base64."""
 
-            fallback: Optional[StrictBool] = False
+            fallback: StrictBool | None = False
             """Whether this is a fallback key. Only used when handling fallback keys."""
 
             signatures: Mapping[StrictStr, Mapping[StrictStr, StrictStr]]
@@ -156,10 +156,10 @@ class KeyUploadServlet(RestServlet):
             See the following for more detail: https://spec.matrix.org/v1.16/appendices/#signing-details
             """
 
-        device_keys: Optional[DeviceKeys] = None
+        device_keys: DeviceKeys | None = None
         """Identity keys for the device. May be absent if no new identity keys are required."""
 
-        fallback_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]] = None
+        fallback_keys: Mapping[StrictStr, StrictStr | KeyObject] | None = None
         """
         The public key which should be used if the device's one-time keys are
         exhausted. The fallback key is not deleted once used, but should be
@@ -193,7 +193,7 @@ class KeyUploadServlet(RestServlet):
                     )
             return v
 
-        one_time_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]] = None
+        one_time_keys: Mapping[StrictStr, StrictStr | KeyObject] | None = None
         """
         One-time public keys for "pre-key" messages. The names of the properties
         should be in the format `<algorithm>:<key_id>`.
@@ -221,7 +221,7 @@ class KeyUploadServlet(RestServlet):
             return v
 
     async def on_POST(
-        self, request: SynapseRequest, device_id: Optional[str]
+        self, request: SynapseRequest, device_id: str | None
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()

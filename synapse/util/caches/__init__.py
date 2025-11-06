@@ -24,7 +24,7 @@ import logging
 import typing
 from enum import Enum, auto
 from sys import intern
-from typing import Any, Callable, Optional, Sized, TypeVar
+from typing import Any, Callable, Sized, TypeVar
 
 import attr
 from prometheus_client import REGISTRY
@@ -129,7 +129,7 @@ class CacheMetric:
     _cache: Sized
     _cache_type: str
     _cache_name: str
-    _collect_callback: Optional[Callable]
+    _collect_callback: Callable | None
     _server_name: str
 
     hits: int = 0
@@ -137,7 +137,7 @@ class CacheMetric:
     eviction_size_by_reason: typing.Counter[EvictionReason] = attr.ib(
         factory=collections.Counter
     )
-    memory_usage: Optional[int] = None
+    memory_usage: int | None = None
 
     def inc_hits(self) -> None:
         self.hits += 1
@@ -208,9 +208,9 @@ def register_cache(
     cache_name: str,
     cache: Sized,
     server_name: str,
-    collect_callback: Optional[Callable] = None,
+    collect_callback: Callable | None = None,
     resizable: bool = True,
-    resize_callback: Optional[Callable] = None,
+    resize_callback: Callable | None = None,
 ) -> CacheMetric:
     """Register a cache object for metric collection and resizing.
 
@@ -269,7 +269,7 @@ KNOWN_KEYS = {
     )
 }
 
-T = TypeVar("T", Optional[str], str)
+T = TypeVar("T", str | None, str)
 
 
 def intern_string(string: T) -> T:

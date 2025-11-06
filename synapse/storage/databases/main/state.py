@@ -28,9 +28,7 @@ from typing import (
     Iterable,
     Mapping,
     MutableMapping,
-    Optional,
     TypeVar,
-    Union,
     cast,
     overload,
 )
@@ -86,8 +84,8 @@ class EventMetadata:
 
     room_id: str
     event_type: str
-    state_key: Optional[str]
-    rejection_reason: Optional[str]
+    state_key: str | None
+    rejection_reason: str | None
 
 
 def _retrieve_and_check_room_version(room_id: str, room_version_id: str) -> RoomVersion:
@@ -243,7 +241,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return result_map
 
-    async def get_room_predecessor(self, room_id: str) -> Optional[JsonMapping]:
+    async def get_room_predecessor(self, room_id: str) -> JsonMapping | None:
         """Get the predecessor of an upgraded room if it exists.
         Otherwise return None.
 
@@ -303,7 +301,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         return create_event
 
     @cached(max_entries=10000)
-    async def get_room_type(self, room_id: str) -> Union[Optional[str], Sentinel]:
+    async def get_room_type(self, room_id: str) -> str | None | Sentinel:
         """Fetch room type for given room.
 
         Since this function is cached, any missing values would be cached as
@@ -325,7 +323,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     @cachedList(cached_method_name="get_room_type", list_name="room_ids")
     async def bulk_get_room_type(
         self, room_ids: set[str]
-    ) -> Mapping[str, Union[Optional[str], Sentinel]]:
+    ) -> Mapping[str, str | None | Sentinel]:
         """
         Bulk fetch room types for the given rooms (via current state).
 
@@ -342,7 +340,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def txn(
             txn: LoggingTransaction,
-        ) -> MutableMapping[str, Union[Optional[str], Sentinel]]:
+        ) -> MutableMapping[str, str | None | Sentinel]:
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "room_id", room_ids
             )
@@ -398,13 +396,13 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         return results
 
     @cached(max_entries=10000)
-    async def get_room_encryption(self, room_id: str) -> Optional[str]:
+    async def get_room_encryption(self, room_id: str) -> str | None:
         raise NotImplementedError()
 
     @cachedList(cached_method_name="get_room_encryption", list_name="room_ids")
     async def bulk_get_room_encryption(
         self, room_ids: set[str]
-    ) -> Mapping[str, Union[Optional[str], Sentinel]]:
+    ) -> Mapping[str, str | None | Sentinel]:
         """
         Bulk fetch room encryption for the given rooms (via current state).
 
@@ -422,7 +420,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def txn(
             txn: LoggingTransaction,
-        ) -> MutableMapping[str, Union[Optional[str], Sentinel]]:
+        ) -> MutableMapping[str, str | None | Sentinel]:
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "room_id", room_ids
             )
@@ -551,7 +549,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     # FIXME: how should this be cached?
     @cancellable
     async def get_partial_filtered_current_state_ids(
-        self, room_id: str, state_filter: Optional[StateFilter] = None
+        self, room_id: str, state_filter: StateFilter | None = None
     ) -> StateMap[str]:
         """Get the current state event of a given type for a room based on the
         current_state_events table.  This may not be as up-to-date as the result
@@ -604,7 +602,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         )
 
     @cached(max_entries=50000)
-    async def _get_state_group_for_event(self, event_id: str) -> Optional[int]:
+    async def _get_state_group_for_event(self, event_id: str) -> int | None:
         return await self.db_pool.simple_select_one_onecol(
             table="event_to_state_groups",
             keyvalues={"event_id": event_id},
@@ -986,15 +984,13 @@ class StateMapWrapper(dict[StateKey, str]):
         return super().__getitem__(key)
 
     @overload  # type: ignore[override]
-    def get(self, key: StateKey, default: None = None, /) -> Optional[str]: ...
+    def get(self, key: StateKey, default: None = None, /) -> str | None: ...
     @overload
     def get(self, key: StateKey, default: str, /) -> str: ...
     @overload
-    def get(self, key: StateKey, default: _T, /) -> Union[str, _T]: ...
+    def get(self, key: StateKey, default: _T, /) -> str | _T: ...
 
-    def get(
-        self, key: StateKey, default: Union[str, _T, None] = None
-    ) -> Union[str, _T, None]:
+    def get(self, key: StateKey, default: str | _T | None = None) -> str | _T | None:
         if key not in self.state_filter:
             raise Exception("State map was filtered and doesn't include: %s", key)
         return super().get(key, default)

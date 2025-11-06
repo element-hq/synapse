@@ -28,7 +28,6 @@ from typing import (
     Counter as CounterType,
     Generator,
     Iterable,
-    Optional,
     TextIO,
 )
 
@@ -75,7 +74,7 @@ class _SchemaState:
     current_version: int = attr.ib()
     """The current schema version of the database"""
 
-    compat_version: Optional[int] = attr.ib()
+    compat_version: int | None = attr.ib()
     """The SCHEMA_VERSION of the oldest version of Synapse for this database
 
     If this is None, we have an old version of the database without the necessary
@@ -95,7 +94,7 @@ class _SchemaState:
 def prepare_database(
     db_conn: LoggingDatabaseConnection,
     database_engine: BaseDatabaseEngine,
-    config: Optional[HomeServerConfig],
+    config: HomeServerConfig | None,
     databases: Collection[str] = ("main", "state"),
 ) -> None:
     """Prepares a physical database for usage. Will either create all necessary tables
@@ -307,7 +306,7 @@ def _upgrade_existing_database(
     cur: LoggingTransaction,
     current_schema_state: _SchemaState,
     database_engine: BaseDatabaseEngine,
-    config: Optional[HomeServerConfig],
+    config: HomeServerConfig | None,
     databases: Collection[str],
     is_empty: bool = False,
 ) -> None:
@@ -683,7 +682,7 @@ def execute_statements_from_stream(cur: Cursor, f: TextIO) -> None:
 
 def _get_or_create_schema_state(
     txn: Cursor, database_engine: BaseDatabaseEngine
-) -> Optional[_SchemaState]:
+) -> _SchemaState | None:
     # Bluntly try creating the schema_version tables.
     sql_path = os.path.join(schema_path, "common", "schema_version.sql")
     database_engine.execute_script_file(txn, sql_path)
@@ -698,7 +697,7 @@ def _get_or_create_schema_state(
     current_version = int(row[0])
     upgraded = bool(row[1])
 
-    compat_version: Optional[int] = None
+    compat_version: int | None = None
     txn.execute("SELECT compat_version FROM schema_compat_version")
     row = txn.fetchone()
     if row is not None:

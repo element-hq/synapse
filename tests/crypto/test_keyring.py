@@ -19,7 +19,7 @@
 #
 #
 import time
-from typing import Any, Optional, cast
+from typing import Any, cast
 from unittest.mock import Mock
 
 import attr
@@ -87,7 +87,7 @@ class FakeRequest:
 @logcontext_clean
 class KeyringTestCase(unittest.HomeserverTestCase):
     def check_context(
-        self, val: ContextRequest, expected: Optional[ContextRequest]
+        self, val: ContextRequest, expected: ContextRequest | None
     ) -> ContextRequest:
         self.assertEqual(getattr(current_context(), "request", None), expected)
         return val

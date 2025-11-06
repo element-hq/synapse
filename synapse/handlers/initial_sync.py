@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import (
     AccountDataTypes,
@@ -71,8 +71,8 @@ class InitialSyncHandler:
         self.snapshot_cache: ResponseCache[
             tuple[
                 str,
-                Optional[StreamToken],
-                Optional[StreamToken],
+                StreamToken | None,
+                StreamToken | None,
                 Direction,
                 int,
                 bool,

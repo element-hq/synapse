@@ -24,7 +24,7 @@ import json
 import os
 import re
 import shutil
-from typing import Any, BinaryIO, ClassVar, Optional, Sequence
+from typing import Any, BinaryIO, ClassVar, Sequence
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
@@ -273,7 +273,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
                 resolutionReceiver: IResolutionReceiver,
                 hostName: str,
                 portNumber: int = 0,
-                addressTypes: Optional[Sequence[type[IAddress]]] = None,
+                addressTypes: Sequence[type[IAddress]] | None = None,
                 transportSemantics: str = "TCP",
             ) -> IResolutionReceiver:
                 resolution = HostResolution(hostName)
@@ -1661,7 +1661,7 @@ class MediaConfigModuleCallbackTestCase(unittest.HomeserverTestCase):
     async def get_media_config_for_user(
         self,
         user_id: str,
-    ) -> Optional[JsonDict]:
+    ) -> JsonDict | None:
         # We echo back the user_id and set a custom upload size.
         return {"m.upload.size": 1024, "user_id": user_id}
 
@@ -1999,7 +1999,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
                 "Deferred[Any]",
                 str,
                 str,
-                Optional[QueryParams],
+                QueryParams | None,
             ]
         ] = []
 
@@ -2010,7 +2010,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             download_ratelimiter: Ratelimiter,
             ip_address: Any,
             max_size: int,
-            args: Optional[QueryParams] = None,
+            args: QueryParams | None = None,
             retry_on_dns_fail: bool = True,
             ignore_backoff: bool = False,
             follow_redirects: bool = False,
@@ -2044,7 +2044,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             download_ratelimiter: Ratelimiter,
             ip_address: Any,
             max_size: int,
-            args: Optional[QueryParams] = None,
+            args: QueryParams | None = None,
             retry_on_dns_fail: bool = True,
             ignore_backoff: bool = False,
             follow_redirects: bool = False,
@@ -2107,7 +2107,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
         self.tok = self.login("user", "pass")
 
     def _req(
-        self, content_disposition: Optional[bytes], include_content_type: bool = True
+        self, content_disposition: bytes | None, include_content_type: bool = True
     ) -> FakeChannel:
         channel = self.make_request(
             "GET",
@@ -2418,7 +2418,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
     def _test_thumbnail(
         self,
         method: str,
-        expected_body: Optional[bytes],
+        expected_body: bytes | None,
         expected_found: bool,
         unable_to_thumbnail: bool = False,
     ) -> None:
@@ -3012,7 +3012,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
     async def _get_media_upload_limits_for_user(
         self,
         user_id: str,
-    ) -> Optional[list[MediaUploadLimit]]:
+    ) -> list[MediaUploadLimit] | None:
         # user1 has custom limits
         if user_id == self.user1:
             # n.b. we return these in increasing duration order and Synapse will need to sort them correctly
@@ -3037,7 +3037,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         sent_bytes: int,
         attempted_bytes: int,
     ) -> None:
-        self.last_media_upload_limit_exceeded: Optional[dict[str, object]] = {
+        self.last_media_upload_limit_exceeded: dict[str, object] | None = {
             "user_id": user_id,
             "limit": limit,
             "sent_bytes": sent_bytes,

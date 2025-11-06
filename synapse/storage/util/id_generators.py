@@ -30,10 +30,8 @@ from typing import (
     ContextManager,
     Generic,
     Iterable,
-    Optional,
     Sequence,
     TypeVar,
-    Union,
     cast,
 )
 
@@ -619,7 +617,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             self._unfinished_ids.difference_update(next_ids)
             self._finished_ids.update(next_ids)
 
-            new_cur: Optional[int] = None
+            new_cur: int | None = None
 
             if self._unfinished_ids or self._in_flight_fetches:
                 # If there are unfinished IDs then the new position will be the
@@ -844,10 +842,10 @@ class _AsyncCtxManagerWrapper(Generic[T]):
 
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
         return self.inner.__exit__(exc_type, exc, tb)
 
 
@@ -857,10 +855,10 @@ class _MultiWriterCtxManager:
 
     id_gen: MultiWriterIdGenerator
     notifier: "ReplicationNotifier"
-    multiple_ids: Optional[int] = None
+    multiple_ids: int | None = None
     stream_ids: list[int] = attr.Factory(list)
 
-    async def __aenter__(self) -> Union[int, list[int]]:
+    async def __aenter__(self) -> int | list[int]:
         # It's safe to run this in autocommit mode as fetching values from a
         # sequence ignores transaction semantics anyway.
         self.stream_ids = await self.id_gen._db.runInteraction(
@@ -877,9 +875,9 @@ class _MultiWriterCtxManager:
 
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
     ) -> bool:
         self.id_gen._mark_ids_as_finished(self.stream_ids)
 

@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Awaitable, Optional, cast
+from typing import Awaitable, cast
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactorClock
@@ -329,7 +329,7 @@ class LogContextScopeManagerTestCase(TestCase):
         reactor, clock = get_clock()
 
         callback_finished = False
-        active_span_in_callback: Optional[jaeger_client.Span] = None
+        active_span_in_callback: jaeger_client.Span | None = None
 
         async def bg_task() -> None:
             nonlocal callback_finished, active_span_in_callback
@@ -391,7 +391,7 @@ class LogContextScopeManagerTestCase(TestCase):
         reactor, clock = get_clock()
 
         callback_finished = False
-        active_span_in_callback: Optional[jaeger_client.Span] = None
+        active_span_in_callback: jaeger_client.Span | None = None
 
         async def bg_task() -> None:
             nonlocal callback_finished, active_span_in_callback
@@ -461,7 +461,7 @@ class LogContextScopeManagerTestCase(TestCase):
             span.span_id: span.operation_name for span in self._reporter.get_spans()
         }
 
-        def get_span_friendly_name(span_id: Optional[int]) -> str:
+        def get_span_friendly_name(span_id: int | None) -> str:
             if span_id is None:
                 return "None"
 

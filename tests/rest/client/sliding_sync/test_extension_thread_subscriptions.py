@@ -13,7 +13,7 @@
 #
 import logging
 from http import HTTPStatus
-from typing import Optional, cast
+from typing import cast
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -455,7 +455,7 @@ class SlidingSyncThreadSubscriptionsExtensionTestCase(SlidingSyncBase):
 
     def _do_backpaginate(
         self, *, from_tok: str, to_tok: str, limit: int, access_token: str
-    ) -> tuple[JsonDict, Optional[str]]:
+    ) -> tuple[JsonDict, str | None]:
         channel = self.make_request(
             "GET",
             "/_matrix/client/unstable/io.element.msc4308/thread_subscriptions"
@@ -465,7 +465,7 @@ class SlidingSyncThreadSubscriptionsExtensionTestCase(SlidingSyncBase):
 
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         body = channel.json_body
-        return body, cast(Optional[str], body.get("end"))
+        return body, cast(str | None, body.get("end"))
 
     def _subscribe_to_thread(
         self, user_id: str, room_id: str, thread_root_id: str

@@ -31,7 +31,6 @@ from typing import (
     Iterator,
     Mapping,
     MutableSet,
-    Optional,
 )
 from weakref import WeakSet
 
@@ -164,7 +163,7 @@ class FederationRateLimiter:
         our_server_name: str,
         clock: Clock,
         config: FederationRatelimitSettings,
-        metrics_name: Optional[str] = None,
+        metrics_name: str | None = None,
     ):
         """
         Args:
@@ -217,7 +216,7 @@ class _PerHostRatelimiter:
         our_server_name: str,
         clock: Clock,
         config: FederationRatelimitSettings,
-        metrics_name: Optional[str] = None,
+        metrics_name: str | None = None,
     ):
         """
         Args:

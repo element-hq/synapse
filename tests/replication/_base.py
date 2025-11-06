@@ -19,7 +19,7 @@
 #
 import logging
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any
 
 from twisted.internet.address import IPv4Address
 from twisted.internet.protocol import Protocol, connectionDone
@@ -105,8 +105,8 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
             repl_handler,
         )
 
-        self._client_transport: Optional[FakeTransport] = None
-        self._server_transport: Optional[FakeTransport] = None
+        self._client_transport: FakeTransport | None = None
+        self._server_transport: FakeTransport | None = None
 
     def create_resource_dict(self) -> dict[str, Resource]:
         d = super().create_resource_dict()
@@ -325,7 +325,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
         return resource
 
     def make_worker_hs(
-        self, worker_app: str, extra_config: Optional[dict] = None, **kwargs: Any
+        self, worker_app: str, extra_config: dict | None = None, **kwargs: Any
     ) -> HomeServer:
         """Make a new worker HS instance, correctly connecting replication
         stream to the master HS.
@@ -534,7 +534,7 @@ class FakeRedisPubSubServer:
 class FakeRedisPubSubProtocol(Protocol):
     """A connection from a client talking to the fake Redis server."""
 
-    transport: Optional[FakeTransport] = None
+    transport: FakeTransport | None = None
 
     def __init__(self, server: FakeRedisPubSubServer):
         self._server = server

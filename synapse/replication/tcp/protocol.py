@@ -28,7 +28,7 @@ import fcntl
 import logging
 import struct
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Collection, Optional
+from typing import TYPE_CHECKING, Any, Collection
 
 from prometheus_client import Counter
 from zope.interface import Interface, implementer
@@ -153,7 +153,7 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         self.last_received_command = self.clock.time_msec()
         self.last_sent_command = 0
         # When we requested the connection be closed
-        self.time_we_closed: Optional[int] = None
+        self.time_we_closed: int | None = None
 
         self.received_ping = False  # Have we received a ping from the other side
 
@@ -166,7 +166,7 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         self.pending_commands: list[Command] = []
 
         # The LoopingCall for sending pings.
-        self._send_ping_loop: Optional[task.LoopingCall] = None
+        self._send_ping_loop: task.LoopingCall | None = None
 
         # a logcontext which we use for processing incoming commands. We declare it as a
         # background process so that the CPU stats get reported to prometheus.

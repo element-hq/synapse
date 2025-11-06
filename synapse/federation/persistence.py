@@ -27,7 +27,6 @@ These actions are mostly only used by the :py:mod:`.replication` module.
 """
 
 import logging
-from typing import Optional
 
 from synapse.federation.units import Transaction
 from synapse.storage.databases.main import DataStore
@@ -44,7 +43,7 @@ class TransactionActions:
 
     async def have_responded(
         self, origin: str, transaction: Transaction
-    ) -> Optional[tuple[int, JsonDict]]:
+    ) -> tuple[int, JsonDict] | None:
         """Have we already responded to a transaction with the same id and
         origin?
 

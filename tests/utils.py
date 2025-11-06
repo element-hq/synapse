@@ -25,9 +25,7 @@ import signal
 from types import FrameType, TracebackType
 from typing import (
     Literal,
-    Optional,
     TypeVar,
-    Union,
     overload,
 )
 
@@ -141,7 +139,7 @@ def default_config(server_name: str, parse: Literal[True]) -> HomeServerConfig: 
 
 def default_config(
     server_name: str, parse: bool = False
-) -> Union[dict[str, object], HomeServerConfig]:
+) -> dict[str, object] | HomeServerConfig:
     """
     Create a reasonable test config.
 
@@ -320,13 +318,13 @@ class test_timeout:
     ```
     """
 
-    def __init__(self, seconds: int, error_message: Optional[str] = None) -> None:
+    def __init__(self, seconds: int, error_message: str | None = None) -> None:
         self.error_message = f"Test timed out after {seconds}s"
         if error_message is not None:
             self.error_message += f": {error_message}"
         self.seconds = seconds
 
-    def handle_timeout(self, signum: int, frame: Optional[FrameType]) -> None:
+    def handle_timeout(self, signum: int, frame: FrameType | None) -> None:
         raise TestTimeout(self.error_message)
 
     def __enter__(self) -> None:
@@ -335,8 +333,8 @@ class test_timeout:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         signal.alarm(0)

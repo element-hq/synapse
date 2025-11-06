@@ -290,7 +290,7 @@ class LockStore(SQLBaseStore):
         self,
         lock_names: Collection[tuple[str, str]],
         write: bool,
-    ) -> Optional[AsyncExitStack]:
+    ) -> AsyncExitStack | None:
         """Try to acquire multiple locks for the given names/keys. Will return
         an async context manager if the locks are successfully acquired, which
         *must* be used (otherwise the lock will leak).
@@ -402,7 +402,7 @@ class Lock:
 
         # We might be called from a non-main thread, so we defer setting up the
         # looping call.
-        self._looping_call: Optional[LoopingCall] = None
+        self._looping_call: LoopingCall | None = None
         reactor.callFromThread(self._setup_looping_call)
 
         self._dropped = False
@@ -497,9 +497,9 @@ class Lock:
 
     async def __aexit__(
         self,
-        _exctype: Optional[type[BaseException]],
-        _excinst: Optional[BaseException],
-        _exctb: Optional[TracebackType],
+        _exctype: type[BaseException] | None,
+        _excinst: BaseException | None,
+        _exctb: TracebackType | None,
     ) -> bool:
         await self.release()
 

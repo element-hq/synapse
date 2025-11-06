@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 import attr
 
@@ -37,7 +37,7 @@ class RatelimitOverride:
 
 
 GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK = Callable[
-    [str, str], Awaitable[Optional[RatelimitOverride]]
+    [str, str], Awaitable[RatelimitOverride | None]
 ]
 
 
@@ -51,9 +51,8 @@ class RatelimitModuleApiCallbacks:
 
     def register_callbacks(
         self,
-        get_ratelimit_override_for_user: Optional[
-            GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
-        ] = None,
+        get_ratelimit_override_for_user: GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
+        | None = None,
     ) -> None:
         """Register callbacks from module for each hook."""
         if get_ratelimit_override_for_user is not None:
@@ -63,14 +62,14 @@ class RatelimitModuleApiCallbacks:
 
     async def get_ratelimit_override_for_user(
         self, user_id: str, limiter_name: str
-    ) -> Optional[RatelimitOverride]:
+    ) -> RatelimitOverride | None:
         for callback in self._get_ratelimit_override_for_user_callbacks:
             with Measure(
                 self.clock,
                 name=f"{callback.__module__}.{callback.__qualname__}",
                 server_name=self.server_name,
             ):
-                res: Optional[RatelimitOverride] = await delay_cancellation(
+                res: RatelimitOverride | None = await delay_cancellation(
                     callback(user_id, limiter_name)
                 )
             if res:

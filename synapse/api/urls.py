@@ -24,7 +24,6 @@
 import hmac
 import urllib.parse
 from hashlib import sha256
-from typing import Optional
 from urllib.parse import urlencode, urljoin
 
 from synapse.config import ConfigError
@@ -75,7 +74,7 @@ class LoginSSORedirectURIBuilder:
         self._public_baseurl = hs_config.server.public_baseurl
 
     def build_login_sso_redirect_uri(
-        self, *, idp_id: Optional[str], client_redirect_url: str
+        self, *, idp_id: str | None, client_redirect_url: str
     ) -> str:
         """Build a `/login/sso/redirect` URI for the given identity provider.
 

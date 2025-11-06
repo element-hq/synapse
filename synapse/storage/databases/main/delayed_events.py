@@ -14,7 +14,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, NewType, Optional, Union
+from typing import TYPE_CHECKING, NewType
 
 import attr
 
@@ -51,10 +51,10 @@ Timestamp = NewType("Timestamp", int)
 class EventDetails:
     room_id: RoomID
     type: EventType
-    state_key: Optional[StateKey]
-    origin_server_ts: Optional[Timestamp]
+    state_key: StateKey | None
+    origin_server_ts: Timestamp | None
     content: JsonDict
-    device_id: Optional[DeviceID]
+    device_id: DeviceID | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -91,7 +91,7 @@ class DelayedEventsStore(SQLBaseStore):
             desc="get_delayed_events_stream_pos",
         )
 
-    async def update_delayed_events_stream_pos(self, stream_id: Optional[int]) -> None:
+    async def update_delayed_events_stream_pos(self, stream_id: int | None) -> None:
         """
         Updates the stream position of the background process to watch for state events
         that target the same piece of state as any scheduled delayed events.
@@ -109,12 +109,12 @@ class DelayedEventsStore(SQLBaseStore):
         self,
         *,
         user_localpart: str,
-        device_id: Optional[str],
+        device_id: str | None,
         creation_ts: Timestamp,
         room_id: str,
         event_type: str,
-        state_key: Optional[str],
-        origin_server_ts: Optional[int],
+        state_key: str | None,
+        origin_server_ts: int | None,
         content: JsonDict,
         delay: int,
         limit: int,
@@ -344,7 +344,7 @@ class DelayedEventsStore(SQLBaseStore):
     async def get_scheduled_delayed_events_for_user(
         self,
         user_localpart: str,
-        delay_ids: Optional[list[str]],
+        delay_ids: list[str] | None,
     ) -> list[JsonDict]:
         """Returns all scheduled delayed events for the given user."""
         # TODO: Support Pagination stream API ("next_batch" field)
@@ -389,7 +389,7 @@ class DelayedEventsStore(SQLBaseStore):
     async def get_finalised_delayed_events_for_user(
         self,
         user_localpart: str,
-        delay_ids: Optional[list[str]],
+        delay_ids: list[str] | None,
         current_ts: Timestamp,
         retention_period: int,
         retention_limit: int,
@@ -482,7 +482,7 @@ class DelayedEventsStore(SQLBaseStore):
         self, current_ts: Timestamp
     ) -> tuple[
         list[DelayedEventDetails],
-        Optional[Timestamp],
+        Timestamp | None,
     ]:
         """
         Marks for processing all delayed events that should have been sent prior to the provided time
@@ -496,7 +496,7 @@ class DelayedEventsStore(SQLBaseStore):
             txn: LoggingTransaction,
         ) -> tuple[
             list[DelayedEventDetails],
-            Optional[Timestamp],
+            Timestamp | None,
         ]:
             sql_cols = ", ".join(
                 (
@@ -570,8 +570,8 @@ class DelayedEventsStore(SQLBaseStore):
         delay_id: str,
         user_localpart: str,
     ) -> tuple[
-        Optional[EventDetails],
-        Optional[Timestamp],
+        EventDetails | None,
+        Timestamp | None,
     ]:
         """
         Marks for processing the matching delayed event, regardless of its timeout time,
@@ -592,8 +592,8 @@ class DelayedEventsStore(SQLBaseStore):
         def process_target_delayed_event_txn(
             txn: LoggingTransaction,
         ) -> tuple[
-            Optional[EventDetails],
-            Optional[Timestamp],
+            EventDetails | None,
+            Timestamp | None,
         ]:
             txn.execute(
                 """
@@ -660,7 +660,7 @@ class DelayedEventsStore(SQLBaseStore):
         delay_id: str,
         user_localpart: str,
         finalised_ts: Timestamp,
-    ) -> Optional[Timestamp]:
+    ) -> Timestamp | None:
         """
         Cancels the matching delayed event, i.e. remove it as long as it hasn't been processed.
 
@@ -677,7 +677,7 @@ class DelayedEventsStore(SQLBaseStore):
 
         def cancel_delayed_event_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Timestamp]:
+        ) -> Timestamp | None:
             txn.execute(
                 """
                 UPDATE delayed_events
@@ -728,7 +728,7 @@ class DelayedEventsStore(SQLBaseStore):
         state_key: str,
         not_from_localpart: str,
         finalised_ts: Timestamp,
-    ) -> Optional[Timestamp]:
+    ) -> Timestamp | None:
         """
         Cancels all matching delayed state events, i.e. remove them as long as they haven't been processed.
 
@@ -744,7 +744,7 @@ class DelayedEventsStore(SQLBaseStore):
 
         def cancel_delayed_state_events_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Timestamp]:
+        ) -> Timestamp | None:
             txn.execute(
                 """
                 UPDATE delayed_events
@@ -775,7 +775,7 @@ class DelayedEventsStore(SQLBaseStore):
         self,
         delay_id: DelayID,
         user_localpart: UserLocalpart,
-        result_or_error: Union[str, JsonDict],
+        result_or_error: str | JsonDict,
         finalised_ts: Timestamp,
     ) -> None:
         """
@@ -866,7 +866,7 @@ class DelayedEventsStore(SQLBaseStore):
             """,
         )
 
-    async def get_next_delayed_event_send_ts(self) -> Optional[Timestamp]:
+    async def get_next_delayed_event_send_ts(self) -> Timestamp | None:
         """
         Returns the send time of the next delayed event to be sent, if any.
         """
@@ -878,7 +878,7 @@ class DelayedEventsStore(SQLBaseStore):
 
     def _get_next_delayed_event_send_ts_txn(
         self, txn: LoggingTransaction
-    ) -> Optional[Timestamp]:
+    ) -> Timestamp | None:
         txn.execute(
             """
             SELECT MIN(send_ts) FROM delayed_events

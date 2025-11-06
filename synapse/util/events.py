@@ -13,7 +13,7 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import Field, StrictStr, ValidationError, field_validator
 
@@ -41,7 +41,7 @@ class MTextRepresentation(ParseModel):
     """
 
     body: StrictStr
-    mimetype: Optional[StrictStr] = None
+    mimetype: StrictStr | None = None
 
 
 class MTopic(ParseModel):
@@ -53,7 +53,7 @@ class MTopic(ParseModel):
     See `TopicContentBlock` in the Matrix specification.
     """
 
-    m_text: Optional[list[MTextRepresentation]] = Field(None, alias="m.text")
+    m_text: list[MTextRepresentation] | None = Field(None, alias="m.text")
     """
     An ordered array of textual representations in different mimetypes.
     """
@@ -65,7 +65,7 @@ class MTopic(ParseModel):
     @classmethod
     def ignore_invalid_representations(
         cls, m_text: Any
-    ) -> Optional[list[MTextRepresentation]]:
+    ) -> list[MTextRepresentation] | None:
         if not isinstance(m_text, (list, tuple)):
             raise ValueError("m.text must be a list or a tuple")
         representations = []
@@ -87,7 +87,7 @@ class TopicContent(ParseModel):
     The topic in plain text.
     """
 
-    m_topic: Optional[MTopic] = Field(None, alias="m.topic")
+    m_topic: MTopic | None = Field(None, alias="m.topic")
     """
     Textual representation of the room topic in different mimetypes.
     """
@@ -96,14 +96,14 @@ class TopicContent(ParseModel):
     # `topic` field.
     @field_validator("m_topic", mode="before")
     @classmethod
-    def ignore_invalid_m_topic(cls, m_topic: Any) -> Optional[MTopic]:
+    def ignore_invalid_m_topic(cls, m_topic: Any) -> MTopic | None:
         try:
             return MTopic.model_validate(m_topic)
         except ValidationError:
             return None
 
 
-def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
+def get_plain_text_topic_from_event_content(content: JsonDict) -> str | None:
     """
     Given the `content` of an `m.room.topic` event, returns the plain-text topic
     representation. Prefers pulling plain-text from the newer `m.topic` field if

@@ -21,7 +21,7 @@
 import logging
 import random
 import urllib.parse
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
 
 from prometheus_client import Counter
 
@@ -68,7 +68,7 @@ http_badges_failed_counter = Counter(
 )
 
 
-def tweaks_for_actions(actions: list[Union[str, dict]]) -> JsonMapping:
+def tweaks_for_actions(actions: list[str | dict]) -> JsonMapping:
     """
     Converts a list of actions into a `tweaks` dict (which can then be passed to
         the push gateway).
@@ -119,7 +119,7 @@ class HttpPusher(Pusher):
         self.data = pusher_config.data
         self.backoff_delay = HttpPusher.INITIAL_BACKOFF_SEC
         self.failing_since = pusher_config.failing_since
-        self.timed_call: Optional[IDelayedCall] = None
+        self.timed_call: IDelayedCall | None = None
         self._is_processing = False
         self._group_unread_count_by_room = (
             hs.config.push.push_group_unread_count_by_room
@@ -163,7 +163,7 @@ class HttpPusher(Pusher):
         self.data_minus_url = {}
         self.data_minus_url.update(self.data)
         del self.data_minus_url["url"]
-        self.badge_count_last_call: Optional[int] = None
+        self.badge_count_last_call: int | None = None
 
     def on_started(self, should_check_for_notifs: bool) -> None:
         """Called when this pusher has been started.
@@ -394,9 +394,9 @@ class HttpPusher(Pusher):
     async def dispatch_push(
         self,
         content: JsonDict,
-        tweaks: Optional[JsonMapping] = None,
-        default_payload: Optional[JsonMapping] = None,
-    ) -> Union[bool, list[str]]:
+        tweaks: JsonMapping | None = None,
+        default_payload: JsonMapping | None = None,
+    ) -> bool | list[str]:
         """Send a notification to the registered push gateway, with `content` being
         the content of the `notification` top property specified in the spec.
         Note that the `devices` property will be added with device-specific
@@ -453,7 +453,7 @@ class HttpPusher(Pusher):
         event: EventBase,
         tweaks: JsonMapping,
         badge: int,
-    ) -> Union[bool, list[str]]:
+    ) -> bool | list[str]:
         """Send a notification to the registered push gateway by building it
         from an event.
 

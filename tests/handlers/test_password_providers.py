@@ -22,7 +22,7 @@
 """Tests for the password_auth_provider interface"""
 
 from http import HTTPStatus
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -707,7 +707,7 @@ class PasswordAuthProviderTests(unittest.HomeserverTestCase):
         self.called = False
 
         async def on_logged_out(
-            user_id: str, device_id: Optional[str], access_token: str
+            user_id: str, device_id: str | None, access_token: str
         ) -> None:
             self.called = True
 
@@ -978,7 +978,7 @@ class PasswordAuthProviderTests(unittest.HomeserverTestCase):
         self,
         access_token: str,
         device: str,
-        body: Union[JsonDict, bytes] = b"",
+        body: JsonDict | bytes = b"",
     ) -> FakeChannel:
         """Delete an individual device."""
         channel = self.make_request(

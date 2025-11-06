@@ -26,7 +26,6 @@ from typing import (
     Any,
     Counter as CounterType,
     Iterable,
-    Optional,
 )
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
@@ -62,7 +61,7 @@ class StatsHandler:
         self.stats_enabled = hs.config.stats.stats_enabled
 
         # The current position in the current_state_delta stream
-        self.pos: Optional[int] = None
+        self.pos: int | None = None
 
         # Guard to ensure we only process deltas one at a time
         self._is_processing = False

@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Mapping
 
 from synapse import event_auth
 from synapse.api.constants import (
@@ -61,7 +61,7 @@ class EventAuthHandler:
     async def check_auth_rules_from_context(
         self,
         event: EventBase,
-        batched_auth_events: Optional[Mapping[str, EventBase]] = None,
+        batched_auth_events: Mapping[str, EventBase] | None = None,
     ) -> None:
         """Check an event passes the auth rules at its own auth events
         Args:
@@ -89,7 +89,7 @@ class EventAuthHandler:
 
     def compute_auth_events(
         self,
-        event: Union[EventBase, EventBuilder],
+        event: EventBase | EventBuilder,
         current_state_ids: StateMap[str],
         for_verification: bool = False,
     ) -> list[str]:
@@ -236,7 +236,7 @@ class EventAuthHandler:
         state_ids: StateMap[str],
         room_version: RoomVersion,
         user_id: str,
-        prev_membership: Optional[str],
+        prev_membership: str | None,
     ) -> None:
         """
         Check whether a user can join a room without an invite due to restricted join rules.

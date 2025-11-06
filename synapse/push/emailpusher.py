@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from twisted.internet.error import AlreadyCalled, AlreadyCancelled
 from twisted.internet.interfaces import IDelayedCall
@@ -70,7 +70,7 @@ class EmailPusher(Pusher):
         self.server_name = hs.hostname
         self.store = self.hs.get_datastores().main
         self.email = pusher_config.pushkey
-        self.timed_call: Optional[IDelayedCall] = None
+        self.timed_call: IDelayedCall | None = None
         self.throttle_params: dict[str, ThrottleParams] = {}
         self._inited = False
 
@@ -174,7 +174,7 @@ class EmailPusher(Pusher):
             )
         )
 
-        soonest_due_at: Optional[int] = None
+        soonest_due_at: int | None = None
 
         if not unprocessed:
             await self.save_last_stream_ordering_and_success(self.max_stream_ordering)

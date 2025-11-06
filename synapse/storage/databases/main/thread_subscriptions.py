@@ -15,8 +15,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Iterable,
-    Optional,
-    Union,
     cast,
 )
 
@@ -162,8 +160,8 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         room_id: str,
         thread_root_event_id: str,
         *,
-        automatic_event_orderings: Optional[EventOrderings],
-    ) -> Optional[Union[int, AutomaticSubscriptionConflicted]]:
+        automatic_event_orderings: EventOrderings | None,
+    ) -> int | AutomaticSubscriptionConflicted | None:
         """Updates a user's subscription settings for a specific thread root.
 
         If no change would be made to the subscription, does not produce any database change.
@@ -205,7 +203,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
         def _subscribe_user_to_thread_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Union[int, AutomaticSubscriptionConflicted]]:
+        ) -> int | AutomaticSubscriptionConflicted | None:
             requested_automatic = automatic_event_orderings is not None
 
             row = self.db_pool.simple_select_one_txn(
@@ -307,7 +305,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
     async def unsubscribe_user_from_thread(
         self, user_id: str, room_id: str, thread_root_event_id: str
-    ) -> Optional[int]:
+    ) -> int | None:
         """Unsubscribes a user from a thread.
 
         If no change would be made to the subscription, does not produce any database change.
@@ -323,7 +321,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
         assert self._can_write_to_thread_subscriptions
 
-        def _unsubscribe_user_from_thread_txn(txn: LoggingTransaction) -> Optional[int]:
+        def _unsubscribe_user_from_thread_txn(txn: LoggingTransaction) -> int | None:
             already_subscribed = self.db_pool.simple_select_one_onecol_txn(
                 txn,
                 table="thread_subscriptions",
@@ -420,7 +418,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
     @cached(tree=True)
     async def get_subscription_for_thread(
         self, user_id: str, room_id: str, thread_root_event_id: str
-    ) -> Optional[ThreadSubscription]:
+    ) -> ThreadSubscription | None:
         """Get the thread subscription for a specific thread and user.
 
         Args:
@@ -540,7 +538,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
     async def get_latest_updated_thread_subscriptions_for_user(
         self, user_id: str, *, from_id: int, to_id: int, limit: int
-    ) -> list[tuple[int, str, str, bool, Optional[bool]]]:
+    ) -> list[tuple[int, str, str, bool, bool | None]]:
         """Get the latest updates to thread subscriptions for a specific user.
 
         Args:
@@ -558,7 +556,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
         def get_updated_thread_subscriptions_for_user_txn(
             txn: LoggingTransaction,
-        ) -> list[tuple[int, str, str, bool, Optional[bool]]]:
+        ) -> list[tuple[int, str, str, bool, bool | None]]:
             sql = """
                 WITH the_updates AS (
                     SELECT stream_id, room_id, event_id, subscribed, automatic

@@ -32,7 +32,7 @@ import time
 import urllib.request
 from os import path
 from tempfile import TemporaryDirectory
-from typing import Any, Match, Optional, Union
+from typing import Any, Match
 
 import attr
 import click
@@ -327,11 +327,11 @@ def _prepare() -> None:
 
 @cli.command()
 @click.option("--gh-token", envvar=["GH_TOKEN", "GITHUB_TOKEN"])
-def tag(gh_token: Optional[str]) -> None:
+def tag(gh_token: str | None) -> None:
     _tag(gh_token)
 
 
-def _tag(gh_token: Optional[str]) -> None:
+def _tag(gh_token: str | None) -> None:
     """Tags the release and generates a draft GitHub release"""
 
     # Test that the GH Token is valid before continuing.
@@ -471,11 +471,11 @@ def _publish(gh_token: str) -> None:
 
 @cli.command()
 @click.option("--gh-token", envvar=["GH_TOKEN", "GITHUB_TOKEN"], required=False)
-def upload(gh_token: Optional[str]) -> None:
+def upload(gh_token: str | None) -> None:
     _upload(gh_token)
 
 
-def _upload(gh_token: Optional[str]) -> None:
+def _upload(gh_token: str | None) -> None:
     """Upload release to pypi."""
 
     # Test that the GH Token is valid before continuing.
@@ -576,11 +576,11 @@ def _merge_into(repo: Repo, source: str, target: str) -> None:
 
 @cli.command()
 @click.option("--gh-token", envvar=["GH_TOKEN", "GITHUB_TOKEN"], required=False)
-def wait_for_actions(gh_token: Optional[str]) -> None:
+def wait_for_actions(gh_token: str | None) -> None:
     _wait_for_actions(gh_token)
 
 
-def _wait_for_actions(gh_token: Optional[str]) -> None:
+def _wait_for_actions(gh_token: str | None) -> None:
     # Test that the GH Token is valid before continuing.
     check_valid_gh_token(gh_token)
 
@@ -658,7 +658,7 @@ def _notify(message: str) -> None:
     envvar=["GH_TOKEN", "GITHUB_TOKEN"],
     required=False,
 )
-def merge_back(_gh_token: Optional[str]) -> None:
+def merge_back(_gh_token: str | None) -> None:
     _merge_back()
 
 
@@ -715,7 +715,7 @@ def _merge_back() -> None:
     envvar=["GH_TOKEN", "GITHUB_TOKEN"],
     required=False,
 )
-def announce(_gh_token: Optional[str]) -> None:
+def announce(_gh_token: str | None) -> None:
     _announce()
 
 
@@ -851,7 +851,7 @@ def get_repo_and_check_clean_checkout(
     return repo
 
 
-def check_valid_gh_token(gh_token: Optional[str]) -> None:
+def check_valid_gh_token(gh_token: str | None) -> None:
     """Check that a github token is valid, if supplied"""
 
     if not gh_token:
@@ -867,7 +867,7 @@ def check_valid_gh_token(gh_token: Optional[str]) -> None:
         raise click.ClickException(f"Github credentials are bad: {e}")
 
 
-def find_ref(repo: git.Repo, ref_name: str) -> Optional[git.HEAD]:
+def find_ref(repo: git.Repo, ref_name: str) -> git.HEAD | None:
     """Find the branch/ref, looking first locally then in the remote."""
     if ref_name in repo.references:
         return repo.references[ref_name]
@@ -904,7 +904,7 @@ def get_changes_for_version(wanted_version: version.Version) -> str:
 
         # These are 0-based.
         start_line: int
-        end_line: Optional[int] = None  # Is none if its the last entry
+        end_line: int | None = None  # Is none if its the last entry
 
     headings: list[VersionSection] = []
     for i, token in enumerate(tokens):
@@ -991,7 +991,7 @@ def build_dependabot_changelog(repo: Repo, current_version: version.Version) -> 
     messages = []
     for commit in reversed(commits):
         if commit.author.name == "dependabot[bot]":
-            message: Union[str, bytes] = commit.message
+            message: str | bytes = commit.message
             if isinstance(message, bytes):
                 message = message.decode("utf-8")
             messages.append(message.split("\n", maxsplit=1)[0])

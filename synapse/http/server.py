@@ -35,10 +35,8 @@ from typing import (
     Callable,
     Iterable,
     Iterator,
-    Optional,
     Pattern,
     Protocol,
-    Union,
     cast,
 )
 
@@ -111,7 +109,7 @@ HTTP_STATUS_REQUEST_CANCELLED = 499
 
 
 def return_json_error(
-    f: failure.Failure, request: "SynapseRequest", config: Optional[HomeServerConfig]
+    f: failure.Failure, request: "SynapseRequest", config: HomeServerConfig | None
 ) -> None:
     """Sends a JSON error response to clients."""
 
@@ -173,7 +171,7 @@ def return_json_error(
 def return_html_error(
     f: failure.Failure,
     request: Request,
-    error_template: Union[str, jinja2.Template],
+    error_template: str | jinja2.Template,
 ) -> None:
     """Sends an HTML error page corresponding to the given failure.
 
@@ -264,7 +262,7 @@ def wrap_async_request_handler(
 # it is actually called with a SynapseRequest and a kwargs dict for the params,
 # but I can't figure out how to represent that.
 ServletCallback = Callable[
-    ..., Union[None, Awaitable[None], tuple[int, Any], Awaitable[tuple[int, Any]]]
+    ..., None | Awaitable[None] | tuple[int, Any] | Awaitable[tuple[int, Any]]
 ]
 
 
@@ -349,9 +347,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
             f = failure.Failure()
             self._send_error_response(f, request)
 
-    async def _async_render(
-        self, request: "SynapseRequest"
-    ) -> Optional[tuple[int, Any]]:
+    async def _async_render(self, request: "SynapseRequest") -> tuple[int, Any] | None:
         """Delegates to `_async_render_<METHOD>` methods, or returns a 400 if
         no appropriate method exists. Can be overridden in sub classes for
         different routing.
@@ -406,7 +402,7 @@ class DirectServeJsonResource(_AsyncResource):
         canonical_json: bool = False,
         extract_context: bool = False,
         # Clock is optional as this class is exposed to the module API.
-        clock: Optional[Clock] = None,
+        clock: Clock | None = None,
     ):
         """
         Args:
@@ -603,7 +599,7 @@ class DirectServeHtmlResource(_AsyncResource):
         self,
         extract_context: bool = False,
         # Clock is optional as this class is exposed to the module API.
-        clock: Optional[Clock] = None,
+        clock: Clock | None = None,
     ):
         """
         Args:
@@ -732,7 +728,7 @@ class _ByteProducer:
         request: Request,
         iterator: Iterator[bytes],
     ):
-        self._request: Optional[Request] = request
+        self._request: Request | None = request
         self._iterator = iterator
         self._paused = False
         self.tracing_scope = start_active_span(
@@ -831,7 +827,7 @@ def respond_with_json(
     json_object: Any,
     send_cors: bool = False,
     canonical_json: bool = True,
-) -> Optional[int]:
+) -> int | None:
     """Sends encoded JSON in response to the given request.
 
     Args:
@@ -880,7 +876,7 @@ def respond_with_json_bytes(
     code: int,
     json_bytes: bytes,
     send_cors: bool = False,
-) -> Optional[int]:
+) -> int | None:
     """Sends encoded JSON in response to the given request.
 
     Args:
@@ -929,7 +925,7 @@ async def _async_write_json_to_request_in_thread(
     expensive.
     """
 
-    def encode(opentracing_span: "Optional[opentracing.Span]") -> bytes:
+    def encode(opentracing_span: "opentracing.Span | None") -> bytes:
         # it might take a while for the threadpool to schedule us, so we write
         # opentracing logs once we actually get scheduled, so that we can see how
         # much that contributed.

@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 #
-from typing import Literal, Union
+from typing import Literal
 
 from twisted.internet.testing import MemoryReactor
 
@@ -59,7 +59,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
         async def user_may_create_room(
             user_id: str, room_config: JsonDict
-        ) -> Union[Literal["NOT_SPAM"], Codes]:
+        ) -> Literal["NOT_SPAM"] | Codes:
             self.last_room_config = room_config
             self.last_user_id = user_id
             return "NOT_SPAM"
@@ -82,7 +82,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
         async def user_may_create_room(
             user_id: str, room_config: JsonDict
-        ) -> Union[Literal["NOT_SPAM"], Codes]:
+        ) -> Literal["NOT_SPAM"] | Codes:
             self.last_room_config = room_config
             self.last_user_id = user_id
             return "NOT_SPAM"
@@ -117,7 +117,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
         async def user_may_create_room(
             user_id: str, room_config: JsonDict
-        ) -> Union[Literal["NOT_SPAM"], Codes]:
+        ) -> Literal["NOT_SPAM"] | Codes:
             self.last_room_config = room_config
             self.last_user_id = user_id
             return "NOT_SPAM"
@@ -156,7 +156,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
         async def user_may_create_room(
             user_id: str, room_config: JsonDict
-        ) -> Union[Literal["NOT_SPAM"], Codes]:
+        ) -> Literal["NOT_SPAM"] | Codes:
             self.last_room_config = room_config
             self.last_user_id = user_id
             return Codes.UNAUTHORIZED
@@ -181,7 +181,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
         async def user_may_create_room(
             user_id: str,
-        ) -> Union[Literal["NOT_SPAM"], Codes]:
+        ) -> Literal["NOT_SPAM"] | Codes:
             self.last_user_id = user_id
             return "NOT_SPAM"
 
@@ -205,7 +205,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
             event_type: str,
             state_key: str,
             content: JsonDict,
-        ) -> Union[Literal["NOT_SPAM"], Codes]:
+        ) -> Literal["NOT_SPAM"] | Codes:
             self.last_user_id = user_id
             self.last_room_id = room_id
             self.last_event_type = event_type
@@ -255,7 +255,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
             event_type: str,
             state_key: str,
             content: JsonDict,
-        ) -> Union[Literal["NOT_SPAM"], Codes]:
+        ) -> Literal["NOT_SPAM"] | Codes:
             return Codes.FORBIDDEN
 
         self._module_api.register_spam_checker_callbacks(

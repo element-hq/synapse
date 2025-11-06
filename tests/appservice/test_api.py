@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Mapping, Optional, Sequence, Union
+from typing import Any, Mapping, Sequence
 from unittest.mock import Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -80,7 +80,7 @@ class ApplicationServiceApiTestCase(unittest.HomeserverTestCase):
         async def get_json(
             url: str,
             args: Mapping[Any, Any],
-            headers: Mapping[Union[str, bytes], Sequence[Union[str, bytes]]],
+            headers: Mapping[str | bytes, Sequence[str | bytes]],
         ) -> list[JsonDict]:
             # Ensure the access token is passed as a header.
             if not headers or not headers.get(b"Authorization"):
@@ -154,9 +154,7 @@ class ApplicationServiceApiTestCase(unittest.HomeserverTestCase):
         async def get_json(
             url: str,
             args: Mapping[Any, Any],
-            headers: Optional[
-                Mapping[Union[str, bytes], Sequence[Union[str, bytes]]]
-            ] = None,
+            headers: Mapping[str | bytes, Sequence[str | bytes]] | None = None,
         ) -> list[JsonDict]:
             # Ensure the access token is passed as a both a query param and in the headers.
             if not args.get(b"access_token"):
@@ -216,7 +214,7 @@ class ApplicationServiceApiTestCase(unittest.HomeserverTestCase):
         async def post_json_get_json(
             uri: str,
             post_json: Any,
-            headers: Mapping[Union[str, bytes], Sequence[Union[str, bytes]]],
+            headers: Mapping[str | bytes, Sequence[str | bytes]],
         ) -> JsonDict:
             # Ensure the access token is passed as both a header and query arg.
             if not headers.get(b"Authorization"):

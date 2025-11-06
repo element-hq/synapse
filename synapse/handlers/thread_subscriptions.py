@@ -1,6 +1,6 @@
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import RelationTypes
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
@@ -29,7 +29,7 @@ class ThreadSubscriptionsHandler:
         user_id: UserID,
         room_id: str,
         thread_root_event_id: str,
-    ) -> Optional[ThreadSubscription]:
+    ) -> ThreadSubscription | None:
         """Get thread subscription settings for a specific thread and user.
         Checks that the thread root is both a real event and also that it is visible
         to the user.
@@ -62,8 +62,8 @@ class ThreadSubscriptionsHandler:
         room_id: str,
         thread_root_event_id: str,
         *,
-        automatic_event_id: Optional[str],
-    ) -> Optional[int]:
+        automatic_event_id: str | None,
+    ) -> int | None:
         """Sets or updates a user's subscription settings for a specific thread root.
 
         Args:
@@ -146,7 +146,7 @@ class ThreadSubscriptionsHandler:
 
     async def unsubscribe_user_from_thread(
         self, user_id: UserID, room_id: str, thread_root_event_id: str
-    ) -> Optional[int]:
+    ) -> int | None:
         """Clears a user's subscription settings for a specific thread root.
 
         Args:

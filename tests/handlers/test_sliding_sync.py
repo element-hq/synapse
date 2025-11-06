@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import AbstractSet, Mapping, Optional
+from typing import AbstractSet, Mapping
 from unittest.mock import patch
 
 import attr
@@ -62,7 +62,7 @@ class RoomSyncConfigTestCase(TestCase):
         self,
         actual: RoomSyncConfig,
         expected: RoomSyncConfig,
-        message_prefix: Optional[str] = None,
+        message_prefix: str | None = None,
     ) -> None:
         self.assertEqual(actual.timeline_limit, expected.timeline_limit, message_prefix)
 
@@ -3277,7 +3277,7 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
         self,
         user: UserID,
         to_token: StreamToken,
-        from_token: Optional[StreamToken],
+        from_token: StreamToken | None,
     ) -> tuple[dict[str, RoomsForUserType], AbstractSet[str], AbstractSet[str]]:
         """
         Get the rooms the user should be syncing with
@@ -3614,7 +3614,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         self,
         user: UserID,
         to_token: StreamToken,
-        from_token: Optional[StreamToken],
+        from_token: StreamToken | None,
     ) -> tuple[dict[str, RoomsForUserType], AbstractSet[str], AbstractSet[str]]:
         """
         Get the rooms the user should be syncing with
@@ -3828,10 +3828,10 @@ class RequiredStateChangesTestParameters:
     request_required_state_map: dict[str, set[str]]
     state_deltas: StateMap[str]
     expected_with_state_deltas: tuple[
-        Optional[Mapping[str, AbstractSet[str]]], StateFilter
+        Mapping[str, AbstractSet[str]] | None, StateFilter
     ]
     expected_without_state_deltas: tuple[
-        Optional[Mapping[str, AbstractSet[str]]], StateFilter
+        Mapping[str, AbstractSet[str]] | None, StateFilter
     ]
 
 
