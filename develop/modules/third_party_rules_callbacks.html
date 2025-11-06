@@ -170,7 +170,7 @@ the module API's <code>register_third_party_rules_callbacks</code> method.</p>
 <pre><code class="language-python">async def check_event_allowed(
     event: &quot;synapse.events.EventBase&quot;,
     state_events: &quot;synapse.types.StateMap&quot;,
-) -&gt; Tuple[bool, Optional[dict]]
+) -&gt; tuple[bool, dict | None]
 </code></pre>
 <p><strong><span style="color:red">
 This callback is very experimental and can and will break without notice. Module developers
@@ -402,7 +402,7 @@ class EventCensorer:
         self,
         event: &quot;synapse.events.EventBase&quot;,
         state_events: &quot;synapse.types.StateMap&quot;,
-    ) -&gt; Tuple[bool, Optional[dict]]:
+    ) -&gt; Tuple[bool, dict | None]:
         event_dict = event.get_dict()
         new_event_content = await self.api.http_client.post_json_get_json(
             uri=self._endpoint, post_json=event_dict,

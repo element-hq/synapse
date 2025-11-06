@@ -10804,9 +10804,9 @@ search results; otherwise return <code>False</code>.</p>
 <p>The profile is represented as a dictionary with the following keys:</p>
 <ul>
 <li><code>user_id: str</code>. The Matrix ID for this user.</li>
-<li><code>display_name: Optional[str]</code>. The user's display name, or <code>None</code> if this user
+<li><code>display_name: str | None</code>. The user's display name, or <code>None</code> if this user
 has not set a display name.</li>
-<li><code>avatar_url: Optional[str]</code>. The <code>mxc://</code> URL to the user's avatar, or <code>None</code>
+<li><code>avatar_url: str | None</code>. The <code>mxc://</code> URL to the user's avatar, or <code>None</code>
 if this user has not set an avatar.</li>
 </ul>
 <p>The module is given a copy of the original dictionary, so modifying it from within the
@@ -10819,10 +10819,10 @@ any of the subsequent implementations of this callback.</p>
 <h3 id="check_registration_for_spam"><a class="header" href="#check_registration_for_spam"><code>check_registration_for_spam</code></a></h3>
 <p><em>First introduced in Synapse v1.37.0</em></p>
 <pre><code class="language-python">async def check_registration_for_spam(
-    email_threepid: Optional[dict],
-    username: Optional[str],
+    email_threepid: dict | None,
+    username: str | None,
     request_info: Collection[Tuple[str, str]],
-    auth_provider_id: Optional[str] = None,
+    auth_provider_id: str | None = None,
 ) -&gt; &quot;synapse.spam_checker_api.RegistrationBehaviour&quot;
 </code></pre>
 <p>Called when registering a new user. The module must return a <code>RegistrationBehaviour</code>
@@ -10891,10 +10891,10 @@ any of the subsequent implementations of this callback.</p>
 <p><em>First introduced in Synapse v1.87.0</em></p>
 <pre><code class="language-python">async def check_login_for_spam(
     user_id: str,
-    device_id: Optional[str],
-    initial_display_name: Optional[str],
-    request_info: Collection[Tuple[Optional[str], str]],
-    auth_provider_id: Optional[str] = None,
+    device_id: str | None,
+    initial_display_name: str | None,
+    request_info: Collection[tuple[str | None, str]],
+    auth_provider_id: str | None = None,
 ) -&gt; Union[&quot;synapse.module_api.NOT_SPAM&quot;, &quot;synapse.module_api.errors.Codes&quot;]
 </code></pre>
 <p>Called when a user logs in.</p>
@@ -10954,7 +10954,7 @@ class ListSpamChecker:
             resource=IsUserEvilResource(config),
         )
 
-    async def check_event_for_spam(self, event: &quot;synapse.events.EventBase&quot;) -&gt; Union[Literal[&quot;NOT_SPAM&quot;], Codes]:
+    async def check_event_for_spam(self, event: &quot;synapse.events.EventBase&quot;) -&gt; Literal[&quot;NOT_SPAM&quot;] | Codes:
         if event.sender in self.evil_users:
           return Codes.FORBIDDEN
         else:
@@ -10971,7 +10971,7 @@ the module API's <code>register_third_party_rules_callbacks</code> method.</p>
 <pre><code class="language-python">async def check_event_allowed(
     event: &quot;synapse.events.EventBase&quot;,
     state_events: &quot;synapse.types.StateMap&quot;,
-) -&gt; Tuple[bool, Optional[dict]]
+) -&gt; tuple[bool, dict | None]
 </code></pre>
 <p><strong><span style="color:red">
 This callback is very experimental and can and will break without notice. Module developers
@@ -11203,7 +11203,7 @@ class EventCensorer:
         self,
         event: &quot;synapse.events.EventBase&quot;,
         state_events: &quot;synapse.types.StateMap&quot;,
-    ) -&gt; Tuple[bool, Optional[dict]]:
+    ) -&gt; Tuple[bool, dict | None]:
         event_dict = event.get_dict()
         new_event_content = await self.api.http_client.post_json_get_json(
             uri=self._endpoint, post_json=event_dict,
@@ -11227,7 +11227,7 @@ unless a similar presence router is running on that homeserver.)</p>
 <p><em>First introduced in Synapse v1.42.0</em></p>
 <pre><code class="language-python">async def get_users_for_states(
     state_updates: Iterable[&quot;synapse.api.UserPresenceState&quot;],
-) -&gt; Dict[str, Set[&quot;synapse.api.UserPresenceState&quot;]]
+) -&gt; dict[str, set[&quot;synapse.api.UserPresenceState&quot;]]
 </code></pre>
 <p><strong>Requires</strong> <code>get_interested_users</code> to also be registered</p>
 <p>Called when processing updates to the presence state of one or more users. This callback can
@@ -11242,7 +11242,7 @@ Synapse concatenates the sets associated with this key from each dictionary. </p
 <p><em>First introduced in Synapse v1.42.0</em></p>
 <pre><code class="language-python">async def get_interested_users(
     user_id: str
-) -&gt; Union[Set[str], &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;]
+) -&gt; set[str] | &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;
 </code></pre>
 <p><strong>Requires</strong> <code>get_users_for_states</code> to also be registered</p>
 <p>Called when determining which users someone should be able to see the presence state of. This
@@ -11262,7 +11262,7 @@ implementations of this callback.</p>
 <p>The example below is a module that implements both presence router callbacks, and ensures
 that <code>@alice:example.org</code> receives all presence updates from <code>@bob:example.com</code> and
 <code>@charlie:somewhere.org</code>, regardless of whether Alice shares a room with any of them.</p>
-<pre><code class="language-python">from typing import Dict, Iterable, Set, Union
+<pre><code class="language-python">from typing import Iterable
 
 from synapse.module_api import ModuleApi
 
@@ -11279,7 +11279,7 @@ class CustomPresenceRouter:
     async def get_users_for_states(
         self,
         state_updates: Iterable[&quot;synapse.api.UserPresenceState&quot;],
-    ) -&gt; Dict[str, Set[&quot;synapse.api.UserPresenceState&quot;]]:
+    ) -&gt; dict[str, set[&quot;synapse.api.UserPresenceState&quot;]]:
         res = {}
         for update in state_updates:
             if (
@@ -11293,7 +11293,7 @@ class CustomPresenceRouter:
     async def get_interested_users(
         self,
         user_id: str,
-    ) -&gt; Union[Set[str], &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;]:
+    ) -&gt; set[str] | &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;:
         if user_id == &quot;@alice:example.com&quot;:
             return {&quot;@bob:example.com&quot;, &quot;@charlie:somewhere.org&quot;}
 
@@ -11307,7 +11307,7 @@ Synapse instance. Account validity callbacks can be registered using the module 
 <p>The available account validity callbacks are:</p>
 <h3 id="is_user_expired"><a class="header" href="#is_user_expired"><code>is_user_expired</code></a></h3>
 <p><em>First introduced in Synapse v1.39.0</em></p>
-<pre><code class="language-python">async def is_user_expired(user: str) -&gt; Optional[bool]
+<pre><code class="language-python">async def is_user_expired(user: str) -&gt; bool | None
 </code></pre>
 <p>Called when processing any authenticated request (except for logout requests). The module
 can return a <code>bool</code> to indicate whether the user has expired and should be locked out of
@@ -11351,12 +11351,7 @@ callbacks, which should be of the following form:</p>
     user: str,
     login_type: str,
     login_dict: &quot;synapse.module_api.JsonDict&quot;,
-) -&gt; Optional[
-    Tuple[
-        str, 
-        Optional[Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]]]
-    ]
-]
+) -&gt; tuple[str, Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]] | None] | None
 </code></pre>
 <p>The login type and field names should be provided by the user in the
 request to the <code>/login</code> API. <a href="https://matrix.org/docs/spec/client_server/latest#authentication-types">The Matrix specification</a>
@@ -11384,12 +11379,7 @@ authentication fails.</p>
     medium: str, 
     address: str,
     password: str,
-) -&gt; Optional[
-    Tuple[
-        str, 
-        Optional[Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]]]
-    ]
-]
+) -&gt; tuple[str, Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]] | None]
 </code></pre>
 <p>Called when a user attempts to register or log in with a third party identifier,
 such as email. It is passed the medium (eg. <code>email</code>), an address (eg. <code>jdoe@example.com</code>)
@@ -11407,7 +11397,7 @@ the authentication is denied.</p>
 <p><em>First introduced in Synapse v1.46.0</em></p>
 <pre><code class="language-python">async def on_logged_out(
     user_id: str,
-    device_id: Optional[str],
+    device_id: str | None,
     access_token: str
 ) -&gt; None
 </code></pre>
@@ -11422,7 +11412,7 @@ to still be present.</p>
 <pre><code class="language-python">async def get_username_for_registration(
     uia_results: Dict[str, Any],
     params: Dict[str, Any],
-) -&gt; Optional[str]
+) -&gt; str | None
 </code></pre>
 <p>Called when registering a new user. The module can return a username to set for the user
 being registered by returning it as a string, or <code>None</code> if it doesn't wish to force a
@@ -11471,7 +11461,7 @@ generated).</p>
 <pre><code class="language-python">async def get_displayname_for_registration(
     uia_results: Dict[str, Any],
     params: Dict[str, Any],
-) -&gt; Optional[str]
+) -&gt; str | None
 </code></pre>
 <p>Called when registering a new user. The module can return a display name to set for the
 user being registered by returning it as a string, or <code>None</code> if it doesn't wish to force a
@@ -11545,12 +11535,7 @@ class MyAuthProvider:
         username: str,
         login_type: str,
         login_dict: &quot;synapse.module_api.JsonDict&quot;,
-    ) -&gt; Optional[
-        Tuple[
-            str,
-            Optional[Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]]],
-        ]
-    ]:
+    ) -&gt; tuple[str, Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]] | None] | None:
         if login_type != &quot;my.login_type&quot;:
             return None
 
@@ -11562,12 +11547,7 @@ class MyAuthProvider:
         username: str,
         login_type: str,
         login_dict: &quot;synapse.module_api.JsonDict&quot;,
-    ) -&gt; Optional[
-        Tuple[
-            str,
-            Optional[Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]]],
-        ]
-    ]:
+    ) -&gt; tuple[str, Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]] | None] | None:
         if login_type != &quot;m.login.password&quot;:
             return None
 
@@ -11631,7 +11611,7 @@ of local users. Account data callbacks can be registered using the module API's
 <p><em>First introduced in Synapse v1.57.0</em></p>
 <pre><code class="language-python">async def on_account_data_updated(
     user_id: str,
-    room_id: Optional[str],
+    room_id: str | None,
     account_data_type: str,
     content: &quot;synapse.module_api.JsonDict&quot;,
 ) -&gt; None:
@@ -11690,7 +11670,7 @@ class CustomAccountDataModule:
     async def log_new_account_data(
         self,
         user_id: str,
-        room_id: Optional[str],
+        room_id: str | None,
         account_data_type: str,
         content: JsonDict,
     ) -&gt; None:
@@ -11740,7 +11720,7 @@ using the module API's <code>register_media_repository_callbacks</code> method.<
 <p>The available media repository callbacks are:</p>
 <h3 id="get_media_config_for_user"><a class="header" href="#get_media_config_for_user"><code>get_media_config_for_user</code></a></h3>
 <p><em>First introduced in Synapse v1.132.0</em></p>
-<pre><code class="language-python">async def get_media_config_for_user(user_id: str) -&gt; Optional[JsonDict]
+<pre><code class="language-python">async def get_media_config_for_user(user_id: str) -&gt; JsonDict | None
 </code></pre>
 <p><strong><span style="color:red">
 Caution: This callback is currently experimental . The method signature or behaviour
@@ -11782,7 +11762,7 @@ returns <code>False</code> will be used. If this happens, Synapse will not call 
 implementations of this callback.</p>
 <h3 id="get_media_upload_limits_for_user"><a class="header" href="#get_media_upload_limits_for_user"><code>get_media_upload_limits_for_user</code></a></h3>
 <p><em>First introduced in Synapse v1.139.0</em></p>
-<pre><code class="language-python">async def get_media_upload_limits_for_user(user_id: str, size: int) -&gt; Optional[List[synapse.module_api.MediaUploadLimit]]
+<pre><code class="language-python">async def get_media_upload_limits_for_user(user_id: str, size: int) -&gt; list[synapse.module_api.MediaUploadLimit] | None
 </code></pre>
 <p><strong><span style="color:red">
 Caution: This callback is currently experimental. The method signature or behaviour
@@ -11834,7 +11814,7 @@ Synapse is running. Ratelimit callbacks can be registered using the module API's
 <p>The available ratelimit callbacks are:</p>
 <h3 id="get_ratelimit_override_for_user"><a class="header" href="#get_ratelimit_override_for_user"><code>get_ratelimit_override_for_user</code></a></h3>
 <p><em>First introduced in Synapse v1.132.0</em></p>
-<pre><code class="language-python">async def get_ratelimit_override_for_user(user: str, limiter_name: str) -&gt; Optional[synapse.module_api.RatelimitOverride]
+<pre><code class="language-python">async def get_ratelimit_override_for_user(user: str, limiter_name: str) -&gt; synapse.module_api.RatelimitOverride | None
 </code></pre>
 <p><strong><span style="color:red">
 Caution: This callback is currently experimental . The method signature or behaviour
@@ -19309,7 +19289,7 @@ logcontext is not finished before the <code>async</code> processing completes.</
 <tr>
 <td width="50%" valign="top">
 <p><strong>Bad</strong>:</p>
-<pre><code class="language-python">cache: Optional[ObservableDeferred[None]] = None
+<pre><code class="language-python">cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]
@@ -19334,7 +19314,7 @@ with LoggingContext(&quot;request-1&quot;):
 </td>
 <td width="50%" valign="top">
 <p><strong>Good</strong>:</p>
-<pre><code class="language-python">cache: Optional[ObservableDeferred[None]] = None
+<pre><code class="language-python">cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]
@@ -19364,7 +19344,7 @@ with LoggingContext(&quot;request-1&quot;):
 <tr>
 <td width="50%">
 <p><strong>OK</strong>:</p>
-<pre><code class="language-python">cache: Optional[ObservableDeferred[None]] = None
+<pre><code class="language-python">cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]
