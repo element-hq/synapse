@@ -20,7 +20,6 @@
 #
 #
 import logging
-from collections import deque
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -69,6 +68,7 @@ from synapse.replication.tcp.streams._base import (
     DeviceListsStream,
     ThreadSubscriptionsStream,
 )
+from synapse.util.background_queue import BackgroundQueue
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -113,9 +113,7 @@ tcp_command_queue_gauge = LaterGauge(
 
 
 # the type of the entries in _command_queues_by_stream
-_StreamCommandQueue = deque[
-    tuple[RdataCommand | PositionCommand, IReplicationConnection]
-]
+_StreamCommandQueueItem = tuple[RdataCommand | PositionCommand, IReplicationConnection]
 
 
 class ReplicationCommandHandler:
@@ -263,7 +261,12 @@ class ReplicationCommandHandler:
         # for each stream, a queue of commands that are awaiting processing, and the
         # connection that they arrived on.
         self._command_queues_by_stream = {
-            stream_name: _StreamCommandQueue() for stream_name in self._streams
+            stream_name: BackgroundQueue[_StreamCommandQueueItem](
+                hs,
+                "process-replication-data",
+                self._unsafe_process_item,
+            )
+            for stream_name in self._streams
         }
 
         # For each connection, the incoming stream names that have received a POSITION
@@ -347,38 +350,17 @@ class ReplicationCommandHandler:
             logger.error("Got %s for unknown stream: %s", cmd.NAME, stream_name)
             return
 
-        queue.append((cmd, conn))
+        queue.add((cmd, conn))
 
-        # if we're already processing this stream, there's nothing more to do:
-        # the new entry on the queue will get picked up in due course
-        if stream_name in self._processing_streams:
-            return
+    async def _unsafe_process_item(self, item: _StreamCommandQueueItem) -> None:
+        """Process a single command from the stream queue.
 
-        # fire off a background process to start processing the queue.
-        self.hs.run_as_background_process(
-            "process-replication-data",
-            self._unsafe_process_queue,
-            stream_name,
-        )
-
-    async def _unsafe_process_queue(self, stream_name: str) -> None:
-        """Processes the command queue for the given stream, until it is empty
-
-        Does not check if there is already a thread processing the queue, hence "unsafe"
+        This should only be called one at a time per stream, and is called from
+        the stream's BackgroundQueue.
         """
-        assert stream_name not in self._processing_streams
-
-        self._processing_streams.add(stream_name)
-        try:
-            queue = self._command_queues_by_stream.get(stream_name)
-            while queue:
-                cmd, conn = queue.popleft()
-                try:
-                    await self._process_command(cmd, conn, stream_name)
-                except Exception:
-                    logger.exception("Failed to handle command %s", cmd)
-        finally:
-            self._processing_streams.discard(stream_name)
+        cmd, conn = item
+        stream_name = cmd.stream_name
+        await self._process_command(cmd, conn, stream_name)
 
     async def _process_command(
         self,
