@@ -84,7 +84,7 @@ select = [
     "UP045",
 ]
 extend-safe-fixes = [
-    # pyupgrade
+    # pyupgrade rules compatible with Synapse's minimum supported Python version
     "UP006",
     "UP007",
     "UP045",
