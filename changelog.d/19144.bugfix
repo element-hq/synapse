@@ -1,0 +1,1 @@
+Fix a bug introduced in 1.142.0rc1 where any attempt to configure `matrix_authentication_service.secret_path` would prevent the homeserver from starting up.
