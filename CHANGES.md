@@ -1,14 +1,5 @@
 # Synapse 1.142.0rc4 (2025-11-07)
 
-## Bugfixes
-
-- Fix a bug introduced in 1.142.0rc1 where any attempt to configure `matrix_authentication_service.secret_path` would prevent the homeserver from starting up. ([\#19144](https://github.com/element-hq/synapse/issues/19144))
-
-
-
-
-# Synapse 1.142.0rc3 (2025-11-04)
-
 ## Dropped support for Python 3.9
 
 This release drops support for Python 3.9, in line with our [dependency
@@ -38,6 +29,14 @@ of these wheels downstream, please reach out to us in
 [#synapse-dev:matrix.org](https://matrix.to/#/#synapse-dev:matrix.org). We'd
 love to hear from you!
 
+## Bugfixes
+
+- Fix a bug introduced in 1.142.0rc1 where any attempt to configure `matrix_authentication_service.secret_path` would prevent the homeserver from starting up. ([\#19144](https://github.com/element-hq/synapse/issues/19144))
+
+
+
+
+# Synapse 1.142.0rc3 (2025-11-04)
 
 ## Internal Changes
 
