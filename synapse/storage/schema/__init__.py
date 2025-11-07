@@ -170,7 +170,8 @@ Changes in SCHEMA_VERSION = 92
     - Cleaned up a trigger that was added in #18260 and then reverted.
 
 Changes in SCHEMA_VERSION = 93
-    - Remove `user_localpart` from the primary key of the `delayed_events` table.
+    - MSC4140: Remove `user_localpart` from the primary key of the `delayed_events` table,
+      so that delayed events may be uniquely identified by their `delay_id` alone.
 """
 
 
