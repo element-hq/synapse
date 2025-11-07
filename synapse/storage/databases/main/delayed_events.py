@@ -866,7 +866,7 @@ class DelayedEventsStore(SQLBaseStore):
         Unmark all delayed events for processing.
         """
 
-        def unprocess_delayed_events(txn: LoggingTransaction):
+        def unprocess_delayed_events(txn: LoggingTransaction) -> None:
             txn.execute(
                 """
                 UPDATE delayed_events SET is_processed = FALSE
