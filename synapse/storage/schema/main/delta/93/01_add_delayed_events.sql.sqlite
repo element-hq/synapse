@@ -35,8 +35,8 @@ INSERT INTO delayed_events_new (delay_id, user_localpart, device_id, delay_id, s
 
 DROP TABLE delayed_events;
 
-ALTER TABLE delayed_events_new RENAME TO delayed_events;
+CREATE INDEX delayed_events_send_ts ON delayed_events_new (send_ts);
+CREATE INDEX delayed_events_is_processed ON delayed_events_new (is_processed);
+CREATE INDEX delayed_events_room_state_event_idx ON delayed_events_new (room_id, event_type, state_key) WHERE state_key IS NOT NULL;
 
-CREATE INDEX delayed_events_send_ts ON delayed_events (send_ts);
-CREATE INDEX delayed_events_is_processed ON delayed_events (is_processed);
-CREATE INDEX delayed_events_room_state_event_idx ON delayed_events (room_id, event_type, state_key) WHERE state_key IS NOT NULL;
+ALTER TABLE delayed_events_new RENAME TO delayed_events;
