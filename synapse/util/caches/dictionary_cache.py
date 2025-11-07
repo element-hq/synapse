@@ -25,9 +25,7 @@ from typing import (
     Generic,
     Iterable,
     Literal,
-    Optional,
     TypeVar,
-    Union,
 )
 
 import attr
@@ -88,7 +86,7 @@ class _PerKeyValue(Generic[DV]):
 
     __slots__ = ["value"]
 
-    def __init__(self, value: Union[DV, Literal[_Sentinel.sentinel]]) -> None:
+    def __init__(self, value: DV | Literal[_Sentinel.sentinel]) -> None:
         self.value = value
 
     def __len__(self) -> int:
@@ -157,8 +155,8 @@ class DictionaryCache(Generic[KT, DKT, DV]):
         #     * A key of `(KT, DKT)` has a value of `_PerKeyValue`
         #     * A key of `(KT, _FullCacheKey.KEY)` has a value of `Dict[DKT, DV]`
         self.cache: LruCache[
-            tuple[KT, Union[DKT, Literal[_FullCacheKey.KEY]]],
-            Union[_PerKeyValue, dict[DKT, DV]],
+            tuple[KT, DKT | Literal[_FullCacheKey.KEY]],
+            _PerKeyValue | dict[DKT, DV],
         ] = LruCache(
             max_size=max_entries,
             clock=clock,
@@ -170,7 +168,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
 
         self.name = name
         self.sequence = 0
-        self.thread: Optional[threading.Thread] = None
+        self.thread: threading.Thread | None = None
 
     def check_thread(self) -> None:
         expected_thread = self.thread
@@ -182,9 +180,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
                     "Cache objects can only be accessed from the main thread"
                 )
 
-    def get(
-        self, key: KT, dict_keys: Optional[Iterable[DKT]] = None
-    ) -> DictionaryEntry:
+    def get(self, key: KT, dict_keys: Iterable[DKT] | None = None) -> DictionaryEntry:
         """Fetch an entry out of the cache
 
         Args:
@@ -295,7 +291,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
         sequence: int,
         key: KT,
         value: dict[DKT, DV],
-        fetched_keys: Optional[Iterable[DKT]] = None,
+        fetched_keys: Iterable[DKT] | None = None,
     ) -> None:
         """Updates the entry in the cache.
 

@@ -1,1 +1,0 @@
-Use type hinting generics in standard collections, as per PEP 585, added in Python 3.9.

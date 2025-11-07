@@ -85,8 +85,8 @@ MutableStateMap = MutableMapping[StateKey, T]
 
 # JSON types. These could be made stronger, but will do for now.
 # A "simple" (canonical) JSON value.
-SimpleJsonValue = Optional[Union[str, int, bool]]
-JsonValue = Union[list[SimpleJsonValue], tuple[SimpleJsonValue, ...], SimpleJsonValue]
+SimpleJsonValue = str | int | bool | None
+JsonValue = list[SimpleJsonValue] | tuple[SimpleJsonValue, ...] | SimpleJsonValue
 # A JSON-serialisable dict.
 JsonDict = dict[str, Any]
 # A JSON-serialisable mapping; roughly speaking an immutable JSONDict.
@@ -101,12 +101,12 @@ JsonSerializable = object
 #
 # StrCollection is an unordered collection of strings. If ordering is important,
 # StrSequence can be used instead.
-StrCollection = Union[tuple[str, ...], list[str], AbstractSet[str]]
+StrCollection = tuple[str, ...] | list[str] | AbstractSet[str]
 # Sequence[str] that does not include str itself; str being a Sequence[str]
 # is very misleading and results in bugs.
 #
 # Unlike StrCollection, StrSequence is an ordered collection of strings.
-StrSequence = Union[tuple[str, ...], list[str]]
+StrSequence = tuple[str, ...] | list[str]
 
 
 # Note that this seems to require inheriting *directly* from Interface in order
@@ -158,11 +158,11 @@ class Requester:
     """
 
     user: "UserID"
-    access_token_id: Optional[int]
+    access_token_id: int | None
     is_guest: bool
     scope: set[str]
     shadow_banned: bool
-    device_id: Optional[str]
+    device_id: str | None
     app_service: Optional["ApplicationService"]
     authenticated_entity: str
 
@@ -216,13 +216,13 @@ class Requester:
 
 def create_requester(
     user_id: Union[str, "UserID"],
-    access_token_id: Optional[int] = None,
+    access_token_id: int | None = None,
     is_guest: bool = False,
     scope: StrCollection = (),
     shadow_banned: bool = False,
-    device_id: Optional[str] = None,
+    device_id: str | None = None,
     app_service: Optional["ApplicationService"] = None,
-    authenticated_entity: Optional[str] = None,
+    authenticated_entity: str | None = None,
 ) -> Requester:
     """
     Create a new ``Requester`` object
@@ -385,7 +385,7 @@ class RoomID:
 
     SIGIL = "!"
     id: str
-    room_id_with_domain: Optional[RoomIdWithDomain]
+    room_id_with_domain: RoomIdWithDomain | None
 
     @classmethod
     def is_valid(cls: type["RoomID"], s: str) -> bool:
@@ -397,7 +397,7 @@ class RoomID:
         except Exception:
             return False
 
-    def get_domain(self) -> Optional[str]:
+    def get_domain(self) -> str | None:
         if not self.room_id_with_domain:
             return None
         return self.room_id_with_domain.domain
@@ -419,7 +419,7 @@ class RoomID:
                 Codes.INVALID_PARAM,
             )
 
-        room_id_with_domain: Optional[RoomIdWithDomain] = None
+        room_id_with_domain: RoomIdWithDomain | None = None
         if ":" in s:
             room_id_with_domain = RoomIdWithDomain.from_string(s)
         else:
@@ -487,7 +487,7 @@ NON_MXID_CHARACTER_PATTERN = re.compile(
 
 
 def map_username_to_mxid_localpart(
-    username: Union[str, bytes], case_sensitive: bool = False
+    username: str | bytes, case_sensitive: bool = False
 ) -> str:
     """Map a username onto a string suitable for a MXID
 
@@ -744,7 +744,7 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
     attributes, must be hashable.
     """
 
-    topological: Optional[int] = attr.ib(
+    topological: int | None = attr.ib(
         validator=attr.validators.optional(attr.validators.instance_of(int)),
         kw_only=True,
         default=None,
@@ -954,7 +954,7 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
     def is_stream_position_in_range(
         low: Optional["AbstractMultiWriterStreamToken"],
         high: Optional["AbstractMultiWriterStreamToken"],
-        instance_name: Optional[str],
+        instance_name: str | None,
         pos: int,
     ) -> bool:
         """Checks if a given persisted position is between the two given tokens.
@@ -1224,11 +1224,11 @@ class StreamToken:
     @overload
     def get_field(
         self, key: StreamKeyType
-    ) -> Union[int, RoomStreamToken, MultiWriterStreamToken]: ...
+    ) -> int | RoomStreamToken | MultiWriterStreamToken: ...
 
     def get_field(
         self, key: StreamKeyType
-    ) -> Union[int, RoomStreamToken, MultiWriterStreamToken]:
+    ) -> int | RoomStreamToken | MultiWriterStreamToken:
         """Returns the stream ID for the given key."""
         return getattr(self, key.value)
 
@@ -1394,8 +1394,8 @@ class PersistedEventPosition(PersistedPosition):
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class ThirdPartyInstanceID:
-    appservice_id: Optional[str]
-    network_id: Optional[str]
+    appservice_id: str | None
+    network_id: str | None
 
     # Deny iteration because it will bite you if you try to create a singleton
     # set by:
@@ -1432,7 +1432,7 @@ class ReadReceipt:
     receipt_type: str
     user_id: str
     event_ids: list[str]
-    thread_id: Optional[str]
+    thread_id: str | None
     data: JsonDict
 
 
@@ -1507,11 +1507,11 @@ class UserInfo:
     """
 
     user_id: UserID
-    appservice_id: Optional[int]
-    consent_server_notice_sent: Optional[str]
-    consent_version: Optional[str]
-    consent_ts: Optional[int]
-    user_type: Optional[str]
+    appservice_id: int | None
+    consent_server_notice_sent: str | None
+    consent_version: str | None
+    consent_ts: int | None
+    user_type: str | None
     creation_ts: int
     is_admin: bool
     is_deactivated: bool
@@ -1524,14 +1524,14 @@ class UserInfo:
 
 class UserProfile(TypedDict):
     user_id: str
-    display_name: Optional[str]
-    avatar_url: Optional[str]
+    display_name: str | None
+    avatar_url: str | None
 
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)
 class RetentionPolicy:
-    min_lifetime: Optional[int] = None
-    max_lifetime: Optional[int] = None
+    min_lifetime: int | None = None
+    max_lifetime: int | None = None
 
 
 class TaskStatus(str, Enum):
@@ -1563,13 +1563,13 @@ class ScheduledTask:
     # In milliseconds since epoch in system time timezone, usually UTC.
     timestamp: int
     # Optionally bind a task to some resource id for easy retrieval
-    resource_id: Optional[str]
+    resource_id: str | None
     # Optional parameters that will be passed to the function ran by the task
-    params: Optional[JsonMapping]
+    params: JsonMapping | None
     # Optional result that can be updated by the running task
-    result: Optional[JsonMapping]
+    result: JsonMapping | None
     # Optional error that should be assigned a value when the status is FAILED
-    error: Optional[str]
+    error: str | None
 
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)

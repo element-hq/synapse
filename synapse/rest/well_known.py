@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from twisted.web.resource import Resource
 from twisted.web.server import Request
@@ -42,7 +42,7 @@ class WellKnownBuilder:
         self._config = hs.config
         self._auth = hs.get_auth()
 
-    async def get_well_known(self) -> Optional[JsonDict]:
+    async def get_well_known(self) -> JsonDict | None:
         if not self._config.server.serve_client_wellknown:
             return None
 

@@ -21,14 +21,15 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
 import attr
+from pydantic import StrictBool, StrictStr, StringConstraints
+from typing_extensions import Annotated
 
 from twisted.web.server import Request
 
-from synapse._pydantic_compat import StrictBool, StrictStr, constr
 from synapse.api.constants import LoginType
 from synapse.api.errors import (
     Codes,
@@ -160,13 +161,11 @@ class PasswordRestServlet(RestServlet):
         self._set_password_handler = hs.get_set_password_handler()
 
     class PostBody(RequestBodyModel):
-        auth: Optional[AuthenticationData] = None
+        auth: AuthenticationData | None = None
         logout_devices: StrictBool = True
-        if TYPE_CHECKING:
-            # workaround for https://github.com/samuelcolvin/pydantic/issues/156
-            new_password: Optional[StrictStr] = None
-        else:
-            new_password: Optional[constr(max_length=512, strict=True)] = None
+        new_password: (
+            Annotated[str, StringConstraints(max_length=512, strict=True)] | None
+        ) = None
 
     @interactive_auth_handler
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
@@ -260,7 +259,7 @@ class PasswordRestServlet(RestServlet):
         # If we have a password in this request, prefer it. Otherwise, use the
         # password hash from an earlier request.
         if new_password:
-            password_hash: Optional[str] = await self.auth_handler.hash(new_password)
+            password_hash: str | None = await self.auth_handler.hash(new_password)
         elif session_id is not None:
             password_hash = existing_session_password_hash
         else:
@@ -290,8 +289,8 @@ class DeactivateAccountRestServlet(RestServlet):
         self._deactivate_account_handler = hs.get_deactivate_account_handler()
 
     class PostBody(RequestBodyModel):
-        auth: Optional[AuthenticationData] = None
-        id_server: Optional[StrictStr] = None
+        auth: AuthenticationData | None = None
+        id_server: StrictStr | None = None
         # Not specced, see https://github.com/matrix-org/matrix-spec/issues/297
         erase: StrictBool = False
 
@@ -664,7 +663,7 @@ class ThreepidAddRestServlet(RestServlet):
         self.auth_handler = hs.get_auth_handler()
 
     class PostBody(RequestBodyModel):
-        auth: Optional[AuthenticationData] = None
+        auth: AuthenticationData | None = None
         client_secret: ClientSecretStr
         sid: StrictStr
 
@@ -743,7 +742,7 @@ class ThreepidUnbindRestServlet(RestServlet):
 
     class PostBody(RequestBodyModel):
         address: StrictStr
-        id_server: Optional[StrictStr] = None
+        id_server: StrictStr | None = None
         medium: Literal["email", "msisdn"]
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
@@ -772,7 +771,7 @@ class ThreepidDeleteRestServlet(RestServlet):
 
     class PostBody(RequestBodyModel):
         address: StrictStr
-        id_server: Optional[StrictStr] = None
+        id_server: StrictStr | None = None
         medium: Literal["email", "msisdn"]
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:

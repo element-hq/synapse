@@ -24,17 +24,15 @@ from typing import (
     Callable,
     Iterator,
     Mapping,
-    Optional,
     Protocol,
     Sequence,
-    Union,
 )
 
 """
 Some very basic protocol definitions for the DB-API2 classes specified in PEP-249
 """
 
-SQLQueryParameters = Union[Sequence[Any], Mapping[str, Any]]
+SQLQueryParameters = Sequence[Any] | Mapping[str, Any]
 
 
 class Cursor(Protocol):
@@ -44,16 +42,16 @@ class Cursor(Protocol):
         self, sql: str, parameters: Sequence[SQLQueryParameters]
     ) -> Any: ...
 
-    def fetchone(self) -> Optional[tuple]: ...
+    def fetchone(self) -> tuple | None: ...
 
-    def fetchmany(self, size: Optional[int] = ...) -> list[tuple]: ...
+    def fetchmany(self, size: int | None = ...) -> list[tuple]: ...
 
     def fetchall(self) -> list[tuple]: ...
 
     @property
     def description(
         self,
-    ) -> Optional[Sequence[Any]]:
+    ) -> Sequence[Any] | None:
         # At the time of writing, Synapse only assumes that `column[0]: str` for each
         # `column in description`. Since this is hard to express in the type system, and
         # as this is rarely used in Synapse, we deem `column: Any` good enough.
@@ -81,10 +79,10 @@ class Connection(Protocol):
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[TracebackType],
-    ) -> Optional[bool]: ...
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None: ...
 
 
 class DBAPI2Module(Protocol):

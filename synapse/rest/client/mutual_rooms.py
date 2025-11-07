@@ -52,7 +52,7 @@ class UserMutualRoomsServlet(RestServlet):
         self.store = hs.get_datastores().main
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+        # twisted.web.server.Request.args is incorrectly defined as Any | None
         args: dict[bytes, list[bytes]] = request.args  # type: ignore
 
         user_ids = parse_strings_from_args(args, "user_id", required=True)

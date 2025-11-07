@@ -10,16 +10,16 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Mapping, Optional
+from typing import Mapping
 
 from synapse.types import JsonDict
 
 class EventInternalMetadata:
     def __init__(self, internal_metadata_dict: JsonDict): ...
 
-    stream_ordering: Optional[int]
+    stream_ordering: int | None
     """the stream ordering of this event. None, until it has been persisted."""
-    instance_name: Optional[str]
+    instance_name: str | None
     """the instance name of the server that persisted this event. None, until it has been persisted."""
 
     outlier: bool
@@ -62,7 +62,7 @@ class EventInternalMetadata:
         (Added in synapse 0.99.0, so may be unreliable for events received before that)
         """
 
-    def get_send_on_behalf_of(self) -> Optional[str]:
+    def get_send_on_behalf_of(self) -> str | None:
         """Whether this server should send the event on behalf of another server.
         This is used by the federation "send_join" API to forward the initial join
         event for a server in the room.

@@ -19,7 +19,7 @@
 #
 #
 from abc import ABC, abstractmethod
-from typing import Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
 from synapse.types import StrCollection, UserID
 
@@ -38,6 +38,6 @@ class EventSource(ABC, Generic[K, R]):
         limit: int,
         room_ids: StrCollection,
         is_guest: bool,
-        explicit_room_id: Optional[str] = None,
+        explicit_room_id: str | None = None,
     ) -> tuple[list[R], K]:
         raise NotImplementedError()

@@ -23,8 +23,6 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Mapping,
-    Optional,
-    Union,
 )
 
 from synapse.logging.opentracing import tag_args, trace
@@ -82,7 +80,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
         else:
             # We don't use WITH RECURSIVE on sqlite3 as there are distributions
             # that ship with an sqlite3 version that doesn't support it (e.g. wheezy)
-            next_group: Optional[int] = state_group
+            next_group: int | None = state_group
             count = 0
 
             while next_group:
@@ -104,7 +102,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         groups: list[int],
-        state_filter: Optional[StateFilter] = None,
+        state_filter: StateFilter | None = None,
     ) -> Mapping[int, StateMap[str]]:
         """
         Given a number of state groups, fetch the latest state for each group.
@@ -144,7 +142,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
                 %s
             """
 
-            overall_select_query_args: list[Union[int, str]] = []
+            overall_select_query_args: list[int | str] = []
 
             # This is an optimization to create a select clause per-condition. This
             # makes the query planner a lot smarter on what rows should pull out in the
@@ -153,7 +151,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
             use_condition_optimization = (
                 not state_filter.include_others and not state_filter.is_full()
             )
-            state_filter_condition_combos: list[tuple[str, Optional[str]]] = []
+            state_filter_condition_combos: list[tuple[str, str | None]] = []
             # We don't need to caclculate this list if we're not using the condition
             # optimization
             if use_condition_optimization:
@@ -213,7 +211,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
                 """
 
             for group in groups:
-                args: list[Union[int, str]] = [group]
+                args: list[int | str] = [group]
                 args.extend(overall_select_query_args)
 
                 txn.execute(sql % (overall_select_clause,), args)
@@ -235,7 +233,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
             #
             # We just haven't put in the time to refactor this.
             for group in groups:
-                next_group: Optional[int] = group
+                next_group: int | None = group
 
                 while next_group:
                     # We did this before by getting the list of group ids, and

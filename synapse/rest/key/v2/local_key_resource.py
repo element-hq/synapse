@@ -21,7 +21,7 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from signedjson.sign import sign_json
 from unpaddedbase64 import encode_base64
@@ -107,7 +107,7 @@ class LocalKey(RestServlet):
         return json_object
 
     def on_GET(
-        self, request: Request, key_id: Optional[str] = None
+        self, request: Request, key_id: str | None = None
     ) -> tuple[int, JsonDict]:
         # Matrix 1.6 drops support for passing the key_id, this is incompatible
         # with earlier versions and is allowed in order to support both.

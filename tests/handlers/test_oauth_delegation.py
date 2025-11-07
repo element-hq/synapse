@@ -25,7 +25,7 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from io import BytesIO
-from typing import Any, ClassVar, Coroutine, Generator, Optional, TypeVar, Union
+from typing import Any, ClassVar, Coroutine, Generator, TypeVar, Union
 from unittest.mock import ANY, AsyncMock, Mock
 from urllib.parse import parse_qs
 
@@ -759,7 +759,7 @@ class FakeMasServer(HTTPServer):
     secret: str = "verysecret"
     """The shared secret used to authenticate the introspection endpoint."""
 
-    last_token_seen: Optional[str] = None
+    last_token_seen: str | None = None
     """What is the last access token seen by the introspection endpoint."""
 
     calls: int = 0
@@ -1110,7 +1110,7 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         return config
 
     def expect_unauthorized(
-        self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""
+        self, method: str, path: str, content: bytes | str | JsonDict = ""
     ) -> None:
         channel = self.make_request(method, path, content, shorthand=False)
 
@@ -1120,7 +1120,7 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         self,
         method: str,
         path: str,
-        content: Union[bytes, str, JsonDict] = "",
+        content: bytes | str | JsonDict = "",
         auth: bool = False,
     ) -> None:
         channel = self.make_request(
@@ -1133,7 +1133,7 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         )
 
     def expect_forbidden(
-        self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""
+        self, method: str, path: str, content: bytes | str | JsonDict = ""
     ) -> None:
         channel = self.make_request(method, path, content)
 

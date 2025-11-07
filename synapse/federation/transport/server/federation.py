@@ -24,9 +24,7 @@ from typing import (
     TYPE_CHECKING,
     Literal,
     Mapping,
-    Optional,
     Sequence,
-    Union,
 )
 
 from synapse.api.constants import Direction, EduTypes
@@ -156,7 +154,7 @@ class FederationEventServlet(BaseFederationServerServlet):
         content: Literal[None],
         query: dict[bytes, list[bytes]],
         event_id: str,
-    ) -> tuple[int, Union[JsonDict, str]]:
+    ) -> tuple[int, JsonDict | str]:
         return await self.handler.on_pdu_request(origin, event_id)
 
 
@@ -642,7 +640,7 @@ class On3pidBindServlet(BaseFederationServerServlet):
     REQUIRE_AUTH = False
 
     async def on_POST(
-        self, origin: Optional[str], content: JsonDict, query: dict[bytes, list[bytes]]
+        self, origin: str | None, content: JsonDict, query: dict[bytes, list[bytes]]
     ) -> tuple[int, JsonDict]:
         if "invites" in content:
             last_exception = None
@@ -676,7 +674,7 @@ class FederationVersionServlet(BaseFederationServlet):
 
     async def on_GET(
         self,
-        origin: Optional[str],
+        origin: str | None,
         content: Literal[None],
         query: dict[bytes, list[bytes]],
     ) -> tuple[int, JsonDict]:
@@ -812,7 +810,7 @@ class FederationMediaDownloadServlet(BaseFederationServerServlet):
 
     async def on_GET(
         self,
-        origin: Optional[str],
+        origin: str | None,
         content: Literal[None],
         request: SynapseRequest,
         media_id: str,
@@ -852,7 +850,7 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
 
     async def on_GET(
         self,
-        origin: Optional[str],
+        origin: str | None,
         content: Literal[None],
         request: SynapseRequest,
         media_id: str,

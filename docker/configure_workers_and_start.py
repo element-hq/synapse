@@ -68,7 +68,6 @@ from typing import (
     Mapping,
     MutableMapping,
     NoReturn,
-    Optional,
     SupportsIndex,
 )
 
@@ -468,7 +467,7 @@ def add_worker_roles_to_shared_config(
 
 
 def merge_worker_template_configs(
-    existing_dict: Optional[dict[str, Any]],
+    existing_dict: dict[str, Any] | None,
     to_be_merged_dict: dict[str, Any],
 ) -> dict[str, Any]:
     """When given an existing dict of worker template configuration consisting with both
@@ -1026,7 +1025,7 @@ def generate_worker_log_config(
     Returns: the path to the generated file
     """
     # Check whether we should write worker logs to disk, in addition to the console
-    extra_log_template_args: dict[str, Optional[str]] = {}
+    extra_log_template_args: dict[str, str | None] = {}
     if environ.get("SYNAPSE_WORKERS_WRITE_LOGS_TO_DISK"):
         extra_log_template_args["LOG_FILE_PATH"] = f"{data_dir}/logs/{worker_name}.log"
 

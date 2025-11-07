@@ -21,7 +21,7 @@
 
 import logging
 from http.client import TEMPORARY_REDIRECT
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.http.server import HttpServer, respond_with_redirect
 from synapse.http.servlet import RestServlet
@@ -41,7 +41,7 @@ class MSC4108DelegationRendezvousServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        redirection_target: Optional[str] = (
+        redirection_target: str | None = (
             hs.config.experimental.msc4108_delegation_endpoint
         )
         assert redirection_target is not None, (

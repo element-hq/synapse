@@ -24,7 +24,6 @@ from typing import (
     Iterable,
     Literal,
     Mapping,
-    Optional,
     TypedDict,
     cast,
 )
@@ -252,8 +251,8 @@ class EndToEndRoomKeyStore(EndToEndRoomKeyBackgroundStore):
         self,
         user_id: str,
         version: str,
-        room_id: Optional[str] = None,
-        session_id: Optional[str] = None,
+        room_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict[
         Literal["rooms"], dict[str, dict[Literal["sessions"], dict[str, RoomKey]]]
     ]:
@@ -438,8 +437,8 @@ class EndToEndRoomKeyStore(EndToEndRoomKeyBackgroundStore):
         self,
         user_id: str,
         version: str,
-        room_id: Optional[str] = None,
-        session_id: Optional[str] = None,
+        room_id: str | None = None,
+        session_id: str | None = None,
     ) -> None:
         """Bulk delete the E2E room keys for a given backup, optionally filtered to a given
         room or a given session.
@@ -480,13 +479,13 @@ class EndToEndRoomKeyStore(EndToEndRoomKeyBackgroundStore):
         )
         # `SELECT MAX() FROM ...` will always return 1 row. The value in that row will
         # be `NULL` when there are no available versions.
-        row = cast(tuple[Optional[int]], txn.fetchone())
+        row = cast(tuple[int | None], txn.fetchone())
         if row[0] is None:
             raise StoreError(404, "No current backup version")
         return row[0]
 
     async def get_e2e_room_keys_version_info(
-        self, user_id: str, version: Optional[str] = None
+        self, user_id: str, version: str | None = None
     ) -> JsonDict:
         """Get info metadata about a version of our room_keys backup.
 
@@ -556,7 +555,7 @@ class EndToEndRoomKeyStore(EndToEndRoomKeyBackgroundStore):
                 "SELECT MAX(version) FROM e2e_room_keys_versions WHERE user_id=?",
                 (user_id,),
             )
-            current_version = cast(tuple[Optional[int]], txn.fetchone())[0]
+            current_version = cast(tuple[int | None], txn.fetchone())[0]
             if current_version is None:
                 current_version = 0
 
@@ -584,8 +583,8 @@ class EndToEndRoomKeyStore(EndToEndRoomKeyBackgroundStore):
         self,
         user_id: str,
         version: str,
-        info: Optional[JsonDict] = None,
-        version_etag: Optional[int] = None,
+        info: JsonDict | None = None,
+        version_etag: int | None = None,
     ) -> None:
         """Update a given backup version
 
@@ -621,7 +620,7 @@ class EndToEndRoomKeyStore(EndToEndRoomKeyBackgroundStore):
 
     @trace
     async def delete_e2e_room_keys_version(
-        self, user_id: str, version: Optional[str] = None
+        self, user_id: str, version: str | None = None
     ) -> None:
         """Delete a given backup version of the user's room keys.
         Doesn't delete their actual key data.

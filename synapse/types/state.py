@@ -27,7 +27,6 @@ from typing import (
     Collection,
     Iterable,
     Mapping,
-    Optional,
     TypeVar,
 )
 
@@ -60,7 +59,7 @@ class StateFilter:
             appear in `types`.
     """
 
-    types: "immutabledict[str, Optional[frozenset[str]]]"
+    types: "immutabledict[str, frozenset[str] | None]"
     include_others: bool = False
 
     def __attrs_post_init__(self) -> None:
@@ -101,7 +100,7 @@ class StateFilter:
         return _NONE_STATE_FILTER
 
     @staticmethod
-    def from_types(types: Iterable[tuple[str, Optional[str]]]) -> "StateFilter":
+    def from_types(types: Iterable[tuple[str, str | None]]) -> "StateFilter":
         """Creates a filter that only fetches the given types
 
         Args:
@@ -111,7 +110,7 @@ class StateFilter:
         Returns:
             The new state filter.
         """
-        type_dict: dict[str, Optional[set[str]]] = {}
+        type_dict: dict[str, set[str] | None] = {}
         for typ, s in types:
             if typ in type_dict:
                 if type_dict[typ] is None:
@@ -130,7 +129,7 @@ class StateFilter:
             )
         )
 
-    def to_types(self) -> Iterable[tuple[str, Optional[str]]]:
+    def to_types(self) -> Iterable[tuple[str, str | None]]:
         """The inverse to `from_types`."""
         for event_type, state_keys in self.types.items():
             if state_keys is None:
@@ -157,13 +156,13 @@ class StateFilter:
 
     @staticmethod
     def freeze(
-        types: Mapping[str, Optional[Collection[str]]], include_others: bool
+        types: Mapping[str, Collection[str] | None], include_others: bool
     ) -> "StateFilter":
         """
         Returns a (frozen) StateFilter with the same contents as the parameters
         specified here, which can be made of mutable types.
         """
-        types_with_frozen_values: dict[str, Optional[frozenset[str]]] = {}
+        types_with_frozen_values: dict[str, frozenset[str] | None] = {}
         for state_types, state_keys in types.items():
             if state_keys is not None:
                 types_with_frozen_values[state_types] = frozenset(state_keys)
@@ -289,7 +288,7 @@ class StateFilter:
 
         return where_clause, where_args
 
-    def max_entries_returned(self) -> Optional[int]:
+    def max_entries_returned(self) -> int | None:
         """Returns the maximum number of entries this filter will return if
         known, otherwise returns None.
 
@@ -450,7 +449,7 @@ class StateFilter:
 
         # {state type -> set of state keys OR None for wildcard}
         # (The same structure as that of a StateFilter.)
-        new_types: dict[str, Optional[set[str]]] = {}
+        new_types: dict[str, set[str] | None] = {}
 
         # if we start with all, insert the excluded statetypes as empty sets
         # to prevent them from being included

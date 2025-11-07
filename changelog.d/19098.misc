@@ -1,1 +1,0 @@
-Use Pillow's `Image.getexif` method instead of the experimental `Image._getexif`.

@@ -22,7 +22,7 @@
 import itertools
 import json
 import logging
-from typing import Iterable, Mapping, Optional, Union, cast
+from typing import Iterable, Mapping, cast
 
 from canonicaljson import encode_canonical_json
 from signedjson.key import decode_verify_key_bytes
@@ -201,7 +201,7 @@ class KeyStore(CacheInvalidationWorkerStore):
         self,
         server_name: str,
         key_id: str,
-    ) -> Optional[FetchKeyResultForRemote]:
+    ) -> FetchKeyResultForRemote | None:
         raise NotImplementedError()
 
     @cachedList(
@@ -209,13 +209,13 @@ class KeyStore(CacheInvalidationWorkerStore):
     )
     async def get_server_keys_json_for_remote(
         self, server_name: str, key_ids: Iterable[str]
-    ) -> Mapping[str, Optional[FetchKeyResultForRemote]]:
+    ) -> Mapping[str, FetchKeyResultForRemote | None]:
         """Fetch the cached keys for the given server/key IDs.
 
         If we have multiple entries for a given key ID, returns the most recent.
         """
         rows = cast(
-            list[tuple[str, str, int, int, Union[bytes, memoryview]]],
+            list[tuple[str, str, int, int, bytes | memoryview]],
             await self.db_pool.simple_select_many_batch(
                 table="server_keys_json",
                 column="key_id",
@@ -258,7 +258,7 @@ class KeyStore(CacheInvalidationWorkerStore):
         If we have multiple entries for a given key ID, returns the most recent.
         """
         rows = cast(
-            list[tuple[str, str, int, int, Union[bytes, memoryview]]],
+            list[tuple[str, str, int, int, bytes | memoryview]],
             await self.db_pool.simple_select_list(
                 table="server_keys_json",
                 keyvalues={"server_name": server_name},

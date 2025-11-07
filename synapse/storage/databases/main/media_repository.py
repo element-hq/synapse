@@ -25,8 +25,6 @@ from typing import (
     TYPE_CHECKING,
     Collection,
     Iterable,
-    Optional,
-    Union,
     cast,
 )
 
@@ -57,16 +55,16 @@ logger = logging.getLogger(__name__)
 class LocalMedia:
     media_id: str
     media_type: str
-    media_length: Optional[int]
+    media_length: int | None
     upload_name: str
     created_ts: int
-    url_cache: Optional[str]
+    url_cache: str | None
     last_access_ts: int
-    quarantined_by: Optional[str]
+    quarantined_by: str | None
     safe_from_quarantine: bool
-    user_id: Optional[str]
-    authenticated: Optional[bool]
-    sha256: Optional[str]
+    user_id: str | None
+    authenticated: bool | None
+    sha256: str | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -75,20 +73,20 @@ class RemoteMedia:
     media_id: str
     media_type: str
     media_length: int
-    upload_name: Optional[str]
+    upload_name: str | None
     filesystem_id: str
     created_ts: int
     last_access_ts: int
-    quarantined_by: Optional[str]
-    authenticated: Optional[bool]
-    sha256: Optional[str]
+    quarantined_by: str | None
+    authenticated: bool | None
+    sha256: str | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class UrlCache:
     response_code: int
     expires_ts: int
-    og: Union[str, bytes]
+    og: str | bytes
 
 
 class MediaSortOrder(Enum):
@@ -183,7 +181,7 @@ class MediaRepositoryBackgroundUpdateStore(SQLBaseStore):
         )
 
         if hs.config.media.can_load_media_repo:
-            self.unused_expiration_time: Optional[int] = (
+            self.unused_expiration_time: int | None = (
                 hs.config.media.unused_expiration_time
             )
         else:
@@ -224,7 +222,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         super().__init__(database, db_conn, hs)
         self.server_name: str = hs.hostname
 
-    async def get_local_media(self, media_id: str) -> Optional[LocalMedia]:
+    async def get_local_media(self, media_id: str) -> LocalMedia | None:
         """Get the metadata for a local piece of media
 
         Returns:
@@ -299,7 +297,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             else:
                 order = "ASC"
 
-            args: list[Union[str, int]] = [user_id]
+            args: list[str | int] = [user_id]
             sql = """
                 SELECT COUNT(*) as total_media
                 FROM local_media_repository
@@ -472,12 +470,12 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         media_id: str,
         media_type: str,
         time_now_ms: int,
-        upload_name: Optional[str],
+        upload_name: str | None,
         media_length: int,
         user_id: UserID,
-        url_cache: Optional[str] = None,
-        sha256: Optional[str] = None,
-        quarantined_by: Optional[str] = None,
+        url_cache: str | None = None,
+        sha256: str | None = None,
+        quarantined_by: str | None = None,
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -505,12 +503,12 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         self,
         media_id: str,
         media_type: str,
-        upload_name: Optional[str],
+        upload_name: str | None,
         media_length: int,
         user_id: UserID,
         sha256: str,
-        url_cache: Optional[str] = None,
-        quarantined_by: Optional[str] = None,
+        url_cache: str | None = None,
+        quarantined_by: str | None = None,
     ) -> None:
         updatevalues = {
             "media_type": media_type,
@@ -575,13 +573,13 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             "get_pending_media", get_pending_media_txn
         )
 
-    async def get_url_cache(self, url: str, ts: int) -> Optional[UrlCache]:
+    async def get_url_cache(self, url: str, ts: int) -> UrlCache | None:
         """Get the media_id and ts for a cached URL as of the given timestamp
         Returns:
             None if the URL isn't cached.
         """
 
-        def get_url_cache_txn(txn: LoggingTransaction) -> Optional[UrlCache]:
+        def get_url_cache_txn(txn: LoggingTransaction) -> UrlCache | None:
             # get the most recently cached result (relative to the given ts)
             sql = """
                 SELECT response_code, expires_ts, og
@@ -615,7 +613,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         self,
         url: str,
         response_code: int,
-        etag: Optional[str],
+        etag: str | None,
         expires_ts: int,
         og: str,
         media_id: str,
@@ -683,7 +681,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
     async def get_cached_remote_media(
         self, origin: str, media_id: str
-    ) -> Optional[RemoteMedia]:
+    ) -> RemoteMedia | None:
         row = await self.db_pool.simple_select_one(
             "remote_media_cache",
             {"media_origin": origin, "media_id": media_id},
@@ -724,9 +722,9 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         media_type: str,
         media_length: int,
         time_now_ms: int,
-        upload_name: Optional[str],
+        upload_name: str | None,
         filesystem_id: str,
-        sha256: Optional[str],
+        sha256: str | None,
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -822,7 +820,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         t_width: int,
         t_height: int,
         t_type: str,
-    ) -> Optional[ThumbnailInfo]:
+    ) -> ThumbnailInfo | None:
         """Fetch the thumbnail info of given width, height and type."""
 
         row = await self.db_pool.simple_select_one(

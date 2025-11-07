@@ -23,7 +23,6 @@ from typing import (
     Collection,
     Iterable,
     Mapping,
-    Optional,
     TypeVar,
 )
 
@@ -79,7 +78,7 @@ class FakeEvent:
         id: str,
         sender: str,
         type: str,
-        state_key: Optional[str],
+        state_key: str | None,
         content: Mapping[str, object],
     ):
         self.node_id = id
@@ -525,7 +524,7 @@ class StateTestCase(unittest.TestCase):
             #    EventBuilder. But this is Hard because the relevant attributes are
             #    DictProperty[T] descriptors on EventBase but normal Ts on FakeEvent.
             # 2. Define a `GenericEvent` Protocol describing `FakeEvent` only, and
-            #    change this function to accept Union[Event, EventBase, EventBuilder].
+            #    change this function to accept Event | EventBase | EventBuilder.
             #    This seems reasonable to me, but mypy isn't happy. I think that's
             #    a mypy bug, see https://github.com/python/mypy/issues/5570
             # Instead, resort to a type-ignore.
@@ -1082,8 +1081,8 @@ class TestStateResolutionStore:
         self,
         room_id: str,
         auth_sets: list[set[str]],
-        conflicted_state: Optional[set[str]],
-        additional_backwards_reachable_conflicted_events: Optional[set[str]],
+        conflicted_state: set[str] | None,
+        additional_backwards_reachable_conflicted_events: set[str] | None,
     ) -> "defer.Deferred[StateDifference]":
         chains = [frozenset(self._get_auth_chain(a)) for a in auth_sets]
 

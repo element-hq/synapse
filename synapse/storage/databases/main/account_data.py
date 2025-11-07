@@ -25,7 +25,6 @@ from typing import (
     Any,
     Iterable,
     Mapping,
-    Optional,
     cast,
 )
 
@@ -213,7 +212,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
     @cached(num_args=2, max_entries=5000, tree=True)
     async def get_global_account_data_by_type_for_user(
         self, user_id: str, data_type: str
-    ) -> Optional[JsonMapping]:
+    ) -> JsonMapping | None:
         """
         Returns:
             The account data.
@@ -233,7 +232,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_latest_stream_id_for_global_account_data_by_type_for_user(
         self, user_id: str, data_type: str
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Returns:
             The stream ID of the account data,
@@ -242,7 +241,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_latest_stream_id_for_global_account_data_by_type_for_user_txn(
             txn: LoggingTransaction,
-        ) -> Optional[int]:
+        ) -> int | None:
             sql = """
                 SELECT stream_id FROM account_data
                 WHERE user_id = ? AND account_data_type = ?
@@ -300,7 +299,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
     @cached(num_args=3, max_entries=5000, tree=True)
     async def get_account_data_for_room_and_type(
         self, user_id: str, room_id: str, account_data_type: str
-    ) -> Optional[JsonMapping]:
+    ) -> JsonMapping | None:
         """Get the client account_data of given type for a user for a room.
 
         Args:
@@ -313,7 +312,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_account_data_for_room_and_type_txn(
             txn: LoggingTransaction,
-        ) -> Optional[JsonDict]:
+        ) -> JsonDict | None:
             content_json = self.db_pool.simple_select_one_onecol_txn(
                 txn,
                 table="room_account_data",

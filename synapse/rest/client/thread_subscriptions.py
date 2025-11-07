@@ -1,5 +1,5 @@
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import attr
 from typing_extensions import TypeAlias
@@ -50,7 +50,7 @@ class ThreadSubscriptionsRestServlet(RestServlet):
         self.handler = hs.get_thread_subscriptions_handler()
 
     class PutBody(RequestBodyModel):
-        automatic: Optional[AnyEventId]
+        automatic: AnyEventId | None = None
         """
         If supplied, the event ID of an event giving rise to this automatic subscription.
 

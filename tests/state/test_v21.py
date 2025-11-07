@@ -18,7 +18,7 @@
 #
 #
 import itertools
-from typing import Optional, Sequence
+from typing import Sequence
 
 from twisted.internet import defer
 from twisted.test.proto_helpers import MemoryReactor
@@ -357,11 +357,11 @@ class StateResV21TestCase(unittest.HomeserverTestCase):
         self,
         room_id: str,
         state_maps: Sequence[StateMap[str]],
-        event_map: Optional[dict[str, EventBase]],
+        event_map: dict[str, EventBase] | None,
         state_res_store: StateResolutionStoreInterface,
     ) -> set[str]:
         _, conflicted_state = _seperate(state_maps)
-        conflicted_set: Optional[set[str]] = set(
+        conflicted_set: set[str] | None = set(
             itertools.chain.from_iterable(conflicted_state.values())
         )
         if event_map is None:
@@ -458,7 +458,7 @@ class StateResV21TestCase(unittest.HomeserverTestCase):
             resolve_and_check()
 
     def persist_event(
-        self, event: EventBase, state: Optional[StateMap[str]] = None
+        self, event: EventBase, state: StateMap[str] | None = None
     ) -> None:
         """Persist the event, with optional state"""
         context = self.get_success(
@@ -473,12 +473,12 @@ class StateResV21TestCase(unittest.HomeserverTestCase):
     def create_event(
         self,
         event_type: str,
-        state_key: Optional[str],
+        state_key: str | None,
         sender: str,
         content: dict,
         auth_events: list[str],
-        prev_events: Optional[list[str]] = None,
-        room_id: Optional[str] = None,
+        prev_events: list[str] | None = None,
+        room_id: str | None = None,
     ) -> EventBase:
         """Short-hand for event_from_pdu_json for fields we typically care about.
         Tests can override by just calling event_from_pdu_json directly."""

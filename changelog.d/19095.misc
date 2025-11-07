@@ -1,1 +1,0 @@
-Avoid clobbering other `SIGHUP` handlers in 3rd-party code.

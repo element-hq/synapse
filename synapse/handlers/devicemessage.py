@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from synapse.api.constants import EduTypes, EventContentFields, ToDeviceEventTypes
 from synapse.api.errors import Codes, SynapseError
@@ -315,7 +315,7 @@ class DeviceMessageHandler:
         self,
         requester: Requester,
         device_id: str,
-        since_token: Optional[str],
+        since_token: str | None,
         limit: int,
     ) -> JsonDict:
         """Fetches up to `limit` events sent to `device_id` starting from `since_token`

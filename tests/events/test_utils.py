@@ -20,7 +20,7 @@
 #
 
 import unittest as stdlib_unittest
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 
 import attr
 from parameterized import parameterized
@@ -648,7 +648,7 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
     def serialize(
         self,
         ev: EventBase,
-        fields: Optional[list[str]],
+        fields: list[str] | None,
         include_admin_metadata: bool = False,
     ) -> JsonDict:
         return serialize_event(

@@ -20,7 +20,7 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable
 
 import attr
 
@@ -576,8 +576,8 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
         limit: int,
         room_ids: Iterable[str],
         is_guest: bool,
-        explicit_room_id: Optional[str] = None,
-        to_key: Optional[int] = None,
+        explicit_room_id: str | None = None,
+        to_key: int | None = None,
     ) -> tuple[list[JsonMapping], int]:
         """
         Find typing notifications for given rooms (> `from_token` and <= `to_token`)

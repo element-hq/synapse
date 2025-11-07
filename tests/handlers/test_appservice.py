@@ -25,7 +25,6 @@ from typing import (
     Awaitable,
     Callable,
     Iterable,
-    Optional,
     TypeVar,
 )
 from unittest.mock import AsyncMock, Mock
@@ -81,10 +80,10 @@ class AppServiceHandlerTestCase(unittest.TestCase):
 
         def test_run_as_background_process(
             desc: "LiteralString",
-            func: Callable[..., Awaitable[Optional[R]]],
+            func: Callable[..., Awaitable[R | None]],
             *args: Any,
             **kwargs: Any,
-        ) -> "defer.Deferred[Optional[R]]":
+        ) -> "defer.Deferred[R | None]":
             # Ignore linter error as this is used only for testing purposes (i.e. outside of Synapse).
             return run_as_background_process(desc, "test_server", func, *args, **kwargs)  # type: ignore[untracked-background-process]
 
@@ -293,7 +292,7 @@ class AppServiceHandlerTestCase(unittest.TestCase):
 
         async def get_3pe_protocol(
             service: ApplicationService, protocol: str
-        ) -> Optional[JsonDict]:
+        ) -> JsonDict | None:
             if service == service_one:
                 return {
                     "x-protocol-data": 42,
@@ -385,7 +384,7 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         )
 
     def _mkservice(
-        self, is_interested_in_event: bool, protocols: Optional[Iterable] = None
+        self, is_interested_in_event: bool, protocols: Iterable | None = None
     ) -> Mock:
         """
         Create a new mock representing an ApplicationService.
@@ -1021,7 +1020,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
 
     def _register_application_service(
         self,
-        namespaces: Optional[dict[str, Iterable[dict]]] = None,
+        namespaces: dict[str, Iterable[dict]] | None = None,
     ) -> ApplicationService:
         """
         Register a new application service, with the given namespaces of interest.
@@ -1316,8 +1315,8 @@ class ApplicationServicesHandlerOtkCountsTestCase(unittest.HomeserverTestCase):
         # Capture what was sent as an AS transaction.
         self.send_mock.assert_called()
         last_args, _last_kwargs = self.send_mock.call_args
-        otks: Optional[TransactionOneTimeKeysCount] = last_args[self.ARG_OTK_COUNTS]
-        unused_fallbacks: Optional[TransactionUnusedFallbackKeys] = last_args[
+        otks: TransactionOneTimeKeysCount | None = last_args[self.ARG_OTK_COUNTS]
+        unused_fallbacks: TransactionUnusedFallbackKeys | None = last_args[
             self.ARG_FALLBACK_KEYS
         ]
 
