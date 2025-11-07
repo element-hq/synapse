@@ -834,36 +834,50 @@ class DelayedEventsStore(SQLBaseStore):
         """
         Finalise the matching delayed state events that have been marked as processed.
         """
-        await self.db_pool.execute(
+
+        def finalise_processed_delayed_state_events(txn: LoggingTransaction) -> None:
+            txn.execute(
+                """
+                UPDATE delayed_events
+                SET
+                    finalised_error = ?,
+                    finalised_ts = ?
+                WHERE room_id = ? AND event_type = ? AND state_key = ?
+                    AND user_localpart <> ?
+                    AND is_processed
+                    AND finalised_ts IS NULL
+                """,
+                (
+                    _generate_cancelled_by_state_update_json(),
+                    finalised_ts,
+                    room_id,
+                    event_type,
+                    state_key,
+                ),
+            )
+
+        await self.db_pool.runInteraction(
             "finalise_processed_delayed_state_events",
-            """
-            UPDATE delayed_events
-            SET
-                finalised_error = ?,
-                finalised_ts = ?
-            WHERE room_id = ? AND event_type = ? AND state_key = ?
-                AND user_localpart <> ?
-                AND is_processed
-                AND finalised_ts IS NULL
-            """,
-            _generate_cancelled_by_state_update_json(),
-            finalised_ts,
-            room_id,
-            event_type,
-            state_key,
+            finalise_processed_delayed_state_events,
         )
 
     async def unprocess_delayed_events(self) -> None:
         """
         Unmark all delayed events for processing.
         """
-        await self.db_pool.execute(
+
+        def unprocess_delayed_events(txn: LoggingTransaction):
+            txn.execute(
+                """
+                UPDATE delayed_events SET is_processed = FALSE
+                WHERE is_processed
+                    AND finalised_ts IS NULL
+                """
+            )
+
+        await self.db_pool.runInteraction(
             "unprocess_delayed_events",
-            """
-            UPDATE delayed_events SET is_processed = FALSE
-            WHERE is_processed
-                AND finalised_ts IS NULL
-            """,
+            unprocess_delayed_events,
         )
 
     async def get_next_delayed_event_send_ts(self) -> Timestamp | None:
