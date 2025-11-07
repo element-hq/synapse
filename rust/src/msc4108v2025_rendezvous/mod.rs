@@ -18,7 +18,11 @@ use std::{
 };
 
 use bytes::Bytes;
-use http::{Response, StatusCode};
+use headers::{
+    AccessControlAllowHeaders, AccessControlAllowMethods, AccessControlAllowOrigin, HeaderMapExt,
+};
+use http::header::HeaderName;
+use http::{header, HeaderMap, Method, Response, StatusCode};
 use pyo3::{
     pyclass, pymethods,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
@@ -35,6 +39,24 @@ use crate::{
 
 mod session;
 
+// Annoyingly we need to set the normal CORS headers on every response as the Python layer doesn't do it for us.
+// List is taken from https://spec.matrix.org/v1.16/client-server-api/#web-browser-clients
+fn prepare_headers(headers: &mut HeaderMap) {
+    headers.typed_insert(AccessControlAllowOrigin::ANY);
+    headers.typed_insert(AccessControlAllowMethods::from_iter([
+        Method::POST,
+        Method::GET,
+        Method::PUT,
+        Method::DELETE,
+        Method::OPTIONS,
+    ]));
+    headers.typed_insert(AccessControlAllowHeaders::from_iter([
+        HeaderName::from_static("x-requested-with"),
+        header::CONTENT_TYPE,
+        header::AUTHORIZATION,
+    ]));
+}
+
 #[pyclass]
 struct MSC4108v2025RendezvousHandler {
     clock: PyObject,
@@ -49,12 +71,15 @@ impl MSC4108v2025RendezvousHandler {
     fn check_data_length(&self, data: &str) -> PyResult<()> {
         let data_length = data.len() as u64;
         if data_length > self.max_content_length {
+            let mut headers = HeaderMap::new();
+            prepare_headers(&mut headers);
+
             return Err(SynapseError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "Payload too large".to_owned(),
                 "M_TOO_LARGE",
                 None,
-                None,
+                Some(headers),
             ));
         }
         Ok(())
@@ -140,22 +165,28 @@ impl MSC4108v2025RendezvousHandler {
         // parse JSON body out of request
         let json: serde_json::Value =
             serde_json::from_slice(&request.into_body()).map_err(|_| {
+                let mut headers = HeaderMap::new();
+                prepare_headers(&mut headers);
+
                 SynapseError::new(
                     StatusCode::BAD_REQUEST,
                     "Invalid JSON in request body".to_owned(),
                     "M_INVALID_PARAM",
                     None,
-                    None,
+                    Some(headers),
                 )
             })?;
 
         let data: String = json["data"].as_str().map(|s| s.to_owned()).ok_or_else(|| {
+            let mut headers = HeaderMap::new();
+            prepare_headers(&mut headers);
+
             SynapseError::new(
                 StatusCode::BAD_REQUEST,
                 "Missing 'data' field in JSON body".to_owned(),
                 "M_INVALID_PARAM",
                 None,
-                None,
+                Some(headers),
             )
         })?;
 
@@ -164,16 +195,21 @@ impl MSC4108v2025RendezvousHandler {
         let session = Session::new(id, data, now, self.ttl);
 
         let response_body = serde_json::to_string(&session.post_response()).map_err(|_| {
+            let mut headers = HeaderMap::new();
+            prepare_headers(&mut headers);
+
             SynapseError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to serialize response".to_owned(),
                 "M_UNKNOWN",
                 None,
-                None,
+                Some(headers),
             )
         })?;
         let mut response = Response::new(response_body.as_bytes());
         *response.status_mut() = StatusCode::OK;
+        let headers = response.headers_mut();
+        prepare_headers(headers);
         http_response_to_twisted(twisted_request, response)?;
 
         self.sessions.insert(id, session);
@@ -198,12 +234,15 @@ impl MSC4108v2025RendezvousHandler {
             .ok_or_else(NotFoundError::new)?;
 
         let response_body = serde_json::to_string(&session.get_response()).map_err(|_| {
+            let mut headers = HeaderMap::new();
+            prepare_headers(&mut headers);
+
             SynapseError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to serialize response".to_owned(),
                 "M_UNKNOWN",
                 None,
-                None,
+                Some(headers),
             )
         })?;
         let mut response = Response::new(response_body.as_bytes());
@@ -224,12 +263,15 @@ impl MSC4108v2025RendezvousHandler {
         // parse JSON body out of request
         let json: serde_json::Value =
             serde_json::from_slice(&request.into_body()).map_err(|_| {
+                let mut headers = HeaderMap::new();
+                prepare_headers(&mut headers);
+
                 SynapseError::new(
                     StatusCode::BAD_REQUEST,
                     "Invalid JSON in request body".to_owned(),
                     "M_INVALID_PARAM",
                     None,
-                    None,
+                    Some(headers),
                 )
             })?;
 
@@ -237,22 +279,28 @@ impl MSC4108v2025RendezvousHandler {
             .as_str()
             .map(|s| s.to_owned())
             .ok_or_else(|| {
+                let mut headers = HeaderMap::new();
+                prepare_headers(&mut headers);
+
                 SynapseError::new(
                     StatusCode::BAD_REQUEST,
                     "Missing 'sequence_token' field in JSON body".to_owned(),
                     "M_INVALID_PARAM",
                     None,
-                    None,
+                    Some(headers),
                 )
             })?;
 
         let data: String = json["data"].as_str().map(|s| s.to_owned()).ok_or_else(|| {
+            let mut headers = HeaderMap::new();
+            prepare_headers(&mut headers);
+
             SynapseError::new(
                 StatusCode::BAD_REQUEST,
                 "Missing 'data' field in JSON body".to_owned(),
                 "M_INVALID_PARAM",
                 None,
-                None,
+                Some(headers),
             )
         })?;
 
@@ -269,12 +317,15 @@ impl MSC4108v2025RendezvousHandler {
             .ok_or_else(NotFoundError::new)?;
 
         if !session.sequence_token().eq(&sequence_token) {
+            let mut headers = HeaderMap::new();
+            prepare_headers(&mut headers);
+
             return Err(SynapseError::new(
                 StatusCode::CONFLICT,
                 "sequence_token does not match".to_owned(),
                 "IO_ELEMENT_MSC4108_CONCURRENT_WRITE",
                 None,
-                None,
+                Some(headers),
             ));
         }
 
@@ -291,6 +342,7 @@ impl MSC4108v2025RendezvousHandler {
         })?;
         let mut response = Response::new(response_body.as_bytes());
         *response.status_mut() = StatusCode::OK;
+        prepare_headers(response.headers_mut());
         http_response_to_twisted(twisted_request, response)?;
 
         Ok(())
@@ -304,6 +356,7 @@ impl MSC4108v2025RendezvousHandler {
 
         let mut response = Response::new(Bytes::new());
         *response.status_mut() = StatusCode::OK;
+        prepare_headers(response.headers_mut());
         http_response_to_twisted(twisted_request, response)?;
 
         Ok(())
