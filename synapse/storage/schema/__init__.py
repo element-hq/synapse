@@ -170,7 +170,7 @@ Changes in SCHEMA_VERSION = 92
     - Cleaned up a trigger that was added in #18260 and then reverted.
 
 Changes in SCHEMA_VERSION = 93
-    - MSC4140: Add `finalised_delayed_events` table that keeps track of delayed events
+    - MSC4140: Add columns to the `delayed_events` table to keep track of delayed events
       that have been sent, cancelled, or failed to be sent due to an error.
 """
 
