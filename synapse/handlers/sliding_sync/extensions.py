@@ -12,6 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+from collections import defaultdict
 import itertools
 import logging
 from typing import (
@@ -19,6 +20,7 @@ from typing import (
     AbstractSet,
     ChainMap,
     Dict,
+    List,
     Mapping,
     MutableMapping,
     Optional,
@@ -37,14 +39,18 @@ from synapse.api.constants import (
     RelationTypes,
 )
 from synapse.handlers.receipts import ReceiptEventSource
+from synapse.handlers.sliding_sync.room_lists import RoomsForUserType
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
+from synapse.storage.databases.main.relations import ThreadUpdateInfo
 from synapse.types import (
     DeviceListUpdates,
     JsonMapping,
     MultiWriterStreamToken,
+    RoomStreamToken,
     SlidingSyncStreamToken,
     StrCollection,
+    StreamKeyType,
     StreamToken,
     ThreadSubscriptionsToken,
 )
@@ -60,6 +66,7 @@ from synapse.util.async_helpers import (
     concurrently_execute,
     gather_optional_coroutines,
 )
+from synapse.visibility import filter_events_for_client
 
 _ThreadSubscription: TypeAlias = (
     SlidingSyncResult.Extensions.ThreadSubscriptionsExtension.ThreadSubscription
@@ -84,6 +91,7 @@ class SlidingSyncExtensionHandler:
         self.device_handler = hs.get_device_handler()
         self.push_rules_handler = hs.get_push_rules_handler()
         self.relations_handler = hs.get_relations_handler()
+        self._storage_controllers = hs.get_storage_controllers()
         self._enable_thread_subscriptions = hs.config.experimental.msc4306_enabled
         self._enable_threads_ext = hs.config.experimental.msc4360_enabled
 
@@ -96,6 +104,7 @@ class SlidingSyncExtensionHandler:
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        room_membership_for_user_at_to_token_map: Mapping[str, RoomsForUserType],
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
     ) -> SlidingSyncResult.Extensions:
@@ -111,6 +120,8 @@ class SlidingSyncExtensionHandler:
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
             actual_room_response_map: A map of room ID to room results in the the
                 Sliding Sync response.
+            room_membership_for_user_at_to_token_map: A map of room ID to the membership
+                information for the user in the room at the time of `to_token`.
             to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
@@ -191,7 +202,9 @@ class SlidingSyncExtensionHandler:
             threads_coro = self.get_threads_extension_response(
                 sync_config=sync_config,
                 threads_request=sync_config.extensions.threads,
+                actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
+                room_membership_for_user_at_to_token_map=room_membership_for_user_at_to_token_map,
                 to_token=to_token,
                 from_token=from_token,
             )
@@ -997,7 +1010,9 @@ class SlidingSyncExtensionHandler:
         self,
         sync_config: SlidingSyncConfig,
         threads_request: SlidingSyncConfig.Extensions.ThreadsExtension,
+        actual_room_ids: Set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        room_membership_for_user_at_to_token_map: Mapping[str, RoomsForUserType],
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
     ) -> Optional[SlidingSyncResult.Extensions.ThreadsExtension]:
@@ -1009,6 +1024,8 @@ class SlidingSyncExtensionHandler:
             actual_room_response_map: A map of room ID to room results in the
                 sliding sync response. Used to determine which threads already have
                 events in the room timeline.
+            room_membership_for_user_at_to_token_map: A map of room ID to the membership
+                information for the user in the room at the time of `to_token`.
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
 
@@ -1018,22 +1035,112 @@ class SlidingSyncExtensionHandler:
         if not threads_request.enabled:
             return None
 
+
+        # if (
+        #     # No timeline for invite/knock rooms
+        #     room_membership_for_user_at_to_token.membership
+        #     not in (Membership.INVITE, Membership.KNOCK)
+        # ):
+        #     limited = False
+        #     # We want to start off using the `to_token` (vs `from_token`) because we look
+        #     # backwards from the `to_token` up to the `timeline_limit` and we might not
+        #     # reach the `from_token` before we hit the limit. We will update the room stream
+        #     # position once we've fetched the events to point to the earliest event fetched.
+        #     prev_batch_token = to_token
+        #
+        #     # We're going to paginate backwards from the `to_token`
+        #     to_bound = to_token.room_key
+        #     # People shouldn't see past their leave/ban event
+        #     if room_membership_for_user_at_to_token.membership in (
+        #         Membership.LEAVE,
+        #         Membership.BAN,
+        #     ):
+        #         to_bound = room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
+        #
+        #     # For initial `/sync` (and other historical scenarios mentioned above), we
+        #     # want to view a historical section of the timeline; to fetch events by
+        #     # `topological_ordering` (best representation of the room DAG as others were
+        #     # seeing it at the time). This also aligns with the order that `/messages`
+        #     # returns events in.
+        #     #
+        #     # For incremental `/sync`, we want to get all updates for rooms since
+        #     # the last `/sync` (regardless if those updates arrived late or happened
+        #     # a while ago in the past); to fetch events by `stream_ordering` (in the
+        #     # order they were received by the server).
+        #     #
+        #     # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
+        #     #
+        #     # FIXME: Using workaround for mypy,
+        #     # https://github.com/python/mypy/issues/10740#issuecomment-1997047277 and
+        #     # https://github.com/python/mypy/issues/17479
+        #     paginate_room_events_by_topological_ordering: PaginateFunction = (
+        #         self.store.paginate_room_events_by_topological_ordering
+        #     )
+        #     paginate_room_events_by_stream_ordering: PaginateFunction = (
+        #         self.store.paginate_room_events_by_stream_ordering
+        #     )
+        #     pagination_method: PaginateFunction = (
+        #         # Use `topographical_ordering` for historical events
+        #         paginate_room_events_by_topological_ordering
+        #         if timeline_from_bound is None
+        #         # Use `stream_ordering` for updates
+        #         else paginate_room_events_by_stream_ordering
+        #     )
+        #     timeline_events, new_room_key, limited = await pagination_method(
+        #         room_id=room_id,
+        #         # The bounds are reversed so we can paginate backwards
+        #         # (from newer to older events) starting at to_bound.
+        #         # This ensures we fill the `limit` with the newest events first,
+        #         from_key=to_bound,
+        #         to_key=timeline_from_bound,
+        #         direction=Direction.BACKWARDS,
+        #         limit=room_sync_config.timeline_limit,
+        #     )
+        #
+        #     # Make sure we don't expose any events that the client shouldn't see
+        #     timeline_events = await filter_events_for_client(
+        #         self.storage_controllers,
+        #         user.to_string(),
+        #         timeline_events,
+        #         is_peeking=room_membership_for_user_at_to_token.membership
+        #         != Membership.JOIN,
+        #         filter_send_to_client=True,
+        #     )
+
+        # TODO: Improve by doing subqueries for rooms where user membership is changed
+
         # Fetch thread updates globally across all joined rooms.
         # The database layer returns a StreamToken (exclusive) for prev_batch if there
         # are more results.
         (
             all_thread_updates,
             prev_batch_token,
-        ) = await self.store.get_thread_updates_for_user(
-            user_id=sync_config.user.to_string(),
+        ) = await self.store.get_thread_updates_for_rooms(
+            room_ids=actual_room_ids,
             from_token=from_token.stream_token.room_key if from_token else None,
             to_token=to_token.room_key,
             limit=threads_request.limit,
-            include_thread_roots=threads_request.include_roots,
         )
 
         if len(all_thread_updates) == 0:
             return None
+
+        all_event_ids = {update.event_id for updates in all_thread_updates.values() for update in updates}
+        all_events = await self.store.get_events_as_list(all_event_ids)
+        filtered_events = await filter_events_for_client(self._storage_controllers, sync_config.user.to_string(), all_events)
+        
+        filtered_updates: Dict[str, List[ThreadUpdateInfo]] = defaultdict(list)
+        for thread_id, updates in all_thread_updates.items():
+            for update in updates:
+                for ev in filtered_events:
+                    if update.event_id == ev.event_id:
+                        filtered_updates[thread_id].append(update)
+
+        # Optionally fetch thread root events
+        thread_root_event_map = {}
+        if threads_request.include_roots:
+            thread_root_events = await self.store.get_events_as_list(filtered_updates.keys())
+            thread_root_event_map = {e.event_id: e for e in thread_root_events}
 
         # Identify which threads already have events in the room timelines.
         # If include_roots=False, we'll omit these threads from the extension response
@@ -1061,12 +1168,11 @@ class SlidingSyncExtensionHandler:
         # Collect thread root events and get bundled aggregations.
         # Only fetch bundled aggregations if we have thread root events to attach them to.
         thread_root_events = [
-            update.thread_root_event
-            for update in all_thread_updates
+            root_event
+            for root_event in thread_root_event_map.values()
             # Don't fetch bundled aggregations for threads with events already in the
             # timeline response since they will get filtered out later anyway.
-            if update.thread_root_event
-            and update.thread_root_event.event_id not in threads_in_timeline
+            if root_event.event_id not in threads_in_timeline
         ]
         aggregations_map = {}
         if thread_root_events:
@@ -1076,23 +1182,38 @@ class SlidingSyncExtensionHandler:
             )
 
         thread_updates: Dict[str, Dict[str, _ThreadUpdate]] = {}
-        for update in all_thread_updates:
+        for thread_root, updates in filtered_updates.items():
             # Skip this thread if it already has events in the room timeline
             # (unless include_roots=True, in which case we always include it)
-            if update.thread_id in threads_in_timeline:
+            if thread_root in threads_in_timeline:
                 continue
 
-            # Only look up bundled aggregations if we have a thread root event
-            bundled_aggs = (
-                aggregations_map.get(update.thread_id)
-                if update.thread_root_event
-                else None
-            )
+            # We only care about the latest update for the thread.
+            # Since values were obtained from the db in DESC order, the first event in
+            # the list will be the latest event.
+            update = updates[0]
 
-            thread_updates.setdefault(update.room_id, {})[update.thread_id] = (
+            # # Generate prev_batch token if this thread has more than one update.
+            per_thread_prev_batch = None
+            if len(updates) > 1:
+                # Create a token pointing to one position before the latest event's
+                # stream position.
+                # This makes it exclusive - /relations with dir=b won't return the
+                # latest event again.
+                # Use StreamToken.START as base (all other streams at 0) since only room
+                # position matters.
+                per_thread_prev_batch = StreamToken.START.copy_and_replace(
+                    StreamKeyType.ROOM, RoomStreamToken(stream=update.stream_ordering - 1)
+                )
+
+            # Only look up bundled aggregations if we have a thread root event
+            bundled_aggs = (aggregations_map.get(thread_root))
+            thread_root_event = thread_root_event_map.get(thread_root)
+
+            thread_updates.setdefault(update.room_id, {})[thread_root] = (
                 _ThreadUpdate(
-                    thread_root=update.thread_root_event,
-                    prev_batch=update.prev_batch,
+                    thread_root=thread_root_event,
+                    prev_batch=per_thread_prev_batch,
                     bundled_aggregations=bundled_aggs,
                 )
             )

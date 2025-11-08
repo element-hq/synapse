@@ -134,6 +134,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # base = self.store.get_max_thread_subscriptions_stream_id()
 
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0, # Set to 0, otherwise events will be in timeline, not extension
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -150,6 +157,7 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
             {"updates": {room_id: {thread_root_id: {}}}},
         )
 
+
     def test_threads_incremental_sync(self) -> None:
         """
         Test new thread updates appear in incremental sync response.
@@ -158,6 +166,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         user1_tok = self.login(user1_id, "pass")
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -256,6 +271,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # User2 syncs with threads extension enabled
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -296,6 +318,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Initial sync for user2
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -380,6 +409,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Sync with include_roots=True
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -434,6 +470,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Sync with include_roots=False (explicitly)
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -451,6 +494,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Also test with include_roots omitted (should behave the same)
         sync_body_no_param = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -478,6 +528,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Initial sync to establish baseline
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -529,6 +586,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Initial sync to establish baseline
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -668,6 +732,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Initial sync (no from_token)
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
