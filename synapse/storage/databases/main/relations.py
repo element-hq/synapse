@@ -1157,25 +1157,26 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
         from_token: Optional[RoomStreamToken] = None,
         to_token: Optional[RoomStreamToken] = None,
         limit: int = 5,
+        exclude_thread_ids: Optional[Collection[str]] = None,
     ) -> Tuple[Dict[str, List[ThreadUpdateInfo]], Optional[StreamToken]]:
         """Get a list of updated threads, ordered by stream ordering of their
         latest reply, filtered to only include threads in rooms where the user
         is currently joined.
 
         Args:
-            user_id: The user ID to fetch thread updates for. Only threads in rooms
-                where this user is currently joined will be returned.
+            room_ids: The room IDs to fetch thread updates for.
             from_token: The lower bound (exclusive) for thread updates. If None,
                 fetch from the start of the room timeline.
             to_token: The upper bound (inclusive) for thread updates. If None,
                 fetch up to the current position in the room timeline.
             limit: Maximum number of thread updates to return.
-            include_thread_roots: If True, fetch and return the thread root EventBase
-                objects. If False, return None for the thread_root_event field.
+            exclude_thread_ids: Optional collection of thread root event IDs to exclude
+                from the results. Useful for filtering out threads already visible
+                in the room timeline.
 
         Returns:
             A tuple of:
-                A list of ThreadUpdateInfo objects containing thread update information,
+                A dict mapping thread_id to list of ThreadUpdateInfo objects,
                 ordered by stream_ordering descending (most recent first).
                 A prev_batch StreamToken (exclusive) if there are more results available,
                 None otherwise.
@@ -1204,6 +1205,15 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
                 pagination_clause += " AND stream_ordering <= ?"
                 pagination_args.append(str(to_bound))
 
+            # Generate the exclusion clause for thread IDs, if necessary.
+            exclusion_clause = ""
+            exclusion_args: List[str] = []
+            if exclude_thread_ids:
+                exclusion_clause, exclusion_args = make_in_list_sql_clause(
+                    txn.database_engine, "er.relates_to_id", exclude_thread_ids, negative=True,
+                )
+                exclusion_clause = f" AND {exclusion_clause}"
+
             # TODO: improve the fact that multiple hits for the same thread means we
             # won't get as many updates for the sss response
 
@@ -1214,6 +1224,7 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
                   INNER JOIN events AS e ON er.event_id = e.event_id
                   WHERE er.relation_type = '{RelationTypes.THREAD}'
                   AND {room_clause}
+                  {exclusion_clause}
                   {pagination_clause}
                   ORDER BY stream_ordering DESC
                   LIMIT ?
@@ -1223,6 +1234,7 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
                 sql,
                 (
                     *room_id_values,
+                    *exclusion_args,
                     *pagination_args,
                     limit,
                 ),

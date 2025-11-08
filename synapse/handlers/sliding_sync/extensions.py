@@ -38,6 +38,7 @@ from synapse.api.constants import (
     MRelatesToFields,
     RelationTypes,
 )
+from synapse.events import EventBase
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.handlers.sliding_sync.room_lists import RoomsForUserType
 from synapse.logging.opentracing import trace
@@ -1006,6 +1007,44 @@ class SlidingSyncExtensionHandler:
             prev_batch=prev_batch,
         )
 
+    def _extract_thread_id_from_event(
+        self, event: EventBase
+    ) -> Optional[str]:
+        """Extract thread ID from event if it's a thread reply.
+
+        Args:
+            event: The event to check.
+
+        Returns:
+            The thread ID if the event is a thread reply, None otherwise.
+        """
+        relates_to = event.content.get(EventContentFields.RELATIONS)
+        if isinstance(relates_to, dict):
+            if relates_to.get(MRelatesToFields.REL_TYPE) == RelationTypes.THREAD:
+                return relates_to.get(MRelatesToFields.EVENT_ID)
+        return None
+
+    def _find_threads_in_timeline(
+        self,
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+    ) -> Set[str]:
+        """Find all thread IDs that have events in room timelines.
+
+        Args:
+            actual_room_response_map: A map of room ID to room results.
+
+        Returns:
+            A set of thread IDs (thread root event IDs) that appear in timelines.
+        """
+        threads_in_timeline: Set[str] = set()
+        for room_result in actual_room_response_map.values():
+            if room_result.timeline_events:
+                for event in room_result.timeline_events:
+                    thread_id = self._extract_thread_id_from_event(event)
+                    if thread_id:
+                        threads_in_timeline.add(thread_id)
+        return threads_in_timeline
+
     async def get_threads_extension_response(
         self,
         sync_config: SlidingSyncConfig,
@@ -1109,9 +1148,18 @@ class SlidingSyncExtensionHandler:
 
         # TODO: Improve by doing subqueries for rooms where user membership is changed
 
+        # Identify which threads already have events in the room timelines.
+        # If include_roots=False, we'll exclude these threads from the DB query
+        # since the client already sees the thread activity in the timeline.
+        # If include_roots=True, we fetch all threads regardless, because the client
+        # wants the thread root events.
+        threads_to_exclude: Optional[Set[str]] = None
+        if not threads_request.include_roots:
+            threads_to_exclude = self._find_threads_in_timeline(actual_room_response_map)
+
         # Fetch thread updates globally across all joined rooms.
-        # The database layer returns a StreamToken (exclusive) for prev_batch if there
-        # are more results.
+        # The database layer filters out excluded threads and returns a StreamToken
+        # (exclusive) for prev_batch if there are more results.
         (
             all_thread_updates,
             prev_batch_token,
@@ -1120,107 +1168,80 @@ class SlidingSyncExtensionHandler:
             from_token=from_token.stream_token.room_key if from_token else None,
             to_token=to_token.room_key,
             limit=threads_request.limit,
+            exclude_thread_ids=threads_to_exclude,
         )
 
+        # Early return: no thread updates found
         if len(all_thread_updates) == 0:
             return None
 
-        all_event_ids = {update.event_id for updates in all_thread_updates.values() for update in updates}
-        all_events = await self.store.get_events_as_list(all_event_ids)
-        filtered_events = await filter_events_for_client(self._storage_controllers, sync_config.user.to_string(), all_events)
-        
-        filtered_updates: Dict[str, List[ThreadUpdateInfo]] = defaultdict(list)
+        # Build a mapping of event_id -> (thread_id, update) for efficient lookup
+        # during visibility filtering.
+        event_to_thread_map: Dict[str, tuple[str, ThreadUpdateInfo]] = {}
         for thread_id, updates in all_thread_updates.items():
             for update in updates:
-                for ev in filtered_events:
-                    if update.event_id == ev.event_id:
-                        filtered_updates[thread_id].append(update)
+                event_to_thread_map[update.event_id] = (thread_id, update)
 
-        # Optionally fetch thread root events
+        # Fetch and filter events for visibility
+        all_events = await self.store.get_events_as_list(event_to_thread_map.keys())
+        filtered_events = await filter_events_for_client(
+            self._storage_controllers, sync_config.user.to_string(), all_events
+        )
+
+        # Rebuild thread updates from filtered events
+        filtered_updates: Dict[str, List[ThreadUpdateInfo]] = defaultdict(list)
+        for event in filtered_events:
+            if event.event_id in event_to_thread_map:
+                thread_id, update = event_to_thread_map[event.event_id]
+                filtered_updates[thread_id].append(update)
+
+        # Early return: no visible thread updates after filtering
+        if not filtered_updates:
+            return None
+
+        # Sort updates for each thread by stream_ordering DESC to ensure updates[0] is the latest.
+        # This is critical because the prev_batch token generation below assumes DESC order.
+        for updates in filtered_updates.values():
+            updates.sort(key=lambda u: u.stream_ordering, reverse=True)
+
+        # Optionally fetch thread root events and their bundled aggregations
         thread_root_event_map = {}
+        aggregations_map = {}
         if threads_request.include_roots:
             thread_root_events = await self.store.get_events_as_list(filtered_updates.keys())
             thread_root_event_map = {e.event_id: e for e in thread_root_events}
 
-        # Identify which threads already have events in the room timelines.
-        # If include_roots=False, we'll omit these threads from the extension response
-        # since the client already sees the thread activity in the timeline.
-        # If include_roots=True, we include all threads regardless, because the client
-        # wants the thread root events.
-        threads_in_timeline: Set[str] = set()  # thread_id
-        if not threads_request.include_roots:
-            for _, room_result in actual_room_response_map.items():
-                if room_result.timeline_events:
-                    for event in room_result.timeline_events:
-                        # Check if this event is part of a thread
-                        relates_to = event.content.get(EventContentFields.RELATIONS)
-                        if not isinstance(relates_to, dict):
-                            continue
-
-                        rel_type = relates_to.get(MRelatesToFields.REL_TYPE)
-
-                        # If this is a thread reply, track the thread
-                        if rel_type == RelationTypes.THREAD:
-                            thread_id = relates_to.get(MRelatesToFields.EVENT_ID)
-                            if thread_id:
-                                threads_in_timeline.add(thread_id)
-
-        # Collect thread root events and get bundled aggregations.
-        # Only fetch bundled aggregations if we have thread root events to attach them to.
-        thread_root_events = [
-            root_event
-            for root_event in thread_root_event_map.values()
-            # Don't fetch bundled aggregations for threads with events already in the
-            # timeline response since they will get filtered out later anyway.
-            if root_event.event_id not in threads_in_timeline
-        ]
-        aggregations_map = {}
-        if thread_root_events:
-            aggregations_map = await self.relations_handler.get_bundled_aggregations(
-                thread_root_events,
-                sync_config.user.to_string(),
-            )
+            if thread_root_event_map:
+                aggregations_map = await self.relations_handler.get_bundled_aggregations(
+                    thread_root_event_map.values(),
+                    sync_config.user.to_string(),
+                )
 
         thread_updates: Dict[str, Dict[str, _ThreadUpdate]] = {}
         for thread_root, updates in filtered_updates.items():
-            # Skip this thread if it already has events in the room timeline
-            # (unless include_roots=True, in which case we always include it)
-            if thread_root in threads_in_timeline:
-                continue
-
             # We only care about the latest update for the thread.
-            # Since values were obtained from the db in DESC order, the first event in
-            # the list will be the latest event.
-            update = updates[0]
+            # After sorting above, updates[0] is guaranteed to be the latest (highest stream_ordering).
+            latest_update = updates[0]
 
-            # # Generate prev_batch token if this thread has more than one update.
+            # TODO: What if we were limited in the amount of events we fetched from the
+            # db? Then how can we know for sure if we missed out on additional updates
+            # to this thread?
+
+            # Generate per-thread prev_batch token if this thread has multiple visible updates.
             per_thread_prev_batch = None
             if len(updates) > 1:
-                # Create a token pointing to one position before the latest event's
-                # stream position.
-                # This makes it exclusive - /relations with dir=b won't return the
-                # latest event again.
-                # Use StreamToken.START as base (all other streams at 0) since only room
-                # position matters.
+                # Create a token pointing to one position before the latest event's stream position.
+                # This makes it exclusive - /relations with dir=b won't return the latest event again.
+                # Use StreamToken.START as base (all other streams at 0) since only room position matters.
                 per_thread_prev_batch = StreamToken.START.copy_and_replace(
-                    StreamKeyType.ROOM, RoomStreamToken(stream=update.stream_ordering - 1)
+                    StreamKeyType.ROOM, RoomStreamToken(stream=latest_update.stream_ordering - 1)
                 )
 
-            # Only look up bundled aggregations if we have a thread root event
-            bundled_aggs = (aggregations_map.get(thread_root))
-            thread_root_event = thread_root_event_map.get(thread_root)
-
-            thread_updates.setdefault(update.room_id, {})[thread_root] = (
-                _ThreadUpdate(
-                    thread_root=thread_root_event,
-                    prev_batch=per_thread_prev_batch,
-                    bundled_aggregations=bundled_aggs,
-                )
+            thread_updates.setdefault(latest_update.room_id, {})[thread_root] = _ThreadUpdate(
+                thread_root=thread_root_event_map.get(thread_root),
+                prev_batch=per_thread_prev_batch,
+                bundled_aggregations=aggregations_map.get(thread_root),
             )
-
-        # If after filtering we have no thread updates, return None to omit the extension
-        if not thread_updates:
-            return None
 
         return SlidingSyncResult.Extensions.ThreadsExtension(
             updates=thread_updates,
