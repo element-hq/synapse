@@ -295,12 +295,10 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
     def test_threads_not_returned_after_leaving_room(self) -> None:
         """
-        Test that thread updates are not returned after a user leaves the room,
-        even if the thread was updated while they were joined.
+        Test that thread updates are properly bounded when a user leaves a room.
 
-        This tests the known limitation: if a thread has multiple updates and the
-        user leaves between them, they won't see any updates (even earlier ones
-        while joined).
+        Users should see thread updates that occurred up to the point they left,
+        but NOT updates that occurred after they left.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -369,13 +367,33 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # User2 incremental sync
         response_body, _ = self.do_sync(sync_body, tok=user2_tok, since=sync_pos)
 
-        # Assert: User2 should NOT see the thread update (they left before latest update)
-        # Note: This also demonstrates that only currently joined rooms are returned - user2
-        # won't see the thread even though there was an update while they were joined (Reply 1)
-        self.assertNotIn(
+        # Assert: User2 SHOULD see Reply 1 (happened while joined) but NOT Reply 2 (after leaving)
+        self.assertIn(
             EXT_NAME,
             response_body["extensions"],
-            "User2 should not see thread updates after leaving the room",
+            "User2 should see thread updates up to the point they left",
+        )
+        self.assertIn(
+            room_id,
+            response_body["extensions"][EXT_NAME]["updates"],
+            "Thread updates should include the room user2 left",
+        )
+        self.assertIn(
+            thread_root,
+            response_body["extensions"][EXT_NAME]["updates"][room_id],
+            "Thread root should be in the updates",
+        )
+
+        # Verify that only a single update was seen (Reply 1) by checking that there's
+        # no prev_batch token. If Reply 2 was also included, there would be multiple
+        # updates and a prev_batch token would be present.
+        thread_update = response_body["extensions"][EXT_NAME]["updates"][room_id][
+            thread_root
+        ]
+        self.assertNotIn(
+            "prev_batch",
+            thread_update,
+            "No prev_batch should be present since only one update (Reply 1) is visible",
         )
 
     def test_threads_with_include_roots_true(self) -> None:
