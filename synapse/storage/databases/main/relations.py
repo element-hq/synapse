@@ -101,14 +101,9 @@ class ThreadUpdateInfo:
     Information about a thread update for the sliding sync threads extension.
 
     Attributes:
-        thread_id: The event ID of the thread root event (the event that started the thread).
+        event_id: The event ID of the event in the thread.
         room_id: The room ID where this thread exists.
-        thread_root_event: The actual EventBase object for the thread root event,
-            if include_thread_roots was True in the request. Otherwise None.
-        prev_batch: A pagination token (exclusive) for fetching older events in this thread.
-            Only present if update_count > 1. This token can be used with the /relations
-            endpoint with dir=b to paginate backwards through the thread's history without
-            re-receiving the latest event that was already included in the sliding sync response.
+        stream_ordering: The stream ordering of this event.
     """
 
     event_id: str
