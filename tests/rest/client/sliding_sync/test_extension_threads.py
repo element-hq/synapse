@@ -138,7 +138,7 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
                 "foo-list": {
                     "ranges": [[0, 1]],
                     "required_state": [],
-                    "timeline_limit": 0, # Set to 0, otherwise events will be in timeline, not extension
+                    "timeline_limit": 0,  # Set to 0, otherwise events will be in timeline, not extension
                 }
             },
             "extensions": {
@@ -156,7 +156,6 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
             response_body["extensions"][EXT_NAME],
             {"updates": {room_id: {thread_root_id: {}}}},
         )
-
 
     def test_threads_incremental_sync(self) -> None:
         """

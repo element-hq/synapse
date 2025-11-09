@@ -18,8 +18,8 @@
 #
 #
 
-from collections import defaultdict
 import logging
+from collections import defaultdict
 from typing import (
     TYPE_CHECKING,
     Collection,
@@ -1190,7 +1190,9 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
         def _get_thread_updates_for_user_txn(
             txn: LoggingTransaction,
         ) -> Tuple[List[Tuple[str, str, str, int]], Optional[int]]:
-            room_clause, room_id_values = make_in_list_sql_clause(txn.database_engine, "e.room_id", room_ids)
+            room_clause, room_id_values = make_in_list_sql_clause(
+                txn.database_engine, "e.room_id", room_ids
+            )
 
             # Generate the pagination clause, if necessary.
             pagination_clause = ""
@@ -1210,7 +1212,10 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
             exclusion_args: List[str] = []
             if exclude_thread_ids:
                 exclusion_clause, exclusion_args = make_in_list_sql_clause(
-                    txn.database_engine, "er.relates_to_id", exclude_thread_ids, negative=True,
+                    txn.database_engine,
+                    "er.relates_to_id",
+                    exclude_thread_ids,
+                    negative=True,
                 )
                 exclusion_clause = f" AND {exclusion_clause}"
 
