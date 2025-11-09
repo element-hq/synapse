@@ -922,3 +922,124 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         )
         # Verify the thread root event is present
         self.assertIn("thread_root", thread_updates[thread_root_id])
+
+    def test_threads_only_from_rooms_in_list(self) -> None:
+        """
+        Test that thread updates are only returned for rooms that are in the
+        sliding sync response, not from all rooms the user is joined to.
+
+        This tests the scenario where a user is joined to multiple rooms but
+        the room list range/limit means only some rooms are in the response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create three rooms
+        room_a_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_b_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_c_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create threads in all three rooms
+        thread_a_root = self.helper.send(room_a_id, body="Thread A", tok=user1_tok)[
+            "event_id"
+        ]
+        thread_b_root = self.helper.send(room_b_id, body="Thread B", tok=user1_tok)[
+            "event_id"
+        ]
+        thread_c_root = self.helper.send(room_c_id, body="Thread C", tok=user1_tok)[
+            "event_id"
+        ]
+
+        # Do an initial sync to get the sync position and see room ordering
+        initial_sync_body = {
+            "lists": {
+                "all-rooms": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+        }
+        response_body, sync_pos = self.do_sync(initial_sync_body, tok=user1_tok)
+
+        # Add replies to all threads after the initial sync
+        self.helper.send_event(
+            room_a_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply to A",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_a_root,
+                },
+            },
+            tok=user1_tok,
+        )
+        self.helper.send_event(
+            room_b_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply to B",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_b_root,
+                },
+            },
+            tok=user1_tok,
+        )
+        self.helper.send_event(
+            room_c_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply to C",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_c_root,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # Now do a sync with a limited range that excludes the last room
+        sync_body = {
+            "lists": {
+                "limited-list": {
+                    "ranges": [[0, 1]],  # Only include first 2 rooms
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok, since=sync_pos)
+
+        # Get which rooms were included in this limited response
+        included_rooms = set(
+            response_body["lists"]["limited-list"]["ops"][0]["room_ids"]
+        )
+        excluded_room = ({room_a_id, room_b_id, room_c_id} - included_rooms).pop()
+
+        # Assert: Only threads from rooms in the response should be included
+        thread_updates = response_body["extensions"][EXT_NAME]["updates"]
+
+        # Check that included rooms have thread updates
+        for room_id in included_rooms:
+            self.assertIn(
+                room_id,
+                thread_updates,
+                f"Room {room_id} should have thread updates since it's in the room list",
+            )
+
+        # Check that the excluded room is NOT present
+        self.assertNotIn(
+            excluded_room,
+            thread_updates,
+            f"Room {excluded_room} should NOT have thread updates since it's excluded from the room list",
+        )
