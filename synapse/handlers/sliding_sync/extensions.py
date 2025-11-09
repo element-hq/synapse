@@ -1223,13 +1223,14 @@ class SlidingSyncExtensionHandler:
             # After sorting above, updates[0] is guaranteed to be the latest (highest stream_ordering).
             latest_update = updates[0]
 
-            # TODO: What if we were limited in the amount of events we fetched from the
-            # db? Then how can we know for sure if we missed out on additional updates
-            # to this thread?
-
             # Generate per-thread prev_batch token if this thread has multiple visible updates.
+            # When we hit the global limit, we generate prev_batch tokens for all threads, even if
+            # we only saw 1 update for them. This is to cover the case where we only saw
+            # a single update for a given thread, but the global limit prevent us from
+            # obtaining other updates which would have otherwise been included in the
+            # range.
             per_thread_prev_batch = None
-            if len(updates) > 1:
+            if len(updates) > 1 or prev_batch_token is not None:
                 # Create a token pointing to one position before the latest event's stream position.
                 # This makes it exclusive - /relations with dir=b won't return the latest event again.
                 # Use StreamToken.START as base (all other streams at 0) since only room position matters.

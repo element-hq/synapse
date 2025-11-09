@@ -1230,13 +1230,17 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
                   LIMIT ?
             """
 
+            # Fetch `limit + 1` rows as a way to detect if there are more results beyond
+            # what we're returning. If we get exactly `limit + 1` rows back, we know there
+            # are more results available and we can set `next_token`. We only return the
+            # first `limit` rows to the caller. This avoids needing a separate COUNT query.
             txn.execute(
                 sql,
                 (
                     *room_id_values,
                     *exclusion_args,
                     *pagination_args,
-                    limit,
+                    limit + 1,
                 ),
             )
 
