@@ -36,6 +36,10 @@ from synapse.api.constants import (
 )
 from synapse.events import EventBase
 from synapse.handlers.receipts import ReceiptEventSource
+from synapse.handlers.relations import (
+    AggregationsMap,
+    ThreadRootsMap,
+)
 from synapse.handlers.sliding_sync.room_lists import RoomsForUserType
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
@@ -1209,8 +1213,8 @@ class SlidingSyncExtensionHandler:
         # the latest event for each thread.
 
         # Optionally fetch thread root events and their bundled aggregations
-        thread_root_event_map = {}
-        aggregations_map = {}
+        thread_root_event_map: ThreadRootsMap = {}
+        aggregations_map: AggregationsMap = {}
         if threads_request.include_roots:
             (
                 thread_root_event_map,

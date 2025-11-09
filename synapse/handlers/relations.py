@@ -598,7 +598,7 @@ class RelationsHandler:
 
     async def fetch_thread_roots_and_aggregations(
         self,
-        thread_ids: Iterable[str],
+        thread_ids: Collection[str],
         user_id: str,
     ) -> tuple[ThreadRootsMap, AggregationsMap]:
         """Fetch thread root events and their bundled aggregations.
