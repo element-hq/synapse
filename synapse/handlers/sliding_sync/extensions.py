@@ -19,13 +19,9 @@ from typing import (
     TYPE_CHECKING,
     AbstractSet,
     ChainMap,
-    Dict,
-    List,
     Mapping,
     MutableMapping,
-    Optional,
     Sequence,
-    Set,
     cast,
 )
 
@@ -104,11 +100,11 @@ class SlidingSyncExtensionHandler:
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
+        actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         room_membership_for_user_at_to_token_map: Mapping[str, RoomsForUserType],
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
+        from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions:
         """Handle extension requests.
 
@@ -241,11 +237,11 @@ class SlidingSyncExtensionHandler:
 
     def find_relevant_room_ids_for_extension(
         self,
-        requested_lists: Optional[StrCollection],
-        requested_room_ids: Optional[StrCollection],
+        requested_lists: StrCollection | None,
+        requested_room_ids: StrCollection | None,
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: AbstractSet[str],
-    ) -> Set[str]:
+    ) -> set[str]:
         """
         Handle the reserved `lists`/`rooms` keys for extensions. Extensions should only
         return results for rooms in the Sliding Sync response. This matches up the
@@ -268,7 +264,7 @@ class SlidingSyncExtensionHandler:
 
         # We only want to include account data for rooms that are already in the sliding
         # sync response AND that were requested in the account data request.
-        relevant_room_ids: Set[str] = set()
+        relevant_room_ids: set[str] = set()
 
         # See what rooms from the room subscriptions we should get account data for
         if requested_room_ids is not None:
@@ -285,7 +281,7 @@ class SlidingSyncExtensionHandler:
         if requested_lists is not None:
             for list_key in requested_lists:
                 # Just some typing because we share the variable name in multiple places
-                actual_list: Optional[SlidingSyncResult.SlidingWindowList] = None
+                actual_list: SlidingSyncResult.SlidingWindowList | None = None
 
                 # A wildcard means we process rooms from all lists
                 if list_key == "*":
@@ -316,7 +312,7 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         to_device_request: SlidingSyncConfig.Extensions.ToDeviceExtension,
         to_token: StreamToken,
-    ) -> Optional[SlidingSyncResult.Extensions.ToDeviceExtension]:
+    ) -> SlidingSyncResult.Extensions.ToDeviceExtension | None:
         """Handle to-device extension (MSC3885)
 
         Args:
@@ -391,8 +387,8 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         e2ee_request: SlidingSyncConfig.Extensions.E2eeExtension,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.E2eeExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.E2eeExtension | None:
         """Handle E2EE device extension (MSC3884)
 
         Args:
@@ -408,7 +404,7 @@ class SlidingSyncExtensionHandler:
         if not e2ee_request.enabled:
             return None
 
-        device_list_updates: Optional[DeviceListUpdates] = None
+        device_list_updates: DeviceListUpdates | None = None
         if from_token is not None:
             # TODO: This should take into account the `from_token` and `to_token`
             device_list_updates = await self.device_handler.get_user_ids_changed(
@@ -443,11 +439,11 @@ class SlidingSyncExtensionHandler:
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
+        actual_room_ids: set[str],
         account_data_request: SlidingSyncConfig.Extensions.AccountDataExtension,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.AccountDataExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.AccountDataExtension | None:
         """Handle Account Data extension (MSC3959)
 
         Args:
@@ -518,7 +514,7 @@ class SlidingSyncExtensionHandler:
             # down account data previously or not, so we split the relevant
             # rooms up into different collections based on status.
             live_rooms = set()
-            previously_rooms: Dict[str, int] = {}
+            previously_rooms: dict[str, int] = {}
             initial_rooms = set()
 
             for room_id in relevant_room_ids:
@@ -675,12 +671,12 @@ class SlidingSyncExtensionHandler:
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
+        actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         receipts_request: SlidingSyncConfig.Extensions.ReceiptsExtension,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.ReceiptsExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.ReceiptsExtension | None:
         """Handle Receipts extension (MSC3960)
 
         Args:
@@ -708,13 +704,13 @@ class SlidingSyncExtensionHandler:
             actual_room_ids=actual_room_ids,
         )
 
-        room_id_to_receipt_map: Dict[str, JsonMapping] = {}
+        room_id_to_receipt_map: dict[str, JsonMapping] = {}
         if len(relevant_room_ids) > 0:
             # We need to handle the different cases depending on if we have sent
             # down receipts previously or not, so we split the relevant rooms
             # up into different collections based on status.
             live_rooms = set()
-            previously_rooms: Dict[str, MultiWriterStreamToken] = {}
+            previously_rooms: dict[str, MultiWriterStreamToken] = {}
             initial_rooms = set()
 
             for room_id in relevant_room_ids:
@@ -879,12 +875,12 @@ class SlidingSyncExtensionHandler:
         self,
         sync_config: SlidingSyncConfig,
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
+        actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         typing_request: SlidingSyncConfig.Extensions.TypingExtension,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.TypingExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.TypingExtension | None:
         """Handle Typing Notification extension (MSC3961)
 
         Args:
@@ -909,7 +905,7 @@ class SlidingSyncExtensionHandler:
             actual_room_ids=actual_room_ids,
         )
 
-        room_id_to_typing_map: Dict[str, JsonMapping] = {}
+        room_id_to_typing_map: dict[str, JsonMapping] = {}
         if len(relevant_room_ids) > 0:
             # Note: We don't need to take connection tracking into account for typing
             # notifications because they'll get anything still relevant and hasn't timed
@@ -944,8 +940,8 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         thread_subscriptions_request: SlidingSyncConfig.Extensions.ThreadSubscriptionsExtension,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.ThreadSubscriptionsExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.ThreadSubscriptionsExtension | None:
         """Handle Thread Subscriptions extension (MSC4308)
 
         Args:
@@ -979,8 +975,8 @@ class SlidingSyncExtensionHandler:
         if len(updates) == 0:
             return None
 
-        subscribed_threads: Dict[str, Dict[str, _ThreadSubscription]] = {}
-        unsubscribed_threads: Dict[str, Dict[str, _ThreadUnsubscription]] = {}
+        subscribed_threads: dict[str, dict[str, _ThreadSubscription]] = {}
+        unsubscribed_threads: dict[str, dict[str, _ThreadUnsubscription]] = {}
         for stream_id, room_id, thread_root_id, subscribed, automatic in updates:
             if subscribed:
                 subscribed_threads.setdefault(room_id, {})[thread_root_id] = (
@@ -1008,7 +1004,7 @@ class SlidingSyncExtensionHandler:
             prev_batch=prev_batch,
         )
 
-    def _extract_thread_id_from_event(self, event: EventBase) -> Optional[str]:
+    def _extract_thread_id_from_event(self, event: EventBase) -> str | None:
         """Extract thread ID from event if it's a thread reply.
 
         Args:
@@ -1026,7 +1022,7 @@ class SlidingSyncExtensionHandler:
     def _find_threads_in_timeline(
         self,
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
-    ) -> Set[str]:
+    ) -> set[str]:
         """Find all thread IDs that have events in room timelines.
 
         Args:
@@ -1035,7 +1031,7 @@ class SlidingSyncExtensionHandler:
         Returns:
             A set of thread IDs (thread root event IDs) that appear in timelines.
         """
-        threads_in_timeline: Set[str] = set()
+        threads_in_timeline: set[str] = set()
         for room_result in actual_room_response_map.values():
             if room_result.timeline_events:
                 for event in room_result.timeline_events:
@@ -1046,9 +1042,9 @@ class SlidingSyncExtensionHandler:
 
     def _merge_prev_batch_token(
         self,
-        current_token: Optional[StreamToken],
-        new_token: Optional[StreamToken],
-    ) -> Optional[StreamToken]:
+        current_token: StreamToken | None,
+        new_token: StreamToken | None,
+    ) -> StreamToken | None:
         """Merge two prev_batch tokens, taking the maximum (latest) for backwards pagination.
 
         Args:
@@ -1069,8 +1065,8 @@ class SlidingSyncExtensionHandler:
 
     def _merge_thread_updates(
         self,
-        target: Dict[str, List[ThreadUpdateInfo]],
-        source: Dict[str, List[ThreadUpdateInfo]],
+        target: dict[str, list[ThreadUpdateInfo]],
+        source: dict[str, list[ThreadUpdateInfo]],
     ) -> None:
         """Merge thread updates from source into target.
 
@@ -1085,12 +1081,12 @@ class SlidingSyncExtensionHandler:
         self,
         sync_config: SlidingSyncConfig,
         threads_request: SlidingSyncConfig.Extensions.ThreadsExtension,
-        actual_room_ids: Set[str],
+        actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         room_membership_for_user_at_to_token_map: Mapping[str, RoomsForUserType],
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.ThreadsExtension]:
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.ThreadsExtension | None:
         """Handle Threads extension (MSC4360)
 
         Args:
@@ -1115,7 +1111,7 @@ class SlidingSyncExtensionHandler:
         # since the client already sees the thread activity in the timeline.
         # If include_roots=True, we fetch all threads regardless, because the client
         # wants the thread root events.
-        threads_to_exclude: Optional[Set[str]] = None
+        threads_to_exclude: set[str] | None = None
         if not threads_request.include_roots:
             threads_to_exclude = self._find_threads_in_timeline(
                 actual_room_response_map
@@ -1124,8 +1120,8 @@ class SlidingSyncExtensionHandler:
         # Separate rooms into groups based on membership status.
         # For LEAVE/BAN rooms, we need to bound the to_token to prevent leaking events
         # that occurred after the user left/was banned.
-        leave_ban_rooms: Set[str] = set()
-        other_rooms: Set[str] = set()
+        leave_ban_rooms: set[str] = set()
+        other_rooms: set[str] = set()
 
         for room_id in actual_room_ids:
             membership_info = room_membership_for_user_at_to_token_map.get(room_id)
@@ -1138,8 +1134,8 @@ class SlidingSyncExtensionHandler:
                 other_rooms.add(room_id)
 
         # Fetch thread updates, handling LEAVE/BAN rooms separately to avoid data leaks.
-        all_thread_updates: Dict[str, List[ThreadUpdateInfo]] = {}
-        prev_batch_token: Optional[StreamToken] = None
+        all_thread_updates: dict[str, list[ThreadUpdateInfo]] = {}
+        prev_batch_token: StreamToken | None = None
         remaining_limit = threads_request.limit
 
         # Query for rooms where the user has left or been banned, using their leave/ban
@@ -1208,7 +1204,7 @@ class SlidingSyncExtensionHandler:
 
         # Build a mapping of event_id -> (thread_id, update) for efficient lookup
         # during visibility filtering.
-        event_to_thread_map: Dict[str, tuple[str, ThreadUpdateInfo]] = {}
+        event_to_thread_map: dict[str, tuple[str, ThreadUpdateInfo]] = {}
         for thread_id, updates in all_thread_updates.items():
             for update in updates:
                 event_to_thread_map[update.event_id] = (thread_id, update)
@@ -1220,7 +1216,7 @@ class SlidingSyncExtensionHandler:
         )
 
         # Rebuild thread updates from filtered events
-        filtered_updates: Dict[str, List[ThreadUpdateInfo]] = defaultdict(list)
+        filtered_updates: dict[str, list[ThreadUpdateInfo]] = defaultdict(list)
         for event in filtered_events:
             if event.event_id in event_to_thread_map:
                 thread_id, update = event_to_thread_map[event.event_id]
@@ -1251,7 +1247,7 @@ class SlidingSyncExtensionHandler:
                     )
                 )
 
-        thread_updates: Dict[str, Dict[str, _ThreadUpdate]] = {}
+        thread_updates: dict[str, dict[str, _ThreadUpdate]] = {}
         for thread_root, updates in filtered_updates.items():
             # We only care about the latest update for the thread.
             # After sorting above, updates[0] is guaranteed to be the latest (highest stream_ordering).

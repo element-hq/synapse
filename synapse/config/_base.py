@@ -33,16 +33,10 @@ from textwrap import dedent
 from typing import (
     Any,
     ClassVar,
-    Dict,
     Iterable,
     Iterator,
-    List,
     MutableMapping,
-    Optional,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
 )
 
 import attr
@@ -64,7 +58,7 @@ class ConfigError(Exception):
            the problem lies.
     """
 
-    def __init__(self, msg: str, path: Optional[StrSequence] = None):
+    def __init__(self, msg: str, path: StrSequence | None = None):
         self.msg = msg
         self.path = path
 
@@ -179,7 +173,7 @@ class Config:
         )
 
     @staticmethod
-    def parse_size(value: Union[str, int]) -> int:
+    def parse_size(value: str | int) -> int:
         """Interpret `value` as a number of bytes.
 
         If an integer is provided it is treated as bytes and is unchanged.
@@ -206,7 +200,7 @@ class Config:
             raise TypeError(f"Bad byte size {value!r}")
 
     @staticmethod
-    def parse_duration(value: Union[str, int]) -> int:
+    def parse_duration(value: str | int) -> int:
         """Convert a duration as a string or integer to a number of milliseconds.
 
         If an integer is provided it is treated as milliseconds and is unchanged.
@@ -274,7 +268,7 @@ class Config:
         return path_exists(file_path)
 
     @classmethod
-    def check_file(cls, file_path: Optional[str], config_name: str) -> str:
+    def check_file(cls, file_path: str | None, config_name: str) -> str:
         if file_path is None:
             raise ConfigError("Missing config for %s." % (config_name,))
         try:
@@ -321,9 +315,9 @@ class Config:
 
     def read_templates(
         self,
-        filenames: List[str],
-        custom_template_directories: Optional[Iterable[str]] = None,
-    ) -> List[jinja2.Template]:
+        filenames: list[str],
+        custom_template_directories: Iterable[str] | None = None,
+    ) -> list[jinja2.Template]:
         """Load a list of template files from disk using the given variables.
 
         This function will attempt to load the given templates from the default Synapse
@@ -402,7 +396,7 @@ class RootConfig:
     class, lower-cased and with "Config" removed.
     """
 
-    config_classes: List[Type[Config]] = []
+    config_classes: list[type[Config]] = []
 
     def __init__(self, config_files: StrSequence = ()):
         # Capture absolute paths here, so we can reload config after we daemonize.
@@ -469,11 +463,11 @@ class RootConfig:
         data_dir_path: str,
         server_name: str,
         generate_secrets: bool = False,
-        report_stats: Optional[bool] = None,
+        report_stats: bool | None = None,
         open_private_ports: bool = False,
-        listeners: Optional[List[dict]] = None,
-        tls_certificate_path: Optional[str] = None,
-        tls_private_key_path: Optional[str] = None,
+        listeners: list[dict] | None = None,
+        tls_certificate_path: str | None = None,
+        tls_private_key_path: str | None = None,
     ) -> str:
         """
         Build a default configuration file
@@ -545,18 +539,22 @@ class RootConfig:
 
     @classmethod
     def load_config(
-        cls: Type[TRootConfig], description: str, argv: List[str]
+        cls: type[TRootConfig], description: str, argv_options: list[str]
     ) -> TRootConfig:
         """Parse the commandline and config files
 
         Doesn't support config-file-generation: used by the worker apps.
+
+        Args:
+            description: TODO
+            argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
         Returns:
             Config object.
         """
         config_parser = argparse.ArgumentParser(description=description)
         cls.add_arguments_to_parser(config_parser)
-        obj, _ = cls.load_config_with_parser(config_parser, argv)
+        obj, _ = cls.load_config_with_parser(config_parser, argv_options)
 
         return obj
 
@@ -601,13 +599,17 @@ class RootConfig:
 
     @classmethod
     def load_config_with_parser(
-        cls: Type[TRootConfig], parser: argparse.ArgumentParser, argv_options: List[str]
-    ) -> Tuple[TRootConfig, argparse.Namespace]:
+        cls: type[TRootConfig], parser: argparse.ArgumentParser, argv_options: list[str]
+    ) -> tuple[TRootConfig, argparse.Namespace]:
         """Parse the commandline and config files with the given parser
 
         Doesn't support config-file-generation: used by the worker apps.
 
         Used for workers where we want to add extra flags/subcommands.
+
+        Note: This is the common denominator for loading config and is also used by
+        `load_config` and `load_or_generate_config`. Which is why we call
+        `validate_config()` here.
 
         Args:
             parser
@@ -642,12 +644,16 @@ class RootConfig:
 
         obj.invoke_all("read_arguments", config_args)
 
+        # Now that we finally have the full config sections parsed, allow subclasses to
+        # do some extra validation across the entire config.
+        obj.validate_config()
+
         return obj, config_args
 
     @classmethod
     def load_or_generate_config(
-        cls: Type[TRootConfig], description: str, argv_options: List[str]
-    ) -> Optional[TRootConfig]:
+        cls: type[TRootConfig], description: str, argv_options: list[str]
+    ) -> TRootConfig | None:
         """Parse the commandline and config files
 
         Supports generation of config files, so is used for the main homeserver app.
@@ -842,19 +848,11 @@ class RootConfig:
         ):
             return None
 
-        obj.parse_config_dict(
-            config_dict,
-            config_dir_path=config_dir_path,
-            data_dir_path=data_dir_path,
-            allow_secrets_in_config=config_args.secrets_in_config,
-        )
-        obj.invoke_all("read_arguments", config_args)
-
-        return obj
+        return cls.load_config(description, argv_options)
 
     def parse_config_dict(
         self,
-        config_dict: Dict[str, Any],
+        config_dict: dict[str, Any],
         config_dir_path: str,
         data_dir_path: str,
         allow_secrets_in_config: bool = True,
@@ -879,7 +877,7 @@ class RootConfig:
         )
 
     def generate_missing_files(
-        self, config_dict: Dict[str, Any], config_dir_path: str
+        self, config_dict: dict[str, Any], config_dir_path: str
     ) -> None:
         self.invoke_all("generate_files", config_dict, config_dir_path)
 
@@ -898,7 +896,7 @@ class RootConfig:
         :returns: the previous config object, which no longer has a reference to this
             RootConfig.
         """
-        existing_config: Optional[Config] = getattr(self, section_name, None)
+        existing_config: Config | None = getattr(self, section_name, None)
         if existing_config is None:
             raise ValueError(f"Unknown config section '{section_name}'")
         logger.info("Reloading config section '%s'", section_name)
@@ -911,8 +909,22 @@ class RootConfig:
         existing_config.root = None
         return existing_config
 
+    def validate_config(self) -> None:
+        """
+        Additional config validation across all config sections.
 
-def read_config_files(config_files: Iterable[str]) -> Dict[str, Any]:
+        Override this in subclasses to add extra validation. This is called once all
+        config option values have been populated.
+
+        XXX: This should only validate, not modify the configuration, as the final
+        config state is required for proper validation across all config sections.
+
+        Raises:
+            ConfigError: if the config is invalid.
+        """
+
+
+def read_config_files(config_files: Iterable[str]) -> dict[str, Any]:
     """Read the config files and shallowly merge them into a dict.
 
     Successive configurations are shallowly merged into ones provided earlier,
@@ -946,7 +958,7 @@ def read_config_files(config_files: Iterable[str]) -> Dict[str, Any]:
     return specified_config
 
 
-def find_config_files(search_paths: List[str]) -> List[str]:
+def find_config_files(search_paths: list[str]) -> list[str]:
     """Finds config files using a list of search paths. If a path is a file
     then that file path is added to the list. If a search path is a directory
     then all the "*.yaml" files in that directory are added to the list in
@@ -1000,7 +1012,7 @@ class ShardedWorkerHandlingConfig:
     below).
     """
 
-    instances: List[str]
+    instances: list[str]
 
     def should_handle(self, instance_name: str, key: str) -> bool:
         """Whether this instance is responsible for handling the given key."""

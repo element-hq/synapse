@@ -29,15 +29,11 @@ from typing import (
     Awaitable,
     Callable,
     ContextManager,
-    Dict,
     Generator,
     Iterable,
     Optional,
     Protocol,
-    Set,
-    Type,
     TypeVar,
-    Union,
 )
 
 from prometheus_client import Metric
@@ -65,6 +61,13 @@ if TYPE_CHECKING:
 
     # Old versions don't have `LiteralString`
     from typing_extensions import LiteralString
+
+    from synapse.server import HomeServer
+
+    try:
+        import opentracing
+    except ImportError:
+        opentracing = None  # type: ignore[assignment]
 
 
 logger = logging.getLogger(__name__)
@@ -127,7 +130,7 @@ _background_process_db_sched_duration = Counter(
 # map from description to a counter, so that we can name our logcontexts
 # incrementally. (It actually duplicates _background_process_start_count, but
 # it's much simpler to do so than to try to combine them.)
-_background_process_counts: Dict[str, int] = {}
+_background_process_counts: dict[str, int] = {}
 
 # Set of all running background processes that became active active since the
 # last time metrics were scraped (i.e. background processes that performed some
@@ -137,7 +140,7 @@ _background_process_counts: Dict[str, int] = {}
 # background processes stacking up behind a lock or linearizer, where we then
 # only need to iterate over and update metrics for the process that have
 # actually been active and can ignore the idle ones.
-_background_processes_active_since_last_scrape: "Set[_BackgroundProcess]" = set()
+_background_processes_active_since_last_scrape: "set[_BackgroundProcess]" = set()
 
 # A lock that covers the above set and dict
 _bg_metrics_lock = threading.Lock()
@@ -184,7 +187,7 @@ class _BackgroundProcess:
         self.desc = desc
         self.server_name = server_name
         self._context = ctx
-        self._reported_stats: Optional[ContextResourceUsage] = None
+        self._reported_stats: ContextResourceUsage | None = None
 
     def update_metrics(self) -> None:
         """Updates the metrics with values from this process."""
@@ -220,11 +223,12 @@ R = TypeVar("R")
 def run_as_background_process(
     desc: "LiteralString",
     server_name: str,
-    func: Callable[..., Awaitable[Optional[R]]],
+    func: Callable[..., Awaitable[R | None]],
     *args: Any,
     bg_start_span: bool = True,
+    test_only_tracer: Optional["opentracing.Tracer"] = None,
     **kwargs: Any,
-) -> "defer.Deferred[Optional[R]]":
+) -> "defer.Deferred[R | None]":
     """Run the given function in its own logcontext, with resource metrics
 
     This should be used to wrap processes which are fired off to run in the
@@ -248,6 +252,8 @@ def run_as_background_process(
         bg_start_span: Whether to start an opentracing span. Defaults to True.
             Should only be disabled for processes that will not log to or tag
             a span.
+        test_only_tracer: Set the OpenTracing tracer to use. This is only useful for
+            tests.
         args: positional args for func
         kwargs: keyword args for func
 
@@ -257,7 +263,13 @@ def run_as_background_process(
         rules.
     """
 
-    async def run() -> Optional[R]:
+    # Since we track the tracing scope in the `LoggingContext`, before we move to the
+    # sentinel logcontext (or a new `LoggingContext`), grab the currently active
+    # tracing span (if any) so that we can create a cross-link to the background process
+    # trace.
+    original_active_tracing_span = active_span(tracer=test_only_tracer)
+
+    async def run() -> R | None:
         with _bg_metrics_lock:
             count = _background_process_counts.get(desc, 0)
             _background_process_counts[desc] = count + 1
@@ -274,8 +286,6 @@ def run_as_background_process(
         ) as logging_context:
             try:
                 if bg_start_span:
-                    original_active_tracing_span = active_span()
-
                     # If there is already an active span (e.g. because this background
                     # process was started as part of handling a request for example),
                     # because this is a long-running background task that may serve a
@@ -306,6 +316,7 @@ def run_as_background_process(
                             # Create a root span for the background process (disconnected
                             # from other spans)
                             ignore_active_span=True,
+                            tracer=test_only_tracer,
                         )
 
                         # Also add a span in the original request trace that cross-links
@@ -322,8 +333,11 @@ def run_as_background_process(
                             f"start_bgproc.{desc}",
                             child_of=original_active_tracing_span,
                             ignore_active_span=True,
-                            # Points to the background process span.
+                            # Create the `FOLLOWS_FROM` reference to the background
+                            # process span so there is a loose coupling between the two
+                            # traces and it's easy to jump between.
                             contexts=[root_tracing_scope.span.context],
+                            tracer=test_only_tracer,
                         ):
                             pass
 
@@ -339,6 +353,7 @@ def run_as_background_process(
                             # span so there is a loose coupling between the two
                             # traces and it's easy to jump between.
                             contexts=[original_active_tracing_span.context],
+                            tracer=test_only_tracer,
                         )
 
                         # For easy usage down below, we create a context manager that
@@ -357,6 +372,7 @@ def run_as_background_process(
                         tracing_scope = start_active_span(
                             f"bgproc.{desc}",
                             tags={SynapseTags.REQUEST_ID: str(logging_context)},
+                            tracer=test_only_tracer,
                         )
                 else:
                     tracing_scope = nullcontext()
@@ -397,19 +413,19 @@ def run_as_background_process(
 P = ParamSpec("P")
 
 
-class HasServerName(Protocol):
-    server_name: str
+class HasHomeServer(Protocol):
+    hs: "HomeServer"
     """
-    The homeserver name that this cache is associated with (used to label the metric)
-    (`hs.hostname`).
+    The homeserver that this cache is associated with (used to label the metric and
+    track backgroun processes for clean shutdown).
     """
 
 
 def wrap_as_background_process(
     desc: "LiteralString",
 ) -> Callable[
-    [Callable[P, Awaitable[Optional[R]]]],
-    Callable[P, "defer.Deferred[Optional[R]]"],
+    [Callable[P, Awaitable[R | None]]],
+    Callable[P, "defer.Deferred[R | None]"],
 ]:
     """Decorator that wraps an asynchronous function `func`, returning a synchronous
     decorated function. Calling the decorated version runs `func` as a background
@@ -431,27 +447,22 @@ def wrap_as_background_process(
     """
 
     def wrapper(
-        func: Callable[Concatenate[HasServerName, P], Awaitable[Optional[R]]],
-    ) -> Callable[P, "defer.Deferred[Optional[R]]"]:
+        func: Callable[Concatenate[HasHomeServer, P], Awaitable[R | None]],
+    ) -> Callable[P, "defer.Deferred[R | None]"]:
         @wraps(func)
         def wrapped_func(
-            self: HasServerName, *args: P.args, **kwargs: P.kwargs
-        ) -> "defer.Deferred[Optional[R]]":
-            assert self.server_name is not None, (
-                "The `server_name` attribute must be set on the object where `@wrap_as_background_process` decorator is used."
+            self: HasHomeServer, *args: P.args, **kwargs: P.kwargs
+        ) -> "defer.Deferred[R | None]":
+            assert self.hs is not None, (
+                "The `hs` attribute must be set on the object where `@wrap_as_background_process` decorator is used."
             )
 
-            return run_as_background_process(
+            return self.hs.run_as_background_process(
                 desc,
-                self.server_name,
                 func,
                 self,
                 *args,
-                # type-ignore: mypy is confusing kwargs with the bg_start_span kwarg.
-                #     Argument 4 to "run_as_background_process" has incompatible type
-                #     "**P.kwargs"; expected "bool"
-                # See https://github.com/python/mypy/issues/8862
-                **kwargs,  # type: ignore[arg-type]
+                **kwargs,
             )
 
         # There are some shenanigans here, because we're decorating a method but
@@ -475,7 +486,7 @@ class BackgroundProcessLoggingContext(LoggingContext):
         *,
         name: str,
         server_name: str,
-        instance_id: Optional[Union[int, str]] = None,
+        instance_id: int | str | None = None,
     ):
         """
 
@@ -491,11 +502,11 @@ class BackgroundProcessLoggingContext(LoggingContext):
         if instance_id is None:
             instance_id = id(self)
         super().__init__(name="%s-%s" % (name, instance_id), server_name=server_name)
-        self._proc: Optional[_BackgroundProcess] = _BackgroundProcess(
+        self._proc: _BackgroundProcess | None = _BackgroundProcess(
             desc=name, server_name=server_name, ctx=self
         )
 
-    def start(self, rusage: "Optional[resource.struct_rusage]") -> None:
+    def start(self, rusage: "resource.struct_rusage | None") -> None:
         """Log context has started running (again)."""
 
         super().start(rusage)
@@ -516,9 +527,9 @@ class BackgroundProcessLoggingContext(LoggingContext):
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
-        value: Optional[BaseException],
-        traceback: Optional[TracebackType],
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
     ) -> None:
         """Log context has finished."""
 

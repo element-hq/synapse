@@ -33,15 +33,10 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Iterable,
     Iterator,
-    List,
-    Optional,
     Pattern,
     Protocol,
-    Tuple,
-    Union,
     cast,
 )
 
@@ -114,7 +109,7 @@ HTTP_STATUS_REQUEST_CANCELLED = 499
 
 
 def return_json_error(
-    f: failure.Failure, request: "SynapseRequest", config: Optional[HomeServerConfig]
+    f: failure.Failure, request: "SynapseRequest", config: HomeServerConfig | None
 ) -> None:
     """Sends a JSON error response to clients."""
 
@@ -176,7 +171,7 @@ def return_json_error(
 def return_html_error(
     f: failure.Failure,
     request: Request,
-    error_template: Union[str, jinja2.Template],
+    error_template: str | jinja2.Template,
 ) -> None:
     """Sends an HTML error page corresponding to the given failure.
 
@@ -267,7 +262,7 @@ def wrap_async_request_handler(
 # it is actually called with a SynapseRequest and a kwargs dict for the params,
 # but I can't figure out how to represent that.
 ServletCallback = Callable[
-    ..., Union[None, Awaitable[None], Tuple[int, Any], Awaitable[Tuple[int, Any]]]
+    ..., None | Awaitable[None] | tuple[int, Any] | Awaitable[tuple[int, Any]]
 ]
 
 
@@ -352,9 +347,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
             f = failure.Failure()
             self._send_error_response(f, request)
 
-    async def _async_render(
-        self, request: "SynapseRequest"
-    ) -> Optional[Tuple[int, Any]]:
+    async def _async_render(self, request: "SynapseRequest") -> tuple[int, Any] | None:
         """Delegates to `_async_render_<METHOD>` methods, or returns a 400 if
         no appropriate method exists. Can be overridden in sub classes for
         different routing.
@@ -409,7 +402,7 @@ class DirectServeJsonResource(_AsyncResource):
         canonical_json: bool = False,
         extract_context: bool = False,
         # Clock is optional as this class is exposed to the module API.
-        clock: Optional[Clock] = None,
+        clock: Clock | None = None,
     ):
         """
         Args:
@@ -420,7 +413,14 @@ class DirectServeJsonResource(_AsyncResource):
         """
 
         if clock is None:
-            clock = Clock(
+            # Ideally we wouldn't ignore the linter error here and instead enforce a
+            # required `Clock` be passed into the `__init__` function.
+            # However, this would change the function signature which is currently being
+            # exported to the module api. Since we don't want to break that api, we have
+            # to settle with ignoring the linter error here.
+            # As of the time of writing this, all Synapse internal usages of
+            # `DirectServeJsonResource` pass in the existing homeserver clock instance.
+            clock = Clock(  # type: ignore[multiple-internal-clocks]
                 cast(ISynapseThreadlessReactor, reactor),
                 server_name="synapse_module_running_from_unknown_server",
             )
@@ -484,7 +484,7 @@ class JsonResource(DirectServeJsonResource):
         self.clock = hs.get_clock()
         super().__init__(canonical_json, extract_context, clock=self.clock)
         # Map of path regex -> method -> callback.
-        self._routes: Dict[Pattern[str], Dict[bytes, _PathEntry]] = {}
+        self._routes: dict[Pattern[str], dict[bytes, _PathEntry]] = {}
         self.hs = hs
 
     def register_paths(
@@ -520,7 +520,7 @@ class JsonResource(DirectServeJsonResource):
 
     def _get_handler_for_request(
         self, request: "SynapseRequest"
-    ) -> Tuple[ServletCallback, str, Dict[str, str]]:
+    ) -> tuple[ServletCallback, str, dict[str, str]]:
         """Finds a callback method to handle the given request.
 
         Returns:
@@ -549,7 +549,7 @@ class JsonResource(DirectServeJsonResource):
         # Huh. No one wanted to handle that? Fiiiiiine.
         raise UnrecognizedRequestError(code=404)
 
-    async def _async_render(self, request: "SynapseRequest") -> Tuple[int, Any]:
+    async def _async_render(self, request: "SynapseRequest") -> tuple[int, Any]:
         callback, servlet_classname, group_dict = self._get_handler_for_request(request)
 
         request.is_render_cancellable = is_function_cancellable(callback)
@@ -599,7 +599,7 @@ class DirectServeHtmlResource(_AsyncResource):
         self,
         extract_context: bool = False,
         # Clock is optional as this class is exposed to the module API.
-        clock: Optional[Clock] = None,
+        clock: Clock | None = None,
     ):
         """
         Args:
@@ -608,7 +608,14 @@ class DirectServeHtmlResource(_AsyncResource):
                 Only optional for the Module API.
         """
         if clock is None:
-            clock = Clock(
+            # Ideally we wouldn't ignore the linter error here and instead enforce a
+            # required `Clock` be passed into the `__init__` function.
+            # However, this would change the function signature which is currently being
+            # exported to the module api. Since we don't want to break that api, we have
+            # to settle with ignoring the linter error here.
+            # As of the time of writing this, all Synapse internal usages of
+            # `DirectServeHtmlResource` pass in the existing homeserver clock instance.
+            clock = Clock(  # type: ignore[multiple-internal-clocks]
                 cast(ISynapseThreadlessReactor, reactor),
                 server_name="synapse_module_running_from_unknown_server",
             )
@@ -721,7 +728,7 @@ class _ByteProducer:
         request: Request,
         iterator: Iterator[bytes],
     ):
-        self._request: Optional[Request] = request
+        self._request: Request | None = request
         self._iterator = iterator
         self._paused = False
         self.tracing_scope = start_active_span(
@@ -744,7 +751,7 @@ class _ByteProducer:
             # Start producing if `registerProducer` was successful
             self.resumeProducing()
 
-    def _send_data(self, data: List[bytes]) -> None:
+    def _send_data(self, data: list[bytes]) -> None:
         """
         Send a list of bytes as a chunk of a response.
         """
@@ -820,7 +827,7 @@ def respond_with_json(
     json_object: Any,
     send_cors: bool = False,
     canonical_json: bool = True,
-) -> Optional[int]:
+) -> int | None:
     """Sends encoded JSON in response to the given request.
 
     Args:
@@ -869,7 +876,7 @@ def respond_with_json_bytes(
     code: int,
     json_bytes: bytes,
     send_cors: bool = False,
-) -> Optional[int]:
+) -> int | None:
     """Sends encoded JSON in response to the given request.
 
     Args:
@@ -918,7 +925,7 @@ async def _async_write_json_to_request_in_thread(
     expensive.
     """
 
-    def encode(opentracing_span: "Optional[opentracing.Span]") -> bytes:
+    def encode(opentracing_span: "opentracing.Span | None") -> bytes:
         # it might take a while for the threadpool to schedule us, so we write
         # opentracing logs once we actually get scheduled, so that we can see how
         # much that contributed.

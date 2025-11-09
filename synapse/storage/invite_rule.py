@@ -1,6 +1,6 @@
 import logging
 from enum import Enum
-from typing import Optional, Pattern
+from typing import Pattern
 
 from matrix_common.regex import glob_to_regex
 
@@ -20,7 +20,7 @@ class InviteRule(Enum):
 class InviteRulesConfig:
     """Class to determine if a given user permits an invite from another user, and the action to take."""
 
-    def __init__(self, account_data: Optional[JsonMapping]):
+    def __init__(self, account_data: JsonMapping | None):
         self.allowed_users: list[Pattern[str]] = []
         self.ignored_users: list[Pattern[str]] = []
         self.blocked_users: list[Pattern[str]] = []
@@ -30,7 +30,7 @@ class InviteRulesConfig:
         self.blocked_servers: list[Pattern[str]] = []
 
         def process_field(
-            values: Optional[list[str]],
+            values: list[str] | None,
             ruleset: list[Pattern[str]],
             rule: InviteRule,
         ) -> None:

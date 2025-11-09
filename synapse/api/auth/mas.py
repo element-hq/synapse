@@ -13,17 +13,19 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional, Set
+from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
-from synapse._pydantic_compat import (
+from pydantic import (
+    AnyHttpUrl,
     BaseModel,
-    Extra,
+    ConfigDict,
     StrictBool,
     StrictInt,
     StrictStr,
     ValidationError,
 )
+
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
     AuthError,
@@ -33,7 +35,6 @@ from synapse.api.errors import (
     UnrecognizedRequestError,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import (
     active_span,
     force_tracing,
@@ -64,8 +65,7 @@ STABLE_SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:client:device:"
 
 
 class ServerMetadata(BaseModel):
-    class Config:
-        extra = Extra.allow
+    model_config = ConfigDict(extra="allow")
 
     issuer: StrictStr
     account_management_uri: StrictStr
@@ -74,14 +74,12 @@ class ServerMetadata(BaseModel):
 class IntrospectionResponse(BaseModel):
     retrieved_at_ms: StrictInt
     active: StrictBool
-    scope: Optional[StrictStr]
-    username: Optional[StrictStr]
-    sub: Optional[StrictStr]
-    device_id: Optional[StrictStr]
-    expires_in: Optional[StrictInt]
-
-    class Config:
-        extra = Extra.allow
+    scope: StrictStr | None = None
+    username: StrictStr | None = None
+    sub: StrictStr | None = None
+    device_id: StrictStr | None = None
+    expires_in: StrictInt | None = None
+    model_config = ConfigDict(extra="allow")
 
     def get_scope_set(self) -> set[str]:
         if not self.scope:
@@ -149,11 +147,33 @@ class MasDelegatedAuth(BaseAuth):
 
     @property
     def _metadata_url(self) -> str:
-        return f"{self._config.endpoint.rstrip('/')}/.well-known/openid-configuration"
+        return str(
+            AnyHttpUrl.build(
+                scheme=self._config.endpoint.scheme,
+                username=self._config.endpoint.username,
+                password=self._config.endpoint.password,
+                host=self._config.endpoint.host or "",
+                port=self._config.endpoint.port,
+                path=".well-known/openid-configuration",
+                query=None,
+                fragment=None,
+            )
+        )
 
     @property
     def _introspection_endpoint(self) -> str:
-        return f"{self._config.endpoint.rstrip('/')}/oauth2/introspect"
+        return str(
+            AnyHttpUrl.build(
+                scheme=self._config.endpoint.scheme,
+                username=self._config.endpoint.username,
+                password=self._config.endpoint.password,
+                host=self._config.endpoint.host or "",
+                port=self._config.endpoint.port,
+                path="oauth2/introspect",
+                query=None,
+                fragment=None,
+            )
+        )
 
     async def _load_metadata(self) -> ServerMetadata:
         response = await self._http_client.get_json(self._metadata_url)
@@ -229,13 +249,12 @@ class MasDelegatedAuth(BaseAuth):
         try:
             with start_active_span("mas-introspect-token"):
                 inject_request_headers(raw_headers)
-                with PreserveLoggingContext():
-                    resp_body = await self._rust_http_client.post(
-                        url=self._introspection_endpoint,
-                        response_limit=1 * 1024 * 1024,
-                        headers=raw_headers,
-                        request_body=body,
-                    )
+                resp_body = await self._rust_http_client.post(
+                    url=self._introspection_endpoint,
+                    response_limit=1 * 1024 * 1024,
+                    headers=raw_headers,
+                    request_body=body,
+                )
         except HttpResponseException as e:
             end_time = self._clock.time()
             introspection_response_timer.labels(
@@ -371,7 +390,7 @@ class MasDelegatedAuth(BaseAuth):
             # We only allow a single device_id in the scope, so we find them all in the
             # scope list, and raise if there are more than one. The OIDC server should be
             # the one enforcing valid scopes, so we raise a 500 if we find an invalid scope.
-            device_ids: Set[str] = set()
+            device_ids: set[str] = set()
             for tok in scope:
                 if tok.startswith(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX):
                     device_ids.add(tok[len(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX) :])

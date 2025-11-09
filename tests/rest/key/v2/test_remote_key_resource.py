@@ -19,7 +19,7 @@
 #
 #
 from io import BytesIO, StringIO
-from typing import Any, Dict, Optional, Union
+from typing import Any
 from unittest.mock import Mock
 
 import signedjson.key
@@ -67,7 +67,7 @@ class BaseRemoteKeyResourceTestCase(unittest.HomeserverTestCase):
             path: str,
             ignore_backoff: bool = False,
             **kwargs: Any,
-        ) -> Union[JsonDict, list]:
+        ) -> JsonDict | list:
             self.assertTrue(ignore_backoff)
             self.assertEqual(destination, server_name)
             key_id = "%s:%s" % (signing_key.alg, signing_key.version)
@@ -156,7 +156,7 @@ class EndToEndPerspectivesTests(BaseRemoteKeyResourceTestCase):
     endpoint, to check that the two implementations are compatible.
     """
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
 
         # replace the signing key with our own
@@ -170,7 +170,7 @@ class EndToEndPerspectivesTests(BaseRemoteKeyResourceTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         # make a second homeserver, configured to use the first one as a key notary
         self.http_client2 = Mock()
-        config = default_config(name="keyclient")
+        config = default_config(server_name="keyclient")
         config["trusted_key_servers"] = [
             {
                 "server_name": self.hs.hostname,
@@ -191,8 +191,8 @@ class EndToEndPerspectivesTests(BaseRemoteKeyResourceTestCase):
         # wire up outbound POST /key/v2/query requests from hs2 so that they
         # will be forwarded to hs1
         async def post_json(
-            destination: str, path: str, data: Optional[JsonDict] = None
-        ) -> Union[JsonDict, list]:
+            destination: str, path: str, data: JsonDict | None = None
+        ) -> JsonDict | list:
             self.assertEqual(destination, self.hs.hostname)
             self.assertEqual(
                 path,

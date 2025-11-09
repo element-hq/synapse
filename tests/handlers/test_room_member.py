@@ -50,7 +50,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
 
         self.intially_unjoined_room_id = f"!example:{self.OTHER_SERVER_NAME}"
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 2}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 2}})
     def test_local_user_local_joins_contribute_to_limit_and_are_limited(self) -> None:
         # The rate limiter has accumulated one token from Alice's join after the create
         # event.
@@ -76,7 +76,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             by=0.5,
         )
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 2}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 2}})
     def test_local_user_profile_edits_dont_contribute_to_limit(self) -> None:
         # The rate limiter has accumulated one token from Alice's join after the create
         # event. Alice should still be able to change her displayname.
@@ -100,7 +100,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             )
         )
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 1}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 1}})
     def test_remote_joins_contribute_to_rate_limit(self) -> None:
         # Join once, to fill the rate limiter bucket.
         #
@@ -248,7 +248,7 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
         self.room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
         self.intially_unjoined_room_id = "!example:otherhs"
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 2}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.01, "burst_count": 2}})
     def test_local_users_joining_on_another_worker_contribute_to_rate_limit(
         self,
     ) -> None:

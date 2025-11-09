@@ -21,7 +21,7 @@
 import itertools
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Mapping
 
 import attr
 
@@ -128,6 +128,7 @@ class SyncRestServlet(RestServlet):
 
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
+            clock=self.clock,
             cache_name="sync_valid_filter",
             server_name=self.server_name,
         )
@@ -139,7 +140,7 @@ class SyncRestServlet(RestServlet):
             cfg=hs.config.ratelimiting.rc_presence_per_user,
         )
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None
 
@@ -190,7 +191,7 @@ class SyncRestServlet(RestServlet):
         # in the response cache once the set of ignored users has changed.
         # (We filter out ignored users from timeline events, so our sync response
         # is invalid once the set of ignored users changes.)
-        last_ignore_accdata_streampos: Optional[int] = None
+        last_ignore_accdata_streampos: int | None = None
         if not since:
             # No `since`, so this is an initial sync.
             last_ignore_accdata_streampos = await self.store.get_latest_stream_id_for_global_account_data_by_type_for_user(
@@ -365,9 +366,6 @@ class SyncRestServlet(RestServlet):
 
         # https://github.com/matrix-org/matrix-doc/blob/54255851f642f84a4f1aaf7bc063eebe3d76752b/proposals/2732-olm-fallback-keys.md
         # states that this field should always be included, as long as the server supports the feature.
-        response["org.matrix.msc2732.device_unused_fallback_key_types"] = (
-            sync_result.device_unused_fallback_key_types
-        )
         response["device_unused_fallback_key_types"] = (
             sync_result.device_unused_fallback_key_types
         )
@@ -384,7 +382,7 @@ class SyncRestServlet(RestServlet):
         return response
 
     @staticmethod
-    def encode_presence(events: List[UserPresenceState], time_now: int) -> JsonDict:
+    def encode_presence(events: list[UserPresenceState], time_now: int) -> JsonDict:
         return {
             "events": [
                 {
@@ -402,7 +400,7 @@ class SyncRestServlet(RestServlet):
     async def encode_joined(
         self,
         sync_config: SyncConfig,
-        rooms: List[JoinedSyncResult],
+        rooms: list[JoinedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
     ) -> JsonDict:
@@ -432,7 +430,7 @@ class SyncRestServlet(RestServlet):
     @trace_with_opname("sync.encode_invited")
     async def encode_invited(
         self,
-        rooms: List[InvitedSyncResult],
+        rooms: list[InvitedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
     ) -> JsonDict:
@@ -468,10 +466,10 @@ class SyncRestServlet(RestServlet):
     @trace_with_opname("sync.encode_knocked")
     async def encode_knocked(
         self,
-        rooms: List[KnockedSyncResult],
+        rooms: list[KnockedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         """
         Encode the rooms we've knocked on in a sync result.
 
@@ -521,7 +519,7 @@ class SyncRestServlet(RestServlet):
     async def encode_archived(
         self,
         sync_config: SyncConfig,
-        rooms: List[ArchivedSyncResult],
+        rooms: list[ArchivedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
     ) -> JsonDict:
@@ -551,7 +549,7 @@ class SyncRestServlet(RestServlet):
     async def encode_room(
         self,
         sync_config: SyncConfig,
-        room: Union[JoinedSyncResult, ArchivedSyncResult],
+        room: JoinedSyncResult | ArchivedSyncResult,
         time_now: int,
         joined: bool,
         serialize_options: SerializeEventConfig,
@@ -773,7 +771,7 @@ class SlidingSyncRestServlet(RestServlet):
         self.sliding_sync_handler = hs.get_sliding_sync_handler()
         self.event_serializer = hs.get_event_client_serializer()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req_experimental_feature(
             request, allow_guest=True, feature=ExperimentalFeature.MSC3575
         )
@@ -909,7 +907,7 @@ class SlidingSyncRestServlet(RestServlet):
     async def encode_rooms(
         self,
         requester: Requester,
-        rooms: Dict[str, SlidingSyncResult.RoomResult],
+        rooms: dict[str, SlidingSyncResult.RoomResult],
         time_now: int,
     ) -> JsonDict:
         serialize_options = SerializeEventConfig(
@@ -917,7 +915,7 @@ class SlidingSyncRestServlet(RestServlet):
             requester=requester,
         )
 
-        serialized_rooms: Dict[str, JsonDict] = {}
+        serialized_rooms: dict[str, JsonDict] = {}
         for room_id, room_result in rooms.items():
             serialized_rooms[room_id] = {
                 "notification_count": room_result.notification_count,

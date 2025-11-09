@@ -32,15 +32,11 @@ from typing import (
     Callable,
     Collection,
     Container,
-    Dict,
     Iterable,
-    List,
     Mapping,
     Optional,
     Sequence,
-    Tuple,
     TypeVar,
-    Union,
 )
 
 import attr
@@ -120,8 +116,8 @@ class SendJoinResult:
     event: EventBase
     # A string giving the server the event was sent to.
     origin: str
-    state: List[EventBase]
-    auth_chain: List[EventBase]
+    state: list[EventBase]
+    auth_chain: list[EventBase]
 
     # True if 'state' elides non-critical membership events
     partial_state: bool
@@ -135,7 +131,7 @@ class FederationClient(FederationBase):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
-        self.pdu_destination_tried: Dict[str, Dict[str, int]] = {}
+        self.pdu_destination_tried: dict[str, dict[str, int]] = {}
         self._clock.looping_call(self._clear_tried_cache, 60 * 1000)
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
@@ -145,9 +141,10 @@ class FederationClient(FederationBase):
 
         # Cache mapping `event_id` to a tuple of the event itself and the `pull_origin`
         # (which server we pulled the event from)
-        self._get_pdu_cache: ExpiringCache[str, Tuple[EventBase, str]] = ExpiringCache(
+        self._get_pdu_cache: ExpiringCache[str, tuple[EventBase, str]] = ExpiringCache(
             cache_name="get_pdu_cache",
             server_name=self.server_name,
+            hs=self.hs,
             clock=self._clock,
             max_len=1000,
             expiry_ms=120 * 1000,
@@ -162,11 +159,12 @@ class FederationClient(FederationBase):
         # It is a map of (room ID, suggested-only) -> the response of
         # get_room_hierarchy.
         self._get_room_hierarchy_cache: ExpiringCache[
-            Tuple[str, bool],
-            Tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]],
+            tuple[str, bool],
+            tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]],
         ] = ExpiringCache(
             cache_name="get_room_hierarchy_cache",
             server_name=self.server_name,
+            hs=self.hs,
             clock=self._clock,
             max_len=1000,
             expiry_ms=5 * 60 * 1000,
@@ -263,8 +261,8 @@ class FederationClient(FederationBase):
         self,
         user: UserID,
         destination: str,
-        query: Dict[str, Dict[str, Dict[str, int]]],
-        timeout: Optional[int],
+        query: dict[str, dict[str, dict[str, int]]],
+        timeout: int | None,
     ) -> JsonDict:
         """Claims one-time keys for a device hosted on a remote server.
 
@@ -283,8 +281,8 @@ class FederationClient(FederationBase):
 
         # Convert the query with counts into a stable and unstable query and check
         # if attempting to claim more than 1 OTK.
-        content: Dict[str, Dict[str, str]] = {}
-        unstable_content: Dict[str, Dict[str, List[str]]] = {}
+        content: dict[str, dict[str, str]] = {}
+        unstable_content: dict[str, dict[str, list[str]]] = {}
         use_unstable = False
         for user_id, one_time_keys in query.items():
             for device_id, algorithms in one_time_keys.items():
@@ -335,7 +333,7 @@ class FederationClient(FederationBase):
     @tag_args
     async def backfill(
         self, dest: str, room_id: str, limit: int, extremities: Collection[str]
-    ) -> Optional[List[EventBase]]:
+    ) -> list[EventBase] | None:
         """Requests some more historic PDUs for the given room from the
         given destination server.
 
@@ -382,8 +380,8 @@ class FederationClient(FederationBase):
         destination: str,
         event_id: str,
         room_version: RoomVersion,
-        timeout: Optional[int] = None,
-    ) -> Optional[EventBase]:
+        timeout: int | None = None,
+    ) -> EventBase | None:
         """Requests the PDU with given origin and ID from the remote home
         server. Does not have any caching or rate limiting!
 
@@ -442,7 +440,7 @@ class FederationClient(FederationBase):
     @trace
     @tag_args
     async def get_pdu_policy_recommendation(
-        self, destination: str, pdu: EventBase, timeout: Optional[int] = None
+        self, destination: str, pdu: EventBase, timeout: int | None = None
     ) -> str:
         """Requests that the destination server (typically a policy server)
         check the event and return its recommendation on how to handle the
@@ -498,8 +496,8 @@ class FederationClient(FederationBase):
     @trace
     @tag_args
     async def ask_policy_server_to_sign_event(
-        self, destination: str, pdu: EventBase, timeout: Optional[int] = None
-    ) -> Optional[JsonDict]:
+        self, destination: str, pdu: EventBase, timeout: int | None = None
+    ) -> JsonDict | None:
         """Requests that the destination server (typically a policy server)
         sign the event as not spam.
 
@@ -539,8 +537,8 @@ class FederationClient(FederationBase):
         destinations: Collection[str],
         event_id: str,
         room_version: RoomVersion,
-        timeout: Optional[int] = None,
-    ) -> Optional[PulledPduInfo]:
+        timeout: int | None = None,
+    ) -> PulledPduInfo | None:
         """Requests the PDU with given origin and ID from the remote home
         servers.
 
@@ -660,7 +658,7 @@ class FederationClient(FederationBase):
     @tag_args
     async def get_room_state_ids(
         self, destination: str, room_id: str, event_id: str
-    ) -> Tuple[List[str], List[str]]:
+    ) -> tuple[list[str], list[str]]:
         """Calls the /state_ids endpoint to fetch the state at a particular point
         in the room, and the auth events for the given event
 
@@ -709,7 +707,7 @@ class FederationClient(FederationBase):
         room_id: str,
         event_id: str,
         room_version: RoomVersion,
-    ) -> Tuple[List[EventBase], List[EventBase]]:
+    ) -> tuple[list[EventBase], list[EventBase]]:
         """Calls the /state endpoint to fetch the state at a particular point
         in the room.
 
@@ -770,7 +768,7 @@ class FederationClient(FederationBase):
         origin: str,
         pdus: Collection[EventBase],
         room_version: RoomVersion,
-    ) -> List[EventBase]:
+    ) -> list[EventBase]:
         """
         Checks the signatures and hashes of a list of pulled events we got from
         federation and records any signature failures as failed pull attempts.
@@ -804,7 +802,7 @@ class FederationClient(FederationBase):
         # We limit how many PDUs we check at once, as if we try to do hundreds
         # of thousands of PDUs at once we see large memory spikes.
 
-        valid_pdus: List[EventBase] = []
+        valid_pdus: list[EventBase] = []
 
         async def _record_failure_callback(event: EventBase, cause: str) -> None:
             await self.store.record_event_failed_pull_attempt(
@@ -833,10 +831,9 @@ class FederationClient(FederationBase):
         pdu: EventBase,
         origin: str,
         room_version: RoomVersion,
-        record_failure_callback: Optional[
-            Callable[[EventBase, str], Awaitable[None]]
-        ] = None,
-    ) -> Optional[EventBase]:
+        record_failure_callback: Callable[[EventBase, str], Awaitable[None]]
+        | None = None,
+    ) -> EventBase | None:
         """Takes a PDU and checks its signatures and hashes.
 
         If the PDU fails its signature check then we check if we have it in the
@@ -914,7 +911,7 @@ class FederationClient(FederationBase):
 
     async def get_event_auth(
         self, destination: str, room_id: str, event_id: str
-    ) -> List[EventBase]:
+    ) -> list[EventBase]:
         res = await self.transport_layer.get_event_auth(destination, room_id, event_id)
 
         room_version = await self.store.get_room_version(room_id)
@@ -932,7 +929,7 @@ class FederationClient(FederationBase):
         description: str,
         destinations: Iterable[str],
         callback: Callable[[str], Awaitable[T]],
-        failover_errcodes: Optional[Container[str]] = None,
+        failover_errcodes: Container[str] | None = None,
         failover_on_unknown_endpoint: bool = False,
     ) -> T:
         """Try an operation on a series of servers, until it succeeds
@@ -1047,8 +1044,8 @@ class FederationClient(FederationBase):
         user_id: str,
         membership: str,
         content: dict,
-        params: Optional[Mapping[str, Union[str, Iterable[str]]]],
-    ) -> Tuple[str, EventBase, RoomVersion]:
+        params: Mapping[str, str | Iterable[str]] | None,
+    ) -> tuple[str, EventBase, RoomVersion]:
         """
         Creates an m.room.member event, with context, without participating in the room.
 
@@ -1090,7 +1087,7 @@ class FederationClient(FederationBase):
                 % (membership, ",".join(valid_memberships))
             )
 
-        async def send_request(destination: str) -> Tuple[str, EventBase, RoomVersion]:
+        async def send_request(destination: str) -> tuple[str, EventBase, RoomVersion]:
             ret = await self.transport_layer.make_membership_event(
                 destination, room_id, user_id, membership, params
             )
@@ -1235,7 +1232,7 @@ class FederationClient(FederationBase):
             # We now go and check the signatures and hashes for the event. Note
             # that we limit how many events we process at a time to keep the
             # memory overhead from exploding.
-            valid_pdus_map: Dict[str, EventBase] = {}
+            valid_pdus_map: dict[str, EventBase] = {}
 
             async def _execute(pdu: EventBase) -> None:
                 valid_pdu = await self._check_sigs_and_hash_and_fetch_one(
@@ -1505,7 +1502,7 @@ class FederationClient(FederationBase):
         # content.
         return resp[1]
 
-    async def send_knock(self, destinations: List[str], pdu: EventBase) -> JsonDict:
+    async def send_knock(self, destinations: list[str], pdu: EventBase) -> JsonDict:
         """Attempts to send a knock event to a given list of servers. Iterates
         through the list until one attempt succeeds.
 
@@ -1564,11 +1561,11 @@ class FederationClient(FederationBase):
     async def get_public_rooms(
         self,
         remote_server: str,
-        limit: Optional[int] = None,
-        since_token: Optional[str] = None,
-        search_filter: Optional[Dict] = None,
+        limit: int | None = None,
+        since_token: str | None = None,
+        search_filter: dict | None = None,
         include_all_networks: bool = False,
-        third_party_instance_id: Optional[str] = None,
+        third_party_instance_id: str | None = None,
     ) -> JsonDict:
         """Get the list of public rooms from a remote homeserver
 
@@ -1610,7 +1607,7 @@ class FederationClient(FederationBase):
         limit: int,
         min_depth: int,
         timeout: int,
-    ) -> List[EventBase]:
+    ) -> list[EventBase]:
         """Tries to fetch events we are missing. This is called when we receive
         an event without having received all of its ancestors.
 
@@ -1677,7 +1674,7 @@ class FederationClient(FederationBase):
 
     async def get_room_complexity(
         self, destination: str, room_id: str
-    ) -> Optional[JsonDict]:
+    ) -> JsonDict | None:
         """
         Fetch the complexity of a remote room from another server.
 
@@ -1716,7 +1713,7 @@ class FederationClient(FederationBase):
         destinations: Iterable[str],
         room_id: str,
         suggested_only: bool,
-    ) -> Tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]]:
+    ) -> tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]]:
         """
         Call other servers to get a hierarchy of the given room.
 
@@ -1747,7 +1744,7 @@ class FederationClient(FederationBase):
 
         async def send_request(
             destination: str,
-        ) -> Tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]]:
+        ) -> tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]]:
             try:
                 res = await self.transport_layer.get_room_hierarchy(
                     destination=destination,
@@ -1922,8 +1919,8 @@ class FederationClient(FederationBase):
             raise InvalidResponseError(str(e))
 
     async def get_account_status(
-        self, destination: str, user_ids: List[str]
-    ) -> Tuple[JsonDict, List[str]]:
+        self, destination: str, user_ids: list[str]
+    ) -> tuple[JsonDict, list[str]]:
         """Retrieves account statuses for a given list of users on a given remote
         homeserver.
 
@@ -1988,10 +1985,10 @@ class FederationClient(FederationBase):
         max_timeout_ms: int,
         download_ratelimiter: Ratelimiter,
         ip_address: str,
-    ) -> Union[
-        Tuple[int, Dict[bytes, List[bytes]], bytes],
-        Tuple[int, Dict[bytes, List[bytes]]],
-    ]:
+    ) -> (
+        tuple[int, dict[bytes, list[bytes]], bytes]
+        | tuple[int, dict[bytes, list[bytes]]]
+    ):
         try:
             return await self.transport_layer.federation_download_media(
                 destination,
@@ -2034,7 +2031,7 @@ class FederationClient(FederationBase):
         max_timeout_ms: int,
         download_ratelimiter: Ratelimiter,
         ip_address: str,
-    ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+    ) -> tuple[int, dict[bytes, list[bytes]]]:
         try:
             return await self.transport_layer.download_media_v3(
                 destination,

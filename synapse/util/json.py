@@ -16,7 +16,6 @@
 import json
 from typing import (
     Any,
-    Dict,
 )
 
 from immutabledict import immutabledict
@@ -27,7 +26,7 @@ def _reject_invalid_json(val: Any) -> None:
     raise ValueError("Invalid JSON value: '%s'" % val)
 
 
-def _handle_immutabledict(obj: Any) -> Dict[Any, Any]:
+def _handle_immutabledict(obj: Any) -> dict[Any, Any]:
     """Helper for json_encoder. Makes immutabledicts serializable by returning
     the underlying dict
     """

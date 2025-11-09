@@ -60,6 +60,7 @@
     - [Admin API](usage/administration/admin_api/README.md)
       - [Account Validity](admin_api/account_validity.md)
       - [Background Updates](usage/administration/admin_api/background_updates.md)
+      - [Fetch Event](admin_api/fetch_event.md)
       - [Event Reports](admin_api/event_reports.md)
       - [Experimental Features](admin_api/experimental_features.md)
       - [Media](admin_api/media_admin_api.md)
@@ -115,6 +116,8 @@
       - [The Auth Chain Difference Algorithm](auth_chain_difference_algorithm.md)
     - [Media Repository](media_repository.md)
     - [Room and User Statistics](room_and_user_statistics.md)
+    - [Releasing]()
+      - [Release Notes Review Checklist](development/internal_documentation/release_notes_review_checklist.md)
   - [Scripts]()
 
 # Other

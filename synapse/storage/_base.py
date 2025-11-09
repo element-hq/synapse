@@ -21,7 +21,7 @@
 #
 import logging
 from abc import ABCMeta
-from typing import TYPE_CHECKING, Any, Collection, Dict, Iterable, Optional, Union
+from typing import TYPE_CHECKING, Any, Collection, Iterable
 
 from synapse.storage.database import (
     DatabasePool,
@@ -56,11 +56,11 @@ class SQLBaseStore(metaclass=ABCMeta):
     ):
         self.hs = hs
         self.server_name = hs.hostname  # nb must be called this for @cached
-        self._clock = hs.get_clock()
+        self.clock = hs.get_clock()  # nb must be called this for @cached
         self.database_engine = database.engine
         self.db_pool = database
 
-        self.external_cached_functions: Dict[str, CachedFunction] = {}
+        self.external_cached_functions: dict[str, CachedFunction] = {}
 
     def process_replication_rows(  # noqa: B027 (no-op by design)
         self,
@@ -176,7 +176,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         )
 
     def _attempt_to_invalidate_cache(
-        self, cache_name: str, key: Optional[Collection[Any]]
+        self, cache_name: str, key: Collection[Any] | None
     ) -> bool:
         """Attempts to invalidate the cache of the given name, ignoring if the
         cache doesn't exist. Mainly used for invalidating caches on workers,
@@ -218,7 +218,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         self.external_cached_functions[cache_name] = func
 
 
-def db_to_json(db_content: Union[memoryview, bytes, bytearray, str]) -> Any:
+def db_to_json(db_content: memoryview | bytes | bytearray | str) -> Any:
     """
     Take some data from a database row and return a JSON-decoded object.
 
