@@ -207,26 +207,6 @@ jobs:
         env:
           PULL_REQUEST_NUMBER: ${{ github.event.number }}
 
-  lint-pydantic:
-    runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.linting == 'true' }}
-
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
-      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
-        with:
-          poetry-version: "2.1.1"
-          extras: "all"
-      - run: poetry run scripts-dev/check_pydantic_models.py
-
   lint-clippy:
     runs-on: ubuntu-latest
     needs: changes
@@ -341,7 +321,6 @@ jobs:
       - lint-mypy
       - lint-crlf
       - lint-newsfile
-      - lint-pydantic
       - check-sampleconfig
       - check-schema-delta
       - check-lockfile
@@ -363,7 +342,6 @@ jobs:
             lint
             lint-mypy
             lint-newsfile
-            lint-pydantic
             lint-clippy
             lint-clippy-nightly
             lint-rust
@@ -470,7 +448,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: '3.9'
+          python-version: '3.10'
 
       - name: Prepare old deps
         if: steps.cache-poetry-old-deps.outputs.cache-hit != 'true'
@@ -514,7 +492,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["pypy-3.9"]
+        python-version: ["pypy-3.10"]
         extras: ["all"]
 
     steps:
@@ -585,7 +563,7 @@ jobs:
         if: ${{ always() }}
         run: /sytest/scripts/tap_to_gha.pl /logs/results.tap
       - name: Upload SyTest logs
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: ${{ always() }}
         with:
           name: Sytest Logs - ${{ job.status }} - (${{ join(matrix.job.*, ', ') }})
@@ -638,10 +616,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - python-version: "3.9"
+          - python-version: "3.10"
             postgres-version: "13"
 
-          - python-version: "3.13"
+          - python-version: "3.14"
             postgres-version: "17"
 
     services:
@@ -683,7 +661,7 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: postgres
       - name: "Upload schema differences"
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: ${{ failure() && !cancelled() && steps.run_tester_script.outcome == 'failure' }}
         with:
           name: Schema dumps

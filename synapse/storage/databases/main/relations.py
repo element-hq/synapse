@@ -19,25 +19,19 @@
 #
 
 import logging
+from collections import defaultdict
 from typing import (
     TYPE_CHECKING,
     Collection,
-    Dict,
-    FrozenSet,
     Iterable,
-    List,
     Mapping,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
-    Union,
     cast,
 )
 
 import attr
 
-from synapse.api.constants import MAIN_TIMELINE, Direction, Membership, RelationTypes
+from synapse.api.constants import MAIN_TIMELINE, Direction, RelationTypes
 from synapse.api.errors import SynapseError
 from synapse.events import EventBase
 from synapse.storage._base import SQLBaseStore
@@ -107,20 +101,14 @@ class ThreadUpdateInfo:
     Information about a thread update for the sliding sync threads extension.
 
     Attributes:
-        thread_id: The event ID of the thread root event (the event that started the thread).
+        event_id: The event ID of the event in the thread.
         room_id: The room ID where this thread exists.
-        thread_root_event: The actual EventBase object for the thread root event,
-            if include_thread_roots was True in the request. Otherwise None.
-        prev_batch: A pagination token (exclusive) for fetching older events in this thread.
-            Only present if update_count > 1. This token can be used with the /relations
-            endpoint with dir=b to paginate backwards through the thread's history without
-            re-receiving the latest event that was already included in the sliding sync response.
+        stream_ordering: The stream ordering of this event.
     """
 
-    thread_id: str
+    event_id: str
     room_id: str
-    thread_root_event: Optional[EventBase]
-    prev_batch: Optional[StreamToken]
+    stream_ordering: int
 
 
 class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
@@ -200,14 +188,14 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
         room_id: str,
         event_id: str,
         event: EventBase,
-        relation_type: Optional[str] = None,
-        event_type: Optional[str] = None,
+        relation_type: str | None = None,
+        event_type: str | None = None,
         limit: int = 5,
         direction: Direction = Direction.BACKWARDS,
-        from_token: Optional[StreamToken] = None,
-        to_token: Optional[StreamToken] = None,
+        from_token: StreamToken | None = None,
+        to_token: StreamToken | None = None,
         recurse: bool = False,
-    ) -> Tuple[Sequence[_RelatedEvent], Optional[StreamToken]]:
+    ) -> tuple[Sequence[_RelatedEvent], StreamToken | None]:
         """Get a list of relations for an event, ordered by topological ordering.
 
         Args:
@@ -237,7 +225,7 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
         assert limit >= 0
 
         where_clause = ["room_id = ?"]
-        where_args: List[Union[str, int]] = [room_id]
+        where_args: list[str | int] = [room_id]
         is_redacted = event.internal_metadata.is_redacted()
 
         if relation_type is not None:
@@ -309,14 +297,14 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def _get_recent_references_for_event_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[_RelatedEvent], Optional[StreamToken]]:
+        ) -> tuple[list[_RelatedEvent], StreamToken | None]:
             txn.execute(sql, [event.event_id] + where_args + [limit + 1])
 
             events = []
-            topo_orderings: List[int] = []
-            stream_orderings: List[int] = []
+            topo_orderings: list[int] = []
+            stream_orderings: list[int] = []
             for event_id, relation_type, sender, topo_ordering, stream_ordering in cast(
-                List[Tuple[str, str, str, int, int]], txn
+                list[tuple[str, str, str, int, int]], txn
             ):
                 # Do not include edits for redacted events as they leak event
                 # content.
@@ -357,8 +345,8 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
     async def get_all_relations_for_event_with_types(
         self,
         event_id: str,
-        relation_types: List[str],
-    ) -> List[str]:
+        relation_types: list[str],
+    ) -> list[str]:
         """Get the event IDs of all events that have a relation to the given event with
         one of the given relation types.
 
@@ -373,9 +361,9 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def get_all_relation_ids_for_event_with_types_txn(
             txn: LoggingTransaction,
-        ) -> List[str]:
+        ) -> list[str]:
             rows = cast(
-                List[Tuple[str]],
+                list[tuple[str]],
                 self.db_pool.simple_select_many_txn(
                     txn=txn,
                     table="event_relations",
@@ -396,7 +384,7 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
     async def get_all_relations_for_event(
         self,
         event_id: str,
-    ) -> List[str]:
+    ) -> list[str]:
         """Get the event IDs of all events that have a relation to the given event.
 
         Args:
@@ -408,9 +396,9 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def get_all_relation_ids_for_event_txn(
             txn: LoggingTransaction,
-        ) -> List[str]:
+        ) -> list[str]:
             rows = cast(
-                List[Tuple[str]],
+                list[tuple[str]],
                 self.db_pool.simple_select_list_txn(
                     txn=txn,
                     table="event_relations",
@@ -490,13 +478,13 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
         return result is not None
 
     @cached()  # type: ignore[synapse-@cached-mutable]
-    async def get_references_for_event(self, event_id: str) -> List[JsonDict]:
+    async def get_references_for_event(self, event_id: str) -> list[JsonDict]:
         raise NotImplementedError()
 
     @cachedList(cached_method_name="get_references_for_event", list_name="event_ids")
     async def get_references_for_events(
         self, event_ids: Collection[str]
-    ) -> Mapping[str, Optional[Sequence[_RelatedEvent]]]:
+    ) -> Mapping[str, Sequence[_RelatedEvent] | None]:
         """Get a list of references to the given events.
 
         Args:
@@ -526,12 +514,12 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def _get_references_for_events_txn(
             txn: LoggingTransaction,
-        ) -> Mapping[str, List[_RelatedEvent]]:
+        ) -> Mapping[str, list[_RelatedEvent]]:
             txn.execute(sql, args)
 
-            result: Dict[str, List[_RelatedEvent]] = {}
+            result: dict[str, list[_RelatedEvent]] = {}
             for relates_to_id, event_id, sender in cast(
-                List[Tuple[str, str, str]], txn
+                list[tuple[str, str, str]], txn
             ):
                 result.setdefault(relates_to_id, []).append(
                     _RelatedEvent(event_id, sender)
@@ -544,14 +532,14 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
         )
 
     @cached()  # type: ignore[synapse-@cached-mutable]
-    def get_applicable_edit(self, event_id: str) -> Optional[EventBase]:
+    def get_applicable_edit(self, event_id: str) -> EventBase | None:
         raise NotImplementedError()
 
     # TODO: This returns a mutable object, which is generally bad.
     @cachedList(cached_method_name="get_applicable_edit", list_name="event_ids")  # type: ignore[synapse-@cached-mutable]
     async def get_applicable_edits(
         self, event_ids: Collection[str]
-    ) -> Mapping[str, Optional[EventBase]]:
+    ) -> Mapping[str, EventBase | None]:
         """Get the most recent edit (if any) that has happened for the given
         events.
 
@@ -606,14 +594,14 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
                 ORDER by edit.origin_server_ts, edit.event_id
             """
 
-        def _get_applicable_edits_txn(txn: LoggingTransaction) -> Dict[str, str]:
+        def _get_applicable_edits_txn(txn: LoggingTransaction) -> dict[str, str]:
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "relates_to_id", event_ids
             )
             args.append(RelationTypes.REPLACE)
 
             txn.execute(sql % (clause,), args)
-            return dict(cast(Iterable[Tuple[str, str]], txn.fetchall()))
+            return dict(cast(Iterable[tuple[str, str]], txn.fetchall()))
 
         edit_ids = await self.db_pool.runInteraction(
             "get_applicable_edits", _get_applicable_edits_txn
@@ -635,14 +623,14 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
         }
 
     @cached()  # type: ignore[synapse-@cached-mutable]
-    def get_thread_summary(self, event_id: str) -> Optional[Tuple[int, EventBase]]:
+    def get_thread_summary(self, event_id: str) -> tuple[int, EventBase] | None:
         raise NotImplementedError()
 
     # TODO: This returns a mutable object, which is generally bad.
     @cachedList(cached_method_name="get_thread_summary", list_name="event_ids")  # type: ignore[synapse-@cached-mutable]
     async def get_thread_summaries(
         self, event_ids: Collection[str]
-    ) -> Mapping[str, Optional[Tuple[int, EventBase]]]:
+    ) -> Mapping[str, tuple[int, EventBase] | None]:
         """Get the number of threaded replies and the latest reply (if any) for the given events.
 
         Args:
@@ -659,7 +647,7 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def _get_thread_summaries_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[Dict[str, int], Dict[str, str]]:
+        ) -> tuple[dict[str, int], dict[str, str]]:
             # Fetch the count of threaded events and the latest event ID.
             # TODO Should this only allow m.room.message events.
             if isinstance(self.database_engine, PostgresEngine):
@@ -730,7 +718,7 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
             args.append(RelationTypes.THREAD)
 
             txn.execute(sql % (clause,), args)
-            counts = dict(cast(List[Tuple[str, int]], txn.fetchall()))
+            counts = dict(cast(list[tuple[str, int]], txn.fetchall()))
 
             return counts, latest_event_ids
 
@@ -758,8 +746,8 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
     async def get_threaded_messages_per_user(
         self,
         event_ids: Collection[str],
-        users: FrozenSet[str] = frozenset(),
-    ) -> Dict[Tuple[str, str], int]:
+        users: frozenset[str] = frozenset(),
+    ) -> dict[tuple[str, str], int]:
         """Get the number of threaded replies for a set of users.
 
         This is used, in conjunction with get_thread_summaries, to calculate an
@@ -791,7 +779,7 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def _get_threaded_messages_per_user_txn(
             txn: LoggingTransaction,
-        ) -> Dict[Tuple[str, str], int]:
+        ) -> dict[tuple[str, str], int]:
             users_sql, users_args = make_in_list_sql_clause(
                 self.database_engine, "child.sender", users
             )
@@ -831,7 +819,7 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
             user participated in that event's thread, otherwise false.
         """
 
-        def _get_threads_participated_txn(txn: LoggingTransaction) -> Set[str]:
+        def _get_threads_participated_txn(txn: LoggingTransaction) -> set[str]:
             # Fetch whether the requester has participated or not.
             sql = """
                 SELECT DISTINCT relates_to_id
@@ -862,10 +850,10 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     async def events_have_relations(
         self,
-        parent_ids: List[str],
-        relation_senders: Optional[List[str]],
-        relation_types: Optional[List[str]],
-    ) -> List[str]:
+        parent_ids: list[str],
+        relation_senders: list[str] | None,
+        relation_types: list[str] | None,
+    ) -> list[str]:
         """Check which events have a relationship from the given senders of the
         given types.
 
@@ -888,8 +876,8 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
                 %s;
         """
 
-        def _get_if_events_have_relations(txn: LoggingTransaction) -> List[str]:
-            clauses: List[str] = []
+        def _get_if_events_have_relations(txn: LoggingTransaction) -> list[str]:
+            clauses: list[str] = []
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "relates_to_id", parent_ids
             )
@@ -967,8 +955,8 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
         self,
         room_id: str,
         limit: int = 5,
-        from_token: Optional[ThreadsNextBatch] = None,
-    ) -> Tuple[Sequence[str], Optional[ThreadsNextBatch]]:
+        from_token: ThreadsNextBatch | None = None,
+    ) -> tuple[Sequence[str], ThreadsNextBatch | None]:
         """Get a list of thread IDs, ordered by topological ordering of their
         latest reply.
 
@@ -1008,10 +996,10 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def _get_threads_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[str], Optional[ThreadsNextBatch]]:
+        ) -> tuple[list[str], ThreadsNextBatch | None]:
             txn.execute(sql, (room_id, *pagination_args, limit + 1))
 
-            rows = cast(List[Tuple[str, int, int]], txn.fetchall())
+            rows = cast(list[tuple[str, int, int]], txn.fetchall())
             thread_ids = [r[0] for r in rows]
 
             # If there are more events, generate the next pagination key from the
@@ -1150,33 +1138,33 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
             "get_related_thread_id", _get_related_thread_id
         )
 
-    async def get_thread_updates_for_user(
+    async def get_thread_updates_for_rooms(
         self,
         *,
-        user_id: str,
-        from_token: Optional[RoomStreamToken] = None,
-        to_token: Optional[RoomStreamToken] = None,
+        room_ids: Collection[str],
+        from_token: RoomStreamToken | None = None,
+        to_token: RoomStreamToken | None = None,
         limit: int = 5,
-        include_thread_roots: bool = False,
-    ) -> Tuple[Sequence[ThreadUpdateInfo], Optional[StreamToken]]:
+        exclude_thread_ids: Collection[str] | None = None,
+    ) -> tuple[dict[str, list[ThreadUpdateInfo]], StreamToken | None]:
         """Get a list of updated threads, ordered by stream ordering of their
         latest reply, filtered to only include threads in rooms where the user
         is currently joined.
 
         Args:
-            user_id: The user ID to fetch thread updates for. Only threads in rooms
-                where this user is currently joined will be returned.
+            room_ids: The room IDs to fetch thread updates for.
             from_token: The lower bound (exclusive) for thread updates. If None,
                 fetch from the start of the room timeline.
             to_token: The upper bound (inclusive) for thread updates. If None,
                 fetch up to the current position in the room timeline.
             limit: Maximum number of thread updates to return.
-            include_thread_roots: If True, fetch and return the thread root EventBase
-                objects. If False, return None for the thread_root_event field.
+            exclude_thread_ids: Optional collection of thread root event IDs to exclude
+                from the results. Useful for filtering out threads already visible
+                in the room timeline.
 
         Returns:
             A tuple of:
-                A list of ThreadUpdateInfo objects containing thread update information,
+                A dict mapping thread_id to list of ThreadUpdateInfo objects,
                 ordered by stream_ordering descending (most recent first).
                 A prev_batch StreamToken (exclusive) if there are more results available,
                 None otherwise.
@@ -1184,74 +1172,73 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
         # Ensure bad limits aren't being passed in.
         assert limit > 0
 
-        # Generate the pagination clause, if necessary.
-        #
-        # Find any threads where the latest reply is between the stream ordering bounds.
-        pagination_clause = ""
-        pagination_args: List[str] = []
-        if from_token:
-            from_bound = from_token.stream
-            pagination_clause += " AND stream_ordering > ?"
-            pagination_args.append(str(from_bound))
-
-        if to_token:
-            to_bound = to_token.stream
-            pagination_clause += " AND stream_ordering <= ?"
-            pagination_args.append(str(to_bound))
-
-        # Build the update count clause - count events in the thread within the sync window
-        update_count_clause = ""
-        update_count_args: List[str] = []
-        update_count_clause = f"""
-            (SELECT COUNT(*)
-             FROM event_relations AS er
-             INNER JOIN events AS e ON er.event_id = e.event_id
-             WHERE er.relates_to_id = threads.thread_id
-               AND er.relation_type = '{RelationTypes.THREAD}'"""
-        if from_token:
-            update_count_clause += " AND e.stream_ordering > ?"
-            update_count_args.append(str(from_token.stream))
-        if to_token:
-            update_count_clause += " AND e.stream_ordering <= ?"
-            update_count_args.append(str(to_token.stream))
-        update_count_clause += ")"
-
-        # Filter threads to only those in rooms where the user is currently joined.
-        sql = f"""
-            SELECT thread_id, room_id, stream_ordering, {update_count_clause} AS update_count
-              FROM threads
-              WHERE EXISTS (
-                  SELECT 1
-                  FROM local_current_membership AS lcm
-                  WHERE lcm.room_id = threads.room_id
-                      AND lcm.user_id = ?
-                      AND lcm.membership = ?
-              )
-              {pagination_clause}
-              ORDER BY stream_ordering DESC
-              LIMIT ?
-        """
+        if len(room_ids) == 0:
+            return ({}), None
 
         def _get_thread_updates_for_user_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Tuple[str, str, int, int]], Optional[int]]:
-            # Add 1 to the limit as a free way of determining if there are more results
-            # than the limit amount. If `limit + 1` results are returned, then there are
-            # more results. Otherwise we would need to do a separate query to determine
-            # if this was true when exactly `limit` results are returned.
+        ) -> tuple[list[tuple[str, str, str, int]], int | None]:
+            room_clause, room_id_values = make_in_list_sql_clause(
+                txn.database_engine, "e.room_id", room_ids
+            )
+
+            # Generate the pagination clause, if necessary.
+            pagination_clause = ""
+            pagination_args: list[str] = []
+            if from_token:
+                from_bound = from_token.stream
+                pagination_clause += " AND stream_ordering > ?"
+                pagination_args.append(str(from_bound))
+
+            if to_token:
+                to_bound = to_token.stream
+                pagination_clause += " AND stream_ordering <= ?"
+                pagination_args.append(str(to_bound))
+
+            # Generate the exclusion clause for thread IDs, if necessary.
+            exclusion_clause = ""
+            exclusion_args: list[str] = []
+            if exclude_thread_ids:
+                exclusion_clause, exclusion_args = make_in_list_sql_clause(
+                    txn.database_engine,
+                    "er.relates_to_id",
+                    exclude_thread_ids,
+                    negative=True,
+                )
+                exclusion_clause = f" AND {exclusion_clause}"
+
+            # TODO: improve the fact that multiple hits for the same thread means we
+            # won't get as many overall updates for the sss response
+
+            # Find any thread events between the stream ordering bounds.
+            sql = f"""
+                SELECT e.event_id, er.relates_to_id, e.room_id, e.stream_ordering
+                  FROM event_relations AS er
+                  INNER JOIN events AS e ON er.event_id = e.event_id
+                  WHERE er.relation_type = '{RelationTypes.THREAD}'
+                  AND {room_clause}
+                  {exclusion_clause}
+                  {pagination_clause}
+                  ORDER BY stream_ordering DESC
+                  LIMIT ?
+            """
+
+            # Fetch `limit + 1` rows as a way to detect if there are more results beyond
+            # what we're returning. If we get exactly `limit + 1` rows back, we know there
+            # are more results available and we can set `next_token`. We only return the
+            # first `limit` rows to the caller. This avoids needing a separate COUNT query.
             txn.execute(
                 sql,
                 (
-                    *update_count_args,
-                    user_id,
-                    Membership.JOIN,
+                    *room_id_values,
+                    *exclusion_args,
                     *pagination_args,
                     limit + 1,
                 ),
             )
 
-            # SQL returns: thread_id, room_id, stream_ordering, update_count
-            rows = cast(List[Tuple[str, str, int, int]], txn.fetchall())
+            # SQL returns: event_id, thread_id, room_id, stream_ordering
+            rows = cast(list[tuple[str, str, str, int]], txn.fetchall())
 
             # If there are more events, generate the next pagination key from the
             # last thread which will be returned.
@@ -1261,7 +1248,7 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
                 # that will be the last row we return from this function.
                 # This works as an exclusive bound that can be backpaginated from.
                 # Use the stream_ordering field (index 2 in original rows)
-                next_token = rows[-2][2]
+                next_token = rows[-2][3]
 
             return rows[:limit], next_token
 
@@ -1280,35 +1267,14 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
                 StreamKeyType.ROOM, RoomStreamToken(stream=next_token_int - 1)
             )
 
-        # Optionally fetch thread root events
-        event_map = {}
-        if include_thread_roots and thread_infos:
-            thread_root_ids = [thread_id for thread_id, _, _, _ in thread_infos]
-            thread_root_events = await self.get_events_as_list(thread_root_ids)
-            event_map = {e.event_id: e for e in thread_root_events}
-
-        # Build ThreadUpdateInfo objects with per-thread prev_batch tokens.
-        thread_update_infos = []
-        for thread_id, room_id, stream_ordering, update_count in thread_infos:
-            # Generate prev_batch token if this thread has more than one update.
-            per_thread_prev_batch = None
-            if update_count > 1:
-                # Create a token pointing to one position before the latest event's
-                # stream position.
-                # This makes it exclusive - /relations with dir=b won't return the
-                # latest event again.
-                # Use StreamToken.START as base (all other streams at 0) since only room
-                # position matters.
-                per_thread_prev_batch = StreamToken.START.copy_and_replace(
-                    StreamKeyType.ROOM, RoomStreamToken(stream=stream_ordering - 1)
-                )
-
-            thread_update_infos.append(
+        # Build ThreadUpdateInfo objects.
+        thread_update_infos: dict[str, list[ThreadUpdateInfo]] = defaultdict(list)
+        for event_id, thread_id, room_id, stream_ordering in thread_infos:
+            thread_update_infos[thread_id].append(
                 ThreadUpdateInfo(
-                    thread_id=thread_id,
+                    event_id=event_id,
                     room_id=room_id,
-                    thread_root_event=event_map.get(thread_id),
-                    prev_batch=per_thread_prev_batch,
+                    stream_ordering=stream_ordering,
                 )
             )
 

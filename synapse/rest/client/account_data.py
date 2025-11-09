@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import AccountDataTypes, ReceiptTypes
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
@@ -75,7 +75,7 @@ class AccountDataServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, account_data_type: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot add account data for other users.")
@@ -101,16 +101,16 @@ class AccountDataServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, account_data_type: str
-    ) -> Tuple[int, JsonMapping]:
+    ) -> tuple[int, JsonMapping]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot get account data for other users.")
 
         # Push rules are stored in a separate table and must be queried separately.
         if account_data_type == AccountDataTypes.PUSH_RULES:
-            account_data: Optional[
-                JsonMapping
-            ] = await self._push_rules_handler.push_rules_for_user(requester.user)
+            account_data: (
+                JsonMapping | None
+            ) = await self._push_rules_handler.push_rules_for_user(requester.user)
         else:
             account_data = await self.store.get_global_account_data_by_type_for_user(
                 user_id, account_data_type
@@ -152,7 +152,7 @@ class UnstableAccountDataServlet(RestServlet):
         request: SynapseRequest,
         user_id: str,
         account_data_type: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot delete account data for other users.")
@@ -191,7 +191,7 @@ class RoomAccountDataServlet(RestServlet):
         user_id: str,
         room_id: str,
         account_data_type: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot add account data for other users.")
@@ -230,7 +230,7 @@ class RoomAccountDataServlet(RestServlet):
         user_id: str,
         room_id: str,
         account_data_type: str,
-    ) -> Tuple[int, JsonMapping]:
+    ) -> tuple[int, JsonMapping]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot get account data for other users.")
@@ -244,7 +244,7 @@ class RoomAccountDataServlet(RestServlet):
 
         # Room-specific push rules are not currently supported.
         if account_data_type == AccountDataTypes.PUSH_RULES:
-            account_data: Optional[JsonMapping] = {}
+            account_data: JsonMapping | None = {}
         else:
             account_data = await self.store.get_account_data_for_room_and_type(
                 user_id, room_id, account_data_type
@@ -288,7 +288,7 @@ class UnstableRoomAccountDataServlet(RestServlet):
         user_id: str,
         room_id: str,
         account_data_type: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot delete account data for other users.")

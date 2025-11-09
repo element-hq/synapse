@@ -33,7 +33,6 @@ See doc/log_contexts.rst for details on how this works.
 import logging
 import threading
 import typing
-import warnings
 from types import TracebackType
 from typing import (
     TYPE_CHECKING,
@@ -41,9 +40,6 @@ from typing import (
     Awaitable,
     Callable,
     Literal,
-    Optional,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     overload,
@@ -55,10 +51,28 @@ from typing_extensions import ParamSpec
 from twisted.internet import defer, threads
 from twisted.python.threadpool import ThreadPool
 
+from synapse.logging.loggers import ExplicitlyConfiguredLogger
+from synapse.util.stringutils import random_string_insecure_fast
+
 if TYPE_CHECKING:
+    from synapse.logging.scopecontextmanager import _LogContextScope
     from synapse.types import ISynapseReactor
 
 logger = logging.getLogger(__name__)
+
+original_logger_class = logging.getLoggerClass()
+logging.setLoggerClass(ExplicitlyConfiguredLogger)
+logcontext_debug_logger = logging.getLogger("synapse.logging.context.debug")
+"""
+A logger for debugging when the logcontext switches.
+
+Because this is very noisy and probably something only developers want to see when
+debugging logcontext problems, we want people to explictly opt-in before seeing anything
+in the logs. Requires explicitly setting `synapse.logging.context.debug` in the logging
+configuration and does not inherit the log level from the parent logger.
+"""
+# Restore the original logger class
+logging.setLoggerClass(original_logger_class)
 
 try:
     import resource
@@ -73,7 +87,7 @@ try:
 
     is_thread_resource_usage_supported = True
 
-    def get_thread_resource_usage() -> "Optional[resource.struct_rusage]":
+    def get_thread_resource_usage() -> "resource.struct_rusage | None":
         return resource.getrusage(RUSAGE_THREAD)
 
 except Exception:
@@ -81,7 +95,7 @@ except Exception:
     # won't track resource usage.
     is_thread_resource_usage_supported = False
 
-    def get_thread_resource_usage() -> "Optional[resource.struct_rusage]":
+    def get_thread_resource_usage() -> "resource.struct_rusage | None":
         return None
 
 
@@ -122,7 +136,7 @@ class ContextResourceUsage:
         "evt_db_fetch_count",
     ]
 
-    def __init__(self, copy_from: "Optional[ContextResourceUsage]" = None) -> None:
+    def __init__(self, copy_from: "ContextResourceUsage | None" = None) -> None:
         """Create a new ContextResourceUsage
 
         Args:
@@ -215,8 +229,8 @@ class ContextRequest:
     request_id: str
     ip_address: str
     site_tag: str
-    requester: Optional[str]
-    authenticated_entity: Optional[str]
+    requester: str | None
+    authenticated_entity: str | None
     method: str
     url: str
     protocol: str
@@ -238,7 +252,14 @@ class _Sentinel:
     we should always know which server the logs are coming from.
     """
 
-    __slots__ = ["previous_context", "finished", "server_name", "request", "tag"]
+    __slots__ = [
+        "previous_context",
+        "finished",
+        "scope",
+        "server_name",
+        "request",
+        "tag",
+    ]
 
     def __init__(self) -> None:
         # Minimal set for compatibility with LoggingContext
@@ -246,15 +267,16 @@ class _Sentinel:
         self.finished = False
         self.server_name = "unknown_server_from_sentinel_context"
         self.request = None
+        self.scope = None
         self.tag = None
 
     def __str__(self) -> str:
         return "sentinel"
 
-    def start(self, rusage: "Optional[resource.struct_rusage]") -> None:
+    def start(self, rusage: "resource.struct_rusage | None") -> None:
         pass
 
-    def stop(self, rusage: "Optional[resource.struct_rusage]") -> None:
+    def stop(self, rusage: "resource.struct_rusage | None") -> None:
         pass
 
     def add_database_transaction(self, duration_sec: float) -> None:
@@ -303,6 +325,7 @@ class LoggingContext:
         "finished",
         "request",
         "tag",
+        "scope",
     ]
 
     def __init__(
@@ -310,8 +333,8 @@ class LoggingContext:
         *,
         name: str,
         server_name: str,
-        parent_context: "Optional[LoggingContext]" = None,
-        request: Optional[ContextRequest] = None,
+        parent_context: "LoggingContext | None" = None,
+        request: ContextRequest | None = None,
     ) -> None:
         self.previous_context = current_context()
 
@@ -320,13 +343,14 @@ class LoggingContext:
 
         # The thread resource usage when the logcontext became active. None
         # if the context is not currently active.
-        self.usage_start: Optional[resource.struct_rusage] = None
+        self.usage_start: resource.struct_rusage | None = None
 
         self.name = name
         self.server_name = server_name
         self.main_thread = get_thread_id()
         self.request = None
         self.tag = ""
+        self.scope: "_LogContextScope" | None = None
 
         # keep track of whether we have hit the __exit__ block for this context
         # (suggesting that the the thing that created the context thinks it should
@@ -340,6 +364,9 @@ class LoggingContext:
             # which request this corresponds to
             self.request = self.parent_context.request
 
+            # we also track the current scope:
+            self.scope = self.parent_context.scope
+
         if request is not None:
             # the request param overrides the request from the parent context
             self.request = request
@@ -347,49 +374,9 @@ class LoggingContext:
     def __str__(self) -> str:
         return self.name
 
-    @classmethod
-    def current_context(cls) -> LoggingContextOrSentinel:
-        """Get the current logging context from thread local storage
-
-        This exists for backwards compatibility. ``current_context()`` should be
-        called directly.
-
-        Returns:
-            The current logging context
-        """
-        warnings.warn(
-            "synapse.logging.context.LoggingContext.current_context() is deprecated "
-            "in favor of synapse.logging.context.current_context().",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return current_context()
-
-    @classmethod
-    def set_current_context(
-        cls, context: LoggingContextOrSentinel
-    ) -> LoggingContextOrSentinel:
-        """Set the current logging context in thread local storage
-
-        This exists for backwards compatibility. ``set_current_context()`` should be
-        called directly.
-
-        Args:
-            context: The context to activate.
-
-        Returns:
-            The context that was previously active
-        """
-        warnings.warn(
-            "synapse.logging.context.LoggingContext.set_current_context() is deprecated "
-            "in favor of synapse.logging.context.set_current_context().",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return set_current_context(context)
-
     def __enter__(self) -> "LoggingContext":
         """Enters this logging context into thread local storage"""
+        logcontext_debug_logger.debug("LoggingContext(%s).__enter__", self.name)
         old_context = set_current_context(self)
         if self.previous_context != old_context:
             logcontext_error(
@@ -403,15 +390,18 @@ class LoggingContext:
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
-        value: Optional[BaseException],
-        traceback: Optional[TracebackType],
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
     ) -> None:
         """Restore the logging context in thread local storage to the state it
         was before this context was entered.
         Returns:
             None to avoid suppressing any exceptions that were thrown.
         """
+        logcontext_debug_logger.debug(
+            "LoggingContext(%s).__exit__ --> %s", self.name, self.previous_context
+        )
         current = set_current_context(self.previous_context)
         if current is not self:
             if current is SENTINEL_CONTEXT:
@@ -426,7 +416,7 @@ class LoggingContext:
         # recorded against the correct metrics.
         self.finished = True
 
-    def start(self, rusage: "Optional[resource.struct_rusage]") -> None:
+    def start(self, rusage: "resource.struct_rusage | None") -> None:
         """
         Record that this logcontext is currently running.
 
@@ -451,7 +441,7 @@ class LoggingContext:
         else:
             self.usage_start = rusage
 
-    def stop(self, rusage: "Optional[resource.struct_rusage]") -> None:
+    def stop(self, rusage: "resource.struct_rusage | None") -> None:
         """
         Record that this logcontext is no longer running.
 
@@ -505,13 +495,13 @@ class LoggingContext:
 
         return res
 
-    def _get_cputime(self, current: "resource.struct_rusage") -> Tuple[float, float]:
+    def _get_cputime(self, current: "resource.struct_rusage") -> tuple[float, float]:
         """Get the cpu usage time between start() and the given rusage
 
         Args:
             rusage: the current resource usage
 
-        Returns: Tuple[float, float]: seconds in user mode, seconds in system mode
+        Returns: tuple[float, float]: seconds in user mode, seconds in system mode
         """
         assert self.usage_start is not None
 
@@ -613,25 +603,57 @@ class LoggingContextFilter(logging.Filter):
         self._default_request = request
 
     def filter(self, record: logging.LogRecord) -> Literal[True]:
-        """Add each fields from the logging contexts to the record.
+        """
+        Add each field from the logging context to the record.
+
+        Please be mindful of 3rd-party code outside of Synapse (like in the case of
+        Synapse Pro for small hosts) as this is running as a global log record filter.
+        Other code may have set their own attributes on the record and the log record
+        may not be relevant to Synapse at all so we should not mangle it.
+
+        We can have some defaults but we should avoid overwriting existing attributes on
+        any log record unless we actually have a Synapse logcontext (not just the
+        default sentinel logcontext).
+
         Returns:
             True to include the record in the log output.
         """
         context = current_context()
         record.request = self._default_request
-        record.server_name = "unknown_server_from_no_context"
+
+        # Avoid overwriting an existing `server_name` on the record. This is running in
+        # the context of a global log record filter so there may be 3rd-party code that
+        # adds their own `server_name` and we don't want to interfere with that
+        # (clobber).
+        if not hasattr(record, "server_name"):
+            record.server_name = "unknown_server_from_no_logcontext"
 
         # context should never be None, but if it somehow ends up being, then
         # we end up in a death spiral of infinite loops, so let's check, for
         # robustness' sake.
         if context is not None:
-            record.server_name = context.server_name
+
+            def safe_set(attr: str, value: Any) -> None:
+                """
+                Only write the attribute if it hasn't already been set or we actually have
+                a Synapse logcontext (indicating that this log record is relevant to
+                Synapse).
+                """
+                if context is not SENTINEL_CONTEXT or not hasattr(record, attr):
+                    setattr(record, attr, value)
+
+            safe_set("server_name", context.server_name)
+
             # Logging is interested in the request ID. Note that for backwards
             # compatibility this is stored as the "request" on the record.
-            record.request = str(context)
+            safe_set("request", str(context))
 
             # Add some data from the HTTP request.
             request = context.request
+            # The sentinel logcontext has no request so if we get past this point, we
+            # know we have some actual Synapse logcontext and don't need to worry about
+            # using `safe_set`. We'll consider this an optimization since this is a
+            # pretty hot-path.
             if request is None:
                 return True
 
@@ -660,22 +682,35 @@ class PreserveLoggingContext:
     reactor back to the code).
     """
 
-    __slots__ = ["_old_context", "_new_context"]
+    __slots__ = ["_old_context", "_new_context", "_instance_id"]
 
     def __init__(
         self, new_context: LoggingContextOrSentinel = SENTINEL_CONTEXT
     ) -> None:
         self._new_context = new_context
+        self._instance_id = random_string_insecure_fast(5)
 
     def __enter__(self) -> None:
+        logcontext_debug_logger.debug(
+            "PreserveLoggingContext(%s).__enter__ %s --> %s",
+            self._instance_id,
+            current_context(),
+            self._new_context,
+        )
         self._old_context = set_current_context(self._new_context)
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
-        value: Optional[BaseException],
-        traceback: Optional[TracebackType],
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
     ) -> None:
+        logcontext_debug_logger.debug(
+            "PreserveLoggingContext(%s).__exit %s --> %s",
+            self._instance_id,
+            current_context(),
+            self._old_context,
+        )
         context = set_current_context(self._old_context)
 
         if context != self._new_context:
@@ -787,10 +822,7 @@ def preserve_fn(f: Callable[P, R]) -> Callable[P, "defer.Deferred[R]"]: ...
 
 
 def preserve_fn(
-    f: Union[
-        Callable[P, R],
-        Callable[P, Awaitable[R]],
-    ],
+    f: Callable[P, R] | Callable[P, Awaitable[R]],
 ) -> Callable[P, "defer.Deferred[R]"]:
     """Function decorator which wraps the function with run_in_background"""
 
@@ -816,10 +848,7 @@ def run_in_background(
 
 
 def run_in_background(
-    f: Union[
-        Callable[P, R],
-        Callable[P, Awaitable[R]],
-    ],
+    f: Callable[P, R] | Callable[P, Awaitable[R]],
     *args: P.args,
     **kwargs: P.kwargs,
 ) -> "defer.Deferred[R]":
@@ -855,7 +884,11 @@ def run_in_background(
         Note that the returned Deferred does not follow the synapse logcontext
         rules.
     """
+    instance_id = random_string_insecure_fast(5)
     calling_context = current_context()
+    logcontext_debug_logger.debug(
+        "run_in_background(%s): called with logcontext=%s", instance_id, calling_context
+    )
     try:
         # (kick off the task in the current context)
         res = f(*args, **kwargs)
@@ -888,7 +921,7 @@ def run_in_background(
         # If the function messes with logcontexts, we can assume it follows the Synapse
         # logcontext rules (Rules for functions returning awaitables: "If the awaitable
         # is already complete, the function returns with the same logcontext it started
-        # with."). If it function doesn't touch logcontexts at all, we can also assume
+        # with."). If the function doesn't touch logcontexts at all, we can also assume
         # the logcontext is unchanged.
         #
         # Either way, the function should have maintained the calling logcontext, so we
@@ -897,6 +930,21 @@ def run_in_background(
         # to reset the logcontext to the sentinel logcontext as that would run
         # immediately (remember our goal is to maintain the calling logcontext when we
         # return).
+        if current_context() != calling_context:
+            logcontext_error(
+                "run_in_background(%s): deferred already completed but the function did not maintain the calling logcontext %s (found %s)"
+                % (
+                    instance_id,
+                    calling_context,
+                    current_context(),
+                )
+            )
+        else:
+            logcontext_debug_logger.debug(
+                "run_in_background(%s): deferred already completed (maintained the calling logcontext %s)",
+                instance_id,
+                calling_context,
+            )
         return d
 
     # Since the function we called may follow the Synapse logcontext rules (Rules for
@@ -907,6 +955,11 @@ def run_in_background(
     #
     # Our goal is to have the caller logcontext unchanged after firing off the
     # background task and returning.
+    logcontext_debug_logger.debug(
+        "run_in_background(%s): restoring calling logcontext %s",
+        instance_id,
+        calling_context,
+    )
     set_current_context(calling_context)
 
     # If the function we called is playing nice and following the Synapse logcontext
@@ -922,7 +975,23 @@ def run_in_background(
     # which is supposed to have a single entry and exit point. But
     # by spawning off another deferred, we are effectively
     # adding a new exit point.)
-    d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
+    if logcontext_debug_logger.isEnabledFor(logging.DEBUG):
+
+        def _log_set_context_cb(
+            result: ResultT, context: LoggingContextOrSentinel
+        ) -> ResultT:
+            logcontext_debug_logger.debug(
+                "run_in_background(%s): resetting logcontext to %s",
+                instance_id,
+                context,
+            )
+            set_current_context(context)
+            return result
+
+        d.addBoth(_log_set_context_cb, SENTINEL_CONTEXT)
+    else:
+        d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
+
     return d
 
 
@@ -978,10 +1047,21 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     restores the old context once the awaitable completes (execution passes from the
     reactor back to the code).
     """
+    instance_id = random_string_insecure_fast(5)
+    logcontext_debug_logger.debug(
+        "make_deferred_yieldable(%s): called with logcontext=%s",
+        instance_id,
+        current_context(),
+    )
+
     # The deferred has already completed
     if deferred.called and not deferred.paused:
         # it looks like this deferred is ready to run any callbacks we give it
         # immediately. We may as well optimise out the logcontext faffery.
+        logcontext_debug_logger.debug(
+            "make_deferred_yieldable(%s): deferred already completed and the function should have maintained the logcontext",
+            instance_id,
+        )
         return deferred
 
     # Our goal is to have the caller logcontext unchanged after they yield/await the
@@ -993,8 +1073,31 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     # does) while the deferred runs in the reactor event loop, we reset the logcontext
     # and add a callback to the deferred to restore it so the caller's logcontext is
     # active when the deferred completes.
-    prev_context = set_current_context(SENTINEL_CONTEXT)
-    deferred.addBoth(_set_context_cb, prev_context)
+
+    logcontext_debug_logger.debug(
+        "make_deferred_yieldable(%s): resetting logcontext to %s",
+        instance_id,
+        SENTINEL_CONTEXT,
+    )
+    calling_context = set_current_context(SENTINEL_CONTEXT)
+
+    if logcontext_debug_logger.isEnabledFor(logging.DEBUG):
+
+        def _log_set_context_cb(
+            result: ResultT, context: LoggingContextOrSentinel
+        ) -> ResultT:
+            logcontext_debug_logger.debug(
+                "make_deferred_yieldable(%s): restoring calling logcontext to %s",
+                instance_id,
+                context,
+            )
+            set_current_context(context)
+            return result
+
+        deferred.addBoth(_log_set_context_cb, calling_context)
+    else:
+        deferred.addBoth(_set_context_cb, calling_context)
+
     return deferred
 
 

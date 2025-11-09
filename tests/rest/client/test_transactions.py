@@ -20,7 +20,7 @@
 #
 
 from http import HTTPStatus
-from typing import Any, Generator, Tuple, cast
+from typing import Any, Generator, cast
 from unittest.mock import AsyncMock, Mock, call
 
 from twisted.internet import defer, reactor as _reactor
@@ -29,16 +29,19 @@ from synapse.logging.context import SENTINEL_CONTEXT, LoggingContext, current_co
 from synapse.rest.client.transactions import CLEANUP_PERIOD_MS, HttpTransactionCache
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
+from synapse.util.constants import (
+    MILLISECONDS_PER_SECOND,
+)
 
 from tests import unittest
-from tests.utils import MockClock
+from tests.server import get_clock
 
 reactor = cast(ISynapseReactor, _reactor)
 
 
 class HttpTransactionCacheTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.clock = MockClock()
+        self.reactor, self.clock = get_clock()
         self.hs = Mock()
         self.hs.get_clock = Mock(return_value=self.clock)
         self.hs.get_auth = Mock()
@@ -89,9 +92,11 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         self,
     ) -> Generator["defer.Deferred[Any]", object, None]:
         @defer.inlineCallbacks
-        def cb() -> Generator["defer.Deferred[object]", object, Tuple[int, JsonDict]]:
+        def cb() -> Generator["defer.Deferred[object]", object, tuple[int, JsonDict]]:
+            # Ignore `multiple-internal-clocks` linter error here since we are creating a `Clock`
+            # for testing purposes.
             yield defer.ensureDeferred(
-                Clock(reactor, server_name="test_server").sleep(0)
+                Clock(reactor, server_name="test_server").sleep(0)  # type: ignore[multiple-internal-clocks]
             )
             return 1, {}
 
@@ -119,7 +124,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         """
         called = [False]
 
-        def cb() -> "defer.Deferred[Tuple[int, JsonDict]]":
+        def cb() -> "defer.Deferred[tuple[int, JsonDict]]":
             if called[0]:
                 # return a valid result the second time
                 return defer.succeed(self.mock_http_response)
@@ -151,7 +156,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         """
         called = [False]
 
-        def cb() -> "defer.Deferred[Tuple[int, JsonDict]]":
+        def cb() -> "defer.Deferred[tuple[int, JsonDict]]":
             if called[0]:
                 # return a valid result the second time
                 return defer.succeed(self.mock_http_response)
@@ -180,8 +185,9 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         yield self.cache.fetch_or_execute_request(
             self.mock_request, self.mock_requester, cb, "an arg"
         )
-        # should NOT have cleaned up yet
-        self.clock.advance_time_msec(CLEANUP_PERIOD_MS / 2)
+        # Advance time just under the cleanup period.
+        # Should NOT have cleaned up yet
+        self.reactor.advance((CLEANUP_PERIOD_MS - 1) / MILLISECONDS_PER_SECOND)
 
         yield self.cache.fetch_or_execute_request(
             self.mock_request, self.mock_requester, cb, "an arg"
@@ -189,7 +195,8 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         # still using cache
         cb.assert_called_once_with("an arg")
 
-        self.clock.advance_time_msec(CLEANUP_PERIOD_MS)
+        # Advance time just after the cleanup period.
+        self.reactor.advance(2 / MILLISECONDS_PER_SECOND)
 
         yield self.cache.fetch_or_execute_request(
             self.mock_request, self.mock_requester, cb, "an arg"

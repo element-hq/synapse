@@ -19,7 +19,6 @@
 #
 #
 import logging
-from typing import Optional
 
 import attr
 
@@ -66,8 +65,8 @@ def extract_stream_token_from_pagination_token(token_str: str) -> str:
 class PaginationConfig:
     """A configuration object which stores pagination parameters."""
 
-    from_token: Optional[StreamToken]
-    to_token: Optional[StreamToken]
+    from_token: StreamToken | None
+    to_token: StreamToken | None
     direction: Direction
     limit: int
 

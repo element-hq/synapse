@@ -56,8 +56,9 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Request thread updates
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
+            content={},
             access_token=user1_tok,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
@@ -95,9 +96,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Request thread updates
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -160,9 +162,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Request thread updates
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -221,9 +224,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Request thread updates
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -270,9 +274,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Request first page with small limit
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=2",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -285,9 +290,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Request second page
         channel = self.make_request(
-            "GET",
+            "POST",
             f"/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=2&from={next_batch}",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -306,9 +312,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
         next_batch_2 = channel.json_body["next_batch"]
 
         channel = self.make_request(
-            "GET",
+            "POST",
             f"/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=2&from={next_batch_2}",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -337,9 +344,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Request with forward direction should fail
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=f",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 400)
 
@@ -352,17 +360,19 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Zero limit should fail
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=0",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 400)
 
         # Negative limit should fail
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=-5",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 400)
 
@@ -375,17 +385,19 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Invalid from token
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&from=invalid_token",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 400)
 
         # Invalid to token
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&to=invalid_token",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 400)
 
@@ -439,9 +451,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Request with limit=1 to get only the latest thread update
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=1",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200)
         self.assertIn("next_batch", channel.json_body)
@@ -455,9 +468,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
         # This should get only the same thread updates as before, not the additional
         # update.
         channel = self.make_request(
-            "GET",
+            "POST",
             f"/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&to={next_batch}",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200)
 
@@ -506,9 +520,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Request thread updates
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200)
 
@@ -584,9 +599,10 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
 
         # Request thread updates for user1 - should only get room1
         channel = self.make_request(
-            "GET",
+            "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200)
 

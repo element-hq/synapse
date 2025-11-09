@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -24,9 +24,6 @@ from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
-from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
-)
 from synapse.replication.http.delayed_events import (
     ReplicationAddedDelayedEventRestServlet,
 )
@@ -58,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 class DelayedEventsHandler:
     def __init__(self, hs: "HomeServer"):
+        self.hs = hs
         self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
@@ -76,10 +74,10 @@ class DelayedEventsHandler:
             cfg=self._config.ratelimiting.rc_delayed_event_mgmt,
         )
 
-        self._next_delayed_event_call: Optional[IDelayedCall] = None
+        self._next_delayed_event_call: IDelayedCall | None = None
 
         # The current position in the current_state_delta stream
-        self._event_pos: Optional[int] = None
+        self._event_pos: int | None = None
 
         # Guard to ensure we only process event deltas one at a time
         self._event_processing = False
@@ -94,7 +92,10 @@ class DelayedEventsHandler:
                 hs.get_notifier().add_replication_callback(self.notify_new_event)
                 # Kick off again (without blocking) to catch any missed notifications
                 # that may have fired before the callback was added.
-                self._clock.call_later(0, self.notify_new_event)
+                self._clock.call_later(
+                    0,
+                    self.notify_new_event,
+                )
 
                 # Delayed events that are already marked as processed on startup might not have been
                 # sent properly on the last run of the server, so unmark them to send them again.
@@ -112,15 +113,14 @@ class DelayedEventsHandler:
                     self._schedule_next_at(next_send_ts)
 
                 # Can send the events in background after having awaited on marking them as processed
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "_send_events",
-                    self.server_name,
                     self._send_events,
                     events,
                 )
 
-            self._initialized_from_db = run_as_background_process(
-                "_schedule_db_events", self.server_name, _schedule_db_events
+            self._initialized_from_db = self.hs.run_as_background_process(
+                "_schedule_db_events", _schedule_db_events
             )
         else:
             self._repl_client = ReplicationAddedDelayedEventRestServlet.make_client(hs)
@@ -145,9 +145,7 @@ class DelayedEventsHandler:
             finally:
                 self._event_processing = False
 
-        run_as_background_process(
-            "delayed_events.notify_new_event", self.server_name, process
-        )
+        self.hs.run_as_background_process("delayed_events.notify_new_event", process)
 
     async def _unsafe_process_new_event(self) -> None:
         # We purposefully fetch the current max room stream ordering before
@@ -228,7 +226,7 @@ class DelayedEventsHandler:
 
                 await self._store.update_delayed_events_stream_pos(max_pos)
 
-    async def _handle_state_deltas(self, deltas: List[StateDelta]) -> None:
+    async def _handle_state_deltas(self, deltas: list[StateDelta]) -> None:
         """
         Process current state deltas to cancel other users' pending delayed events
         that target the same state.
@@ -329,8 +327,8 @@ class DelayedEventsHandler:
         *,
         room_id: str,
         event_type: str,
-        state_key: Optional[str],
-        origin_server_ts: Optional[int],
+        state_key: str | None,
+        origin_server_ts: int | None,
         content: JsonDict,
         delay: int,
     ) -> str:
@@ -504,8 +502,8 @@ class DelayedEventsHandler:
 
         await self._send_events(events)
 
-    async def _send_events(self, events: List[DelayedEventDetails]) -> None:
-        sent_state: Set[Tuple[RoomID, EventType, StateKey]] = set()
+    async def _send_events(self, events: list[DelayedEventDetails]) -> None:
+        sent_state: set[tuple[RoomID, EventType, StateKey]] = set()
         for event in events:
             if event.state_key is not None:
                 state_info = (event.room_id, event.type, event.state_key)
@@ -528,7 +526,7 @@ class DelayedEventsHandler:
                     state_key=state_key,
                 )
 
-    def _schedule_next_at_or_none(self, next_send_ts: Optional[Timestamp]) -> None:
+    def _schedule_next_at_or_none(self, next_send_ts: Timestamp | None) -> None:
         if next_send_ts is not None:
             self._schedule_next_at(next_send_ts)
         elif self._next_delayed_event_call is not None:
@@ -542,15 +540,14 @@ class DelayedEventsHandler:
         if self._next_delayed_event_call is None:
             self._next_delayed_event_call = self._clock.call_later(
                 delay_sec,
-                run_as_background_process,
+                self.hs.run_as_background_process,
                 "_send_on_timeout",
-                self.server_name,
                 self._send_on_timeout,
             )
         else:
             self._next_delayed_event_call.reset(delay_sec)
 
-    async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
+    async def get_all_for_user(self, requester: Requester) -> list[JsonDict]:
         """Return all pending delayed events requested by the given user."""
         await self._delayed_event_mgmt_ratelimiter.ratelimit(
             requester,
@@ -563,7 +560,7 @@ class DelayedEventsHandler:
     async def _send_event(
         self,
         event: DelayedEventDetails,
-        txn_id: Optional[str] = None,
+        txn_id: str | None = None,
     ) -> None:
         user_id = UserID(event.user_localpart, self._config.server.server_name)
         user_id_str = user_id.to_string()
@@ -625,7 +622,7 @@ class DelayedEventsHandler:
     def _get_current_ts(self) -> Timestamp:
         return Timestamp(self._clock.time_msec())
 
-    def _next_send_ts_changed(self, next_send_ts: Optional[Timestamp]) -> bool:
+    def _next_send_ts_changed(self, next_send_ts: Timestamp | None) -> bool:
         # The DB alone knows if the next send time changed after adding/modifying
         # a delayed event, but if we were to ever miss updating our delayed call's
         # firing time, we may miss other updates. So, keep track of changes to the

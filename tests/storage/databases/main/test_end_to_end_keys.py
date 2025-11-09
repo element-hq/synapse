@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional, Tuple
 
 from twisted.internet.testing import MemoryReactor
 
@@ -99,7 +98,7 @@ class EndToEndKeyWorkerStoreTestCase(HomeserverTestCase):
 
         def check_timestamp_column(
             txn: LoggingTransaction,
-        ) -> List[Tuple[JsonDict, Optional[int]]]:
+        ) -> list[tuple[JsonDict, int | None]]:
             """Fetch all rows for Alice's keys."""
             txn.execute(
                 """

@@ -19,10 +19,11 @@ import synapse.rest.admin
 from synapse.api.constants import RelationTypes
 from synapse.rest.client import login, relations, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, StreamKeyType
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
+from tests.server import TimedOutException
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # base = self.store.get_max_thread_subscriptions_stream_id()
 
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,  # Set to 0, otherwise events will be in timeline, not extension
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -158,6 +166,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         user1_tok = self.login(user1_id, "pass")
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -256,6 +271,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # User2 syncs with threads extension enabled
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -273,12 +295,10 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
     def test_threads_not_returned_after_leaving_room(self) -> None:
         """
-        Test that thread updates are not returned after a user leaves the room,
-        even if the thread was updated while they were joined.
+        Test that thread updates are properly bounded when a user leaves a room.
 
-        This tests the known limitation: if a thread has multiple updates and the
-        user leaves between them, they won't see any updates (even earlier ones
-        while joined).
+        Users should see thread updates that occurred up to the point they left,
+        but NOT updates that occurred after they left.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -296,6 +316,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Initial sync for user2
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -340,13 +367,33 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # User2 incremental sync
         response_body, _ = self.do_sync(sync_body, tok=user2_tok, since=sync_pos)
 
-        # Assert: User2 should NOT see the thread update (they left before latest update)
-        # Note: This also demonstrates that only currently joined rooms are returned - user2
-        # won't see the thread even though there was an update while they were joined (Reply 1)
-        self.assertNotIn(
+        # Assert: User2 SHOULD see Reply 1 (happened while joined) but NOT Reply 2 (after leaving)
+        self.assertIn(
             EXT_NAME,
             response_body["extensions"],
-            "User2 should not see thread updates after leaving the room",
+            "User2 should see thread updates up to the point they left",
+        )
+        self.assertIn(
+            room_id,
+            response_body["extensions"][EXT_NAME]["updates"],
+            "Thread updates should include the room user2 left",
+        )
+        self.assertIn(
+            thread_root,
+            response_body["extensions"][EXT_NAME]["updates"][room_id],
+            "Thread root should be in the updates",
+        )
+
+        # Verify that only a single update was seen (Reply 1) by checking that there's
+        # no prev_batch token. If Reply 2 was also included, there would be multiple
+        # updates and a prev_batch token would be present.
+        thread_update = response_body["extensions"][EXT_NAME]["updates"][room_id][
+            thread_root
+        ]
+        self.assertNotIn(
+            "prev_batch",
+            thread_update,
+            "No prev_batch should be present since only one update (Reply 1) is visible",
         )
 
     def test_threads_with_include_roots_true(self) -> None:
@@ -380,6 +427,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Sync with include_roots=True
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -434,6 +488,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Sync with include_roots=False (explicitly)
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -451,6 +512,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Also test with include_roots omitted (should behave the same)
         sync_body_no_param = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -478,6 +546,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Initial sync to establish baseline
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -529,6 +604,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Initial sync to establish baseline
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -668,6 +750,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Initial sync (no from_token)
         sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -873,6 +962,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Do initial sync with threads extension enabled and limit=2
         sync_body = {
+            "lists": {
+                "all-rooms": {
+                    "ranges": [[0, 10]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -894,9 +990,10 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # Use prev_batch with /thread_updates endpoint to get remaining updates
         # Note: prev_batch should be used as 'from' parameter (upper bound for backward pagination)
         channel = self.make_request(
-            "GET",
+            "POST",
             f"/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&from={prev_batch}",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200)
 
@@ -958,6 +1055,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # First sync
         sync_body = {
+            "lists": {
+                "all-rooms": {
+                    "ranges": [[0, 10]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -996,6 +1100,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Second sync with limit=1 to get only some of the new threads
         sync_body_with_limit = {
+            "lists": {
+                "all-rooms": {
+                    "ranges": [[0, 10]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -1020,9 +1131,10 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # Now use /thread_updates with from=prev_batch and to=pos1
         # This should get the 2 remaining new threads (created after pos1, not returned in second sync)
         channel = self.make_request(
-            "GET",
+            "POST",
             f"/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&from={prev_batch}&to={pos1}",
             access_token=user1_tok,
+            content={},
         )
         self.assertEqual(channel.code, 200)
 
@@ -1054,4 +1166,244 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
             combined_new_threads,
             all_new_threads,
             "Combined responses should include all new thread updates with no gaps",
+        )
+
+    def test_threads_only_from_rooms_in_list(self) -> None:
+        """
+        Test that thread updates are only returned for rooms that are in the
+        sliding sync response, not from all rooms the user is joined to.
+
+        This tests the scenario where a user is joined to multiple rooms but
+        the room list range/limit means only some rooms are in the response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create three rooms
+        room_a_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_b_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_c_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create threads in all three rooms
+        thread_a_root = self.helper.send(room_a_id, body="Thread A", tok=user1_tok)[
+            "event_id"
+        ]
+        thread_b_root = self.helper.send(room_b_id, body="Thread B", tok=user1_tok)[
+            "event_id"
+        ]
+        thread_c_root = self.helper.send(room_c_id, body="Thread C", tok=user1_tok)[
+            "event_id"
+        ]
+
+        # Do an initial sync to get the sync position and see room ordering
+        initial_sync_body = {
+            "lists": {
+                "all-rooms": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+        }
+        response_body, sync_pos = self.do_sync(initial_sync_body, tok=user1_tok)
+
+        # Add replies to all threads after the initial sync
+        self.helper.send_event(
+            room_a_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply to A",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_a_root,
+                },
+            },
+            tok=user1_tok,
+        )
+        self.helper.send_event(
+            room_b_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply to B",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_b_root,
+                },
+            },
+            tok=user1_tok,
+        )
+        self.helper.send_event(
+            room_c_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply to C",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_c_root,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # Now do a sync with a limited range that excludes the last room
+        sync_body = {
+            "lists": {
+                "limited-list": {
+                    "ranges": [[0, 1]],  # Only include first 2 rooms
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok, since=sync_pos)
+
+        # Get which rooms were included in this limited response
+        included_rooms = set(
+            response_body["lists"]["limited-list"]["ops"][0]["room_ids"]
+        )
+        excluded_room = ({room_a_id, room_b_id, room_c_id} - included_rooms).pop()
+
+        # Assert: Only threads from rooms in the response should be included
+        thread_updates = response_body["extensions"][EXT_NAME]["updates"]
+
+        # Check that included rooms have thread updates
+        for room_id in included_rooms:
+            self.assertIn(
+                room_id,
+                thread_updates,
+                f"Room {room_id} should have thread updates since it's in the room list",
+            )
+
+        # Check that the excluded room is NOT present
+        self.assertNotIn(
+            excluded_room,
+            thread_updates,
+            f"Room {excluded_room} should NOT have thread updates since it's excluded from the room list",
+        )
+
+    def test_wait_for_new_data(self) -> None:
+        """
+        Test to make sure that the Sliding Sync request waits for new data to arrive.
+
+        (Only applies to incremental syncs with a `timeout` specified)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Create a thread
+        thread_root = self.helper.send(room_id, body="Thread root", tok=user1_tok)[
+            "event_id"
+        ]
+
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make an incremental Sliding Sync request with the threads extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+        # Send a thread reply to trigger new results
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply in thread",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root,
+                },
+            },
+            tok=user2_tok,
+        )
+        # Should respond before the 10 second timeout
+        channel.await_result(timeout_ms=3000)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # We should see the new thread update
+        self.assertIn(
+            thread_root,
+            channel.json_body["extensions"][EXT_NAME]["updates"][room_id],
+        )
+
+    def test_wait_for_new_data_timeout(self) -> None:
+        """
+        Test to make sure that the Sliding Sync request waits for new data to arrive but
+        no data ever arrives so we timeout. We're also making sure that the default data
+        from the threads extension doesn't trigger a false-positive for new data.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+        # Wake-up `notifier.wait_for_events(...)` that will cause us test
+        # `SlidingSyncResult.__bool__` for new results.
+        self._bump_notifier_wait_for_events(
+            user1_id, wake_stream_key=StreamKeyType.ACCOUNT_DATA
+        )
+        # Block for a little bit more to ensure we don't see any new results.
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=4000)
+        # Wait for the sync to complete (wait for the rest of the 10 second timeout,
+        # 5000 + 4000 + 1200 > 10000)
+        channel.await_result(timeout_ms=1200)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Should be no thread updates
+        self.assertNotIn(
+            EXT_NAME,
+            channel.json_body.get("extensions", {}),
         )

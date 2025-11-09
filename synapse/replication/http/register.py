@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -59,14 +59,14 @@ class ReplicationRegisterServlet(ReplicationEndpoint):
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
         user_id: str,
-        password_hash: Optional[str],
+        password_hash: str | None,
         was_guest: bool,
         make_guest: bool,
-        appservice_id: Optional[str],
-        create_profile_with_displayname: Optional[str],
+        appservice_id: str | None,
+        create_profile_with_displayname: str | None,
         admin: bool,
-        user_type: Optional[str],
-        address: Optional[str],
+        user_type: str | None,
+        address: str | None,
         shadow_banned: bool,
         approved: bool,
     ) -> JsonDict:
@@ -104,7 +104,7 @@ class ReplicationRegisterServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self.registration_handler.check_registration_ratelimit(content["address"])
 
         # Always default admin users to approved (since it means they were created by
@@ -143,7 +143,7 @@ class ReplicationPostRegisterActionsServlet(ReplicationEndpoint):
 
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
-        user_id: str, auth_result: JsonDict, access_token: Optional[str]
+        user_id: str, auth_result: JsonDict, access_token: str | None
     ) -> JsonDict:
         """
         Args:
@@ -156,7 +156,7 @@ class ReplicationPostRegisterActionsServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         auth_result = content["auth_result"]
         access_token = content["access_token"]
 

@@ -22,7 +22,7 @@ import sys
 from argparse import REMAINDER, Namespace
 from contextlib import redirect_stderr
 from io import StringIO
-from typing import Any, Callable, Coroutine, List, TypeVar
+from typing import Any, Callable, Coroutine, TypeVar
 
 import pyperf
 
@@ -76,7 +76,7 @@ def make_test(
 
 if __name__ == "__main__":
 
-    def add_cmdline_args(cmd: List[str], args: Namespace) -> None:
+    def add_cmdline_args(cmd: list[str], args: Namespace) -> None:
         if args.log:
             cmd.extend(["--log"])
         cmd.extend(args.tests)

@@ -17,7 +17,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List
 from unittest.mock import Mock, patch
 
 from parameterized import parameterized
@@ -58,7 +57,7 @@ class FederationReaderOpenIDListenerTests(HomeserverTestCase):
             (["openid"], "auth_fail"),
         ]
     )
-    def test_openid_listener(self, names: List[str], expectation: str) -> None:
+    def test_openid_listener(self, names: list[str], expectation: str) -> None:
         """
         Test different openid listener configurations.
 
@@ -106,7 +105,7 @@ class SynapseHomeserverOpenIDListenerTests(HomeserverTestCase):
             (["openid"], "auth_fail"),
         ]
     )
-    def test_openid_listener(self, names: List[str], expectation: str) -> None:
+    def test_openid_listener(self, names: list[str], expectation: str) -> None:
         """
         Test different openid listener configurations.
 

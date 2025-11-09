@@ -20,7 +20,6 @@
 
 # type: ignore
 
-from unittest.mock import Mock
 
 from synapse.replication.tcp.streams._base import ReceiptsStream
 
@@ -30,9 +29,6 @@ USER_ID = "@feeling:blue"
 
 
 class ReceiptsStreamTestCase(BaseStreamTestCase):
-    def _build_replication_data_handler(self):
-        return Mock(wraps=super()._build_replication_data_handler())
-
     def test_receipt(self):
         self.reconnect()
 
@@ -50,22 +46,29 @@ class ReceiptsStreamTestCase(BaseStreamTestCase):
         self.replicate()
 
         # there should be one RDATA command
-        self.test_handler.on_rdata.assert_called_once()
-        stream_name, _, token, rdata_rows = self.test_handler.on_rdata.call_args[0]
-        self.assertEqual(stream_name, "receipts")
-        self.assertEqual(1, len(rdata_rows))
-        row: ReceiptsStream.ReceiptsStreamRow = rdata_rows[0]
+        received_receipt_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == ReceiptsStream.NAME
+        ]
+        self.assertEqual(
+            len(received_receipt_rows),
+            1,
+            "Expected exactly one row for the receipts stream",
+        )
+        (stream_name, token, row) = received_receipt_rows[0]
+        self.assertEqual(stream_name, ReceiptsStream.NAME)
         self.assertEqual("!room:blue", row.room_id)
         self.assertEqual("m.read", row.receipt_type)
         self.assertEqual(USER_ID, row.user_id)
         self.assertEqual("$event:blue", row.event_id)
         self.assertIsNone(row.thread_id)
         self.assertEqual({"a": 1}, row.data)
+        # Clear out the received rows that we've checked so we can check for new ones later
+        self.test_handler.received_rdata_rows.clear()
 
         # Now let's disconnect and insert some data.
         self.disconnect()
-
-        self.test_handler.on_rdata.reset_mock()
 
         self.get_success(
             self.hs.get_datastores().main.insert_receipt(
@@ -79,20 +82,27 @@ class ReceiptsStreamTestCase(BaseStreamTestCase):
         )
         self.replicate()
 
-        # Nothing should have happened as we are disconnected
-        self.test_handler.on_rdata.assert_not_called()
+        # Not yet connected: no rows should yet have been received
+        self.assertEqual([], self.test_handler.received_rdata_rows)
 
+        # Now reconnect and pull the updates
         self.reconnect()
-        self.pump(0.1)
+        self.replicate()
 
         # We should now have caught up and get the missing data
-        self.test_handler.on_rdata.assert_called_once()
-        stream_name, _, token, rdata_rows = self.test_handler.on_rdata.call_args[0]
-        self.assertEqual(stream_name, "receipts")
+        received_receipt_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == ReceiptsStream.NAME
+        ]
+        self.assertEqual(
+            len(received_receipt_rows),
+            1,
+            "Expected exactly one row for the receipts stream",
+        )
+        (stream_name, token, row) = received_receipt_rows[0]
+        self.assertEqual(stream_name, ReceiptsStream.NAME)
         self.assertEqual(token, 3)
-        self.assertEqual(1, len(rdata_rows))
-
-        row: ReceiptsStream.ReceiptsStreamRow = rdata_rows[0]
         self.assertEqual("!room2:blue", row.room_id)
         self.assertEqual("m.read", row.receipt_type)
         self.assertEqual(USER_ID, row.user_id)

@@ -533,16 +533,6 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # On the regular service, that API should not allow for the
-        # creation of new devices.
-        channel = self.make_request(
-            "PUT",
-            "/_matrix/client/v3/devices/AABBCCDD?user_id=@bob:test",
-            content={"display_name": "Bob's device"},
-            access_token=self.pre_msc_service.token,
-        )
-        self.assertEqual(channel.code, 404, channel.json_body)
-
     def test_DELETE_device(self) -> None:
         self.register_appservice_user(
             "alice", self.msc4190_service.token, inhibit_login=True

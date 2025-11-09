@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, List, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, cast
 
 from twisted.python.failure import Failure
 
@@ -29,7 +29,6 @@ from synapse.api.filtering import Filter
 from synapse.events.utils import SerializeEventConfig
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.opentracing import trace
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.admin._base import assert_user_is_admin
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
@@ -92,7 +91,7 @@ class PaginationHandler:
 
         self.pagination_lock = ReadWriteLock()
         # IDs of rooms in which there currently an active purge *or delete* operation.
-        self._purges_in_progress_by_room: Set[str] = set()
+        self._purges_in_progress_by_room: set[str] = set()
         self._event_serializer = hs.get_event_client_serializer()
 
         self._retention_default_max_lifetime = (
@@ -116,10 +115,9 @@ class PaginationHandler:
                 logger.info("Setting up purge job with config: %s", job)
 
                 self.clock.looping_call(
-                    run_as_background_process,
+                    self.hs.run_as_background_process,
                     job.interval,
                     "purge_history_for_rooms_in_range",
-                    self.server_name,
                     self.purge_history_for_rooms_in_range,
                     job.shortest_max_lifetime,
                     job.longest_max_lifetime,
@@ -134,7 +132,7 @@ class PaginationHandler:
         )
 
     async def purge_history_for_rooms_in_range(
-        self, min_ms: Optional[int], max_ms: Optional[int]
+        self, min_ms: int | None, max_ms: int | None
     ) -> None:
         """Purge outdated events from rooms within the given retention range.
 
@@ -244,9 +242,8 @@ class PaginationHandler:
             # We want to purge everything, including local events, and to run the purge in
             # the background so that it's not blocking any other operation apart from
             # other purges in the same room.
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 PURGE_HISTORY_ACTION_NAME,
-                self.server_name,
                 self.purge_history,
                 room_id,
                 token,
@@ -282,7 +279,7 @@ class PaginationHandler:
     async def _purge_history(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         """
         Scheduler action to purge some history of a room.
         """
@@ -311,7 +308,7 @@ class PaginationHandler:
         room_id: str,
         token: str,
         delete_local_events: bool,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Carry out a history purge on a room.
 
         Args:
@@ -335,7 +332,7 @@ class PaginationHandler:
             )
             return f.getErrorMessage()
 
-    async def get_delete_task(self, delete_id: str) -> Optional[ScheduledTask]:
+    async def get_delete_task(self, delete_id: str) -> ScheduledTask | None:
         """Get the current status of an active deleting
 
         Args:
@@ -345,8 +342,8 @@ class PaginationHandler:
         return await self._task_scheduler.get_task(delete_id)
 
     async def get_delete_tasks_by_room(
-        self, room_id: str, only_active: Optional[bool] = False
-    ) -> List[ScheduledTask]:
+        self, room_id: str, only_active: bool | None = False
+    ) -> list[ScheduledTask]:
         """Get complete, failed or active delete tasks by room
 
         Args:
@@ -366,7 +363,7 @@ class PaginationHandler:
     async def _purge_room(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         """
         Scheduler action to purge a room.
         """
@@ -418,7 +415,7 @@ class PaginationHandler:
         room_id: str,
         pagin_config: PaginationConfig,
         as_client_event: bool = True,
-        event_filter: Optional[Filter] = None,
+        event_filter: Filter | None = None,
         use_admin_priviledge: bool = False,
     ) -> JsonDict:
         """Get messages in a room.
@@ -526,7 +523,7 @@ class PaginationHandler:
             # We use a `Set` because there can be multiple events at a given depth
             # and we only care about looking at the unique continum of depths to
             # find gaps.
-            event_depths: Set[int] = {event.depth for event in events}
+            event_depths: set[int] = {event.depth for event in events}
             sorted_event_depths = sorted(event_depths)
 
             # Inspect the depths of the returned events to see if there are any gaps
@@ -604,9 +601,8 @@ class PaginationHandler:
                 # Otherwise, we can backfill in the background for eventual
                 # consistency's sake but we don't need to block the client waiting
                 # for a costly federation call and processing.
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "maybe_backfill_in_the_background",
-                    self.server_name,
                     self.hs.get_federation_handler().maybe_backfill,
                     room_id,
                     curr_topo,
@@ -695,7 +691,7 @@ class PaginationHandler:
     async def _shutdown_and_purge_room(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         """
         Scheduler action to shutdown and purge a room.
         """
@@ -706,7 +702,7 @@ class PaginationHandler:
 
         room_id = task.resource_id
 
-        async def update_result(result: Optional[JsonMapping]) -> None:
+        async def update_result(result: JsonMapping | None) -> None:
             await self._task_scheduler.update_task(task.id, result=result)
 
         shutdown_result = (

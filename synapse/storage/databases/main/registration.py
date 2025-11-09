@@ -22,7 +22,7 @@
 import logging
 import random
 import re
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import attr
 
@@ -94,8 +94,8 @@ class TokenLookupResult:
     token_id: int
     is_guest: bool = False
     shadow_banned: bool = False
-    device_id: Optional[str] = None
-    valid_until_ms: Optional[int] = None
+    device_id: str | None = None
+    valid_until_ms: int | None = None
     token_owner: str = attr.ib()
     token_used: bool = False
 
@@ -118,7 +118,7 @@ class RefreshTokenLookupResult:
     token_id: int
     """The ID of this refresh token."""
 
-    next_token_id: Optional[int]
+    next_token_id: int | None
     """The ID of the refresh token which replaced this one."""
 
     has_next_refresh_token_been_refreshed: bool
@@ -127,11 +127,11 @@ class RefreshTokenLookupResult:
     has_next_access_token_been_used: bool
     """True if the next access token was already used at least once."""
 
-    expiry_ts: Optional[int]
+    expiry_ts: int | None
     """The time at which the refresh token expires and can not be used.
     If None, the refresh token doesn't expire."""
 
-    ultimate_session_expiry_ts: Optional[int]
+    ultimate_session_expiry_ts: int | None
     """The time at which the session comes to an end and can no longer be
     refreshed.
     If None, the session can be refreshed indefinitely."""
@@ -144,10 +144,10 @@ class LoginTokenLookupResult:
     user_id: str
     """The user this token belongs to."""
 
-    auth_provider_id: Optional[str]
+    auth_provider_id: str | None
     """The SSO Identity Provider that the user authenticated with, to get this token."""
 
-    auth_provider_session_id: Optional[str]
+    auth_provider_session_id: str | None
     """The session ID advertised by the SSO Identity Provider."""
 
 
@@ -171,7 +171,7 @@ class ThreepidValidationSession:
     """ID of the validation session"""
     last_send_attempt: int
     """a number serving to dedupe send attempts for this session"""
-    validated_at: Optional[int]
+    validated_at: int | None
     """timestamp of when this session was validated if so"""
 
 
@@ -212,7 +212,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             )
 
             if hs.config.worker.run_background_tasks:
-                self._clock.call_later(
+                self.clock.call_later(
                     0.0,
                     self._set_expiration_date_when_missing,
                 )
@@ -226,20 +226,20 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         # Create a background job for culling expired 3PID validity tokens
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
+            self.clock.looping_call(
                 self.cull_expired_threepid_validation_tokens, THIRTY_MINUTES_IN_MS
             )
 
     async def register_user(
         self,
         user_id: str,
-        password_hash: Optional[str] = None,
+        password_hash: str | None = None,
         was_guest: bool = False,
         make_guest: bool = False,
-        appservice_id: Optional[str] = None,
-        create_profile_with_displayname: Optional[str] = None,
+        appservice_id: str | None = None,
+        create_profile_with_displayname: str | None = None,
         admin: bool = False,
-        user_type: Optional[str] = None,
+        user_type: str | None = None,
         shadow_banned: bool = False,
         approved: bool = False,
     ) -> None:
@@ -286,19 +286,19 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         self,
         txn: LoggingTransaction,
         user_id: str,
-        password_hash: Optional[str],
+        password_hash: str | None,
         was_guest: bool,
         make_guest: bool,
-        appservice_id: Optional[str],
-        create_profile_with_displayname: Optional[str],
+        appservice_id: str | None,
+        create_profile_with_displayname: str | None,
         admin: bool,
-        user_type: Optional[str],
+        user_type: str | None,
         shadow_banned: bool,
         approved: bool,
     ) -> None:
         user_id_obj = UserID.from_string(user_id)
 
-        now = int(self._clock.time())
+        now = int(self.clock.time())
 
         user_approved = approved or not self._require_approval
 
@@ -379,10 +379,10 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
 
     @cached()
-    async def get_user_by_id(self, user_id: str) -> Optional[UserInfo]:
+    async def get_user_by_id(self, user_id: str) -> UserInfo | None:
         """Returns info about the user account, if it exists."""
 
-        def get_user_by_id_txn(txn: LoggingTransaction) -> Optional[UserInfo]:
+        def get_user_by_id_txn(txn: LoggingTransaction) -> UserInfo | None:
             # We could technically use simple_select_one here, but it would not perform
             # the COALESCEs (unless hacked into the column names), which could yield
             # confusing results.
@@ -457,7 +457,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         if not info:
             return False
 
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         days = self.config.server.mau_appservice_trial_days.get(
             info.appservice_id, self.config.server.mau_trial_days
         )
@@ -466,7 +466,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         return is_trial
 
     @cached()
-    async def get_user_by_access_token(self, token: str) -> Optional[TokenLookupResult]:
+    async def get_user_by_access_token(self, token: str) -> TokenLookupResult | None:
         """Get a user from the given access token.
 
         Args:
@@ -479,7 +479,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         )
 
     @cached()
-    async def get_expiration_ts_for_user(self, user_id: str) -> Optional[int]:
+    async def get_expiration_ts_for_user(self, user_id: str) -> int | None:
         """Get the expiration timestamp for the account bearing a given user ID.
 
         Args:
@@ -515,8 +515,8 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         user_id: str,
         expiration_ts: int,
         email_sent: bool,
-        renewal_token: Optional[str] = None,
-        token_used_ts: Optional[int] = None,
+        renewal_token: str | None = None,
+        token_used_ts: int | None = None,
     ) -> None:
         """Updates the account validity properties of the given account, with the
         given values.
@@ -576,7 +576,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
     async def get_user_from_renewal_token(
         self, renewal_token: str
-    ) -> Tuple[str, int, Optional[int]]:
+    ) -> tuple[str, int, int | None]:
         """Get a user ID and renewal status from a renewal token.
 
         Args:
@@ -592,7 +592,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                     has not been renewed using the current token yet.
         """
         return cast(
-            Tuple[str, int, Optional[int]],
+            tuple[str, int, int | None],
             await self.db_pool.simple_select_one(
                 table="account_validity",
                 keyvalues={"renewal_token": renewal_token},
@@ -617,7 +617,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             desc="get_renewal_token_for_user",
         )
 
-    async def get_users_expiring_soon(self) -> List[Tuple[str, int]]:
+    async def get_users_expiring_soon(self) -> list[tuple[str, int]]:
         """Selects users whose account will expire in the [now, now + renew_at] time
         window (see configuration for account_validity for information on what renew_at
         refers to).
@@ -628,19 +628,19 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         def select_users_txn(
             txn: LoggingTransaction, now_ms: int, renew_at: int
-        ) -> List[Tuple[str, int]]:
+        ) -> list[tuple[str, int]]:
             sql = (
                 "SELECT user_id, expiration_ts_ms FROM account_validity"
                 " WHERE email_sent = FALSE AND (expiration_ts_ms - ?) <= ?"
             )
             values = [now_ms, renew_at]
             txn.execute(sql, values)
-            return cast(List[Tuple[str, int]], txn.fetchall())
+            return cast(list[tuple[str, int]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_users_expiring_soon",
             select_users_txn,
-            self._clock.time_msec(),
+            self.clock.time_msec(),
             self.config.account_validity.account_validity_renew_at,
         )
 
@@ -745,7 +745,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         await self.db_pool.runInteraction("set_shadow_banned", set_shadow_banned_txn)
 
     async def set_user_type(
-        self, user: UserID, user_type: Optional[Union[UserTypes, str]]
+        self, user: UserID, user_type: UserTypes | str | None
     ) -> None:
         """Sets the user type.
 
@@ -766,7 +766,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
     def _query_for_auth(
         self, txn: LoggingTransaction, token: str
-    ) -> Optional[TokenLookupResult]:
+    ) -> TokenLookupResult | None:
         sql = """
             SELECT users.name as user_id,
                 users.is_guest,
@@ -858,17 +858,17 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         )
         return True if res == UserTypes.SUPPORT else False
 
-    async def get_users_by_id_case_insensitive(self, user_id: str) -> Dict[str, str]:
+    async def get_users_by_id_case_insensitive(self, user_id: str) -> dict[str, str]:
         """Gets users that match user_id case insensitively.
 
         Returns:
              A mapping of user_id -> password_hash.
         """
 
-        def f(txn: LoggingTransaction) -> Dict[str, str]:
+        def f(txn: LoggingTransaction) -> dict[str, str]:
             sql = "SELECT name, password_hash FROM users WHERE lower(name) = lower(?)"
             txn.execute(sql, (user_id,))
-            result = cast(List[Tuple[str, str]], txn.fetchall())
+            result = cast(list[tuple[str, str]], txn.fetchall())
             return dict(result)
 
         return await self.db_pool.runInteraction("get_users_by_id_case_insensitive", f)
@@ -978,7 +978,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
     async def replace_user_external_id(
         self,
-        record_external_ids: List[Tuple[str, str]],
+        record_external_ids: list[tuple[str, str]],
         user_id: str,
     ) -> None:
         """Replace mappings from external user ids to a mxid in a single transaction.
@@ -1027,7 +1027,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
     @cached()
     async def get_user_by_external_id(
         self, auth_provider: str, external_id: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Look up a user by their external auth id
 
         Args:
@@ -1045,7 +1045,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             desc="get_user_by_external_id",
         )
 
-    async def get_external_ids_by_user(self, mxid: str) -> List[Tuple[str, str]]:
+    async def get_external_ids_by_user(self, mxid: str) -> list[tuple[str, str]]:
         """Look up external ids for the given user
 
         Args:
@@ -1055,7 +1055,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             Tuples of (auth_provider, external_id)
         """
         return cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="user_external_ids",
                 keyvalues={"user_id": mxid},
@@ -1075,7 +1075,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction("count_users", _count_users)
 
-    async def count_daily_user_type(self) -> Dict[str, int]:
+    async def count_daily_user_type(self) -> dict[str, int]:
         """
         Counts 1) native non guest users
                2) native guests users
@@ -1083,8 +1083,8 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         who registered on the homeserver in the past 24 hours
         """
 
-        def _count_daily_user_type(txn: LoggingTransaction) -> Dict[str, int]:
-            yesterday = int(self._clock.time()) - (60 * 60 * 24)
+        def _count_daily_user_type(txn: LoggingTransaction) -> dict[str, int]:
+            yesterday = int(self.clock.time()) - (60 * 60 * 24)
 
             sql = """
                 SELECT user_type, COUNT(*) AS count FROM (
@@ -1116,7 +1116,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 WHERE appservice_id IS NULL
             """
             )
-            (count,) = cast(Tuple[int], txn.fetchone())
+            (count,) = cast(tuple[int], txn.fetchone())
             return count
 
         return await self.db_pool.runInteraction("count_users", _count_users)
@@ -1145,7 +1145,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         return str(next_id)
 
-    async def get_user_id_by_threepid(self, medium: str, address: str) -> Optional[str]:
+    async def get_user_id_by_threepid(self, medium: str, address: str) -> str | None:
         """Returns user id from threepid
 
         Args:
@@ -1163,7 +1163,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
     def get_user_id_by_threepid_txn(
         self, txn: LoggingTransaction, medium: str, address: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Returns user id from threepid
 
         Args:
@@ -1196,9 +1196,9 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             {"user_id": user_id, "validated_at": validated_at, "added_at": added_at},
         )
 
-    async def user_get_threepids(self, user_id: str) -> List[ThreepidResult]:
+    async def user_get_threepids(self, user_id: str) -> list[ThreepidResult]:
         results = cast(
-            List[Tuple[str, str, int, int]],
+            list[tuple[str, str, int, int]],
             await self.db_pool.simple_select_list(
                 "user_threepids",
                 keyvalues={"user_id": user_id},
@@ -1253,7 +1253,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             desc="add_user_bound_threepid",
         )
 
-    async def user_get_bound_threepids(self, user_id: str) -> List[Tuple[str, str]]:
+    async def user_get_bound_threepids(self, user_id: str) -> list[tuple[str, str]]:
         """Get the threepids that a user has bound to an identity server through the homeserver
         The homeserver remembers where binds to an identity server occurred. Using this
         method can retrieve those threepids.
@@ -1267,7 +1267,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 address: The address of the threepid (e.g "bob@example.com")
         """
         return cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="user_threepid_id_server",
                 keyvalues={"user_id": user_id},
@@ -1302,7 +1302,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
     async def get_id_servers_user_bound(
         self, user_id: str, medium: str, address: str
-    ) -> List[str]:
+    ) -> list[str]:
         """Get the list of identity servers that the server proxied bind
         requests to for given user and threepid
 
@@ -1386,12 +1386,12 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
     async def get_threepid_validation_session(
         self,
-        medium: Optional[str],
+        medium: str | None,
         client_secret: str,
-        address: Optional[str] = None,
-        sid: Optional[str] = None,
-        validated: Optional[bool] = True,
-    ) -> Optional[ThreepidValidationSession]:
+        address: str | None = None,
+        sid: str | None = None,
+        validated: bool | None = True,
+    ) -> ThreepidValidationSession | None:
         """Gets a session_id and last_send_attempt (if available) for a
         combination of validation metadata
 
@@ -1425,7 +1425,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         def get_threepid_validation_session_txn(
             txn: LoggingTransaction,
-        ) -> Optional[ThreepidValidationSession]:
+        ) -> ThreepidValidationSession | None:
             sql = """
                 SELECT address, session_id, medium, client_secret,
                 last_send_attempt, validated_at
@@ -1496,7 +1496,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         await self.db_pool.runInteraction(
             "cull_expired_threepid_validation_tokens",
             cull_expired_threepid_validation_tokens_txn,
-            self._clock.time_msec(),
+            self.clock.time_msec(),
         )
 
     @wrap_as_background_process("account_validity_set_expiration_dates")
@@ -1537,7 +1537,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 random value in the [now + period - d ; now + period] range, d being a
                 delta equal to 10% of the validity period.
         """
-        now_ms = self._clock.time_msec()
+        now_ms = self.clock.time_msec()
         assert self._account_validity_period is not None
         expiration_ts = now_ms + self._account_validity_period
 
@@ -1555,7 +1555,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             values={"expiration_ts_ms": expiration_ts, "email_sent": False},
         )
 
-    async def get_user_pending_deactivation(self) -> Optional[str]:
+    async def get_user_pending_deactivation(self) -> str | None:
         """
         Gets one user from the table of users waiting to be parted from all the rooms
         they're in.
@@ -1608,7 +1608,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         Raises:
             StoreError if there was a problem updating this.
         """
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
 
         await self.db_pool.simple_update_one(
             "access_tokens",
@@ -1639,7 +1639,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         uses_allowed, pending, completed, expiry_time = res
 
         # Check if the token has expired
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         if expiry_time and expiry_time < now:
             return False
 
@@ -1686,7 +1686,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         """
 
         def _use_registration_token_txn(txn: LoggingTransaction) -> None:
-            # Normally, res is Optional[Dict[str, Any]].
+            # Normally, res is dict[str, Any] | None.
             # Override type because the return type is only optional if
             # allow_none is True, and we don't want mypy throwing errors
             # about None not being indexable.
@@ -1715,8 +1715,8 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         )
 
     async def get_registration_tokens(
-        self, valid: Optional[bool] = None
-    ) -> List[Tuple[str, Optional[int], int, int, Optional[int]]]:
+        self, valid: bool | None = None
+    ) -> list[tuple[str, int | None, int, int, int | None]]:
         """List all registration tokens. Used by the admin API.
 
         Args:
@@ -1734,8 +1734,8 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         """
 
         def select_registration_tokens_txn(
-            txn: LoggingTransaction, now: int, valid: Optional[bool]
-        ) -> List[Tuple[str, Optional[int], int, int, Optional[int]]]:
+            txn: LoggingTransaction, now: int, valid: bool | None
+        ) -> list[tuple[str, int | None, int, int, int | None]]:
             if valid is None:
                 # Return all tokens regardless of validity
                 txn.execute(
@@ -1765,17 +1765,17 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 txn.execute(sql, [now])
 
             return cast(
-                List[Tuple[str, Optional[int], int, int, Optional[int]]], txn.fetchall()
+                list[tuple[str, int | None, int, int, int | None]], txn.fetchall()
             )
 
         return await self.db_pool.runInteraction(
             "select_registration_tokens",
             select_registration_tokens_txn,
-            self._clock.time_msec(),
+            self.clock.time_msec(),
             valid,
         )
 
-    async def get_one_registration_token(self, token: str) -> Optional[Dict[str, Any]]:
+    async def get_one_registration_token(self, token: str) -> dict[str, Any] | None:
         """Get info about the given registration token. Used by the admin API.
 
         Args:
@@ -1801,9 +1801,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             "expiry_time": row[4],
         }
 
-    async def generate_registration_token(
-        self, length: int, chars: str
-    ) -> Optional[str]:
+    async def generate_registration_token(self, length: int, chars: str) -> str | None:
         """Generate a random registration token. Used by the admin API.
 
         Args:
@@ -1843,7 +1841,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         )
 
     async def create_registration_token(
-        self, token: str, uses_allowed: Optional[int], expiry_time: Optional[int]
+        self, token: str, uses_allowed: int | None, expiry_time: int | None
     ) -> bool:
         """Create a new registration token. Used by the admin API.
 
@@ -1892,8 +1890,8 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         )
 
     async def update_registration_token(
-        self, token: str, updatevalues: Dict[str, Optional[int]]
-    ) -> Optional[Dict[str, Any]]:
+        self, token: str, updatevalues: dict[str, int | None]
+    ) -> dict[str, Any] | None:
         """Update a registration token. Used by the admin API.
 
         Args:
@@ -1909,7 +1907,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         def _update_registration_token_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Dict[str, Any]]:
+        ) -> dict[str, Any] | None:
             try:
                 self.db_pool.simple_update_one_txn(
                     txn,
@@ -1996,14 +1994,12 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             desc="mark_access_token_as_used",
         )
 
-    async def lookup_refresh_token(
-        self, token: str
-    ) -> Optional[RefreshTokenLookupResult]:
+    async def lookup_refresh_token(self, token: str) -> RefreshTokenLookupResult | None:
         """Lookup a refresh token with hints about its validity."""
 
         def _lookup_refresh_token_txn(
             txn: LoggingTransaction,
-        ) -> Optional[RefreshTokenLookupResult]:
+        ) -> RefreshTokenLookupResult | None:
             txn.execute(
                 """
                 SELECT
@@ -2154,8 +2150,8 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         user_id: str,
         token: str,
         expiry_ts: int,
-        auth_provider_id: Optional[str],
-        auth_provider_session_id: Optional[str],
+        auth_provider_id: str | None,
+        auth_provider_session_id: str | None,
     ) -> None:
         """Adds a short-term login token for the given user.
 
@@ -2251,7 +2247,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             "consume_login_token",
             self._consume_login_token,
             token,
-            self._clock.time_msec(),
+            self.clock.time_msec(),
         )
 
     async def invalidate_login_tokens_by_session_id(
@@ -2271,7 +2267,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 "auth_provider_id": auth_provider_id,
                 "auth_provider_session_id": auth_provider_session_id,
             },
-            updatevalues={"used_ts": self._clock.time_msec()},
+            updatevalues={"used_ts": self.clock.time_msec()},
             desc="invalidate_login_tokens_by_session_id",
         )
 
@@ -2455,9 +2451,9 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
     async def user_delete_access_tokens(
         self,
         user_id: str,
-        except_token_id: Optional[int] = None,
-        device_id: Optional[str] = None,
-    ) -> List[Tuple[str, int, Optional[str]]]:
+        except_token_id: int | None = None,
+        device_id: str | None = None,
+    ) -> list[tuple[str, int, str | None]]:
         """
         Invalidate access and refresh tokens belonging to a user
 
@@ -2471,14 +2467,14 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             A tuple of (token, token id, device id) for each of the deleted tokens
         """
 
-        def f(txn: LoggingTransaction) -> List[Tuple[str, int, Optional[str]]]:
+        def f(txn: LoggingTransaction) -> list[tuple[str, int, str | None]]:
             keyvalues = {"user_id": user_id}
             if device_id is not None:
                 keyvalues["device_id"] = device_id
 
             items = keyvalues.items()
             where_clause = " AND ".join(k + " = ?" for k, _ in items)
-            values: List[Union[str, int]] = [v for _, v in items]
+            values: list[str | int] = [v for _, v in items]
             # Conveniently, refresh_tokens and access_tokens both use the user_id and device_id fields. Only caveat
             # is the `except_token_id` param that is tricky to get right, so for now we're just using the same where
             # clause and values before we handle that. This seems to be only used in the "set password" handler.
@@ -2517,7 +2513,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         self,
         user_id: str,
         device_ids: StrCollection,
-    ) -> List[Tuple[str, int, Optional[str]]]:
+    ) -> list[tuple[str, int, str | None]]:
         """
         Invalidate access and refresh tokens belonging to a user
 
@@ -2530,7 +2526,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         def user_delete_access_tokens_for_devices_txn(
             txn: LoggingTransaction, batch_device_ids: StrCollection
-        ) -> List[Tuple[str, int, Optional[str]]]:
+        ) -> list[tuple[str, int, str | None]]:
             self.db_pool.simple_delete_many_txn(
                 txn,
                 table="refresh_tokens",
@@ -2544,31 +2540,13 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             )
             args.append(user_id)
 
-            if self.database_engine.supports_returning:
-                sql = f"""
-                    DELETE FROM access_tokens
-                    WHERE {clause} AND user_id = ?
-                    RETURNING token, id, device_id
-                """
-                txn.execute(sql, args)
-                tokens_and_devices = txn.fetchall()
-            else:
-                tokens_and_devices = self.db_pool.simple_select_many_txn(
-                    txn,
-                    table="access_tokens",
-                    column="device_id",
-                    iterable=batch_device_ids,
-                    keyvalues={"user_id": user_id},
-                    retcols=("token", "id", "device_id"),
-                )
-
-                self.db_pool.simple_delete_many_txn(
-                    txn,
-                    table="access_tokens",
-                    keyvalues={"user_id": user_id},
-                    column="device_id",
-                    values=batch_device_ids,
-                )
+            sql = f"""
+                DELETE FROM access_tokens
+                WHERE {clause} AND user_id = ?
+                RETURNING token, id, device_id
+            """
+            txn.execute(sql, args)
+            tokens_and_devices = txn.fetchall()
 
             self._invalidate_cache_and_stream_bulk(
                 txn,
@@ -2601,7 +2579,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         await self.db_pool.runInteraction("delete_access_token", f)
 
     async def user_set_password_hash(
-        self, user_id: str, password_hash: Optional[str]
+        self, user_id: str, password_hash: str | None
     ) -> None:
         """
         NB. This does *not* evict any cache because the one use for this
@@ -2640,7 +2618,6 @@ class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        self._clock = hs.get_clock()
         self.config = hs.config
 
         self.db_pool.updates.register_background_index_update(
@@ -2687,7 +2664,7 @@ class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
 
         def _background_update_set_deactivated_flag_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[bool, int]:
+        ) -> tuple[bool, int]:
             txn.execute(
                 """
                 SELECT
@@ -2761,7 +2738,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
 
         # Create a background job for removing expired login tokens
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
+            self.clock.looping_call(
                 self._delete_expired_login_tokens, THIRTY_MINUTES_IN_MS
             )
 
@@ -2769,10 +2746,10 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
         self,
         user_id: str,
         token: str,
-        device_id: Optional[str],
-        valid_until_ms: Optional[int],
-        puppets_user_id: Optional[str] = None,
-        refresh_token_id: Optional[int] = None,
+        device_id: str | None,
+        valid_until_ms: int | None,
+        puppets_user_id: str | None = None,
+        refresh_token_id: int | None = None,
     ) -> int:
         """Adds an access token for the given user.
 
@@ -2790,7 +2767,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
             The token ID
         """
         next_id = self._access_tokens_id_gen.get_next()
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
 
         await self.db_pool.simple_insert(
             "access_tokens",
@@ -2814,9 +2791,9 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
         self,
         user_id: str,
         token: str,
-        device_id: Optional[str],
-        expiry_ts: Optional[int],
-        ultimate_session_expiry_ts: Optional[int],
+        device_id: str | None,
+        expiry_ts: int | None,
+        ultimate_session_expiry_ts: int | None,
     ) -> int:
         """Adds a refresh token for the given user.
 
@@ -2874,7 +2851,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
                 keyvalues={"name": user_id},
                 updatevalues={
                     "consent_version": consent_version,
-                    "consent_ts": self._clock.time_msec(),
+                    "consent_ts": self.clock.time_msec(),
                 },
             )
             self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
@@ -2908,7 +2885,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
 
     async def validate_threepid_session(
         self, session_id: str, client_secret: str, token: str, current_ts: int
-    ) -> Optional[str]:
+    ) -> str | None:
         """Attempt to validate a threepid session using a token
 
         Args:
@@ -2928,7 +2905,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
         """
 
         # Insert everything into a transaction in order to run atomically
-        def validate_threepid_session_txn(txn: LoggingTransaction) -> Optional[str]:
+        def validate_threepid_session_txn(txn: LoggingTransaction) -> str | None:
             row = self.db_pool.simple_select_one_txn(
                 txn,
                 table="threepid_validation_session",
@@ -2986,7 +2963,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
                 txn,
                 table="threepid_validation_session",
                 keyvalues={"session_id": session_id},
-                updatevalues={"validated_at": self._clock.time_msec()},
+                updatevalues={"validated_at": self.clock.time_msec()},
             )
 
             return next_link
@@ -3003,7 +2980,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
         session_id: str,
         client_secret: str,
         send_attempt: int,
-        next_link: Optional[str],
+        next_link: str | None,
         token: str,
         token_expires: int,
     ) -> None:
@@ -3064,7 +3041,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
 
         # We keep the expired tokens for an extra 5 minutes so we can measure how many
         # times a token is being used after its expiry
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         await self.db_pool.runInteraction(
             "delete_expired_login_tokens",
             _delete_expired_login_tokens_txn,

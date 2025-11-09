@@ -28,7 +28,7 @@ import re
 import shutil
 import sys
 import traceback
-from typing import TYPE_CHECKING, BinaryIO, Iterable, Optional, Tuple
+from typing import TYPE_CHECKING, BinaryIO, Iterable
 from urllib.parse import urljoin, urlparse, urlsplit
 from urllib.request import urlopen
 
@@ -44,7 +44,6 @@ from synapse.media._base import FileInfo, get_filename_from_headers
 from synapse.media.media_storage import MediaStorage, SHA256TransparentIOWriter
 from synapse.media.oembed import OEmbedProvider
 from synapse.media.preview_html import decode_body, parse_html_to_open_graph
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import JsonDict, UserID
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.expiringcache import ExpiringCache
@@ -71,9 +70,9 @@ class DownloadResult:
     uri: str
     response_code: int
     media_type: str
-    download_name: Optional[str]
+    download_name: str | None
     expires: int
-    etag: Optional[str]
+    etag: str | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -88,7 +87,7 @@ class MediaInfo:
     media_length: int
     # The media filename, according to the server. This is parsed from the
     # returned headers, if possible.
-    download_name: Optional[str]
+    download_name: str | None
     # The time of the preview.
     created_ts_ms: int
     # Information from the media storage provider about where the file is stored
@@ -102,7 +101,7 @@ class MediaInfo:
     # The timestamp (in milliseconds) of when this preview expires.
     expires: int
     # The ETag header of the response.
-    etag: Optional[str]
+    etag: str | None
 
 
 class UrlPreviewer:
@@ -167,6 +166,7 @@ class UrlPreviewer:
         media_storage: MediaStorage,
     ):
         self.clock = hs.get_clock()
+        self.hs = hs
         self.filepaths = media_repo.filepaths
         self.max_spider_size = hs.config.media.max_spider_size
         self.server_name = hs.hostname
@@ -201,15 +201,14 @@ class UrlPreviewer:
         self._cache: ExpiringCache[str, ObservableDeferred] = ExpiringCache(
             cache_name="url_previews",
             server_name=self.server_name,
+            hs=self.hs,
             clock=self.clock,
             # don't spider URLs more often than once an hour
             expiry_ms=ONE_HOUR,
         )
 
         if self._worker_run_media_background_jobs:
-            self._cleaner_loop = self.clock.looping_call(
-                self._start_expire_url_cache_data, 10 * 1000
-            )
+            self.clock.looping_call(self._start_expire_url_cache_data, 10 * 1000)
 
     async def preview(self, url: str, user: UserID, ts: int) -> bytes:
         # the in-memory cache:
@@ -269,7 +268,7 @@ class UrlPreviewer:
 
         # The number of milliseconds that the response should be considered valid.
         expiration_ms = media_info.expires
-        author_name: Optional[str] = None
+        author_name: str | None = None
 
         if _is_media(media_info.media_type):
             file_id = media_info.filesystem_id
@@ -706,7 +705,7 @@ class UrlPreviewer:
 
     async def _handle_oembed_response(
         self, url: str, media_info: MediaInfo, expiration_ms: int
-    ) -> Tuple[JsonDict, Optional[str], int]:
+    ) -> tuple[JsonDict, str | None, int]:
         """
         Parse the downloaded oEmbed info.
 
@@ -739,8 +738,8 @@ class UrlPreviewer:
         return open_graph_result, oembed_response.author_name, expiration_ms
 
     def _start_expire_url_cache_data(self) -> Deferred:
-        return run_as_background_process(
-            "expire_url_cache_data", self.server_name, self._expire_url_cache_data
+        return self.hs.run_as_background_process(
+            "expire_url_cache_data", self._expire_url_cache_data
         )
 
     async def _expire_url_cache_data(self) -> None:

@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Iterable
 
 from canonicaljson import encode_canonical_json
 from parameterized import parameterized
@@ -66,7 +66,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         )
 
     def assertEventsEqual(
-        self, first: EventBase, second: EventBase, msg: Optional[Any] = None
+        self, first: EventBase, second: EventBase, msg: Any | None = None
     ) -> None:
         self.assertEqual(
             encode_canonical_json(first.get_pdu_json()),
@@ -241,16 +241,16 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         sender: str = USER_ID,
         room_id: str = ROOM_ID,
         type: str = "m.room.message",
-        key: Optional[str] = None,
-        internal: Optional[dict] = None,
-        depth: Optional[int] = None,
-        prev_events: Optional[List[Tuple[str, dict]]] = None,
-        auth_events: Optional[List[str]] = None,
-        prev_state: Optional[List[str]] = None,
-        redacts: Optional[str] = None,
+        key: str | None = None,
+        internal: dict | None = None,
+        depth: int | None = None,
+        prev_events: list[tuple[str, dict]] | None = None,
+        auth_events: list[str] | None = None,
+        prev_state: list[str] | None = None,
+        redacts: str | None = None,
         push_actions: Iterable = frozenset(),
         **content: object,
-    ) -> Tuple[EventBase, EventContext]:
+    ) -> tuple[EventBase, EventContext]:
         prev_events = prev_events or []
         auth_events = auth_events or []
         prev_state = prev_state or []

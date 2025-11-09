@@ -26,19 +26,13 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Generic,
     Hashable,
     Iterable,
-    List,
     Mapping,
-    Optional,
     Protocol,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
     cast,
 )
 from weakref import WeakValueDictionary
@@ -53,18 +47,19 @@ from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import delay_cancellation
 from synapse.util.caches.deferred_cache import DeferredCache
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
-CacheKey = Union[Tuple, Any]
+CacheKey = tuple | Any
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 
 class CachedFunction(Generic[F]):
-    invalidate: Callable[[Tuple[Any, ...]], None]
+    invalidate: Callable[[tuple[Any, ...]], None]
     invalidate_all: Callable[[], None]
-    prefill: Callable[[Tuple[Any, ...], Any], None]
+    prefill: Callable[[tuple[Any, ...], Any], None]
     cache: Any = None
     num_args: Any = None
 
@@ -79,10 +74,10 @@ class _CacheDescriptorBase:
     def __init__(
         self,
         orig: Callable[..., Any],
-        num_args: Optional[int],
-        uncached_args: Optional[Collection[str]] = None,
+        num_args: int | None,
+        uncached_args: Collection[str] | None = None,
         cache_context: bool = False,
-        name: Optional[str] = None,
+        name: str | None = None,
     ):
         self.orig = orig
         self.name = name or orig.__name__
@@ -154,11 +149,18 @@ class _CacheDescriptorBase:
         )
 
 
-class HasServerName(Protocol):
+class HasServerNameAndClock(Protocol):
     server_name: str
     """
     The homeserver name that this cache is associated with (used to label the metric)
     (`hs.hostname`).
+    """
+
+    clock: Clock
+    """
+    The homeserver clock instance used to track delayed and looping calls. Important to
+    be able to fully cleanup the homeserver instance on server shutdown.
+    (`hs.get_clock()`).
     """
 
 
@@ -212,13 +214,13 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         *,
         orig: Callable[..., Any],
         max_entries: int = 1000,
-        num_args: Optional[int] = None,
-        uncached_args: Optional[Collection[str]] = None,
+        num_args: int | None = None,
+        uncached_args: Collection[str] | None = None,
         tree: bool = False,
         cache_context: bool = False,
         iterable: bool = False,
         prune_unread_entries: bool = True,
-        name: Optional[str] = None,
+        name: str | None = None,
     ):
         super().__init__(
             orig,
@@ -239,7 +241,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         self.prune_unread_entries = prune_unread_entries
 
     def __get__(
-        self, obj: Optional[HasServerName], owner: Optional[Type]
+        self, obj: HasServerNameAndClock | None, owner: type | None
     ) -> Callable[..., "defer.Deferred[Any]"]:
         # We need access to instance-level `obj.server_name` attribute
         assert obj is not None, (
@@ -249,9 +251,13 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         assert obj.server_name is not None, (
             "The `server_name` attribute must be set on the object where `@cached` decorator is used."
         )
+        assert obj.clock is not None, (
+            "The `clock` attribute must be set on the object where `@cached` decorator is used."
+        )
 
         cache: DeferredCache[CacheKey, Any] = DeferredCache(
             name=self.name,
+            clock=obj.clock,
             server_name=obj.server_name,
             max_entries=self.max_entries,
             tree=self.tree,
@@ -320,11 +326,11 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
 
     def __init__(
         self,
-        orig: Callable[..., Awaitable[Dict]],
+        orig: Callable[..., Awaitable[dict]],
         cached_method_name: str,
         list_name: str,
-        num_args: Optional[int] = None,
-        name: Optional[str] = None,
+        num_args: int | None = None,
+        name: str | None = None,
     ):
         """
         Args:
@@ -351,8 +357,8 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             )
 
     def __get__(
-        self, obj: Optional[Any], objtype: Optional[Type] = None
-    ) -> Callable[..., "defer.Deferred[Dict[Hashable, Any]]"]:
+        self, obj: Any | None, objtype: type | None = None
+    ) -> Callable[..., "defer.Deferred[dict[Hashable, Any]]"]:
         cached_method = getattr(obj, self.cached_method_name)
         cache: DeferredCache[CacheKey, Any] = cached_method.cache
         num_args = cached_method.num_args
@@ -364,7 +370,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             )
 
         @functools.wraps(self.orig)
-        def wrapped(*args: Any, **kwargs: Any) -> "defer.Deferred[Dict]":
+        def wrapped(*args: Any, **kwargs: Any) -> "defer.Deferred[dict]":
             # If we're passed a cache_context then we'll want to call its
             # invalidate() whenever we are invalidated
             invalidate_callback = kwargs.pop("on_invalidate", None)
@@ -400,10 +406,10 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
 
             results = {cache_key_to_arg(key): v for key, v in immediate_results.items()}
 
-            cached_defers: List["defer.Deferred[Any]"] = []
+            cached_defers: list["defer.Deferred[Any]"] = []
             if pending_deferred:
 
-                def update_results(r: Dict) -> None:
+                def update_results(r: dict) -> None:
                     for k, v in r.items():
                         results[cache_key_to_arg(k)] = v
 
@@ -413,7 +419,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             if missing:
                 cache_entry = cache.start_bulk_input(missing, invalidate_callback)
 
-                def complete_all(res: Dict[Hashable, Any]) -> None:
+                def complete_all(res: dict[Hashable, Any]) -> None:
                     missing_results = {}
                     for key in missing:
                         arg = cache_key_to_arg(key)
@@ -463,10 +469,10 @@ class _CacheContext:
     on a lower level.
     """
 
-    Cache = Union[DeferredCache, LruCache]
+    Cache = DeferredCache | LruCache
 
     _cache_context_objects: """WeakValueDictionary[
-        Tuple["_CacheContext.Cache", CacheKey], "_CacheContext"
+        tuple["_CacheContext.Cache", CacheKey], "_CacheContext"
     ]""" = WeakValueDictionary()
 
     def __init__(self, cache: "_CacheContext.Cache", cache_key: CacheKey) -> None:
@@ -500,13 +506,13 @@ class _CachedFunctionDescriptor:
     plugin."""
 
     max_entries: int
-    num_args: Optional[int]
-    uncached_args: Optional[Collection[str]]
+    num_args: int | None
+    uncached_args: Collection[str] | None
     tree: bool
     cache_context: bool
     iterable: bool
     prune_unread_entries: bool
-    name: Optional[str]
+    name: str | None
 
     def __call__(self, orig: F) -> CachedFunction[F]:
         d = DeferredCacheDescriptor(
@@ -526,13 +532,13 @@ class _CachedFunctionDescriptor:
 def cached(
     *,
     max_entries: int = 1000,
-    num_args: Optional[int] = None,
-    uncached_args: Optional[Collection[str]] = None,
+    num_args: int | None = None,
+    uncached_args: Collection[str] | None = None,
     tree: bool = False,
     cache_context: bool = False,
     iterable: bool = False,
     prune_unread_entries: bool = True,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> _CachedFunctionDescriptor:
     return _CachedFunctionDescriptor(
         max_entries=max_entries,
@@ -553,8 +559,8 @@ class _CachedListFunctionDescriptor:
 
     cached_method_name: str
     list_name: str
-    num_args: Optional[int] = None
-    name: Optional[str] = None
+    num_args: int | None = None
+    name: str | None = None
 
     def __call__(self, orig: F) -> CachedFunction[F]:
         d = DeferredCacheListDescriptor(
@@ -571,8 +577,8 @@ def cachedList(
     *,
     cached_method_name: str,
     list_name: str,
-    num_args: Optional[int] = None,
-    name: Optional[str] = None,
+    num_args: int | None = None,
+    name: str | None = None,
 ) -> _CachedListFunctionDescriptor:
     """Creates a descriptor that wraps a function in a `DeferredCacheListDescriptor`.
 

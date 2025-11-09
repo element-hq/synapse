@@ -20,7 +20,6 @@
 #
 
 from http import HTTPStatus
-from typing import Dict, List, Tuple
 
 from twisted.web.resource import Resource
 
@@ -52,14 +51,14 @@ class CancellableFederationServlet(BaseFederationServlet):
 
     @cancellable
     async def on_GET(
-        self, origin: str, content: None, query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
+        self, origin: str, content: None, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
         await self.clock.sleep(1.0)
         return HTTPStatus.OK, {"result": True}
 
     async def on_POST(
-        self, origin: str, content: JsonDict, query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
+        self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
         await self.clock.sleep(1.0)
         return HTTPStatus.OK, {"result": True}
 

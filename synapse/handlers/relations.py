@@ -20,15 +20,12 @@
 #
 import enum
 import logging
+from collections import defaultdict
 from typing import (
     TYPE_CHECKING,
     Collection,
-    Dict,
-    FrozenSet,
     Iterable,
-    List,
     Mapping,
-    Optional,
     Sequence,
 )
 
@@ -40,7 +37,11 @@ from synapse.events import EventBase, relation_from_event
 from synapse.events.utils import SerializeEventConfig
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import trace
-from synapse.storage.databases.main.relations import ThreadsNextBatch, _RelatedEvent
+from synapse.storage.databases.main.relations import (
+    ThreadsNextBatch,
+    ThreadUpdateInfo,
+    _RelatedEvent,
+)
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, UserID
 from synapse.util.async_helpers import gather_results
@@ -51,6 +52,11 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+# Type aliases for thread update processing
+ThreadUpdatesMap = dict[str, list[ThreadUpdateInfo]]
+ThreadRootsMap = dict[str, EventBase]
+AggregationsMap = dict[str, "BundledAggregations"]
 
 
 class ThreadsListInclude(str, enum.Enum):
@@ -78,9 +84,9 @@ class BundledAggregations:
     Some values require additional processing during serialization.
     """
 
-    references: Optional[JsonDict] = None
-    replace: Optional[EventBase] = None
-    thread: Optional[_ThreadAggregation] = None
+    references: JsonDict | None = None
+    replace: EventBase | None = None
+    thread: _ThreadAggregation | None = None
 
     def __bool__(self) -> bool:
         return bool(self.references or self.replace or self.thread)
@@ -104,8 +110,8 @@ class RelationsHandler:
         pagin_config: PaginationConfig,
         recurse: bool,
         include_original_event: bool,
-        relation_type: Optional[str] = None,
-        event_type: Optional[str] = None,
+        relation_type: str | None = None,
+        event_type: str | None = None,
     ) -> JsonDict:
         """Get related events of a event, ordered by topological ordering.
 
@@ -210,7 +216,7 @@ class RelationsHandler:
         requester: Requester,
         event_id: str,
         initial_redaction_event: EventBase,
-        relation_types: List[str],
+        relation_types: list[str],
     ) -> None:
         """Redacts all events related to the given event ID with one of the given
         relation types.
@@ -265,7 +271,7 @@ class RelationsHandler:
                 )
 
     async def get_references_for_events(
-        self, event_ids: Collection[str], ignored_users: FrozenSet[str] = frozenset()
+        self, event_ids: Collection[str], ignored_users: frozenset[str] = frozenset()
     ) -> Mapping[str, Sequence[_RelatedEvent]]:
         """Get a list of references to the given events.
 
@@ -306,11 +312,11 @@ class RelationsHandler:
 
     async def _get_threads_for_events(
         self,
-        events_by_id: Dict[str, EventBase],
-        relations_by_id: Dict[str, str],
+        events_by_id: dict[str, EventBase],
+        relations_by_id: dict[str, str],
         user_id: str,
-        ignored_users: FrozenSet[str],
-    ) -> Dict[str, _ThreadAggregation]:
+        ignored_users: frozenset[str],
+    ) -> dict[str, _ThreadAggregation]:
         """Get the bundled aggregations for threads for the requested events.
 
         Args:
@@ -435,7 +441,7 @@ class RelationsHandler:
     @trace
     async def get_bundled_aggregations(
         self, events: Iterable[EventBase], user_id: str
-    ) -> Dict[str, BundledAggregations]:
+    ) -> dict[str, BundledAggregations]:
         """Generate bundled aggregations for events.
 
         Args:
@@ -454,7 +460,7 @@ class RelationsHandler:
         # De-duplicated events by ID to handle the same event requested multiple times.
         events_by_id = {}
         # A map of event ID to the relation in that event, if there is one.
-        relations_by_id: Dict[str, str] = {}
+        relations_by_id: dict[str, str] = {}
         for event in events:
             # State events do not get bundled aggregations.
             if event.is_state():
@@ -477,7 +483,7 @@ class RelationsHandler:
             events_by_id[event.event_id] = event
 
         # event ID -> bundled aggregation in non-serialized form.
-        results: Dict[str, BundledAggregations] = {}
+        results: dict[str, BundledAggregations] = {}
 
         # Fetch any ignored users of the requesting user.
         ignored_users = await self._main_store.ignored_users(user_id)
@@ -548,13 +554,87 @@ class RelationsHandler:
 
         return results
 
+    async def process_thread_updates_for_visibility(
+        self,
+        all_thread_updates: ThreadUpdatesMap,
+        user_id: str,
+    ) -> ThreadUpdatesMap:
+        """Process thread updates by filtering for visibility.
+
+        Takes raw thread updates from storage and filters them based on whether the
+        user can see the events. Preserves the ordering of updates within each thread.
+
+        Args:
+            all_thread_updates: Map of thread_id to list of ThreadUpdateInfo objects
+            user_id: The user ID to filter events for
+
+        Returns:
+            Filtered map of thread_id to list of ThreadUpdateInfo objects, containing
+            only updates for events the user can see.
+        """
+        # Build a mapping of event_id -> (thread_id, update) for efficient lookup
+        # during visibility filtering.
+        event_to_thread_map: dict[str, tuple[str, ThreadUpdateInfo]] = {}
+        for thread_id, updates in all_thread_updates.items():
+            for update in updates:
+                event_to_thread_map[update.event_id] = (thread_id, update)
+
+        # Fetch and filter events for visibility
+        all_events = await self._main_store.get_events_as_list(
+            event_to_thread_map.keys()
+        )
+        filtered_events = await filter_events_for_client(
+            self._storage_controllers, user_id, all_events
+        )
+
+        # Rebuild thread updates from filtered events
+        filtered_updates: ThreadUpdatesMap = defaultdict(list)
+        for event in filtered_events:
+            if event.event_id in event_to_thread_map:
+                thread_id, update = event_to_thread_map[event.event_id]
+                filtered_updates[thread_id].append(update)
+
+        return filtered_updates
+
+    async def fetch_thread_roots_and_aggregations(
+        self,
+        thread_ids: Iterable[str],
+        user_id: str,
+    ) -> tuple[ThreadRootsMap, AggregationsMap]:
+        """Fetch thread root events and their bundled aggregations.
+
+        Args:
+            thread_ids: The thread root event IDs to fetch
+            user_id: The user ID requesting the aggregations
+
+        Returns:
+            A tuple of:
+            - Map of event_id to EventBase for thread root events
+            - Map of event_id to BundledAggregations for those events
+        """
+        # Fetch thread root events
+        thread_root_events = await self._main_store.get_events_as_list(thread_ids)
+        thread_root_event_map: ThreadRootsMap = {
+            e.event_id: e for e in thread_root_events
+        }
+
+        # Fetch bundled aggregations for the thread roots
+        aggregations_map: AggregationsMap = {}
+        if thread_root_event_map:
+            aggregations_map = await self.get_bundled_aggregations(
+                thread_root_event_map.values(),
+                user_id,
+            )
+
+        return thread_root_event_map, aggregations_map
+
     async def get_threads(
         self,
         requester: Requester,
         room_id: str,
         include: ThreadsListInclude,
         limit: int = 5,
-        from_token: Optional[ThreadsNextBatch] = None,
+        from_token: ThreadsNextBatch | None = None,
     ) -> JsonDict:
         """Get related events of a event, ordered by topological ordering.
 

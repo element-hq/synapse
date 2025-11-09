@@ -20,7 +20,7 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING, Dict, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import Direction
 from synapse.api.errors import SynapseError
@@ -35,7 +35,8 @@ from synapse.streams.config import (
     PaginationConfig,
     extract_stream_token_from_pagination_token,
 )
-from synapse.types import JsonDict, RoomStreamToken, StreamToken
+from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
+from synapse.types.rest.client import ThreadUpdatesBody
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -66,9 +67,9 @@ class RelationPaginationServlet(RestServlet):
         request: SynapseRequest,
         room_id: str,
         parent_id: str,
-        relation_type: Optional[str] = None,
-        event_type: Optional[str] = None,
-    ) -> Tuple[int, JsonDict]:
+        relation_type: str | None = None,
+        event_type: str | None = None,
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         pagination_config = await PaginationConfig.from_request(
@@ -110,7 +111,7 @@ class ThreadsServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         limit = parse_integer(request, "limit", default=5)
@@ -158,14 +159,17 @@ class ThreadUpdatesServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.relations_handler = hs.get_relations_handler()
         self.event_serializer = hs.get_event_client_serializer()
+        self._storage_controllers = hs.get_storage_controllers()
+        # TODO: Get sliding sync handler for filter_rooms logic
+        # self.sliding_sync_handler = hs.get_sliding_sync_handler()
 
     async def _serialize_thread_updates(
         self,
-        thread_updates: Sequence[ThreadUpdateInfo],
-        bundled_aggregations: Dict[str, BundledAggregations],
+        thread_updates: list[ThreadUpdateInfo],
+        bundled_aggregations: dict[str, BundledAggregations],
         time_now: int,
         serialize_options: SerializeEventConfig,
-    ) -> Dict[str, Dict[str, JsonDict]]:
+    ) -> dict[str, dict[str, JsonDict]]:
         """
         Serialize thread updates into the response format.
 
@@ -178,7 +182,7 @@ class ThreadUpdatesServlet(RestServlet):
         Returns:
             Nested dict mapping room_id -> thread_root_id -> thread update dict
         """
-        chunk: Dict[str, Dict[str, JsonDict]] = {}
+        chunk: dict[str, dict[str, JsonDict]] = {}
 
         for update in thread_updates:
             room_id = update.room_id
@@ -215,10 +219,13 @@ class ThreadUpdatesServlet(RestServlet):
 
         return chunk
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
-        # Parse parameters
+        # Parse request body
+        body = ThreadUpdatesBody.model_validate_json(request.content.read())
+
+        # Parse query parameters
         dir_str = parse_string(request, "dir", default="b")
         if dir_str != "b":
             raise SynapseError(
@@ -234,8 +241,8 @@ class ThreadUpdatesServlet(RestServlet):
         to_token_str = parse_string(request, "to")
 
         # Parse pagination tokens
-        from_token: Optional[RoomStreamToken] = None
-        to_token: Optional[RoomStreamToken] = None
+        from_token: RoomStreamToken | None = None
+        to_token: RoomStreamToken | None = None
 
         if from_token_str:
             try:
@@ -261,58 +268,108 @@ class ThreadUpdatesServlet(RestServlet):
             except Exception:
                 raise SynapseError(400, "'to' parameter is invalid")
 
+        # Get the list of rooms to fetch thread updates for
+        # Start with all joined rooms, then apply filters if provided
+        user_id = requester.user.to_string()
+        room_ids = await self.store.get_rooms_for_user(user_id)
+
+        if body.filters is not None:
+            # TODO: Apply filters using sliding sync room filter logic
+            # For now, if filters are provided, we need to call the sliding sync
+            # filter_rooms method to get the applicable room IDs
+            raise SynapseError(501, "Room filters not yet implemented")
+
         # Fetch thread updates from storage
         # For backward pagination:
         # - 'from' (upper bound, exclusive) maps to 'to_token' (inclusive with <=)
         #   Since next_batch is (last_returned - 1), <= excludes the last returned item
         # - 'to' (lower bound, exclusive) maps to 'from_token' (exclusive with >)
-        thread_updates, next_token = await self.store.get_thread_updates_for_user(
-            user_id=requester.user.to_string(),
+        (
+            all_thread_updates,
+            prev_batch_token,
+        ) = await self.store.get_thread_updates_for_rooms(
+            room_ids=room_ids,
             from_token=to_token,
             to_token=from_token,
             limit=limit,
-            include_thread_roots=True,
         )
 
-        # Serialize response
-        chunk: Dict[str, Dict[str, JsonDict]] = {}
+        if len(all_thread_updates) == 0:
+            return 200, {"chunk": {}}
 
-        if thread_updates:
-            # Get bundled aggregations for all thread roots
-            thread_root_events = [
-                update.thread_root_event
-                for update in thread_updates
-                if update.thread_root_event is not None
-            ]
+        # Filter thread updates for visibility
+        filtered_updates = (
+            await self.relations_handler.process_thread_updates_for_visibility(
+                all_thread_updates, user_id
+            )
+        )
 
-            bundled_aggregations = {}
-            if thread_root_events:
-                bundled_aggregations = (
-                    await self.relations_handler.get_bundled_aggregations(
-                        thread_root_events, requester.user.to_string()
-                    )
+        if not filtered_updates:
+            return 200, {"chunk": {}}
+
+        # Fetch thread root events and their bundled aggregations
+        (
+            thread_root_event_map,
+            aggregations_map,
+        ) = await self.relations_handler.fetch_thread_roots_and_aggregations(
+            filtered_updates.keys(), user_id
+        )
+
+        # Build response with per-thread data
+        # Updates are already sorted by stream_ordering DESC from the database query,
+        # and filter_events_for_client preserves order, so updates[0] is guaranteed to be
+        # the latest event for each thread.
+        time_now = self.clock.time_msec()
+        serialize_options = SerializeEventConfig(requester=requester)
+        chunk: dict[str, dict[str, JsonDict]] = {}
+
+        for thread_root_id, updates in filtered_updates.items():
+            # We only care about the latest update for the thread
+            latest_update = updates[0]
+            room_id = latest_update.room_id
+
+            if room_id not in chunk:
+                chunk[room_id] = {}
+
+            update_dict: JsonDict = {}
+
+            # Add thread root if present
+            thread_root_event = thread_root_event_map.get(thread_root_id)
+            if thread_root_event is not None:
+                bundle_aggs_map = (
+                    {thread_root_id: aggregations_map[thread_root_id]}
+                    if thread_root_id in aggregations_map
+                    else None
+                )
+                serialized_events = await self.event_serializer.serialize_events(
+                    [thread_root_event],
+                    time_now,
+                    config=serialize_options,
+                    bundle_aggregations=bundle_aggs_map,
+                )
+                if serialized_events:
+                    update_dict["thread_root"] = serialized_events[0]
+
+            # Add per-thread prev_batch if this thread has multiple visible updates
+            if len(updates) > 1:
+                # Create a token pointing to one position before the latest event's stream position.
+                # This makes it exclusive - /relations with dir=b won't return the latest event again.
+                per_thread_prev_batch = StreamToken.START.copy_and_replace(
+                    StreamKeyType.ROOM,
+                    RoomStreamToken(stream=latest_update.stream_ordering - 1),
+                )
+                update_dict["prev_batch"] = await per_thread_prev_batch.to_string(
+                    self.store
                 )
 
-            # Set up serialization
-            time_now = self.clock.time_msec()
-            serialize_options = SerializeEventConfig(
-                requester=requester,
-            )
-
-            # Serialize all thread updates
-            chunk = await self._serialize_thread_updates(
-                thread_updates=thread_updates,
-                bundled_aggregations=bundled_aggregations,
-                time_now=time_now,
-                serialize_options=serialize_options,
-            )
+            chunk[room_id][thread_root_id] = update_dict
 
         # Build response
         response: JsonDict = {"chunk": chunk}
 
         # Add next_batch token for pagination
-        if next_token is not None:
-            response["next_batch"] = await next_token.to_string(self.store)
+        if prev_batch_token is not None:
+            response["next_batch"] = await prev_batch_token.to_string(self.store)
 
         return 200, response
 

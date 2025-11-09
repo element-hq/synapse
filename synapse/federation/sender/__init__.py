@@ -135,13 +135,9 @@ from collections import OrderedDict
 from typing import (
     TYPE_CHECKING,
     Collection,
-    Dict,
     Hashable,
     Iterable,
-    List,
     Literal,
-    Optional,
-    Tuple,
 )
 
 import attr
@@ -168,7 +164,6 @@ from synapse.metrics import (
     events_processed_counter,
 )
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.types import (
@@ -233,6 +228,11 @@ WAKEUP_INTERVAL_BETWEEN_DESTINATIONS_SEC = 5
 
 class AbstractFederationSender(metaclass=abc.ABCMeta):
     @abc.abstractmethod
+    def shutdown(self) -> None:
+        """Stops this federation sender instance from sending further transactions."""
+        raise NotImplementedError()
+
+    @abc.abstractmethod
     def notify_new_events(self, max_token: RoomStreamToken) -> None:
         """This gets called when we have some new events we might want to
         send out to other servers.
@@ -265,7 +265,7 @@ class AbstractFederationSender(metaclass=abc.ABCMeta):
         destination: str,
         edu_type: str,
         content: JsonDict,
-        key: Optional[Hashable] = None,
+        key: Hashable | None = None,
     ) -> None:
         """Construct an Edu object, and queue it for sending
 
@@ -308,7 +308,7 @@ class AbstractFederationSender(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     async def get_replication_rows(
         self, instance_name: str, from_token: int, to_token: int, target_row_count: int
-    ) -> Tuple[List[Tuple[int, Tuple]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple]], int, bool]:
         raise NotImplementedError()
 
 
@@ -326,6 +326,7 @@ class _DestinationWakeupQueue:
     _MAX_TIME_IN_QUEUE = 30.0
 
     sender: "FederationSender" = attr.ib()
+    hs: "HomeServer" = attr.ib()
     server_name: str = attr.ib()
     """
     Our homeserver name (used to label metrics) (`hs.hostname`).
@@ -408,14 +409,14 @@ class FederationSender(AbstractFederationSender):
         self.is_mine_id = hs.is_mine_id
         self.is_mine_server_name = hs.is_mine_server_name
 
-        self._presence_router: Optional["PresenceRouter"] = None
+        self._presence_router: "PresenceRouter" | None = None
         self._transaction_manager = TransactionManager(hs)
 
         self._instance_name = hs.get_instance_name()
         self._federation_shard_config = hs.config.worker.federation_shard_config
 
         # map from destination to PerDestinationQueue
-        self._per_destination_queues: Dict[str, PerDestinationQueue] = {}
+        self._per_destination_queues: dict[str, PerDestinationQueue] = {}
 
         transaction_queue_pending_destinations_gauge.register_hook(
             homeserver_instance_id=hs.get_instance_id(),
@@ -453,21 +454,33 @@ class FederationSender(AbstractFederationSender):
             1.0 / hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
         )
         self._destination_wakeup_queue = _DestinationWakeupQueue(
-            self, self.server_name, self.clock, max_delay_s=rr_txn_interval_per_room_s
+            self,
+            hs,
+            self.server_name,
+            self.clock,
+            max_delay_s=rr_txn_interval_per_room_s,
         )
+
+        # It is important for `_is_shutdown` to be instantiated before the looping call
+        # for `wake_destinations_needing_catchup`.
+        self._is_shutdown = False
 
         # Regularly wake up destinations that have outstanding PDUs to be caught up
         self.clock.looping_call_now(
-            run_as_background_process,
+            self.hs.run_as_background_process,
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
-            self.server_name,
             self._wake_destinations_needing_catchup,
         )
 
+    def shutdown(self) -> None:
+        self._is_shutdown = True
+        for queue in self._per_destination_queues.values():
+            queue.shutdown()
+
     def _get_per_destination_queue(
         self, destination: str
-    ) -> Optional[PerDestinationQueue]:
+    ) -> PerDestinationQueue | None:
         """Get or create a PerDestinationQueue for the given destination
 
         Args:
@@ -503,16 +516,15 @@ class FederationSender(AbstractFederationSender):
             return
 
         # fire off a processing loop in the background
-        run_as_background_process(
+        self.hs.run_as_background_process(
             "process_event_queue_for_federation",
-            self.server_name,
             self._process_event_queue_loop,
         )
 
     async def _process_event_queue_loop(self) -> None:
         try:
             self._is_processing = True
-            while True:
+            while not self._is_shutdown:
                 last_token = await self.store.get_federation_out_pos("events")
                 (
                     next_token,
@@ -592,7 +604,7 @@ class FederationSender(AbstractFederationSender):
                         )
                         return
 
-                    destinations: Optional[Collection[str]] = None
+                    destinations: Collection[str] | None = None
                     if not event.prev_event_ids():
                         # If there are no prev event IDs then the state is empty
                         # and so no remote servers in the room
@@ -708,7 +720,7 @@ class FederationSender(AbstractFederationSender):
                             **{SERVER_NAME_LABEL: self.server_name},
                         ).observe((now - ts) / 1000)
 
-                async def handle_room_events(events: List[EventBase]) -> None:
+                async def handle_room_events(events: list[EventBase]) -> None:
                     logger.debug(
                         "Handling %i events in room %s", len(events), events[0].room_id
                     )
@@ -720,7 +732,7 @@ class FederationSender(AbstractFederationSender):
                         for event in events:
                             await handle_event(event)
 
-                events_by_room: Dict[str, List[EventBase]] = {}
+                events_by_room: dict[str, list[EventBase]] = {}
 
                 for event_id in event_ids:
                     # `event_entries` is unsorted, so we have to iterate over `event_ids`
@@ -997,7 +1009,7 @@ class FederationSender(AbstractFederationSender):
         destination: str,
         edu_type: str,
         content: JsonDict,
-        key: Optional[Hashable] = None,
+        key: Hashable | None = None,
     ) -> None:
         """Construct an Edu object, and queue it for sending
 
@@ -1025,7 +1037,7 @@ class FederationSender(AbstractFederationSender):
 
         self.send_edu(edu, key)
 
-    def send_edu(self, edu: Edu, key: Optional[Hashable]) -> None:
+    def send_edu(self, edu: Edu, key: Hashable | None) -> None:
         """Queue an EDU for sending
 
         Args:
@@ -1108,7 +1120,7 @@ class FederationSender(AbstractFederationSender):
     @staticmethod
     async def get_replication_rows(
         instance_name: str, from_token: int, to_token: int, target_row_count: int
-    ) -> Tuple[List[Tuple[int, Tuple]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple]], int, bool]:
         # Dummy implementation for case where federation sender isn't offloaded
         # to a worker.
         return [], 0, False
@@ -1121,9 +1133,9 @@ class FederationSender(AbstractFederationSender):
         In order to reduce load spikes, adds a delay between each destination.
         """
 
-        last_processed: Optional[str] = None
+        last_processed: str | None = None
 
-        while True:
+        while not self._is_shutdown:
             destinations_to_wake = (
                 await self.store.get_catch_up_outstanding_destinations(last_processed)
             )

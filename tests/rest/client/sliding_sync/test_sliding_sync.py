@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 import logging
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
+from typing import Any, Iterable, Literal
 from unittest.mock import AsyncMock
 
 from parameterized import parameterized, parameterized_class
@@ -81,8 +81,8 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         return config
 
     def do_sync(
-        self, sync_body: JsonDict, *, since: Optional[str] = None, tok: str
-    ) -> Tuple[JsonDict, str]:
+        self, sync_body: JsonDict, *, since: str | None = None, tok: str
+    ) -> tuple[JsonDict, str]:
         """Do a sliding sync request with given body.
 
         Asserts the request was successful.
@@ -170,7 +170,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         # Scrutinize the account data since it has no concrete type. We're just copying
         # everything into a known type. It should be a mapping from user ID to a list of
         # room IDs. Ignore anything else.
-        new_dm_map: Dict[str, List[str]] = {}
+        new_dm_map: dict[str, list[str]] = {}
         if isinstance(existing_dm_map, dict):
             for user_id, room_ids in existing_dm_map.items():
                 if isinstance(user_id, str) and isinstance(room_ids, list):
@@ -239,8 +239,8 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
     def _create_remote_invite_room_for_user(
         self,
         invitee_user_id: str,
-        unsigned_invite_room_state: Optional[List[StrippedStateEvent]],
-        invite_room_id: Optional[str] = None,
+        unsigned_invite_room_state: list[StrippedStateEvent] | None,
+        invite_room_id: str | None = None,
     ) -> str:
         """
         Create a fake invite for a remote room and persist it.

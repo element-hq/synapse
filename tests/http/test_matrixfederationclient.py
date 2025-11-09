@@ -18,7 +18,7 @@
 #
 #
 import io
-from typing import Any, Dict, Generator
+from typing import Any, Generator
 from unittest.mock import ANY, Mock, create_autospec
 
 from netaddr import IPSet
@@ -63,10 +63,6 @@ def check_logcontext(context: LoggingContextOrSentinel) -> None:
 
 
 class FederationClientTests(HomeserverTestCase):
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        hs = self.setup_test_homeserver(reactor=reactor, clock=clock)
-        return hs
-
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:
@@ -418,6 +414,65 @@ class FederationClientTests(HomeserverTestCase):
         self.assertEqual(length, len(data))
         self.assertEqual(output_stream.getvalue(), data)
 
+    @override_config(
+        {
+            "federation": {
+                # Set the timeout to a deterministic value, in case the defaults
+                # change.
+                "client_timeout": "10s",
+            }
+        }
+    )
+    def test_authed_media_timeout_reading_body(self) -> None:
+        """
+        If the HTTP request is connected, but gets no response before being
+        timed out, it'll give a RequestSendFailed with can_retry.
+
+        Regression test for https://github.com/element-hq/synapse/issues/19061
+        """
+        limiter = Ratelimiter(
+            store=self.hs.get_datastores().main,
+            clock=self.clock,
+            cfg=RatelimitSettings(key="", per_second=0.17, burst_count=1048576),
+        )
+
+        output_stream = io.BytesIO()
+
+        d = defer.ensureDeferred(
+            # timeout is set by `client_timeout`, which we override above.
+            self.cl.federation_get_file(
+                "testserv:8008", "path", output_stream, limiter, "127.0.0.1", 10000
+            )
+        )
+
+        self.pump()
+
+        conn = Mock()
+        clients = self.reactor.tcpClients
+        client = clients[0][2].buildProtocol(None)
+        client.makeConnection(conn)
+
+        # Deferred does not have a result
+        self.assertNoResult(d)
+
+        # Send it the HTTP response
+        client.dataReceived(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Server: Fake\r\n"
+            # Set a large content length, prompting the federation client to
+            # wait to receive the rest of the body.
+            b"Content-Length: 1000\r\n"
+            b"Content-Type: multipart/mixed; boundary=6067d4698f8d40a0a794ea7d7379d53a\r\n\r\n"
+        )
+
+        # Push by enough to time it out
+        self.reactor.advance(10.5)
+        f = self.failureResultOf(d)
+
+        self.assertIsInstance(f.value, RequestSendFailed)
+        self.assertTrue(f.value.can_retry)
+        self.assertIsInstance(f.value.inner_exception, defer.TimeoutError)
+
     @parameterized.expand(["get_json", "post_json", "delete_json", "put_json"])
     def test_timeout_reading_body(self, method_name: str) -> None:
         """
@@ -749,7 +804,7 @@ class FederationClientTests(HomeserverTestCase):
 
 
 class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         conf = super().default_config()
         conf["instance_map"] = {
             "main": {"host": "testserv", "port": 8765},
