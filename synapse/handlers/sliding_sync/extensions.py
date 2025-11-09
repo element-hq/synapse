@@ -1029,7 +1029,7 @@ class SlidingSyncExtensionHandler:
             actual_room_response_map: A map of room ID to room results.
 
         Returns:
-            A set of thread IDs (thread root event IDs) that appear in timelines.
+            A set of thread IDs (thread root event IDs) that appear in the timeline.
         """
         threads_in_timeline: set[str] = set()
         for room_result in actual_room_response_map.values():
@@ -1058,7 +1058,6 @@ class SlidingSyncExtensionHandler:
             return current_token
         if current_token is None:
             return new_token
-        # Take the maximum (latest) prev_batch token for backwards pagination
         if new_token.room_key.stream > current_token.room_key.stream:
             return new_token
         return current_token
@@ -1092,6 +1091,7 @@ class SlidingSyncExtensionHandler:
         Args:
             sync_config: Sync configuration.
             threads_request: The threads extension from the request.
+            actual_room_ids: The actual room IDs in the the Sliding Sync response.
             actual_room_response_map: A map of room ID to room results in the
                 sliding sync response. Used to determine which threads already have
                 events in the room timeline.
@@ -1168,10 +1168,7 @@ class SlidingSyncExtensionHandler:
                 )
                 remaining_limit -= num_updates
 
-                # Merge results
                 self._merge_thread_updates(all_thread_updates, room_thread_updates)
-
-                # Merge prev_batch tokens
                 prev_batch_token = self._merge_prev_batch_token(
                     prev_batch_token, room_prev_batch
                 )
@@ -1190,15 +1187,11 @@ class SlidingSyncExtensionHandler:
                 exclude_thread_ids=threads_to_exclude,
             )
 
-            # Merge results
             self._merge_thread_updates(all_thread_updates, other_thread_updates)
-
-            # Merge prev_batch tokens
             prev_batch_token = self._merge_prev_batch_token(
                 prev_batch_token, other_prev_batch
             )
 
-        # Early return: no thread updates found
         if len(all_thread_updates) == 0:
             return None
 
@@ -1222,7 +1215,6 @@ class SlidingSyncExtensionHandler:
                 thread_id, update = event_to_thread_map[event.event_id]
                 filtered_updates[thread_id].append(update)
 
-        # Early return: no visible thread updates after filtering
         if not filtered_updates:
             return None
 

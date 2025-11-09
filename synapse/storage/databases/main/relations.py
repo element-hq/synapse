@@ -1208,7 +1208,7 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
                 exclusion_clause = f" AND {exclusion_clause}"
 
             # TODO: improve the fact that multiple hits for the same thread means we
-            # won't get as many updates for the sss response
+            # won't get as many overall updates for the sss response
 
             # Find any thread events between the stream ordering bounds.
             sql = f"""
