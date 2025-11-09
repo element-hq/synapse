@@ -19,10 +19,11 @@ import synapse.rest.admin
 from synapse.api.constants import RelationTypes
 from synapse.rest.client import login, relations, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, StreamKeyType
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
+from tests.server import TimedOutException
 
 logger = logging.getLogger(__name__)
 
@@ -1042,4 +1043,123 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
             excluded_room,
             thread_updates,
             f"Room {excluded_room} should NOT have thread updates since it's excluded from the room list",
+        )
+
+    def test_wait_for_new_data(self) -> None:
+        """
+        Test to make sure that the Sliding Sync request waits for new data to arrive.
+
+        (Only applies to incremental syncs with a `timeout` specified)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Create a thread
+        thread_root = self.helper.send(room_id, body="Thread root", tok=user1_tok)[
+            "event_id"
+        ]
+
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make an incremental Sliding Sync request with the threads extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+        # Send a thread reply to trigger new results
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply in thread",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root,
+                },
+            },
+            tok=user2_tok,
+        )
+        # Should respond before the 10 second timeout
+        channel.await_result(timeout_ms=3000)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # We should see the new thread update
+        self.assertIn(
+            thread_root,
+            channel.json_body["extensions"][EXT_NAME]["updates"][room_id],
+        )
+
+    def test_wait_for_new_data_timeout(self) -> None:
+        """
+        Test to make sure that the Sliding Sync request waits for new data to arrive but
+        no data ever arrives so we timeout. We're also making sure that the default data
+        from the threads extension doesn't trigger a false-positive for new data.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+        # Wake-up `notifier.wait_for_events(...)` that will cause us test
+        # `SlidingSyncResult.__bool__` for new results.
+        self._bump_notifier_wait_for_events(
+            user1_id, wake_stream_key=StreamKeyType.ACCOUNT_DATA
+        )
+        # Block for a little bit more to ensure we don't see any new results.
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=4000)
+        # Wait for the sync to complete (wait for the rest of the 10 second timeout,
+        # 5000 + 4000 + 1200 > 10000)
+        channel.await_result(timeout_ms=1200)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Should be no thread updates
+        self.assertNotIn(
+            EXT_NAME,
+            channel.json_body.get("extensions", {}),
         )
