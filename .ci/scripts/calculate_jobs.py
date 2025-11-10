@@ -55,6 +55,8 @@ trial_sqlite_tests = [
 
 if not IS_PR:
     # Otherwise, check all supported Python versions.
+    #
+    # Avoiding running all of these versions on every PR saves on CI time.
     trial_sqlite_tests.extend(
         {
             "python-version": version,
@@ -64,6 +66,8 @@ if not IS_PR:
         for version in ("3.11", "3.12", "3.13")
     )
 
+# Only test postgres against the earliest and latest Python versions that we
+# support in order to save on CI time.
 trial_postgres_tests = [
     {
         "python-version": "3.10",
@@ -79,6 +83,7 @@ trial_postgres_tests = [
     },
 ]
 
+# Ensure that Synapse passes unit tests even with no extra dependencies installed.
 trial_no_extra_tests = [
     {
         "python-version": "3.10",
