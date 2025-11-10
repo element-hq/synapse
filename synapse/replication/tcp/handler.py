@@ -20,16 +20,13 @@
 #
 #
 import logging
-from collections import deque
 from typing import (
     TYPE_CHECKING,
     Any,
     Awaitable,
     Iterable,
     Iterator,
-    Optional,
     TypeVar,
-    Union,
 )
 
 from prometheus_client import Counter
@@ -71,6 +68,7 @@ from synapse.replication.tcp.streams._base import (
     DeviceListsStream,
     ThreadSubscriptionsStream,
 )
+from synapse.util.background_queue import BackgroundQueue
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -115,9 +113,7 @@ tcp_command_queue_gauge = LaterGauge(
 
 
 # the type of the entries in _command_queues_by_stream
-_StreamCommandQueue = deque[
-    tuple[Union[RdataCommand, PositionCommand], IReplicationConnection]
-]
+_StreamCommandQueueItem = tuple[RdataCommand | PositionCommand, IReplicationConnection]
 
 
 class ReplicationCommandHandler:
@@ -245,7 +241,7 @@ class ReplicationCommandHandler:
         self._pending_batches: dict[str, list[Any]] = {}
 
         # The factory used to create connections.
-        self._factory: Optional[ReconnectingClientFactory] = None
+        self._factory: ReconnectingClientFactory | None = None
 
         # The currently connected connections. (The list of places we need to send
         # outgoing replication commands to.)
@@ -265,7 +261,12 @@ class ReplicationCommandHandler:
         # for each stream, a queue of commands that are awaiting processing, and the
         # connection that they arrived on.
         self._command_queues_by_stream = {
-            stream_name: _StreamCommandQueue() for stream_name in self._streams
+            stream_name: BackgroundQueue[_StreamCommandQueueItem](
+                hs,
+                "process-replication-data",
+                self._unsafe_process_item,
+            )
+            for stream_name in self._streams
         }
 
         # For each connection, the incoming stream names that have received a POSITION
@@ -336,7 +337,7 @@ class ReplicationCommandHandler:
             self._channels_to_subscribe_to.append(channel_name)
 
     def _add_command_to_stream_queue(
-        self, conn: IReplicationConnection, cmd: Union[RdataCommand, PositionCommand]
+        self, conn: IReplicationConnection, cmd: RdataCommand | PositionCommand
     ) -> None:
         """Queue the given received command for processing
 
@@ -349,42 +350,21 @@ class ReplicationCommandHandler:
             logger.error("Got %s for unknown stream: %s", cmd.NAME, stream_name)
             return
 
-        queue.append((cmd, conn))
+        queue.add((cmd, conn))
 
-        # if we're already processing this stream, there's nothing more to do:
-        # the new entry on the queue will get picked up in due course
-        if stream_name in self._processing_streams:
-            return
+    async def _unsafe_process_item(self, item: _StreamCommandQueueItem) -> None:
+        """Process a single command from the stream queue.
 
-        # fire off a background process to start processing the queue.
-        self.hs.run_as_background_process(
-            "process-replication-data",
-            self._unsafe_process_queue,
-            stream_name,
-        )
-
-    async def _unsafe_process_queue(self, stream_name: str) -> None:
-        """Processes the command queue for the given stream, until it is empty
-
-        Does not check if there is already a thread processing the queue, hence "unsafe"
+        This should only be called one at a time per stream, and is called from
+        the stream's BackgroundQueue.
         """
-        assert stream_name not in self._processing_streams
-
-        self._processing_streams.add(stream_name)
-        try:
-            queue = self._command_queues_by_stream.get(stream_name)
-            while queue:
-                cmd, conn = queue.popleft()
-                try:
-                    await self._process_command(cmd, conn, stream_name)
-                except Exception:
-                    logger.exception("Failed to handle command %s", cmd)
-        finally:
-            self._processing_streams.discard(stream_name)
+        cmd, conn = item
+        stream_name = cmd.stream_name
+        await self._process_command(cmd, conn, stream_name)
 
     async def _process_command(
         self,
-        cmd: Union[PositionCommand, RdataCommand],
+        cmd: PositionCommand | RdataCommand,
         conn: IReplicationConnection,
         stream_name: str,
     ) -> None:
@@ -475,7 +455,7 @@ class ReplicationCommandHandler:
 
     def on_USER_SYNC(
         self, conn: IReplicationConnection, cmd: UserSyncCommand
-    ) -> Optional[Awaitable[None]]:
+    ) -> Awaitable[None] | None:
         user_sync_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         if self._is_presence_writer:
@@ -491,7 +471,7 @@ class ReplicationCommandHandler:
 
     def on_CLEAR_USER_SYNC(
         self, conn: IReplicationConnection, cmd: ClearUserSyncsCommand
-    ) -> Optional[Awaitable[None]]:
+    ) -> Awaitable[None] | None:
         if self._is_presence_writer:
             return self._presence_handler.update_external_syncs_clear(cmd.instance_id)
         else:
@@ -507,7 +487,7 @@ class ReplicationCommandHandler:
 
     def on_USER_IP(
         self, conn: IReplicationConnection, cmd: UserIpCommand
-    ) -> Optional[Awaitable[None]]:
+    ) -> Awaitable[None] | None:
         user_ip_cache_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         if self._is_master or self._should_insert_client_ips:
@@ -849,7 +829,7 @@ class ReplicationCommandHandler:
         self,
         instance_id: str,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         is_syncing: bool,
         last_sync_ms: int,
     ) -> None:
@@ -864,7 +844,7 @@ class ReplicationCommandHandler:
         access_token: str,
         ip: str,
         user_agent: str,
-        device_id: Optional[str],
+        device_id: str | None,
         last_seen: int,
     ) -> None:
         """Tell the master that the user made a request."""
@@ -874,7 +854,7 @@ class ReplicationCommandHandler:
     def send_remote_server_up(self, server: str) -> None:
         self.send_command(RemoteServerUpCommand(server))
 
-    def stream_update(self, stream_name: str, token: Optional[int], data: Any) -> None:
+    def stream_update(self, stream_name: str, token: int | None, data: Any) -> None:
         """Called when a new update is available to stream to Redis subscribers.
 
         We need to check if the client is interested in the stream or not

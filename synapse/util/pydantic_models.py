@@ -13,7 +13,7 @@
 #
 #
 
-from typing import Annotated, Union
+from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, StrictStr, StringConstraints
 
@@ -29,6 +29,13 @@ class ParseModel(BaseModel):
      - enables strict mode,
 
     but otherwise uses Pydantic's default behaviour.
+
+    Strict mode can adversely affect some types of fields, and should be disabled
+    for a field if:
+
+    - the field's type is a `Path` or `FilePath`. Strict mode will refuse to
+      coerce from `str` (likely what the yaml parser will produce) to `FilePath`,
+      raising a `ValidationError`.
 
     For now, ignore unknown fields. In the future, we could change this so that unknown
     config values cause a ValidationError, provided the error messages are meaningful to
@@ -53,4 +60,4 @@ EventIdV1And2 = Annotated[StrictStr, AfterValidator(validate_event_id_v1_and_2)]
 EventIdV3Plus = Annotated[
     StrictStr, StringConstraints(pattern=r"^\$([a-zA-Z0-9-_]{43}|[a-zA-Z0-9+/]{43})$")
 ]
-AnyEventId = Union[EventIdV1And2, EventIdV3Plus]
+AnyEventId = EventIdV1And2 | EventIdV3Plus

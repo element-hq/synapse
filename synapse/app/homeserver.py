@@ -22,7 +22,7 @@
 import logging
 import os
 import sys
-from typing import Iterable, Optional
+from typing import Iterable
 
 from twisted.internet.tcp import Port
 from twisted.web.resource import EncodingResourceWrapper, Resource
@@ -71,7 +71,6 @@ from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
 from synapse.storage import DataStore
 from synapse.types import ISynapseReactor
-from synapse.util.check_dependencies import check_requirements
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.module_loader import load_module
 
@@ -351,10 +350,18 @@ def load_or_generate_config(argv_options: list[str]) -> HomeServerConfig:
 
 def create_homeserver(
     config: HomeServerConfig,
-    reactor: Optional[ISynapseReactor] = None,
+    reactor: ISynapseReactor | None = None,
 ) -> SynapseHomeServer:
     """
     Create a homeserver instance for the Synapse main process.
+
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
 
     Args:
         config: The configuration for the homeserver.
@@ -388,22 +395,20 @@ def create_homeserver(
 
 def setup(
     hs: SynapseHomeServer,
-    *,
-    freeze: bool = True,
 ) -> None:
     """
-    Setup a Synapse homeserver instance given a configuration.
+    Setup a `SynapseHomeServer` (main) instance.
+
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
 
     Args:
         hs: The homeserver to setup.
-        freeze: whether to freeze the homeserver base objects in the garbage collector.
-            May improve garbage collection performance by marking objects with an effectively
-            static lifetime as frozen so they don't need to be considered for cleanup.
-            If you ever want to `shutdown` the homeserver, this needs to be
-            False otherwise the homeserver cannot be garbage collected after `shutdown`.
-
-    Returns:
-        A homeserver instance.
     """
 
     setup_logging(hs, hs.config, use_worker_options=False)
@@ -414,27 +419,38 @@ def setup(
     # Start the tracer
     init_tracer(hs)  # noqa
 
-    try:
-        hs.setup()
-    except Exception as e:
-        handle_startup_exception(e)
+    hs.setup()
 
-    async def _start_when_reactor_running() -> None:
-        # TODO: Feels like this should be moved somewhere else.
-        #
-        # Load the OIDC provider metadatas, if OIDC is enabled.
-        if hs.config.oidc.oidc_enabled:
-            oidc = hs.get_oidc_handler()
-            # Loading the provider metadata also ensures the provider config is valid.
-            await oidc.load_metadata()
 
-        await _base.start(hs, freeze)
+async def start(
+    hs: SynapseHomeServer,
+    *,
+    freeze: bool = True,
+) -> None:
+    """
+    Should be called once the reactor is running.
 
-        # TODO: Feels like this should be moved somewhere else.
-        hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
 
-    # Register a callback to be invoked once the reactor is running
-    register_start(hs, _start_when_reactor_running)
+    Args:
+        hs: The homeserver to setup.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+    """
+
+    await _base.start(hs, freeze=freeze)
+
+    # TODO: Feels like this should be moved somewhere else.
+    hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
 
 def start_reactor(
@@ -460,15 +476,26 @@ def start_reactor(
 def main() -> None:
     homeserver_config = load_or_generate_config(sys.argv[1:])
 
+    # Create a logging context as soon as possible so we can start associating
+    # everything with this homeserver.
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
-        # check base requirements
-        check_requirements()
+        # Initialize and setup the homeserver
         hs = create_homeserver(homeserver_config)
-        setup(hs)
+        try:
+            setup(hs)
+        except Exception as e:
+            handle_startup_exception(e)
 
-        # redirect stdio to the logs, if configured.
-        if not hs.config.logging.no_redirect_stdio:
+        # For problems immediately apparent during initialization, we want to log to
+        # stderr in the terminal so that they are obvious and visible to the operator.
+        #
+        # Now that we're past the initialization stage, we can redirect anything printed
+        # to stdio to the logs, if configured.
+        if not homeserver_config.logging.no_redirect_stdio:
             redirect_stdio_to_logs()
+
+        # Register a callback to be invoked once the reactor is running
+        register_start(hs, start, hs)
 
         start_reactor(homeserver_config)
 

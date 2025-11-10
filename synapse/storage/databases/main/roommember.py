@@ -26,9 +26,7 @@ from typing import (
     Collection,
     Iterable,
     Mapping,
-    Optional,
     Sequence,
-    Union,
     cast,
 )
 
@@ -446,7 +444,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_invite_for_local_user_in_room(
         self, user_id: str, room_id: str
-    ) -> Optional[RoomsForUser]:
+    ) -> RoomsForUser | None:
         """Gets the invite for the given *local* user and room.
 
         Args:
@@ -655,7 +653,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_local_current_membership_for_user_in_room(
         self, user_id: str, room_id: str
-    ) -> tuple[Optional[str], Optional[str]]:
+    ) -> tuple[str | None, str | None]:
         """Retrieve the current local membership state and event ID for a user in a room.
 
         Args:
@@ -672,7 +670,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.BAD_JSON)
 
         results = cast(
-            Optional[tuple[str, str]],
+            tuple[str, str] | None,
             await self.db_pool.simple_select_one(
                 "local_current_membership",
                 {"room_id": room_id, "user_id": user_id},
@@ -833,7 +831,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     )
     async def _do_users_share_a_room(
         self, user_id: str, other_user_ids: Collection[str]
-    ) -> Mapping[str, Optional[bool]]:
+    ) -> Mapping[str, bool | None]:
         """Return mapping from user ID to whether they share a room with the
         given user.
 
@@ -896,7 +894,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     )
     async def _do_users_share_a_room_joined_or_invited(
         self, user_id: str, other_user_ids: Collection[str]
-    ) -> Mapping[str, Optional[bool]]:
+    ) -> Mapping[str, bool | None]:
         """Return mapping from user ID to whether they share a room with the
         given user via being either joined or invited.
 
@@ -974,7 +972,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
               overlapping joined rooms for.
             cache_context
         """
-        shared_room_ids: Optional[frozenset[str]] = None
+        shared_room_ids: frozenset[str] | None = None
         for user_id in user_ids:
             room_ids = await self.get_rooms_for_user(
                 user_id, on_invalidate=cache_context.invalidate
@@ -1045,7 +1043,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     )
     def _get_user_id_from_membership_event_id(
         self, event_id: str
-    ) -> Optional[tuple[str, ProfileInfo]]:
+    ) -> tuple[str, ProfileInfo] | None:
         raise NotImplementedError()
 
     @cachedList(
@@ -1054,7 +1052,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     )
     async def _get_user_ids_from_membership_event_ids(
         self, event_ids: Iterable[str]
-    ) -> Mapping[str, Optional[str]]:
+    ) -> Mapping[str, str | None]:
         """For given set of member event_ids check if they point to a join
         event.
 
@@ -1229,7 +1227,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def _get_approximate_current_memberships_in_room(
         self, room_id: str
-    ) -> Mapping[str, Optional[str]]:
+    ) -> Mapping[str, str | None]:
         """Build a map from event id to membership, for all events in the current state.
 
         The event ids of non-memberships events (e.g. `m.room.power_levels`) are present
@@ -1240,7 +1238,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
 
         rows = cast(
-            list[tuple[str, Optional[str]]],
+            list[tuple[str, str | None]],
             await self.db_pool.simple_select_list(
                 "current_state_events",
                 keyvalues={"room_id": room_id},
@@ -1387,7 +1385,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     @cached(max_entries=5000)
     async def _get_membership_from_event_id(
         self, member_event_id: str
-    ) -> Optional[EventIdMembership]:
+    ) -> EventIdMembership | None:
         raise NotImplementedError()
 
     @cachedList(
@@ -1395,7 +1393,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     )
     async def get_membership_from_event_ids(
         self, member_event_ids: Iterable[str]
-    ) -> Mapping[str, Optional[EventIdMembership]]:
+    ) -> Mapping[str, EventIdMembership | None]:
         """Get user_id and membership of a set of event IDs.
 
         Returns:
@@ -1680,12 +1678,12 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_sliding_sync_room_for_user(
         self, user_id: str, room_id: str
-    ) -> Optional[RoomsForUserSlidingSync]:
+    ) -> RoomsForUserSlidingSync | None:
         """Get the sliding sync room entry for the given user and room."""
 
         def get_sliding_sync_room_for_user_txn(
             txn: LoggingTransaction,
-        ) -> Optional[RoomsForUserSlidingSync]:
+        ) -> RoomsForUserSlidingSync | None:
             sql = """
                 SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
                     r.room_version,
@@ -2106,7 +2104,7 @@ class _JoinedHostsCache:
     # if the instance is newly created or if the state is not based on a state
     # group. (An object is used as a sentinel value to ensure that it never is
     # equal to anything else).
-    state_group: Union[object, int] = attr.Factory(object)
+    state_group: object | int = attr.Factory(object)
 
     def __len__(self) -> int:
         return sum(len(v) for v in self.hosts_to_joined_users.values())

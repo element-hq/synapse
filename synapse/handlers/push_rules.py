@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 import attr
 
@@ -40,7 +40,7 @@ class RuleSpec:
     scope: str
     template: str
     rule_id: str
-    attr: Optional[str]
+    attr: str | None
 
 
 class PushRulesHandler:
@@ -51,7 +51,7 @@ class PushRulesHandler:
         self._main_store = hs.get_datastores().main
 
     async def set_rule_attr(
-        self, user_id: str, spec: RuleSpec, val: Union[bool, JsonDict]
+        self, user_id: str, spec: RuleSpec, val: bool | JsonDict
     ) -> None:
         """Set an attribute (enabled or actions) on an existing push rule.
 
@@ -137,7 +137,7 @@ class PushRulesHandler:
         return rules
 
 
-def check_actions(actions: list[Union[str, JsonDict]]) -> None:
+def check_actions(actions: list[str | JsonDict]) -> None:
     """Check if the given actions are spec compliant.
 
     Args:

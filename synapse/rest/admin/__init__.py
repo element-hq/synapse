@@ -35,7 +35,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.handlers.pagination import PURGE_HISTORY_ACTION_NAME
@@ -153,7 +153,7 @@ class PurgeHistoryRestServlet(RestServlet):
         self.auth = hs.get_auth()
 
     async def on_POST(
-        self, request: SynapseRequest, room_id: str, event_id: Optional[str]
+        self, request: SynapseRequest, room_id: str, event_id: str | None
     ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
@@ -173,7 +173,7 @@ class PurgeHistoryRestServlet(RestServlet):
             if event.room_id != room_id:
                 raise SynapseError(HTTPStatus.BAD_REQUEST, "Event is for wrong room.")
 
-            # RoomStreamToken expects [int] not Optional[int]
+            # RoomStreamToken expects [int] not [int | None]
             assert event.internal_metadata.stream_ordering is not None
             room_token = RoomStreamToken(
                 topological=event.depth, stream=event.internal_metadata.stream_ordering

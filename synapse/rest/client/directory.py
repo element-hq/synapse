@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import StrictStr
 
@@ -73,7 +73,7 @@ class ClientDirectoryServer(RestServlet):
         # TODO: get Pydantic to validate that this is a valid room id?
         room_id: StrictStr
         # `servers` is unspecced
-        servers: Optional[list[StrictStr]] = None
+        servers: list[StrictStr] | None = None
 
     async def on_PUT(
         self, request: SynapseRequest, room_alias: str

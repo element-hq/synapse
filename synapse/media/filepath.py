@@ -24,7 +24,7 @@ import functools
 import os
 import re
 import string
-from typing import Any, Callable, TypeVar, Union, cast
+from typing import Any, Callable, TypeVar, cast
 
 NEW_FORMAT_ID_RE = re.compile(r"^\d\d\d\d-\d\d-\d\d")
 
@@ -46,7 +46,7 @@ def _wrap_in_base_path(func: F) -> F:
 
 
 GetPathMethod = TypeVar(
-    "GetPathMethod", bound=Union[Callable[..., str], Callable[..., list[str]]]
+    "GetPathMethod", bound=Callable[..., str] | Callable[..., list[str]]
 )
 
 
@@ -73,7 +73,7 @@ def _wrap_with_jail_check(relative: bool) -> Callable[[GetPathMethod], GetPathMe
         @functools.wraps(func)
         def _wrapped(
             self: "MediaFilePaths", *args: Any, **kwargs: Any
-        ) -> Union[str, list[str]]:
+        ) -> str | list[str]:
             path_or_paths = func(self, *args, **kwargs)
 
             if isinstance(path_or_paths, list):

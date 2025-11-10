@@ -43,7 +43,7 @@ import argparse
 import base64
 import json
 import sys
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Mapping
 from urllib import parse as urlparse
 
 import requests
@@ -103,12 +103,12 @@ def sign_json(
 
 
 def request(
-    method: Optional[str],
+    method: str | None,
     origin_name: str,
     origin_key: signedjson.types.SigningKey,
     destination: str,
     path: str,
-    content: Optional[str],
+    content: str | None,
     verify_tls: bool,
 ) -> requests.Response:
     if method is None:
@@ -301,9 +301,9 @@ class MatrixConnectionAdapter(HTTPAdapter):
     def get_connection_with_tls_context(
         self,
         request: PreparedRequest,
-        verify: Optional[Union[bool, str]],
-        proxies: Optional[Mapping[str, str]] = None,
-        cert: Optional[Union[tuple[str, str], str]] = None,
+        verify: bool | str | None,
+        proxies: Mapping[str, str] | None = None,
+        cert: tuple[str, str] | str | None = None,
     ) -> HTTPConnectionPool:
         # overrides the get_connection_with_tls_context() method in the base class
         parsed = urlparse.urlsplit(request.url)
@@ -368,7 +368,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
             return server_name, 8448, server_name
 
     @staticmethod
-    def _get_well_known(server_name: str) -> Optional[str]:
+    def _get_well_known(server_name: str) -> str | None:
         if ":" in server_name:
             # explicit port, or ipv6 literal. Either way, no .well-known
             return None

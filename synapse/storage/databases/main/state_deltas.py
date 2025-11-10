@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import attr
 
@@ -50,10 +50,10 @@ class StateDelta:
     event_type: str
     state_key: str
 
-    event_id: Optional[str]
+    event_id: str | None
     """new event_id for this state key. None if the state has been deleted."""
 
-    prev_event_id: Optional[str]
+    prev_event_id: str | None
     """previous event_id for this state key. None if it's new state."""
 
 
@@ -191,8 +191,8 @@ class StateDeltasStore(SQLBaseStore):
         txn: LoggingTransaction,
         room_id: str,
         *,
-        from_token: Optional[RoomStreamToken],
-        to_token: Optional[RoomStreamToken],
+        from_token: RoomStreamToken | None,
+        to_token: RoomStreamToken | None,
     ) -> list[StateDelta]:
         """
         Get the state deltas between two tokens.
@@ -237,8 +237,8 @@ class StateDeltasStore(SQLBaseStore):
         self,
         room_id: str,
         *,
-        from_token: Optional[RoomStreamToken],
-        to_token: Optional[RoomStreamToken],
+        from_token: RoomStreamToken | None,
+        to_token: RoomStreamToken | None,
     ) -> list[StateDelta]:
         """
         Get the state deltas between two tokens.

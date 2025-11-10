@@ -31,10 +31,8 @@ from typing import (
     Generic,
     Iterable,
     Mapping,
-    Optional,
     Sequence,
     TypeVar,
-    Union,
     cast,
 )
 
@@ -156,12 +154,10 @@ class LaterGauge(Collector):
 
     name: str
     desc: str
-    labelnames: Optional[StrSequence] = attr.ib(hash=False)
+    labelnames: StrSequence | None = attr.ib(hash=False)
     _instance_id_to_hook_map: dict[
-        Optional[str],  # instance_id
-        Callable[
-            [], Union[Mapping[tuple[str, ...], Union[int, float]], Union[int, float]]
-        ],
+        str | None,  # instance_id
+        Callable[[], Mapping[tuple[str, ...], int | float] | int | float],
     ] = attr.ib(factory=dict, hash=False)
     """
     Map from homeserver instance_id to a callback. Each callback should either return a
@@ -200,10 +196,8 @@ class LaterGauge(Collector):
     def register_hook(
         self,
         *,
-        homeserver_instance_id: Optional[str],
-        hook: Callable[
-            [], Union[Mapping[tuple[str, ...], Union[int, float]], Union[int, float]]
-        ],
+        homeserver_instance_id: str | None,
+        hook: Callable[[], Mapping[tuple[str, ...], int | float] | int | float],
     ) -> None:
         """
         Register a callback/hook that will be called to generate a metric samples for
@@ -420,7 +414,7 @@ class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):
         name: str,
         documentation: str,
         gsum_value: float,
-        buckets: Optional[Sequence[tuple[str, float]]] = None,
+        buckets: Sequence[tuple[str, float]] | None = None,
         labelnames: StrSequence = (),
         labelvalues: StrSequence = (),
         unit: str = "",
@@ -471,7 +465,7 @@ class GaugeBucketCollector(Collector):
         *,
         name: str,
         documentation: str,
-        labelnames: Optional[StrSequence],
+        labelnames: StrSequence | None,
         buckets: Iterable[float],
         registry: CollectorRegistry = REGISTRY,
     ):
@@ -497,7 +491,7 @@ class GaugeBucketCollector(Collector):
 
         # We initially set this to None. We won't report metrics until
         # this has been initialised after a successful data update
-        self._metric: Optional[GaugeHistogramMetricFamilyWithLabels] = None
+        self._metric: GaugeHistogramMetricFamilyWithLabels | None = None
 
         registry.register(self)
 

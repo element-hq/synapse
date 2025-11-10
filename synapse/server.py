@@ -34,7 +34,6 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Optional,
     TypeVar,
     cast,
 )
@@ -143,6 +142,7 @@ from synapse.http.client import (
     SimpleHttpClient,
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
+from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import (
     all_later_gauges_to_clean_up_on_shutdown,
@@ -319,7 +319,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self,
         hostname: str,
         config: HomeServerConfig,
-        reactor: Optional[ISynapseReactor] = None,
+        reactor: ISynapseReactor | None = None,
     ):
         """
         Args:
@@ -339,33 +339,33 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.config = config
         self._listening_services: list[Port] = []
         self._metrics_listeners: list[tuple[WSGIServer, Thread]] = []
-        self.start_time: Optional[int] = None
+        self.start_time: int | None = None
 
         self._instance_id = random_string(5)
         self._instance_name = config.worker.instance_name
 
         self.version_string = f"Synapse/{SYNAPSE_VERSION}"
 
-        self.datastores: Optional[Databases] = None
+        self.datastores: Databases | None = None
 
         self._module_web_resources: dict[str, Resource] = {}
         self._module_web_resources_consumed = False
 
         # This attribute is set by the free function `refresh_certificate`.
-        self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
+        self.tls_server_context_factory: IOpenSSLContextFactory | None = None
 
         self._is_shutdown = False
         self._async_shutdown_handlers: list[ShutdownInfo] = []
         self._sync_shutdown_handlers: list[ShutdownInfo] = []
-        self._background_processes: set[defer.Deferred[Optional[Any]]] = set()
+        self._background_processes: set[defer.Deferred[Any | None]] = set()
 
     def run_as_background_process(
         self,
         desc: "LiteralString",
-        func: Callable[..., Awaitable[Optional[R]]],
+        func: Callable[..., Awaitable[R | None]],
         *args: Any,
         **kwargs: Any,
-    ) -> "defer.Deferred[Optional[R]]":
+    ) -> "defer.Deferred[R | None]":
         """Run the given function in its own logcontext, with resource metrics
 
         This should be used to wrap processes which are fired off to run in the
@@ -507,7 +507,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         for background_process in list(self._background_processes):
             try:
-                background_process.cancel()
+                with PreserveLoggingContext():
+                    background_process.cancel()
             except Exception:
                 pass
         self._background_processes.clear()

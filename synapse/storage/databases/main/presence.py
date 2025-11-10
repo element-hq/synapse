@@ -23,8 +23,6 @@ from typing import (
     Any,
     Iterable,
     Mapping,
-    Optional,
-    Union,
     cast,
 )
 
@@ -260,7 +258,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
         # TODO All these columns are nullable, but we don't expect that:
         #      https://github.com/matrix-org/synapse/issues/16467
         rows = cast(
-            list[tuple[str, str, int, int, int, Optional[str], Union[int, bool]]],
+            list[tuple[str, str, int, int, int, str | None, int | bool]],
             await self.db_pool.simple_select_many_batch(
                 table="presence_stream",
                 column="user_id",
@@ -317,7 +315,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
     @cached()
     async def _get_full_presence_stream_token_for_user(
         self, user_id: str
-    ) -> Optional[int]:
+    ) -> int | None:
         """Get the presence token corresponding to the last full presence update
         for this user.
 
@@ -399,7 +397,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
             # TODO All these columns are nullable, but we don't expect that:
             #      https://github.com/matrix-org/synapse/issues/16467
             rows = cast(
-                list[tuple[str, str, int, int, int, Optional[str], Union[int, bool]]],
+                list[tuple[str, str, int, int, int, str | None, int | bool]],
                 await self.db_pool.runInteraction(
                     "get_presence_for_all_users",
                     self.db_pool.simple_select_list_paginate_txn,

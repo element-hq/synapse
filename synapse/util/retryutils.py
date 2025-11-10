@@ -168,7 +168,7 @@ class RetryDestinationLimiter:
         hs: "HomeServer",
         clock: Clock,
         store: DataStore,
-        failure_ts: Optional[int],
+        failure_ts: int | None,
         retry_interval: int,
         backoff_on_404: bool = False,
         backoff_on_failure: bool = True,
@@ -230,9 +230,9 @@ class RetryDestinationLimiter:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         success = exc_type is None
         valid_err_code = False

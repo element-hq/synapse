@@ -24,7 +24,6 @@ from typing import (
     Awaitable,
     Callable,
     Iterable,
-    Optional,
     Sequence,
 )
 
@@ -45,7 +44,7 @@ async def resolve_events_with_store(
     room_id: str,
     room_version: RoomVersion,
     state_sets: Sequence[StateMap[str]],
-    event_map: Optional[dict[str, EventBase]],
+    event_map: dict[str, EventBase] | None,
     state_map_factory: Callable[[StrCollection], Awaitable[dict[str, EventBase]]],
 ) -> StateMap[str]:
     """

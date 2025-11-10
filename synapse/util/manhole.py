@@ -21,7 +21,7 @@
 import inspect
 import sys
 import traceback
-from typing import Any, Optional
+from typing import Any
 
 from twisted.conch import manhole_ssh
 from twisted.conch.insults import insults
@@ -130,7 +130,7 @@ class SynapseManhole(ColoredManhole):
 
 
 class SynapseManholeInterpreter(ManholeInterpreter):
-    def showsyntaxerror(self, filename: Optional[str] = None) -> None:
+    def showsyntaxerror(self, filename: str | None = None) -> None:
         """Display the syntax error that just occurred.
 
         Overrides the base implementation, ignoring sys.excepthook. We always want

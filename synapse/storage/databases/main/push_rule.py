@@ -25,9 +25,7 @@ from typing import (
     Collection,
     Iterable,
     Mapping,
-    Optional,
     Sequence,
-    Union,
     cast,
 )
 
@@ -231,7 +229,7 @@ class PushRulesWorkerStore(
 
     async def get_push_rules_enabled_for_user(self, user_id: str) -> dict[str, bool]:
         results = cast(
-            list[tuple[str, Optional[Union[int, bool]]]],
+            list[tuple[str, int | bool | None]],
             await self.db_pool.simple_select_list(
                 table="push_rules_enable",
                 keyvalues={"user_name": user_id},
@@ -327,7 +325,7 @@ class PushRulesWorkerStore(
         results: dict[str, dict[str, bool]] = {user_id: {} for user_id in user_ids}
 
         rows = cast(
-            list[tuple[str, str, Optional[int]]],
+            list[tuple[str, str, int | None]],
             await self.db_pool.simple_select_many_batch(
                 table="push_rules_enable",
                 column="user_name",
@@ -402,9 +400,9 @@ class PushRulesWorkerStore(
         rule_id: str,
         priority_class: int,
         conditions: Sequence[Mapping[str, str]],
-        actions: Sequence[Union[Mapping[str, Any], str]],
-        before: Optional[str] = None,
-        after: Optional[str] = None,
+        actions: Sequence[Mapping[str, Any] | str],
+        before: str | None = None,
+        after: str | None = None,
     ) -> None:
         if not self._is_push_writer:
             raise Exception("Not a push writer")
@@ -791,7 +789,7 @@ class PushRulesWorkerStore(
         self,
         user_id: str,
         rule_id: str,
-        actions: list[Union[dict, str]],
+        actions: list[dict | str],
         is_default_rule: bool,
     ) -> None:
         """
@@ -882,7 +880,7 @@ class PushRulesWorkerStore(
         user_id: str,
         rule_id: str,
         op: str,
-        data: Optional[JsonDict] = None,
+        data: JsonDict | None = None,
     ) -> None:
         if not self._is_push_writer:
             raise Exception("Not a push writer")

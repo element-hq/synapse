@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -58,7 +58,7 @@ class ReplicationBumpPresenceActiveTime(ReplicationEndpoint):
         self._presence_handler = hs.get_presence_handler()
 
     @staticmethod
-    async def _serialize_payload(user_id: str, device_id: Optional[str]) -> JsonDict:  # type: ignore[override]
+    async def _serialize_payload(user_id: str, device_id: str | None) -> JsonDict:  # type: ignore[override]
         return {"device_id": device_id}
 
     async def _handle_request(  # type: ignore[override]
@@ -102,7 +102,7 @@ class ReplicationPresenceSetState(ReplicationEndpoint):
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         state: JsonDict,
         force_notify: bool = False,
         is_sync: bool = False,

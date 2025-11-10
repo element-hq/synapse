@@ -24,7 +24,6 @@ from typing import (
     TYPE_CHECKING,
     Iterable,
     Mapping,
-    Optional,
     cast,
 )
 
@@ -69,8 +68,8 @@ class _GetStateGroupDelta:
     us use the iterable flag when caching
     """
 
-    prev_group: Optional[int]
-    delta_ids: Optional[StateMap[str]]
+    prev_group: int | None
+    delta_ids: StateMap[str] | None
 
     def __len__(self) -> int:
         return len(self.delta_ids) if self.delta_ids else 0
@@ -279,7 +278,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     @tag_args
     @cancellable
     async def _get_state_for_groups(
-        self, groups: Iterable[int], state_filter: Optional[StateFilter] = None
+        self, groups: Iterable[int], state_filter: StateFilter | None = None
     ) -> dict[int, MutableStateMap[str]]:
         """Gets the state at each of a list of state groups, optionally
         filtering by type/state_key
@@ -571,9 +570,9 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         self,
         event_id: str,
         room_id: str,
-        prev_group: Optional[int],
-        delta_ids: Optional[StateMap[str]],
-        current_state_ids: Optional[StateMap[str]],
+        prev_group: int | None,
+        delta_ids: StateMap[str] | None,
+        current_state_ids: StateMap[str] | None,
     ) -> int:
         """Store a new set of state, returning a newly assigned state group.
 
@@ -602,7 +601,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
         def insert_delta_group_txn(
             txn: LoggingTransaction, prev_group: int, delta_ids: StateMap[str]
-        ) -> Optional[int]:
+        ) -> int | None:
             """Try and persist the new group as a delta.
 
             Requires that we have the state as a delta from a previous state group.

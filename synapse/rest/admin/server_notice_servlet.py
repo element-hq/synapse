@@ -18,7 +18,7 @@
 #
 #
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import NotFoundError, SynapseError
@@ -80,7 +80,7 @@ class SendServerNoticeServlet(RestServlet):
         self,
         request: SynapseRequest,
         requester: Requester,
-        txn_id: Optional[str],
+        txn_id: str | None,
     ) -> tuple[int, JsonDict]:
         await assert_user_is_admin(self.auth, requester)
         body = parse_json_object_from_request(request)

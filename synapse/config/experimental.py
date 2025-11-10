@@ -59,7 +59,7 @@ class ClientAuthMethod(enum.Enum):
     PRIVATE_KEY_JWT = "private_key_jwt"
 
 
-def _parse_jwks(jwks: Optional[JsonDict]) -> Optional["JsonWebKey"]:
+def _parse_jwks(jwks: JsonDict | None) -> Optional["JsonWebKey"]:
     """A helper function to parse a JWK dict into a JsonWebKey."""
 
     if jwks is None:
@@ -71,7 +71,7 @@ def _parse_jwks(jwks: Optional[JsonDict]) -> Optional["JsonWebKey"]:
 
 
 def _check_client_secret(
-    instance: "MSC3861", _attribute: attr.Attribute, _value: Optional[str]
+    instance: "MSC3861", _attribute: attr.Attribute, _value: str | None
 ) -> None:
     if instance._client_secret and instance._client_secret_path:
         raise ConfigError(
@@ -88,7 +88,7 @@ def _check_client_secret(
 
 
 def _check_admin_token(
-    instance: "MSC3861", _attribute: attr.Attribute, _value: Optional[str]
+    instance: "MSC3861", _attribute: attr.Attribute, _value: str | None
 ) -> None:
     if instance._admin_token and instance._admin_token_path:
         raise ConfigError(
@@ -124,7 +124,7 @@ class MSC3861:
     issuer: str = attr.ib(default="", validator=attr.validators.instance_of(str))
     """The URL of the OIDC Provider."""
 
-    issuer_metadata: Optional[JsonDict] = attr.ib(default=None)
+    issuer_metadata: JsonDict | None = attr.ib(default=None)
     """The issuer metadata to use, otherwise discovered from /.well-known/openid-configuration as per MSC2965."""
 
     client_id: str = attr.ib(
@@ -138,7 +138,7 @@ class MSC3861:
     )
     """The auth method used when calling the introspection endpoint."""
 
-    _client_secret: Optional[str] = attr.ib(
+    _client_secret: str | None = attr.ib(
         default=None,
         validator=[
             attr.validators.optional(attr.validators.instance_of(str)),
@@ -150,7 +150,7 @@ class MSC3861:
     when using any of the client_secret_* client auth methods.
     """
 
-    _client_secret_path: Optional[str] = attr.ib(
+    _client_secret_path: str | None = attr.ib(
         default=None,
         validator=[
             attr.validators.optional(attr.validators.instance_of(str)),
@@ -196,19 +196,19 @@ class MSC3861:
                 ("experimental", "msc3861", "client_auth_method"),
             )
 
-    introspection_endpoint: Optional[str] = attr.ib(
+    introspection_endpoint: str | None = attr.ib(
         default=None,
         validator=attr.validators.optional(attr.validators.instance_of(str)),
     )
     """The URL of the introspection endpoint used to validate access tokens."""
 
-    account_management_url: Optional[str] = attr.ib(
+    account_management_url: str | None = attr.ib(
         default=None,
         validator=attr.validators.optional(attr.validators.instance_of(str)),
     )
     """The URL of the My Account page on the OIDC Provider as per MSC2965."""
 
-    _admin_token: Optional[str] = attr.ib(
+    _admin_token: str | None = attr.ib(
         default=None,
         validator=[
             attr.validators.optional(attr.validators.instance_of(str)),
@@ -220,7 +220,7 @@ class MSC3861:
     This is used by the OIDC provider, to make admin calls to Synapse.
     """
 
-    _admin_token_path: Optional[str] = attr.ib(
+    _admin_token_path: str | None = attr.ib(
         default=None,
         validator=[
             attr.validators.optional(attr.validators.instance_of(str)),
@@ -232,7 +232,7 @@ class MSC3861:
     external file.
     """
 
-    def client_secret(self) -> Optional[str]:
+    def client_secret(self) -> str | None:
         """Returns the secret given via `client_secret` or `client_secret_path`."""
         if self._client_secret_path:
             return read_secret_from_file_once(
@@ -241,7 +241,7 @@ class MSC3861:
             )
         return self._client_secret
 
-    def admin_token(self) -> Optional[str]:
+    def admin_token(self) -> str | None:
         """Returns the admin token given via `admin_token` or `admin_token_path`."""
         if self._admin_token_path:
             return read_secret_from_file_once(
@@ -526,7 +526,7 @@ class ExperimentalConfig(Config):
         # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
 
-        self.msc4108_delegation_endpoint: Optional[str] = experimental.get(
+        self.msc4108_delegation_endpoint: str | None = experimental.get(
             "msc4108_delegation_endpoint", None
         )
 

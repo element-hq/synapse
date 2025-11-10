@@ -31,8 +31,6 @@ from typing import (
     Generator,
     Iterable,
     Mapping,
-    Optional,
-    Union,
 )
 
 import attr
@@ -122,7 +120,7 @@ class TransportLayerClient:
         )
 
     async def get_event(
-        self, destination: str, event_id: str, timeout: Optional[int] = None
+        self, destination: str, event_id: str, timeout: int | None = None
     ) -> JsonDict:
         """Requests the pdu with give id and origin from the given server.
 
@@ -144,7 +142,7 @@ class TransportLayerClient:
         )
 
     async def get_policy_recommendation_for_pdu(
-        self, destination: str, event: EventBase, timeout: Optional[int] = None
+        self, destination: str, event: EventBase, timeout: int | None = None
     ) -> JsonDict:
         """Requests the policy recommendation for the given pdu from the given policy server.
 
@@ -171,7 +169,7 @@ class TransportLayerClient:
         )
 
     async def ask_policy_server_to_sign_event(
-        self, destination: str, event: EventBase, timeout: Optional[int] = None
+        self, destination: str, event: EventBase, timeout: int | None = None
     ) -> JsonDict:
         """Requests that the destination server (typically a policy server)
         sign the event as not spam.
@@ -198,7 +196,7 @@ class TransportLayerClient:
 
     async def backfill(
         self, destination: str, room_id: str, event_tuples: Collection[str], limit: int
-    ) -> Optional[Union[JsonDict, list]]:
+    ) -> JsonDict | list | None:
         """Requests `limit` previous PDUs in a given context before list of
         PDUs.
 
@@ -235,7 +233,7 @@ class TransportLayerClient:
 
     async def timestamp_to_event(
         self, destination: str, room_id: str, timestamp: int, direction: Direction
-    ) -> Union[JsonDict, list]:
+    ) -> JsonDict | list:
         """
         Calls a remote federating server at `destination` asking for their
         closest event to the given timestamp in the given direction.
@@ -270,7 +268,7 @@ class TransportLayerClient:
     async def send_transaction(
         self,
         transaction: Transaction,
-        json_data_callback: Optional[Callable[[], JsonDict]] = None,
+        json_data_callback: Callable[[], JsonDict] | None = None,
     ) -> JsonDict:
         """Sends the given Transaction to its destination
 
@@ -343,7 +341,7 @@ class TransportLayerClient:
         room_id: str,
         user_id: str,
         membership: str,
-        params: Optional[Mapping[str, Union[str, Iterable[str]]]],
+        params: Mapping[str, str | Iterable[str]] | None,
     ) -> JsonDict:
         """Asks a remote server to build and sign us a membership event
 
@@ -528,11 +526,11 @@ class TransportLayerClient:
     async def get_public_rooms(
         self,
         remote_server: str,
-        limit: Optional[int] = None,
-        since_token: Optional[str] = None,
-        search_filter: Optional[dict] = None,
+        limit: int | None = None,
+        since_token: str | None = None,
+        search_filter: dict | None = None,
         include_all_networks: bool = False,
-        third_party_instance_id: Optional[str] = None,
+        third_party_instance_id: str | None = None,
     ) -> JsonDict:
         """Get the list of public rooms from a remote homeserver
 
@@ -567,7 +565,7 @@ class TransportLayerClient:
                     )
                 raise
         else:
-            args: dict[str, Union[str, Iterable[str]]] = {
+            args: dict[str, str | Iterable[str]] = {
                 "include_all_networks": "true" if include_all_networks else "false"
             }
             if third_party_instance_id:
@@ -694,7 +692,7 @@ class TransportLayerClient:
         user: UserID,
         destination: str,
         query_content: JsonDict,
-        timeout: Optional[int],
+        timeout: int | None,
     ) -> JsonDict:
         """Claim one-time keys for a list of devices hosted on a remote server.
 
@@ -740,7 +738,7 @@ class TransportLayerClient:
         user: UserID,
         destination: str,
         query_content: JsonDict,
-        timeout: Optional[int],
+        timeout: int | None,
     ) -> JsonDict:
         """Claim one-time keys for a list of devices hosted on a remote server.
 
@@ -997,13 +995,13 @@ class SendJoinResponse:
     event_dict: JsonDict
     # The parsed join event from the /send_join response. This will be None if
     # "event" is not included in the response.
-    event: Optional[EventBase] = None
+    event: EventBase | None = None
 
     # The room state is incomplete
     members_omitted: bool = False
 
     # List of servers in the room
-    servers_in_room: Optional[list[str]] = None
+    servers_in_room: list[str] | None = None
 
 
 @attr.s(slots=True, auto_attribs=True)

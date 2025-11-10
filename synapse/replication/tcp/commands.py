@@ -26,7 +26,7 @@ allowed to be sent by which side.
 
 import abc
 import logging
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 from synapse.replication.tcp.streams._base import StreamRow
 from synapse.util.json import json_decoder, json_encoder
@@ -137,7 +137,7 @@ class RdataCommand(Command):
     NAME = "RDATA"
 
     def __init__(
-        self, stream_name: str, instance_name: str, token: Optional[int], row: StreamRow
+        self, stream_name: str, instance_name: str, token: int | None, row: StreamRow
     ):
         self.stream_name = stream_name
         self.instance_name = instance_name
@@ -288,7 +288,7 @@ class UserSyncCommand(Command):
         self,
         instance_id: str,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         is_syncing: bool,
         last_sync_ms: int,
     ):
@@ -300,7 +300,7 @@ class UserSyncCommand(Command):
 
     @classmethod
     def from_line(cls: type["UserSyncCommand"], line: str) -> "UserSyncCommand":
-        device_id: Optional[str]
+        device_id: str | None
         instance_id, user_id, device_id, state, last_sync_ms = line.split(" ", 4)
 
         if device_id == "None":
@@ -407,7 +407,7 @@ class UserIpCommand(Command):
         access_token: str,
         ip: str,
         user_agent: str,
-        device_id: Optional[str],
+        device_id: str | None,
         last_seen: int,
     ):
         self.user_id = user_id

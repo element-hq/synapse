@@ -14,7 +14,7 @@
 
 
 import logging
-from typing import TYPE_CHECKING, Mapping, Optional, cast
+from typing import TYPE_CHECKING, Mapping, cast
 
 import attr
 
@@ -79,7 +79,7 @@ class SlidingSyncStore(SQLBaseStore):
     async def get_latest_bump_stamp_for_room(
         self,
         room_id: str,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Get the `bump_stamp` for the room.
 
@@ -99,7 +99,7 @@ class SlidingSyncStore(SQLBaseStore):
         """
 
         return cast(
-            Optional[int],
+            int | None,
             await self.db_pool.simple_select_one_onecol(
                 table="sliding_sync_joined_rooms",
                 keyvalues={"room_id": room_id},
@@ -121,7 +121,7 @@ class SlidingSyncStore(SQLBaseStore):
         user_id: str,
         device_id: str,
         conn_id: str,
-        previous_connection_position: Optional[int],
+        previous_connection_position: int | None,
         per_connection_state: "MutablePerConnectionState",
     ) -> int:
         """Persist updates to the per-connection state for a sliding sync
@@ -154,7 +154,7 @@ class SlidingSyncStore(SQLBaseStore):
         user_id: str,
         device_id: str,
         conn_id: str,
-        previous_connection_position: Optional[int],
+        previous_connection_position: int | None,
         per_connection_state: "PerConnectionStateDB",
     ) -> int:
         # First we fetch (or create) the connection key associated with the

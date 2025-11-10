@@ -27,9 +27,7 @@ from typing import (
     Callable,
     ContextManager,
     Generator,
-    Optional,
     TypeVar,
-    Union,
 )
 from unittest import mock
 from unittest.mock import Mock
@@ -65,8 +63,8 @@ def test_disconnect(
     reactor: MemoryReactorClock,
     channel: FakeChannel,
     expect_cancellation: bool,
-    expected_body: Union[bytes, JsonDict],
-    expected_code: Optional[int] = None,
+    expected_body: bytes | JsonDict,
+    expected_code: int | None = None,
 ) -> None:
     """Disconnects an in-flight request and checks the response.
 
@@ -146,9 +144,9 @@ def make_request_with_cancellation_test(
     site: Site,
     method: str,
     path: str,
-    content: Union[bytes, str, JsonDict] = b"",
+    content: bytes | str | JsonDict = b"",
     *,
-    token: Optional[str] = None,
+    token: str | None = None,
 ) -> FakeChannel:
     """Performs a request repeatedly, disconnecting at successive `await`s, until
     one completes.
@@ -361,7 +359,7 @@ class Deferred__await__Patch:
         # unresolved `Deferred` and return it out of `Deferred.__await__` /
         # `coroutine.send()`. We have to resolve it later, in case the `await`ing
         # coroutine is part of some shared processing, such as `@cached`.
-        self._to_unblock: dict[Deferred, Union[object, Failure]] = {}
+        self._to_unblock: dict[Deferred, object | Failure] = {}
 
         # The last stack we logged.
         self._previous_stack: list[inspect.FrameInfo] = []

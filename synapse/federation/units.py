@@ -24,7 +24,7 @@ server protocol.
 """
 
 import logging
-from typing import Optional, Sequence
+from typing import Sequence
 
 import attr
 
@@ -70,7 +70,7 @@ class Edu:
         getattr(self, "content", {})["org.matrix.opentracing_context"] = "{}"
 
 
-def _none_to_list(edus: Optional[list[JsonDict]]) -> list[JsonDict]:
+def _none_to_list(edus: list[JsonDict] | None) -> list[JsonDict]:
     if edus is None:
         return []
     return edus
@@ -128,6 +128,6 @@ def filter_pdus_for_valid_depth(pdus: Sequence[JsonDict]) -> list[JsonDict]:
 
 
 def serialize_and_filter_pdus(
-    pdus: Sequence[EventBase], time_now: Optional[int] = None
+    pdus: Sequence[EventBase], time_now: int | None = None
 ) -> list[JsonDict]:
     return filter_pdus_for_valid_depth([pdu.get_pdu_json(time_now) for pdu in pdus])

@@ -25,9 +25,7 @@ from typing import (
     Any,
     Collection,
     Mapping,
-    Optional,
     Sequence,
-    Union,
     cast,
 )
 
@@ -233,7 +231,7 @@ class BulkPushRuleEvaluator:
         event: EventBase,
         context: EventContext,
         event_id_to_event: Mapping[str, EventBase],
-    ) -> tuple[dict, Optional[int]]:
+    ) -> tuple[dict, int | None]:
         """
         Given an event and an event context, get the power level event relevant to the event
         and the power level of the sender of the event.
@@ -390,7 +388,7 @@ class BulkPushRuleEvaluator:
             count_as_unread = _should_count_as_unread(event, context)
 
         rules_by_user = await self._get_rules_for_event(event)
-        actions_by_user: dict[str, Collection[Union[Mapping, str]]] = {}
+        actions_by_user: dict[str, Collection[Mapping | str]] = {}
 
         # Gather a bunch of info in parallel.
         #
@@ -405,7 +403,7 @@ class BulkPushRuleEvaluator:
             profiles,
         ) = await make_deferred_yieldable(
             cast(
-                "Deferred[tuple[int, tuple[dict, Optional[int]], dict[str, dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
+                "Deferred[tuple[int, tuple[dict, int | None], dict[str, dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
                 gather_results(
                     (
                         run_in_background(  # type: ignore[call-overload]
@@ -477,7 +475,7 @@ class BulkPushRuleEvaluator:
             self.hs.config.experimental.msc4306_enabled,
         )
 
-        msc4306_thread_subscribers: Optional[frozenset[str]] = None
+        msc4306_thread_subscribers: frozenset[str] | None = None
         if self.hs.config.experimental.msc4306_enabled and thread_id != MAIN_TIMELINE:
             # pull out, in batch, all local subscribers to this thread
             # (in the common case, they will all be getting processed for push
@@ -510,7 +508,7 @@ class BulkPushRuleEvaluator:
                 # current user, it'll be added to the dict later.
                 actions_by_user[uid] = []
 
-            msc4306_thread_subscription_state: Optional[bool] = None
+            msc4306_thread_subscription_state: bool | None = None
             if msc4306_thread_subscribers is not None:
                 msc4306_thread_subscription_state = uid in msc4306_thread_subscribers
 
@@ -552,10 +550,10 @@ class BulkPushRuleEvaluator:
         )
 
 
-MemberMap = dict[str, Optional[EventIdMembership]]
+MemberMap = dict[str, EventIdMembership | None]
 Rule = dict[str, dict]
 RulesByUser = dict[str, list[Rule]]
-StateGroup = Union[object, int]
+StateGroup = object | int
 
 
 def _is_simple_value(value: Any) -> bool:
@@ -567,9 +565,9 @@ def _is_simple_value(value: Any) -> bool:
 
 
 def _flatten_dict(
-    d: Union[EventBase, Mapping[str, Any]],
-    prefix: Optional[list[str]] = None,
-    result: Optional[dict[str, JsonValue]] = None,
+    d: EventBase | Mapping[str, Any],
+    prefix: list[str] | None = None,
+    result: dict[str, JsonValue] | None = None,
 ) -> dict[str, JsonValue]:
     """
     Given a JSON dictionary (or event) which might contain sub dictionaries,

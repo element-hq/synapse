@@ -34,7 +34,6 @@ from typing import (
     Literal,
     Mapping,
     MutableMapping,
-    Optional,
     Sequence,
     overload,
 )
@@ -75,42 +74,42 @@ class RestHelper:
     hs: HomeServer
     reactor: MemoryReactorClock
     site: Site
-    auth_user_id: Optional[str]
+    auth_user_id: str | None
 
     @overload
     def create_room_as(
         self,
-        room_creator: Optional[str] = ...,
-        is_public: Optional[bool] = ...,
-        room_version: Optional[str] = ...,
-        tok: Optional[str] = ...,
+        room_creator: str | None = ...,
+        is_public: bool | None = ...,
+        room_version: str | None = ...,
+        tok: str | None = ...,
         expect_code: Literal[200] = ...,
-        extra_content: Optional[dict] = ...,
-        custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = ...,
+        extra_content: dict | None = ...,
+        custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = ...,
     ) -> str: ...
 
     @overload
     def create_room_as(
         self,
-        room_creator: Optional[str] = ...,
-        is_public: Optional[bool] = ...,
-        room_version: Optional[str] = ...,
-        tok: Optional[str] = ...,
+        room_creator: str | None = ...,
+        is_public: bool | None = ...,
+        room_version: str | None = ...,
+        tok: str | None = ...,
         expect_code: int = ...,
-        extra_content: Optional[dict] = ...,
-        custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = ...,
-    ) -> Optional[str]: ...
+        extra_content: dict | None = ...,
+        custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = ...,
+    ) -> str | None: ...
 
     def create_room_as(
         self,
-        room_creator: Optional[str] = None,
-        is_public: Optional[bool] = True,
-        room_version: Optional[str] = None,
-        tok: Optional[str] = None,
+        room_creator: str | None = None,
+        is_public: bool | None = True,
+        room_version: str | None = None,
+        tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
-        extra_content: Optional[dict] = None,
-        custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = None,
-    ) -> Optional[str]:
+        extra_content: dict | None = None,
+        custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
+    ) -> str | None:
         """
         Create a room.
 
@@ -166,11 +165,11 @@ class RestHelper:
     def invite(
         self,
         room: str,
-        src: Optional[str] = None,
-        targ: Optional[str] = None,
+        src: str | None = None,
+        targ: str | None = None,
         expect_code: int = HTTPStatus.OK,
-        tok: Optional[str] = None,
-        extra_data: Optional[dict] = None,
+        tok: str | None = None,
+        extra_data: dict | None = None,
     ) -> JsonDict:
         return self.change_membership(
             room=room,
@@ -187,10 +186,10 @@ class RestHelper:
         room: str,
         user: str,
         expect_code: int = HTTPStatus.OK,
-        tok: Optional[str] = None,
-        appservice_user_id: Optional[str] = None,
-        expect_errcode: Optional[Codes] = None,
-        expect_additional_fields: Optional[dict] = None,
+        tok: str | None = None,
+        appservice_user_id: str | None = None,
+        expect_errcode: Codes | None = None,
+        expect_additional_fields: dict | None = None,
     ) -> JsonDict:
         return self.change_membership(
             room=room,
@@ -206,11 +205,11 @@ class RestHelper:
 
     def knock(
         self,
-        room: Optional[str] = None,
-        user: Optional[str] = None,
-        reason: Optional[str] = None,
+        room: str | None = None,
+        user: str | None = None,
+        reason: str | None = None,
         expect_code: int = HTTPStatus.OK,
-        tok: Optional[str] = None,
+        tok: str | None = None,
     ) -> None:
         temp_id = self.auth_user_id
         self.auth_user_id = user
@@ -241,9 +240,9 @@ class RestHelper:
     def leave(
         self,
         room: str,
-        user: Optional[str] = None,
+        user: str | None = None,
         expect_code: int = HTTPStatus.OK,
-        tok: Optional[str] = None,
+        tok: str | None = None,
     ) -> JsonDict:
         return self.change_membership(
             room=room,
@@ -260,7 +259,7 @@ class RestHelper:
         src: str,
         targ: str,
         expect_code: int = HTTPStatus.OK,
-        tok: Optional[str] = None,
+        tok: str | None = None,
     ) -> JsonDict:
         """A convenience helper: `change_membership` with `membership` preset to "ban"."""
         return self.change_membership(
@@ -275,15 +274,15 @@ class RestHelper:
     def change_membership(
         self,
         room: str,
-        src: Optional[str],
-        targ: Optional[str],
+        src: str | None,
+        targ: str | None,
         membership: str,
-        extra_data: Optional[dict] = None,
-        tok: Optional[str] = None,
-        appservice_user_id: Optional[str] = None,
+        extra_data: dict | None = None,
+        tok: str | None = None,
+        appservice_user_id: str | None = None,
         expect_code: int = HTTPStatus.OK,
-        expect_errcode: Optional[str] = None,
-        expect_additional_fields: Optional[dict] = None,
+        expect_errcode: str | None = None,
+        expect_additional_fields: dict | None = None,
     ) -> JsonDict:
         """
         Send a membership state event into a room.
@@ -372,11 +371,11 @@ class RestHelper:
     def send(
         self,
         room_id: str,
-        body: Optional[str] = None,
-        txn_id: Optional[str] = None,
-        tok: Optional[str] = None,
+        body: str | None = None,
+        txn_id: str | None = None,
+        tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
-        custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = None,
+        custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
         type: str = "m.room.message",
     ) -> JsonDict:
         if body is None:
@@ -402,7 +401,7 @@ class RestHelper:
             "msgtype": "m.text",
             "body": f"Test event {idx}",
         },
-        tok: Optional[str] = None,
+        tok: str | None = None,
     ) -> Sequence[str]:
         """
         Helper to send a handful of sequential events and return their event IDs as a sequence.
@@ -424,11 +423,11 @@ class RestHelper:
         self,
         room_id: str,
         type: str,
-        content: Optional[dict] = None,
-        txn_id: Optional[str] = None,
-        tok: Optional[str] = None,
+        content: dict | None = None,
+        txn_id: str | None = None,
+        tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
-        custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = None,
+        custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
     ) -> JsonDict:
         if txn_id is None:
             txn_id = "m%s" % (str(time.time()))
@@ -458,7 +457,7 @@ class RestHelper:
         self,
         room_id: str,
         event_id: str,
-        tok: Optional[str] = None,
+        tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
     ) -> JsonDict:
         """Request a specific event from the server.
@@ -495,8 +494,8 @@ class RestHelper:
         self,
         room_id: str,
         event_type: str,
-        body: Optional[dict[str, Any]],
-        tok: Optional[str],
+        body: dict[str, Any] | None,
+        tok: str | None,
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
         method: str = "GET",
@@ -574,7 +573,7 @@ class RestHelper:
         room_id: str,
         event_type: str,
         body: dict[str, Any],
-        tok: Optional[str] = None,
+        tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
     ) -> JsonDict:
@@ -680,7 +679,7 @@ class RestHelper:
         fake_server: FakeOidcServer,
         remote_user_id: str,
         with_sid: bool = False,
-        idp_id: Optional[str] = None,
+        idp_id: str | None = None,
         expected_status: int = 200,
     ) -> tuple[JsonDict, FakeAuthorizationGrant]:
         """Log in (as a new user) via OIDC
@@ -751,10 +750,10 @@ class RestHelper:
         self,
         fake_server: FakeOidcServer,
         user_info_dict: JsonDict,
-        client_redirect_url: Optional[str] = None,
-        ui_auth_session_id: Optional[str] = None,
+        client_redirect_url: str | None = None,
+        ui_auth_session_id: str | None = None,
         with_sid: bool = False,
-        idp_id: Optional[str] = None,
+        idp_id: str | None = None,
     ) -> tuple[FakeChannel, FakeAuthorizationGrant]:
         """Perform an OIDC authentication flow via a mock OIDC provider.
 
@@ -878,9 +877,9 @@ class RestHelper:
 
     def initiate_sso_login(
         self,
-        client_redirect_url: Optional[str],
+        client_redirect_url: str | None,
         cookies: MutableMapping[str, str],
-        idp_id: Optional[str] = None,
+        idp_id: str | None = None,
     ) -> str:
         """Make a request to the login-via-sso redirect endpoint, and return the target
 

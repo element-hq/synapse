@@ -20,16 +20,16 @@
 #
 
 import logging
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable
 
 from twisted.web.http import Request
 
 logger = logging.getLogger(__name__)
 
 # Types for callbacks to be registered via the module api
-IS_USER_EXPIRED_CALLBACK = Callable[[str], Awaitable[Optional[bool]]]
+IS_USER_EXPIRED_CALLBACK = Callable[[str], Awaitable[bool | None]]
 ON_USER_REGISTRATION_CALLBACK = Callable[[str], Awaitable]
-ON_USER_LOGIN_CALLBACK = Callable[[str, Optional[str], Optional[str]], Awaitable]
+ON_USER_LOGIN_CALLBACK = Callable[[str, str | None, str | None], Awaitable]
 # Temporary hooks to allow for a transition from `/_matrix/client` endpoints
 # to `/_synapse/client/account_validity`. See `register_callbacks` below.
 ON_LEGACY_SEND_MAIL_CALLBACK = Callable[[str], Awaitable]
@@ -42,21 +42,21 @@ class AccountValidityModuleApiCallbacks:
         self.is_user_expired_callbacks: list[IS_USER_EXPIRED_CALLBACK] = []
         self.on_user_registration_callbacks: list[ON_USER_REGISTRATION_CALLBACK] = []
         self.on_user_login_callbacks: list[ON_USER_LOGIN_CALLBACK] = []
-        self.on_legacy_send_mail_callback: Optional[ON_LEGACY_SEND_MAIL_CALLBACK] = None
-        self.on_legacy_renew_callback: Optional[ON_LEGACY_RENEW_CALLBACK] = None
+        self.on_legacy_send_mail_callback: ON_LEGACY_SEND_MAIL_CALLBACK | None = None
+        self.on_legacy_renew_callback: ON_LEGACY_RENEW_CALLBACK | None = None
 
         # The legacy admin requests callback isn't a protected attribute because we need
         # to access it from the admin servlet, which is outside of this handler.
-        self.on_legacy_admin_request_callback: Optional[ON_LEGACY_ADMIN_REQUEST] = None
+        self.on_legacy_admin_request_callback: ON_LEGACY_ADMIN_REQUEST | None = None
 
     def register_callbacks(
         self,
-        is_user_expired: Optional[IS_USER_EXPIRED_CALLBACK] = None,
-        on_user_registration: Optional[ON_USER_REGISTRATION_CALLBACK] = None,
-        on_user_login: Optional[ON_USER_LOGIN_CALLBACK] = None,
-        on_legacy_send_mail: Optional[ON_LEGACY_SEND_MAIL_CALLBACK] = None,
-        on_legacy_renew: Optional[ON_LEGACY_RENEW_CALLBACK] = None,
-        on_legacy_admin_request: Optional[ON_LEGACY_ADMIN_REQUEST] = None,
+        is_user_expired: IS_USER_EXPIRED_CALLBACK | None = None,
+        on_user_registration: ON_USER_REGISTRATION_CALLBACK | None = None,
+        on_user_login: ON_USER_LOGIN_CALLBACK | None = None,
+        on_legacy_send_mail: ON_LEGACY_SEND_MAIL_CALLBACK | None = None,
+        on_legacy_renew: ON_LEGACY_RENEW_CALLBACK | None = None,
+        on_legacy_admin_request: ON_LEGACY_ADMIN_REQUEST | None = None,
     ) -> None:
         """Register callbacks from module for each hook."""
         if is_user_expired is not None:

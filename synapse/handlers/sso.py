@@ -30,7 +30,6 @@ from typing import (
     Iterable,
     Mapping,
     NoReturn,
-    Optional,
     Protocol,
 )
 from urllib.parse import urlencode
@@ -102,12 +101,12 @@ class SsoIdentityProvider(Protocol):
         """User-facing name for this provider"""
 
     @property
-    def idp_icon(self) -> Optional[str]:
+    def idp_icon(self) -> str | None:
         """Optional MXC URI for user-facing icon"""
         return None
 
     @property
-    def idp_brand(self) -> Optional[str]:
+    def idp_brand(self) -> str | None:
         """Optional branding identifier"""
         return None
 
@@ -115,8 +114,8 @@ class SsoIdentityProvider(Protocol):
     async def handle_redirect_request(
         self,
         request: SynapseRequest,
-        client_redirect_url: Optional[bytes],
-        ui_auth_session_id: Optional[str] = None,
+        client_redirect_url: bytes | None,
+        ui_auth_session_id: str | None = None,
     ) -> str:
         """Handle an incoming request to /login/sso/redirect
 
@@ -141,10 +140,10 @@ class UserAttributes:
     # the localpart of the mxid that the mapper has assigned to the user.
     # if `None`, the mapper has not picked a userid, and the user should be prompted to
     # enter one.
-    localpart: Optional[str]
+    localpart: str | None
     confirm_localpart: bool = False
-    display_name: Optional[str] = None
-    picture: Optional[str] = None
+    display_name: str | None = None
+    picture: str | None = None
     # mypy thinks these are incompatible for some reason.
     emails: StrCollection = attr.Factory(list)
 
@@ -157,19 +156,19 @@ class UsernameMappingSession:
     auth_provider_id: str
 
     # An optional session ID from the IdP.
-    auth_provider_session_id: Optional[str]
+    auth_provider_session_id: str | None
 
     # user ID on the IdP server
     remote_user_id: str
 
     # attributes returned by the ID mapper
-    display_name: Optional[str]
+    display_name: str | None
     emails: StrCollection
-    avatar_url: Optional[str]
+    avatar_url: str | None
 
     # An optional dictionary of extra attributes to be provided to the client in the
     # login response.
-    extra_login_attributes: Optional[JsonDict]
+    extra_login_attributes: JsonDict | None
 
     # where to redirect the client back to
     client_redirect_url: str
@@ -178,11 +177,11 @@ class UsernameMappingSession:
     expiry_time_ms: int
 
     # choices made by the user
-    chosen_localpart: Optional[str] = None
+    chosen_localpart: str | None = None
     use_display_name: bool = True
     use_avatar: bool = True
     emails_to_use: StrCollection = ()
-    terms_accepted_version: Optional[str] = None
+    terms_accepted_version: str | None = None
 
 
 # the HTTP cookie used to track the mapping session id
@@ -278,7 +277,7 @@ class SsoHandler:
         self,
         request: Request,
         error: str,
-        error_description: Optional[str] = None,
+        error_description: str | None = None,
         code: int = 400,
     ) -> None:
         """Renders the error template and responds with it.
@@ -302,7 +301,7 @@ class SsoHandler:
         self,
         request: SynapseRequest,
         client_redirect_url: bytes,
-        idp_id: Optional[str],
+        idp_id: str | None,
     ) -> str:
         """Handle a request to /login/sso/redirect
 
@@ -321,7 +320,7 @@ class SsoHandler:
             )
 
         # if the client chose an IdP, use that
-        idp: Optional[SsoIdentityProvider] = None
+        idp: SsoIdentityProvider | None = None
         if idp_id:
             idp = self._identity_providers.get(idp_id)
             if not idp:
@@ -341,7 +340,7 @@ class SsoHandler:
 
     async def get_sso_user_by_remote_user_id(
         self, auth_provider_id: str, remote_user_id: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Maps the user ID of a remote IdP to a mxid for a previously seen user.
 
@@ -389,9 +388,9 @@ class SsoHandler:
         request: SynapseRequest,
         client_redirect_url: str,
         sso_to_matrix_id_mapper: Callable[[int], Awaitable[UserAttributes]],
-        grandfather_existing_users: Callable[[], Awaitable[Optional[str]]],
-        extra_login_attributes: Optional[JsonDict] = None,
-        auth_provider_session_id: Optional[str] = None,
+        grandfather_existing_users: Callable[[], Awaitable[str | None]],
+        extra_login_attributes: JsonDict | None = None,
+        auth_provider_session_id: str | None = None,
         registration_enabled: bool = True,
     ) -> None:
         """
@@ -582,8 +581,8 @@ class SsoHandler:
 
     def _get_url_for_next_new_user_step(
         self,
-        attributes: Optional[UserAttributes] = None,
-        session: Optional[UsernameMappingSession] = None,
+        attributes: UserAttributes | None = None,
+        session: UsernameMappingSession | None = None,
     ) -> bytes:
         """Returns the URL to redirect to for the next step of new user registration
 
@@ -622,8 +621,8 @@ class SsoHandler:
         attributes: UserAttributes,
         client_redirect_url: str,
         next_step_url: bytes,
-        extra_login_attributes: Optional[JsonDict],
-        auth_provider_session_id: Optional[str],
+        extra_login_attributes: JsonDict | None,
+        auth_provider_session_id: str | None,
     ) -> NoReturn:
         """Creates a UsernameMappingSession and redirects the browser
 
@@ -1175,7 +1174,7 @@ class SsoHandler:
         self,
         auth_provider_id: str,
         auth_provider_session_id: str,
-        expected_user_id: Optional[str] = None,
+        expected_user_id: str | None = None,
     ) -> None:
         """Revoke any devices and in-flight logins tied to a provider session.
 

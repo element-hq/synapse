@@ -25,7 +25,6 @@ from typing import (
     AbstractSet,
     Any,
     Mapping,
-    Optional,
     Sequence,
 )
 
@@ -116,7 +115,7 @@ class SyncConfig:
     user: UserID
     filter_collection: FilterCollection
     is_guest: bool
-    device_id: Optional[str]
+    device_id: str | None
     use_state_after: bool
 
 
@@ -127,7 +126,7 @@ class TimelineBatch:
     limited: bool
     # A mapping of event ID to the bundled aggregations for the above events.
     # This is only calculated if limited is true.
-    bundled_aggregations: Optional[dict[str, BundledAggregations]] = None
+    bundled_aggregations: dict[str, BundledAggregations] | None = None
 
     def __bool__(self) -> bool:
         """Make the result appear empty if there are no updates. This is used
@@ -150,7 +149,7 @@ class JoinedSyncResult:
     account_data: list[JsonDict]
     unread_notifications: JsonDict
     unread_thread_notifications: JsonDict
-    summary: Optional[JsonDict]
+    summary: JsonDict | None
     unread_count: int
 
     def __bool__(self) -> bool:
@@ -314,7 +313,7 @@ class SyncHandler:
 
         # ExpiringCache((User, Device)) -> LruCache(user_id => event_id)
         self.lazy_loaded_members_cache: ExpiringCache[
-            tuple[str, Optional[str]], LruCache[str, str]
+            tuple[str, str | None], LruCache[str, str]
         ] = ExpiringCache(
             cache_name="lazy_loaded_members_cache",
             server_name=self.server_name,
@@ -331,7 +330,7 @@ class SyncHandler:
         requester: Requester,
         sync_config: SyncConfig,
         request_key: SyncRequestKey,
-        since_token: Optional[StreamToken] = None,
+        since_token: StreamToken | None = None,
         timeout: int = 0,
         full_state: bool = False,
     ) -> SyncResult:
@@ -372,7 +371,7 @@ class SyncHandler:
     async def _wait_for_sync_for_user(
         self,
         sync_config: SyncConfig,
-        since_token: Optional[StreamToken],
+        since_token: StreamToken | None,
         timeout: int,
         full_state: bool,
         cache_context: ResponseCacheContext[SyncRequestKey],
@@ -502,7 +501,7 @@ class SyncHandler:
     async def current_sync_for_user(
         self,
         sync_config: SyncConfig,
-        since_token: Optional[StreamToken] = None,
+        since_token: StreamToken | None = None,
         full_state: bool = False,
     ) -> SyncResult:
         """
@@ -537,7 +536,7 @@ class SyncHandler:
         self,
         sync_result_builder: "SyncResultBuilder",
         now_token: StreamToken,
-        since_token: Optional[StreamToken] = None,
+        since_token: StreamToken | None = None,
     ) -> tuple[StreamToken, dict[str, list[JsonDict]]]:
         """Get the ephemeral events for each room the user is in
         Args:
@@ -604,8 +603,8 @@ class SyncHandler:
         sync_result_builder: "SyncResultBuilder",
         sync_config: SyncConfig,
         upto_token: StreamToken,
-        since_token: Optional[StreamToken] = None,
-        potential_recents: Optional[list[EventBase]] = None,
+        since_token: StreamToken | None = None,
+        potential_recents: list[EventBase] | None = None,
         newly_joined_room: bool = False,
     ) -> TimelineBatch:
         """Create a timeline batch for the room
@@ -850,7 +849,7 @@ class SyncHandler:
         batch: TimelineBatch,
         state: MutableStateMap[EventBase],
         now_token: StreamToken,
-    ) -> Optional[JsonDict]:
+    ) -> JsonDict | None:
         """Works out a room summary block for this room, summarising the number
         of joined members in the room, and providing the 'hero' members if the
         room has no name so clients can consistently name rooms.  Also adds
@@ -963,11 +962,9 @@ class SyncHandler:
         return summary
 
     def get_lazy_loaded_members_cache(
-        self, cache_key: tuple[str, Optional[str]]
+        self, cache_key: tuple[str, str | None]
     ) -> LruCache[str, str]:
-        cache: Optional[LruCache[str, str]] = self.lazy_loaded_members_cache.get(
-            cache_key
-        )
+        cache: LruCache[str, str] | None = self.lazy_loaded_members_cache.get(cache_key)
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
             cache = LruCache(
@@ -985,7 +982,7 @@ class SyncHandler:
         room_id: str,
         batch: TimelineBatch,
         sync_config: SyncConfig,
-        since_token: Optional[StreamToken],
+        since_token: StreamToken | None,
         end_token: StreamToken,
         full_state: bool,
         joined: bool,
@@ -1024,11 +1021,11 @@ class SyncHandler:
         ):
             # The memberships needed for events in the timeline.
             # Only calculated when `lazy_load_members` is on.
-            members_to_fetch: Optional[set[str]] = None
+            members_to_fetch: set[str] | None = None
 
             # A dictionary mapping user IDs to the first event in the timeline sent by
             # them. Only calculated when `lazy_load_members` is on.
-            first_event_by_sender_map: Optional[dict[str, EventBase]] = None
+            first_event_by_sender_map: dict[str, EventBase] | None = None
 
             # The contribution to the room state from state events in the timeline.
             # Only contains the last event for any given state key.
@@ -1172,7 +1169,7 @@ class SyncHandler:
         sync_config: SyncConfig,
         batch: TimelineBatch,
         end_token: StreamToken,
-        members_to_fetch: Optional[set[str]],
+        members_to_fetch: set[str] | None,
         timeline_state: StateMap[str],
         joined: bool,
     ) -> StateMap[str]:
@@ -1322,7 +1319,7 @@ class SyncHandler:
         batch: TimelineBatch,
         since_token: StreamToken,
         end_token: StreamToken,
-        members_to_fetch: Optional[set[str]],
+        members_to_fetch: set[str] | None,
         timeline_state: StateMap[str],
     ) -> StateMap[str]:
         """Calculate the state events to be included in an incremental sync response.
@@ -1649,7 +1646,7 @@ class SyncHandler:
     async def generate_sync_result(
         self,
         sync_config: SyncConfig,
-        since_token: Optional[StreamToken] = None,
+        since_token: StreamToken | None = None,
         full_state: bool = False,
     ) -> SyncResult:
         """Generates the response body of a sync result.
@@ -1804,7 +1801,7 @@ class SyncHandler:
     async def get_sync_result_builder(
         self,
         sync_config: SyncConfig,
-        since_token: Optional[StreamToken] = None,
+        since_token: StreamToken | None = None,
         full_state: bool = False,
     ) -> "SyncResultBuilder":
         """
@@ -2439,7 +2436,7 @@ class SyncHandler:
                 # This is all screaming out for a refactor, as the logic here is
                 # subtle and the moving parts numerous.
                 if leave_event.internal_metadata.is_out_of_band_membership():
-                    batch_events: Optional[list[EventBase]] = [leave_event]
+                    batch_events: list[EventBase] | None = [leave_event]
                 else:
                     batch_events = None
 
@@ -2608,7 +2605,7 @@ class SyncHandler:
         sync_result_builder: "SyncResultBuilder",
         room_builder: "RoomSyncResultBuilder",
         ephemeral: list[JsonDict],
-        tags: Optional[Mapping[str, JsonMapping]],
+        tags: Mapping[str, JsonMapping] | None,
         account_data: Mapping[str, JsonMapping],
         always_include: bool = False,
     ) -> None:
@@ -2758,7 +2755,7 @@ class SyncHandler:
                 # An out of band room won't have any state changes.
                 state = {}
 
-            summary: Optional[JsonDict] = {}
+            summary: JsonDict | None = {}
 
             # we include a summary in room responses when we're lazy loading
             # members (as the client otherwise doesn't have enough info to form
@@ -3007,7 +3004,7 @@ class SyncResultBuilder:
 
     sync_config: SyncConfig
     full_state: bool
-    since_token: Optional[StreamToken]
+    since_token: StreamToken | None
     now_token: StreamToken
     joined_room_ids: frozenset[str]
     excluded_room_ids: frozenset[str]
@@ -3100,10 +3097,10 @@ class RoomSyncResultBuilder:
 
     room_id: str
     rtype: str
-    events: Optional[list[EventBase]]
+    events: list[EventBase] | None
     newly_joined: bool
     full_state: bool
-    since_token: Optional[StreamToken]
+    since_token: StreamToken | None
     upto_token: StreamToken
     end_token: StreamToken
     out_of_band: bool = False

@@ -18,8 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional, Union
-
 from pydantic import (
     ConfigDict,
     Field,
@@ -49,8 +47,8 @@ class AuthenticationData(RequestBodyModel):
 
     model_config = ConfigDict(extra="allow")
 
-    session: Optional[StrictStr] = None
-    type: Optional[StrictStr] = None
+    session: StrictStr | None = None
+    type: StrictStr | None = None
 
 
 # See also assert_valid_client_secret()
@@ -67,9 +65,9 @@ ClientSecretStr = Annotated[
 
 class ThreepidRequestTokenBody(RequestBodyModel):
     client_secret: ClientSecretStr
-    id_server: Optional[StrictStr] = None
-    id_access_token: Optional[StrictStr] = None
-    next_link: Optional[StrictStr] = None
+    id_server: StrictStr | None = None
+    id_access_token: StrictStr | None = None
+    next_link: StrictStr | None = None
     send_attempt: StrictInt
 
     @model_validator(mode="after")
@@ -246,17 +244,17 @@ class SlidingSyncBody(RequestBodyModel):
                     list of favourite rooms again.
             """
 
-            is_dm: Optional[StrictBool] = None
-            spaces: Optional[list[StrictStr]] = None
-            is_encrypted: Optional[StrictBool] = None
-            is_invite: Optional[StrictBool] = None
-            room_types: Optional[list[Union[StrictStr, None]]] = None
-            not_room_types: Optional[list[Union[StrictStr, None]]] = None
-            room_name_like: Optional[StrictStr] = None
-            tags: Optional[list[StrictStr]] = None
-            not_tags: Optional[list[StrictStr]] = None
+            is_dm: StrictBool | None = None
+            spaces: list[StrictStr] | None = None
+            is_encrypted: StrictBool | None = None
+            is_invite: StrictBool | None = None
+            room_types: list[StrictStr | None] | None = None
+            not_room_types: list[StrictStr | None] | None = None
+            room_name_like: StrictStr | None = None
+            tags: list[StrictStr] | None = None
+            not_tags: list[StrictStr] | None = None
 
-        ranges: Optional[
+        ranges: (
             list[
                 Annotated[
                     tuple[
@@ -266,9 +264,10 @@ class SlidingSyncBody(RequestBodyModel):
                     Field(strict=False),
                 ]
             ]
-        ] = None
-        slow_get_all_rooms: Optional[StrictBool] = False
-        filters: Optional[Filters] = None
+            | None
+        ) = None
+        slow_get_all_rooms: StrictBool | None = False
+        filters: Filters | None = None
 
     class RoomSubscription(CommonRoomParameters):
         pass
@@ -291,15 +290,13 @@ class SlidingSyncBody(RequestBodyModel):
                 since: The `next_batch` from the previous sync response
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             limit: StrictInt = 100
-            since: Optional[StrictStr] = None
+            since: StrictStr | None = None
 
             @field_validator("since")
             @classmethod
-            def since_token_check(
-                cls, value: Optional[StrictStr]
-            ) -> Optional[StrictStr]:
+            def since_token_check(cls, value: StrictStr | None) -> StrictStr | None:
                 # `since` comes in as an opaque string token but we know that it's just
                 # an integer representing the position in the device inbox stream. We
                 # want to pre-validate it to make sure it works fine in downstream code.
@@ -322,7 +319,7 @@ class SlidingSyncBody(RequestBodyModel):
                 enabled
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
 
         class AccountDataExtension(RequestBodyModel):
             """The Account Data extension (MSC3959)
@@ -335,11 +332,11 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[list[StrictStr]] = ["*"]
+            lists: list[StrictStr] | None = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[list[StrictStr]] = ["*"]
+            rooms: list[StrictStr] | None = ["*"]
 
         class ReceiptsExtension(RequestBodyModel):
             """The Receipts extension (MSC3960)
@@ -352,11 +349,11 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[list[StrictStr]] = ["*"]
+            lists: list[StrictStr] | None = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[list[StrictStr]] = ["*"]
+            rooms: list[StrictStr] | None = ["*"]
 
         class TypingExtension(RequestBodyModel):
             """The Typing Notification extension (MSC3961)
@@ -369,11 +366,11 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[list[StrictStr]] = ["*"]
+            lists: list[StrictStr] | None = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[list[StrictStr]] = ["*"]
+            rooms: list[StrictStr] | None = ["*"]
 
         class ThreadSubscriptionsExtension(RequestBodyModel):
             """The Thread Subscriptions extension (MSC4308)
@@ -383,33 +380,34 @@ class SlidingSyncBody(RequestBodyModel):
                 limit: maximum number of subscription changes to return (default 100)
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             limit: StrictInt = 100
 
-        to_device: Optional[ToDeviceExtension] = None
-        e2ee: Optional[E2eeExtension] = None
-        account_data: Optional[AccountDataExtension] = None
-        receipts: Optional[ReceiptsExtension] = None
-        typing: Optional[TypingExtension] = None
-        thread_subscriptions: Optional[ThreadSubscriptionsExtension] = Field(
+        to_device: ToDeviceExtension | None = None
+        e2ee: E2eeExtension | None = None
+        account_data: AccountDataExtension | None = None
+        receipts: ReceiptsExtension | None = None
+        typing: TypingExtension | None = None
+        thread_subscriptions: ThreadSubscriptionsExtension | None = Field(
             None, alias="io.element.msc4308.thread_subscriptions"
         )
 
-    conn_id: Optional[StrictStr] = None
-    lists: Optional[
+    conn_id: StrictStr | None = None
+    lists: (
         dict[
             Annotated[str, StringConstraints(max_length=64, strict=True)],
             SlidingSyncList,
         ]
-    ] = None
-    room_subscriptions: Optional[dict[StrictStr, RoomSubscription]] = None
-    extensions: Optional[Extensions] = None
+        | None
+    ) = None
+    room_subscriptions: dict[StrictStr, RoomSubscription] | None = None
+    extensions: Extensions | None = None
 
     @field_validator("lists")
     @classmethod
     def lists_length_check(
-        cls, value: Optional[dict[str, SlidingSyncList]]
-    ) -> Optional[dict[str, SlidingSyncList]]:
+        cls, value: dict[str, SlidingSyncList] | None
+    ) -> dict[str, SlidingSyncList] | None:
         if value is not None:
             assert len(value) <= 100, f"Max lists: 100 but saw {len(value)}"
         return value

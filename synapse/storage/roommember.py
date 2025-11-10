@@ -20,7 +20,6 @@
 #
 
 import logging
-from typing import Optional
 
 import attr
 
@@ -42,14 +41,14 @@ class RoomsForUser:
 @attr.s(slots=True, frozen=True, weakref_slot=False, auto_attribs=True)
 class RoomsForUserSlidingSync:
     room_id: str
-    sender: Optional[str]
+    sender: str | None
     membership: str
-    event_id: Optional[str]
+    event_id: str | None
     event_pos: PersistedEventPosition
     room_version_id: str
 
     has_known_state: bool
-    room_type: Optional[str]
+    room_type: str | None
     is_encrypted: bool
 
 
@@ -60,9 +59,9 @@ class RoomsForUserStateReset:
     without a corresponding event so that information isn't always available."""
 
     room_id: str
-    sender: Optional[str]
+    sender: str | None
     membership: str
-    event_id: Optional[str]
+    event_id: str | None
     event_pos: PersistedEventPosition
     room_version_id: str
 
@@ -75,8 +74,8 @@ class GetRoomsForUserWithStreamOrdering:
 
 @attr.s(slots=True, frozen=True, weakref_slot=False, auto_attribs=True)
 class ProfileInfo:
-    avatar_url: Optional[str]
-    display_name: Optional[str]
+    avatar_url: str | None
+    display_name: str | None
 
 
 # TODO This is used as a cached value and is mutable.

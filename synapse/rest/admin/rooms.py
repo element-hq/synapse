@@ -20,7 +20,7 @@
 #
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 
 import attr
 from immutabledict import immutabledict
@@ -565,7 +565,7 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, RestServlet):
 
         # Get the room ID from the identifier.
         try:
-            remote_room_hosts: Optional[list[str]] = [
+            remote_room_hosts: list[str] | None = [
                 x.decode("ascii") for x in request.args[b"server_name"]
             ]
         except Exception:

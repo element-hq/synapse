@@ -23,7 +23,6 @@ import logging
 import traceback
 from io import StringIO
 from types import TracebackType
-from typing import Optional
 
 
 class LogFormatter(logging.Formatter):
@@ -39,9 +38,9 @@ class LogFormatter(logging.Formatter):
     def formatException(
         self,
         ei: tuple[
-            Optional[type[BaseException]],
-            Optional[BaseException],
-            Optional[TracebackType],
+            type[BaseException] | None,
+            BaseException | None,
+            TracebackType | None,
         ],
     ) -> str:
         sio = StringIO()

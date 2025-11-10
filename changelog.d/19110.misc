@@ -1,1 +1,0 @@
-Allow Synapse's runtime dependency checking code to take packaging markers (i.e. `python <= 3.14`) into account when checking dependencies.

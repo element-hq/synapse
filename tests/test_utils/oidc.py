@@ -23,7 +23,7 @@
 import base64
 import json
 from hashlib import sha256
-from typing import Any, ContextManager, Optional
+from typing import Any, ContextManager
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs
 
@@ -45,8 +45,8 @@ class FakeAuthorizationGrant:
     client_id: str
     redirect_uri: str
     scope: str
-    nonce: Optional[str]
-    sid: Optional[str]
+    nonce: str | None
+    sid: str | None
 
 
 class FakeOidcServer:
@@ -140,7 +140,7 @@ class FakeOidcServer:
     def get_jwks(self) -> dict:
         return self._jwks.as_dict()
 
-    def get_userinfo(self, access_token: str) -> Optional[dict]:
+    def get_userinfo(self, access_token: str) -> dict | None:
         """Given an access token, get the userinfo of the associated session."""
         session = self._sessions.get(access_token, None)
         if session is None:
@@ -220,7 +220,7 @@ class FakeOidcServer:
         scope: str,
         redirect_uri: str,
         userinfo: dict,
-        nonce: Optional[str] = None,
+        nonce: str | None = None,
         with_sid: bool = False,
     ) -> tuple[str, FakeAuthorizationGrant]:
         """Start an authorization request, and get back the code to use on the authorization endpoint."""
@@ -242,7 +242,7 @@ class FakeOidcServer:
 
         return code, grant
 
-    def exchange_code(self, code: str) -> Optional[dict[str, Any]]:
+    def exchange_code(self, code: str) -> dict[str, Any] | None:
         grant = self._authorization_grants.pop(code, None)
         if grant is None:
             return None
@@ -296,11 +296,11 @@ class FakeOidcServer:
         self,
         method: str,
         uri: str,
-        data: Optional[bytes] = None,
-        headers: Optional[Headers] = None,
+        data: bytes | None = None,
+        headers: Headers | None = None,
     ) -> IResponse:
         """The override of the SimpleHttpClient#request() method"""
-        access_token: Optional[str] = None
+        access_token: str | None = None
 
         if headers is None:
             headers = Headers()
@@ -346,7 +346,7 @@ class FakeOidcServer:
         """Handles requests to the OIDC well-known document."""
         return FakeResponse.json(payload=self.get_metadata())
 
-    def _get_userinfo_handler(self, access_token: Optional[str]) -> IResponse:
+    def _get_userinfo_handler(self, access_token: str | None) -> IResponse:
         """Handles requests to the userinfo endpoint."""
         if access_token is None:
             return FakeResponse(code=401)

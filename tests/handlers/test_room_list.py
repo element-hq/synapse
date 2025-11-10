@@ -1,5 +1,4 @@
 from http import HTTPStatus
-from typing import Optional
 
 from synapse.rest import admin
 from synapse.rest.client import directory, login, room
@@ -18,7 +17,7 @@ class RoomListHandlerTestCase(unittest.HomeserverTestCase):
     ]
 
     def _create_published_room(
-        self, tok: str, extra_content: Optional[JsonDict] = None
+        self, tok: str, extra_content: JsonDict | None = None
     ) -> str:
         room_id = self.helper.create_room_as(tok=tok, extra_content=extra_content)
         channel = self.make_request(

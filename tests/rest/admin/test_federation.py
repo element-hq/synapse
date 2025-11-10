@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 
 from parameterized import parameterized
 
@@ -273,8 +272,8 @@ class FederationTestCase(unittest.HomeserverTestCase):
 
         def _order_test(
             expected_destination_list: list[str],
-            order_by: Optional[str],
-            dir: Optional[str] = None,
+            order_by: str | None,
+            dir: str | None = None,
         ) -> None:
             """Request the list of destinations in a certain order.
             Assert that order is what we expect
@@ -366,7 +365,7 @@ class FederationTestCase(unittest.HomeserverTestCase):
         """Test that searching for a destination works correctly"""
 
         def _search_test(
-            expected_destination: Optional[str],
+            expected_destination: str | None,
             search_term: str,
         ) -> None:
             """Search for a destination and check that the returned destinationis a match
@@ -484,10 +483,10 @@ class FederationTestCase(unittest.HomeserverTestCase):
     def _create_destination(
         self,
         destination: str,
-        failure_ts: Optional[int] = None,
+        failure_ts: int | None = None,
         retry_last_ts: int = 0,
         retry_interval: int = 0,
-        last_successful_stream_ordering: Optional[int] = None,
+        last_successful_stream_ordering: int | None = None,
     ) -> None:
         """Create one specific destination
 
@@ -819,7 +818,7 @@ class DestinationMembershipTestCase(unittest.HomeserverTestCase):
     def _create_destination_rooms(
         self,
         number_rooms: int,
-        destination: Optional[str] = None,
+        destination: str | None = None,
     ) -> list[str]:
         """
         Create the given number of rooms. The given `destination` homeserver will

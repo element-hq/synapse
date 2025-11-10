@@ -22,7 +22,7 @@
 """A circular doubly linked list implementation."""
 
 import threading
-from typing import Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
 P = TypeVar("P")
 LN = TypeVar("LN", bound="ListNode")
@@ -47,10 +47,10 @@ class ListNode(Generic[P]):
         "next_node",
     ]
 
-    def __init__(self, cache_entry: Optional[P] = None) -> None:
+    def __init__(self, cache_entry: P | None = None) -> None:
         self.cache_entry = cache_entry
-        self.prev_node: Optional[ListNode[P]] = None
-        self.next_node: Optional[ListNode[P]] = None
+        self.prev_node: ListNode[P] | None = None
+        self.next_node: ListNode[P] | None = None
 
     @classmethod
     def create_root_node(cls: type["ListNode[P]"]) -> "ListNode[P]":
@@ -149,7 +149,7 @@ class ListNode(Generic[P]):
         prev_node.next_node = self
         next_node.prev_node = self
 
-    def get_cache_entry(self) -> Optional[P]:
+    def get_cache_entry(self) -> P | None:
         """Get the cache entry, returns None if this is the root node (i.e.
         cache_entry is None) or if the entry has been dropped.
         """

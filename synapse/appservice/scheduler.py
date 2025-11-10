@@ -62,7 +62,6 @@ from typing import (
     Callable,
     Collection,
     Iterable,
-    Optional,
     Sequence,
 )
 
@@ -123,10 +122,10 @@ class ApplicationServiceScheduler:
     def enqueue_for_appservice(
         self,
         appservice: ApplicationService,
-        events: Optional[Collection[EventBase]] = None,
-        ephemeral: Optional[Collection[JsonMapping]] = None,
-        to_device_messages: Optional[Collection[JsonMapping]] = None,
-        device_list_summary: Optional[DeviceListUpdates] = None,
+        events: Collection[EventBase] | None = None,
+        ephemeral: Collection[JsonMapping] | None = None,
+        to_device_messages: Collection[JsonMapping] | None = None,
+        device_list_summary: DeviceListUpdates | None = None,
     ) -> None:
         """
         Enqueue some data to be sent off to an application service.
@@ -260,8 +259,8 @@ class _ServiceQueuer:
                 ):
                     return
 
-                one_time_keys_count: Optional[TransactionOneTimeKeysCount] = None
-                unused_fallback_keys: Optional[TransactionUnusedFallbackKeys] = None
+                one_time_keys_count: TransactionOneTimeKeysCount | None = None
+                unused_fallback_keys: TransactionUnusedFallbackKeys | None = None
 
                 if (
                     self._msc3202_transaction_extensions_enabled
@@ -369,11 +368,11 @@ class _TransactionController:
         self,
         service: ApplicationService,
         events: Sequence[EventBase],
-        ephemeral: Optional[list[JsonMapping]] = None,
-        to_device_messages: Optional[list[JsonMapping]] = None,
-        one_time_keys_count: Optional[TransactionOneTimeKeysCount] = None,
-        unused_fallback_keys: Optional[TransactionUnusedFallbackKeys] = None,
-        device_list_summary: Optional[DeviceListUpdates] = None,
+        ephemeral: list[JsonMapping] | None = None,
+        to_device_messages: list[JsonMapping] | None = None,
+        one_time_keys_count: TransactionOneTimeKeysCount | None = None,
+        unused_fallback_keys: TransactionUnusedFallbackKeys | None = None,
+        device_list_summary: DeviceListUpdates | None = None,
     ) -> None:
         """
         Create a transaction with the given data and send to the provided
@@ -504,7 +503,7 @@ class _Recoverer:
         self.service = service
         self.callback = callback
         self.backoff_counter = 1
-        self.scheduled_recovery: Optional[IDelayedCall] = None
+        self.scheduled_recovery: IDelayedCall | None = None
 
     def recover(self) -> None:
         delay = 2**self.backoff_counter

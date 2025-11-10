@@ -22,7 +22,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from pydantic import ConfigDict, StrictStr
 
@@ -95,7 +95,7 @@ class DeleteDevicesRestServlet(RestServlet):
         self.auth_handler = hs.get_auth_handler()
 
     class PostBody(RequestBodyModel):
-        auth: Optional[AuthenticationData] = None
+        auth: AuthenticationData | None = None
         devices: list[StrictStr]
 
     @interactive_auth_handler
@@ -173,7 +173,7 @@ class DeviceRestServlet(RestServlet):
         return 200, device
 
     class DeleteBody(RequestBodyModel):
-        auth: Optional[AuthenticationData] = None
+        auth: AuthenticationData | None = None
 
     @interactive_auth_handler
     async def on_DELETE(
@@ -218,7 +218,7 @@ class DeviceRestServlet(RestServlet):
         return 200, {}
 
     class PutBody(RequestBodyModel):
-        display_name: Optional[StrictStr] = None
+        display_name: StrictStr | None = None
 
     async def on_PUT(
         self, request: SynapseRequest, device_id: str
@@ -316,7 +316,7 @@ class DehydratedDeviceServlet(RestServlet):
 
     class PutBody(RequestBodyModel):
         device_data: DehydratedDeviceDataModel
-        initial_device_display_name: Optional[StrictStr] = None
+        initial_device_display_name: StrictStr | None = None
 
     async def on_PUT(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         submission = parse_and_validate_json_object_from_request(request, self.PutBody)
@@ -391,7 +391,7 @@ class DehydratedDeviceEventsServlet(RestServlet):
         self.store = hs.get_datastores().main
 
     class PostBody(RequestBodyModel):
-        next_batch: Optional[StrictStr] = None
+        next_batch: StrictStr | None = None
 
     async def on_POST(
         self, request: SynapseRequest, device_id: str
@@ -538,7 +538,7 @@ class DehydratedDeviceV2Servlet(RestServlet):
     class PutBody(RequestBodyModel):
         device_data: DehydratedDeviceDataModel
         device_id: StrictStr
-        initial_device_display_name: Optional[StrictStr]
+        initial_device_display_name: StrictStr | None
         model_config = ConfigDict(extra="allow")
 
     async def on_PUT(self, request: SynapseRequest) -> tuple[int, JsonDict]:
