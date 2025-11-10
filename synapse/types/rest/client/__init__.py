@@ -429,34 +429,3 @@ class SlidingSyncBody(RequestBodyModel):
         return value
 
 
-class ThreadUpdatesBody(RequestBodyModel):
-    """
-    Thread updates companion endpoint request body (MSC4360).
-
-    Allows paginating thread updates using the same room selection as a sliding sync
-    request. This enables clients to fetch thread updates for the same set of rooms
-    that were included in their sliding sync response.
-
-    Attributes:
-        lists: Sliding window API lists, using the same structure as SlidingSyncBody.lists.
-            If provided along with room_subscriptions, the union of rooms from both will
-            be used.
-        room_subscriptions: Room subscription API rooms, using the same structure as
-            SlidingSyncBody.room_subscriptions. If provided along with lists, the union
-            of rooms from both will be used.
-        include_roots: Whether to include the thread root events in the response.
-            Defaults to False.
-
-    If neither lists nor room_subscriptions are provided, thread updates from all
-    joined rooms are returned.
-    """
-
-    lists: (
-        dict[
-            Annotated[str, StringConstraints(max_length=64, strict=True)],
-            SlidingSyncBody.SlidingSyncList,
-        ]
-        | None
-    ) = None
-    room_subscriptions: dict[StrictStr, SlidingSyncBody.RoomSubscription] | None = None
-    include_roots: StrictBool = False

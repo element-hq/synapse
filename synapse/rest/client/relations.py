@@ -20,7 +20,10 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
+
+from pydantic import StrictBool, StrictStr
+from pydantic.types import StringConstraints
 
 from synapse.api.constants import Direction, Membership
 from synapse.api.errors import SynapseError
@@ -43,12 +46,45 @@ from synapse.streams.config import (
 )
 from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken, UserID
 from synapse.types.handlers.sliding_sync import PerConnectionState, SlidingSyncConfig
-from synapse.types.rest.client import ThreadUpdatesBody
+from synapse.types.rest.client import RequestBodyModel, SlidingSyncBody
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class ThreadUpdatesBody(RequestBodyModel):
+    """
+    Thread updates companion endpoint request body (MSC4360).
+
+    Allows paginating thread updates using the same room selection as a sliding sync
+    request. This enables clients to fetch thread updates for the same set of rooms
+    that were included in their sliding sync response.
+
+    Attributes:
+        lists: Sliding window API lists, using the same structure as SlidingSyncBody.lists.
+            If provided along with room_subscriptions, the union of rooms from both will
+            be used.
+        room_subscriptions: Room subscription API rooms, using the same structure as
+            SlidingSyncBody.room_subscriptions. If provided along with lists, the union
+            of rooms from both will be used.
+        include_roots: Whether to include the thread root events in the response.
+            Defaults to False.
+
+    If neither lists nor room_subscriptions are provided, thread updates from all
+    joined rooms are returned.
+    """
+
+    lists: (
+        dict[
+            Annotated[str, StringConstraints(max_length=64, strict=True)],
+            SlidingSyncBody.SlidingSyncList,
+        ]
+        | None
+    ) = None
+    room_subscriptions: dict[StrictStr, SlidingSyncBody.RoomSubscription] | None = None
+    include_roots: StrictBool = False
 
 
 class RelationPaginationServlet(RestServlet):
