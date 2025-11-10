@@ -30,7 +30,7 @@ sed -i -E '
   s/[~>]=/==/g
   s/\^/==/g
   /psycopg2/d
-  s/pyOpenSSL = "==16\.0\.0"/pyOpenSSL = "==17.0.0"/
+  s/pyOpenSSL\s*==\s*16\.0\.0"/pyOpenSSL==17.0.0"/
   /systemd/d
 ' pyproject.toml
 
