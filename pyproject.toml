@@ -97,27 +97,6 @@ dependencies = [
     "python-multipart>=0.0.9",
 ]
 
-[project.urls]
-repository = "https://github.com/element-hq/synapse"
-documentation = "https://element-hq.github.io/synapse/latest"
-"Issue Tracker" = "https://github.com/element-hq/synapse/issues"
-
-[project.scripts]
-synapse_homeserver = "synapse.app.homeserver:main"
-synapse_worker = "synapse.app.generic_worker:main"
-synctl = "synapse._scripts.synctl:main"
-
-export_signing_key = "synapse._scripts.export_signing_key:main"
-generate_config = "synapse._scripts.generate_config:main"
-generate_log_config = "synapse._scripts.generate_log_config:main"
-generate_signing_key = "synapse._scripts.generate_signing_key:main"
-hash_password = "synapse._scripts.hash_password:main"
-register_new_matrix_user = "synapse._scripts.register_new_matrix_user:main"
-synapse_port_db = "synapse._scripts.synapse_port_db:main"
-synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
-update_synapse_database = "synapse._scripts.update_synapse_database:main"
-
-
 [project.optional-dependencies]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3>=0.1"]
 postgres = [
@@ -180,6 +159,26 @@ all = [
     #   - test: it's useful to have this separate from dev deps in the olddeps job
     #   - systemd: this is a system-based requirement
 ]
+
+[project.urls]
+repository = "https://github.com/element-hq/synapse"
+documentation = "https://element-hq.github.io/synapse/latest"
+"Issue Tracker" = "https://github.com/element-hq/synapse/issues"
+
+[project.scripts]
+synapse_homeserver = "synapse.app.homeserver:main"
+synapse_worker = "synapse.app.generic_worker:main"
+synctl = "synapse._scripts.synctl:main"
+
+export_signing_key = "synapse._scripts.export_signing_key:main"
+generate_config = "synapse._scripts.generate_config:main"
+generate_log_config = "synapse._scripts.generate_log_config:main"
+generate_signing_key = "synapse._scripts.generate_signing_key:main"
+hash_password = "synapse._scripts.hash_password:main"
+register_new_matrix_user = "synapse._scripts.register_new_matrix_user:main"
+synapse_port_db = "synapse._scripts.synapse_port_db:main"
+synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
+update_synapse_database = "synapse._scripts.update_synapse_database:main"
 
 
 [tool.towncrier]
