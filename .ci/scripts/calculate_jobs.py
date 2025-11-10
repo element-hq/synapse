@@ -50,7 +50,7 @@ trial_sqlite_tests = [
         "python-version": "3.14",
         "database": "sqlite",
         "extras": "all",
-    }
+    },
 ]
 
 if not IS_PR:
@@ -76,7 +76,7 @@ trial_postgres_tests = [
         "database": "postgres",
         "postgres-version": "17",
         "extras": "all",
-    }
+    },
 ]
 
 trial_no_extra_tests = [
