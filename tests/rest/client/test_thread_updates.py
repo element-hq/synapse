@@ -58,7 +58,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
-            content={},
+            content={"include_roots": True},
             access_token=user1_tok,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
@@ -99,7 +99,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -165,7 +165,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -227,7 +227,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -277,7 +277,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=2",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -293,7 +293,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             f"/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=2&from={next_batch}",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -315,7 +315,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             f"/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=2&from={next_batch_2}",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -347,7 +347,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=f",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 400)
 
@@ -363,7 +363,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=0",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 400)
 
@@ -372,7 +372,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=-5",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 400)
 
@@ -388,7 +388,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&from=invalid_token",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 400)
 
@@ -397,7 +397,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&to=invalid_token",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 400)
 
@@ -454,7 +454,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=1",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 200)
         self.assertIn("next_batch", channel.json_body)
@@ -471,7 +471,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             f"/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&to={next_batch}",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 200)
 
@@ -523,7 +523,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 200)
 
@@ -602,7 +602,7 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
             access_token=user1_tok,
-            content={},
+            content={"include_roots": True},
         )
         self.assertEqual(channel.code, 200)
 
@@ -611,3 +611,347 @@ class ThreadUpdatesTestCase(unittest.HomeserverTestCase):
         self.assertIn(room1_id, chunk)
         self.assertNotIn(room2_id, chunk)
         self.assertIn(thread1_root_id, chunk[room1_id])
+
+    def test_room_filtering_with_lists(self) -> None:
+        """
+        Test that room filtering works correctly using the lists parameter.
+        This verifies that thread updates are only returned for rooms matching
+        the provided filters.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create an encrypted room and an unencrypted room
+        encrypted_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": "m.room.encryption",
+                        "state_key": "",
+                        "content": {"algorithm": "m.megolm.v1.aes-sha2"},
+                    }
+                ]
+            },
+        )
+        unencrypted_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create threads in both rooms
+        enc_thread_root_id = self.helper.send(
+            encrypted_room_id, body="Encrypted thread", tok=user1_tok
+        )["event_id"]
+        unenc_thread_root_id = self.helper.send(
+            unencrypted_room_id, body="Unencrypted thread", tok=user1_tok
+        )["event_id"]
+
+        # Add replies to both threads
+        self.helper.send_event(
+            encrypted_room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply in encrypted room",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": enc_thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+        self.helper.send_event(
+            unencrypted_room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply in unencrypted room",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": unenc_thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # Request thread updates with filter for encrypted rooms only
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
+            access_token=user1_tok,
+            content={
+                "lists": {
+                    "encrypted_list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [["m.room.encryption", ""]],
+                        "timeline_limit": 10,
+                        "filters": {"is_encrypted": True},
+                    }
+                }
+            },
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        chunk = channel.json_body["chunk"]
+        # Should only include the encrypted room
+        self.assertIn(encrypted_room_id, chunk)
+        self.assertNotIn(unencrypted_room_id, chunk)
+        self.assertIn(enc_thread_root_id, chunk[encrypted_room_id])
+
+    def test_room_filtering_with_room_subscriptions(self) -> None:
+        """
+        Test that room filtering works correctly using the room_subscriptions parameter.
+        This verifies that thread updates are only returned for explicitly subscribed rooms.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create three rooms
+        room1_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room2_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room3_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create threads in all three rooms
+        thread1_root_id = self.helper.send(room1_id, body="Thread 1", tok=user1_tok)[
+            "event_id"
+        ]
+        thread2_root_id = self.helper.send(room2_id, body="Thread 2", tok=user1_tok)[
+            "event_id"
+        ]
+        thread3_root_id = self.helper.send(room3_id, body="Thread 3", tok=user1_tok)[
+            "event_id"
+        ]
+
+        # Add replies to all threads
+        for room_id, thread_root_id in [
+            (room1_id, thread1_root_id),
+            (room2_id, thread2_root_id),
+            (room3_id, thread3_root_id),
+        ]:
+            self.helper.send_event(
+                room_id,
+                type="m.room.message",
+                content={
+                    "msgtype": "m.text",
+                    "body": "Reply",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                tok=user1_tok,
+            )
+
+        # Request thread updates with subscription to only room1 and room2
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
+            access_token=user1_tok,
+            content={
+                "room_subscriptions": {
+                    room1_id: {
+                        "required_state": [["m.room.name", ""]],
+                        "timeline_limit": 10,
+                    },
+                    room2_id: {
+                        "required_state": [["m.room.name", ""]],
+                        "timeline_limit": 10,
+                    },
+                }
+            },
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        chunk = channel.json_body["chunk"]
+        # Should only include room1 and room2, not room3
+        self.assertIn(room1_id, chunk)
+        self.assertIn(room2_id, chunk)
+        self.assertNotIn(room3_id, chunk)
+        self.assertIn(thread1_root_id, chunk[room1_id])
+        self.assertIn(thread2_root_id, chunk[room2_id])
+
+    def test_room_filtering_with_lists_and_room_subscriptions(self) -> None:
+        """
+        Test that room filtering works correctly when both lists and room_subscriptions
+        are provided. The union of rooms from both should be included.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create an encrypted room and two unencrypted rooms
+        encrypted_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": "m.room.encryption",
+                        "state_key": "",
+                        "content": {"algorithm": "m.megolm.v1.aes-sha2"},
+                    }
+                ]
+            },
+        )
+        unencrypted_room1_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        unencrypted_room2_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create threads in all three rooms
+        enc_thread_root_id = self.helper.send(
+            encrypted_room_id, body="Encrypted thread", tok=user1_tok
+        )["event_id"]
+        unenc1_thread_root_id = self.helper.send(
+            unencrypted_room1_id, body="Unencrypted thread 1", tok=user1_tok
+        )["event_id"]
+        unenc2_thread_root_id = self.helper.send(
+            unencrypted_room2_id, body="Unencrypted thread 2", tok=user1_tok
+        )["event_id"]
+
+        # Add replies to all threads
+        for room_id, thread_root_id in [
+            (encrypted_room_id, enc_thread_root_id),
+            (unencrypted_room1_id, unenc1_thread_root_id),
+            (unencrypted_room2_id, unenc2_thread_root_id),
+        ]:
+            self.helper.send_event(
+                room_id,
+                type="m.room.message",
+                content={
+                    "msgtype": "m.text",
+                    "body": "Reply",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                tok=user1_tok,
+            )
+
+        # Request thread updates with:
+        # - lists: filter for encrypted rooms
+        # - room_subscriptions: explicitly subscribe to unencrypted_room1_id
+        # Expected: should get both encrypted_room_id (from list) and unencrypted_room1_id
+        # (from subscription), but NOT unencrypted_room2_id
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b",
+            access_token=user1_tok,
+            content={
+                "lists": {
+                    "encrypted_list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [["m.room.encryption", ""]],
+                        "timeline_limit": 10,
+                        "filters": {"is_encrypted": True},
+                    }
+                },
+                "room_subscriptions": {
+                    unencrypted_room1_id: {
+                        "required_state": [["m.room.name", ""]],
+                        "timeline_limit": 10,
+                    }
+                },
+            },
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        chunk = channel.json_body["chunk"]
+        # Should include encrypted_room_id (from list filter) and unencrypted_room1_id
+        # (from subscription), but not unencrypted_room2_id
+        self.assertIn(encrypted_room_id, chunk)
+        self.assertIn(unencrypted_room1_id, chunk)
+        self.assertNotIn(unencrypted_room2_id, chunk)
+        self.assertIn(enc_thread_root_id, chunk[encrypted_room_id])
+        self.assertIn(unenc1_thread_root_id, chunk[unencrypted_room1_id])
+
+    def test_threads_not_returned_after_leaving_room(self) -> None:
+        """
+        Test that thread updates are properly bounded when a user leaves a room.
+
+        Users should see thread updates that occurred up to the point they left,
+        but NOT updates that occurred after they left.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create room and both users join
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.join(room_id, user2_id, tok=user2_tok)
+
+        # Create thread
+        res = self.helper.send(room_id, body="Thread root", tok=user1_tok)
+        thread_root = res["event_id"]
+
+        # Reply in thread while user2 is joined
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply 1 while user2 joined",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # User2 leaves the room
+        self.helper.leave(room_id, user2_id, tok=user2_tok)
+
+        # Another reply after user2 left
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply 2 after user2 left",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # User2 gets thread updates with an explicit room subscription
+        # (We need to explicitly subscribe to the room to include it after leaving;
+        # otherwise only joined rooms are returned)
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&limit=100",
+            {
+                "room_subscriptions": {
+                    room_id: {
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user2_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Assert: User2 SHOULD see Reply 1 (happened while joined) but NOT Reply 2 (after leaving)
+        chunk = channel.json_body["chunk"]
+        self.assertIn(
+            room_id,
+            chunk,
+            "Thread updates should include the room user2 left",
+        )
+        self.assertIn(
+            thread_root,
+            chunk[room_id],
+            "Thread root should be in the updates",
+        )
+
+        # Verify that only a single update was seen (Reply 1) by checking that there's
+        # no prev_batch token. If Reply 2 was also included, there would be multiple
+        # updates and a prev_batch token would be present.
+        thread_update = chunk[room_id][thread_root]
+        self.assertNotIn(
+            "prev_batch",
+            thread_update,
+            "No prev_batch should be present since only one update (Reply 1) is visible",
+        )

@@ -37,6 +37,7 @@ from synapse.events.utils import (
     format_event_raw,
 )
 from synapse.handlers.presence import format_user_presence_state
+from synapse.handlers.relations import RelationsHandler
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
 from synapse.handlers.sync import (
     ArchivedSyncResult,
@@ -1107,6 +1108,7 @@ class SlidingSyncRestServlet(RestServlet):
                 time_now,
                 extensions.threads,
                 self.store,
+                requester,
             )
 
         return serialized_extensions
@@ -1150,6 +1152,7 @@ async def _serialise_threads(
     time_now: int,
     threads: SlidingSyncResult.Extensions.ThreadsExtension,
     store: "DataStore",
+    requester: Requester,
 ) -> JsonDict:
     """
     Serialize the threads extension response for sliding sync.
@@ -1159,6 +1162,7 @@ async def _serialise_threads(
         time_now: The current time in milliseconds, used for event serialization.
         threads: The threads extension data containing thread updates and pagination tokens.
         store: The datastore, needed for serializing stream tokens.
+        requester: The user making the request, used for transaction_id inclusion.
 
     Returns:
         A JSON-serializable dict containing:
@@ -1169,46 +1173,24 @@ async def _serialise_threads(
           - "prev_batch": A pagination token for fetching older events in the thread.
         - "prev_batch": A pagination token for fetching older thread updates (if available).
     """
-    out: JsonDict = {}
+    if not threads.updates:
+        out: JsonDict = {}
+        if threads.prev_batch:
+            out["prev_batch"] = await threads.prev_batch.to_string(store)
+        return out
 
-    if threads.updates:
-        updates_dict: JsonDict = {}
-        for room_id, thread_updates in threads.updates.items():
-            room_updates: JsonDict = {}
-            for thread_root_id, update in thread_updates.items():
-                # Serialize the update
-                update_dict: JsonDict = {}
+    # Create serialization config to include transaction_id for requester's events
+    serialize_options = SerializeEventConfig(requester=requester)
 
-                # Serialize the thread_root event if present
-                if update.thread_root is not None:
-                    # Create a mapping of event_id to bundled_aggregations
-                    bundle_aggs_map = (
-                        {thread_root_id: update.bundled_aggregations}
-                        if update.bundled_aggregations
-                        else None
-                    )
-                    serialized_events = await event_serializer.serialize_events(
-                        [update.thread_root],
-                        time_now,
-                        bundle_aggregations=bundle_aggs_map,
-                    )
-                    if serialized_events:
-                        update_dict["thread_root"] = serialized_events[0]
-
-                # Add prev_batch if present
-                if update.prev_batch is not None:
-                    update_dict["prev_batch"] = await update.prev_batch.to_string(store)
-
-                room_updates[thread_root_id] = update_dict
-
-            updates_dict[room_id] = room_updates
-
-        out["updates"] = updates_dict
-
-    if threads.prev_batch:
-        out["prev_batch"] = await threads.prev_batch.to_string(store)
-
-    return out
+    # Use shared serialization helper (static method)
+    return await RelationsHandler.serialize_thread_updates(
+        thread_updates=threads.updates,
+        prev_batch_token=threads.prev_batch,
+        event_serializer=event_serializer,
+        time_now=time_now,
+        store=store,
+        serialize_options=serialize_options,
+    )
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

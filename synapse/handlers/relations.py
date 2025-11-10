@@ -31,7 +31,7 @@ from typing import (
 
 import attr
 
-from synapse.api.constants import Direction, EventTypes, RelationTypes
+from synapse.api.constants import Direction, EventTypes, Membership, RelationTypes
 from synapse.api.errors import SynapseError
 from synapse.events import EventBase, relation_from_event
 from synapse.events.utils import SerializeEventConfig
@@ -43,12 +43,22 @@ from synapse.storage.databases.main.relations import (
     _RelatedEvent,
 )
 from synapse.streams.config import PaginationConfig
-from synapse.types import JsonDict, Requester, UserID
+from synapse.types import (
+    JsonDict,
+    Requester,
+    RoomStreamToken,
+    StreamKeyType,
+    StreamToken,
+    UserID,
+)
 from synapse.util.async_helpers import gather_results
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
+    from synapse.events.utils import EventClientSerializer
+    from synapse.handlers.sliding_sync.room_lists import RoomsForUserType
     from synapse.server import HomeServer
+    from synapse.storage.databases.main import DataStore
 
 
 logger = logging.getLogger(__name__)
@@ -57,6 +67,22 @@ logger = logging.getLogger(__name__)
 ThreadUpdatesMap = dict[str, list[ThreadUpdateInfo]]
 ThreadRootsMap = dict[str, EventBase]
 AggregationsMap = dict[str, "BundledAggregations"]
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class ThreadUpdate:
+    """
+    Data for a single thread update.
+
+    Attributes:
+        thread_root: The thread root event, or None if not requested/not visible
+        prev_batch: Per-thread pagination token for fetching older events in this thread
+        bundled_aggregations: Bundled aggregations for the thread root event
+    """
+
+    thread_root: EventBase | None
+    prev_batch: StreamToken | None
+    bundled_aggregations: "BundledAggregations | None" = None
 
 
 class ThreadsListInclude(str, enum.Enum):
@@ -554,7 +580,7 @@ class RelationsHandler:
 
         return results
 
-    async def process_thread_updates_for_visibility(
+    async def _filter_thread_updates_for_user(
         self,
         all_thread_updates: ThreadUpdatesMap,
         user_id: str,
@@ -596,37 +622,324 @@ class RelationsHandler:
 
         return filtered_updates
 
-    async def fetch_thread_roots_and_aggregations(
+    def _build_thread_updates_response(
         self,
-        thread_ids: Collection[str],
-        user_id: str,
-    ) -> tuple[ThreadRootsMap, AggregationsMap]:
-        """Fetch thread root events and their bundled aggregations.
+        filtered_updates: ThreadUpdatesMap,
+        thread_root_event_map: ThreadRootsMap,
+        aggregations_map: AggregationsMap,
+        global_prev_batch_token: StreamToken | None,
+    ) -> dict[str, dict[str, ThreadUpdate]]:
+        """Build thread update response structure with per-thread prev_batch tokens.
 
         Args:
-            thread_ids: The thread root event IDs to fetch
-            user_id: The user ID requesting the aggregations
+            filtered_updates: Map of thread_root_id to list of ThreadUpdateInfo
+            thread_root_event_map: Map of thread_root_id to EventBase
+            aggregations_map: Map of thread_root_id to BundledAggregations
+            global_prev_batch_token: Global pagination token, or None if no more results
+
+        Returns:
+            Map of room_id to thread_root_id to ThreadUpdate
+        """
+        thread_updates: dict[str, dict[str, ThreadUpdate]] = {}
+
+        for thread_root_id, updates in filtered_updates.items():
+            # We only care about the latest update for the thread
+            # Updates are already sorted by stream_ordering DESC from the database query,
+            # and filter_events_for_client preserves order, so updates[0] is guaranteed to be
+            # the latest event for each thread.
+            latest_update = updates[0]
+            room_id = latest_update.room_id
+
+            # Generate per-thread prev_batch token if this thread has multiple visible updates
+            # or if we hit the global limit.
+            # When we hit the global limit, we generate prev_batch tokens for all threads, even if
+            # we only saw 1 update for them. This is to cover the case where we only saw
+            # a single update for a given thread, but the global limit prevents us from
+            # obtaining other updates which would have otherwise been included in the range.
+            per_thread_prev_batch = None
+            if len(updates) > 1 or global_prev_batch_token is not None:
+                # Create a token pointing to one position before the latest event's stream position.
+                # This makes it exclusive - /relations with dir=b won't return the latest event again.
+                # Use StreamToken.START as base (all other streams at 0) since only room position matters.
+                per_thread_prev_batch = StreamToken.START.copy_and_replace(
+                    StreamKeyType.ROOM,
+                    RoomStreamToken(stream=latest_update.stream_ordering - 1),
+                )
+
+            if room_id not in thread_updates:
+                thread_updates[room_id] = {}
+
+            thread_updates[room_id][thread_root_id] = ThreadUpdate(
+                thread_root=thread_root_event_map.get(thread_root_id),
+                prev_batch=per_thread_prev_batch,
+                bundled_aggregations=aggregations_map.get(thread_root_id),
+            )
+
+        return thread_updates
+
+    async def _fetch_thread_updates(
+        self,
+        room_ids: frozenset[str],
+        room_membership_map: Mapping[str, "RoomsForUserType"],
+        from_token: StreamToken | None,
+        to_token: StreamToken,
+        limit: int,
+        exclude_thread_ids: set[str] | None = None,
+    ) -> tuple[ThreadUpdatesMap, StreamToken | None]:
+        """Fetch thread updates across multiple rooms, handling membership states properly.
+
+        This method separates rooms based on membership status (LEAVE/BAN vs others)
+        and queries them appropriately to prevent data leaks. For rooms where the user
+        has left or been banned, we bound the query to their leave/ban event position.
+
+        Args:
+            room_ids: The set of room IDs to fetch thread updates for
+            room_membership_map: Map of room_id to RoomsForUserType containing membership info
+            from_token: Lower bound (exclusive) for the query, or None for no lower bound
+            to_token: Upper bound for the query (for joined/invited/knocking rooms)
+            limit: Maximum number of thread updates to return across all rooms
+            exclude_thread_ids: Optional set of thread IDs to exclude from results
 
         Returns:
             A tuple of:
-            - Map of event_id to EventBase for thread root events
-            - Map of event_id to BundledAggregations for those events
+            - Map of thread_id to list of ThreadUpdateInfo objects
+            - Global prev_batch token if there are more results, None otherwise
         """
-        # Fetch thread root events
-        thread_root_events = await self._main_store.get_events_as_list(thread_ids)
-        thread_root_event_map: ThreadRootsMap = {
-            e.event_id: e for e in thread_root_events
-        }
+        # Separate rooms based on membership to handle LEAVE/BAN rooms specially
+        leave_ban_rooms: set[str] = set()
+        other_rooms: set[str] = set()
 
-        # Fetch bundled aggregations for the thread roots
-        aggregations_map: AggregationsMap = {}
-        if thread_root_event_map:
-            aggregations_map = await self.get_bundled_aggregations(
-                thread_root_event_map.values(),
-                user_id,
+        for room_id in room_ids:
+            membership_info = room_membership_map.get(room_id)
+            if membership_info and membership_info.membership in (
+                Membership.LEAVE,
+                Membership.BAN,
+            ):
+                leave_ban_rooms.add(room_id)
+            else:
+                other_rooms.add(room_id)
+
+        # Fetch thread updates from storage, handling LEAVE/BAN rooms separately
+        all_thread_updates: ThreadUpdatesMap = {}
+        prev_batch_token: StreamToken | None = None
+        remaining_limit = limit
+
+        # Query LEAVE/BAN rooms with bounded to_token to prevent data leaks
+        if leave_ban_rooms:
+            for room_id in leave_ban_rooms:
+                if remaining_limit <= 0:
+                    # We've hit the limit, set prev_batch to indicate more results
+                    prev_batch_token = to_token
+                    break
+
+                membership_info = room_membership_map[room_id]
+                bounded_to_token = membership_info.event_pos.to_room_stream_token()
+
+                (
+                    room_thread_updates,
+                    room_prev_batch,
+                ) = await self._main_store.get_thread_updates_for_rooms(
+                    room_ids={room_id},
+                    from_token=from_token.room_key if from_token else None,
+                    to_token=bounded_to_token,
+                    limit=remaining_limit,
+                    exclude_thread_ids=exclude_thread_ids,
+                )
+
+                # Count updates and reduce remaining limit
+                num_updates = sum(
+                    len(updates) for updates in room_thread_updates.values()
+                )
+                remaining_limit -= num_updates
+
+                # Merge updates
+                for thread_id, updates in room_thread_updates.items():
+                    all_thread_updates.setdefault(thread_id, []).extend(updates)
+
+                # Merge prev_batch tokens (take the maximum for backward pagination)
+                if room_prev_batch is not None:
+                    if prev_batch_token is None:
+                        prev_batch_token = room_prev_batch
+                    elif (
+                        room_prev_batch.room_key.stream
+                        > prev_batch_token.room_key.stream
+                    ):
+                        prev_batch_token = room_prev_batch
+
+        # Query other rooms (joined/invited/knocking) with normal to_token
+        if other_rooms and remaining_limit > 0:
+            (
+                other_thread_updates,
+                other_prev_batch,
+            ) = await self._main_store.get_thread_updates_for_rooms(
+                room_ids=other_rooms,
+                from_token=from_token.room_key if from_token else None,
+                to_token=to_token.room_key,
+                limit=remaining_limit,
+                exclude_thread_ids=exclude_thread_ids,
             )
 
-        return thread_root_event_map, aggregations_map
+            # Merge updates
+            for thread_id, updates in other_thread_updates.items():
+                all_thread_updates.setdefault(thread_id, []).extend(updates)
+
+            # Merge prev_batch tokens
+            if other_prev_batch is not None:
+                if prev_batch_token is None:
+                    prev_batch_token = other_prev_batch
+                elif (
+                    other_prev_batch.room_key.stream > prev_batch_token.room_key.stream
+                ):
+                    prev_batch_token = other_prev_batch
+
+        return all_thread_updates, prev_batch_token
+
+    async def get_thread_updates_for_rooms(
+        self,
+        room_ids: frozenset[str],
+        room_membership_map: Mapping[str, "RoomsForUserType"],
+        user_id: str,
+        from_token: StreamToken | None,
+        to_token: StreamToken,
+        limit: int,
+        include_roots: bool = False,
+        exclude_thread_ids: set[str] | None = None,
+    ) -> tuple[dict[str, dict[str, ThreadUpdate]], StreamToken | None]:
+        """Get thread updates across multiple rooms with full processing pipeline.
+
+        This is the main entry point for fetching thread updates. It handles:
+        - Fetching updates with membership-based security
+        - Filtering for visibility
+        - Optionally fetching thread roots and aggregations
+        - Building the response structure
+
+        Args:
+            room_ids: The set of room IDs to fetch updates for
+            room_membership_map: Map of room_id to RoomsForUserType for membership info
+            user_id: The user requesting the updates
+            from_token: Lower bound (exclusive) for the query
+            to_token: Upper bound for the query
+            limit: Maximum number of updates to return
+            include_roots: Whether to fetch and include thread root events (default: False)
+            exclude_thread_ids: Optional set of thread IDs to exclude
+
+        Returns:
+            A tuple of:
+            - Map of room_id to thread_root_id to ThreadUpdate
+            - Global prev_batch token if there are more results, None otherwise
+        """
+        # Fetch thread updates with membership handling
+        all_thread_updates, prev_batch_token = await self._fetch_thread_updates(
+            room_ids=room_ids,
+            room_membership_map=room_membership_map,
+            from_token=from_token,
+            to_token=to_token,
+            limit=limit,
+            exclude_thread_ids=exclude_thread_ids,
+        )
+
+        if not all_thread_updates:
+            return {}, prev_batch_token
+
+        # Filter thread updates for visibility
+        filtered_updates = await self._filter_thread_updates_for_user(
+            all_thread_updates, user_id
+        )
+
+        if not filtered_updates:
+            return {}, prev_batch_token
+
+        # Optionally fetch thread root events and their bundled aggregations
+        thread_root_event_map: ThreadRootsMap = {}
+        aggregations_map: AggregationsMap = {}
+        if include_roots:
+            # Fetch thread root events
+            thread_root_events = await self._main_store.get_events_as_list(
+                filtered_updates.keys()
+            )
+            thread_root_event_map = {e.event_id: e for e in thread_root_events}
+
+            # Fetch bundled aggregations for the thread roots
+            if thread_root_event_map:
+                aggregations_map = await self.get_bundled_aggregations(
+                    thread_root_event_map.values(),
+                    user_id,
+                )
+
+        # Build response structure with per-thread prev_batch tokens
+        thread_updates = self._build_thread_updates_response(
+            filtered_updates=filtered_updates,
+            thread_root_event_map=thread_root_event_map,
+            aggregations_map=aggregations_map,
+            global_prev_batch_token=prev_batch_token,
+        )
+
+        return thread_updates, prev_batch_token
+
+    @staticmethod
+    async def serialize_thread_updates(
+        thread_updates: Mapping[str, Mapping[str, ThreadUpdate]],
+        prev_batch_token: StreamToken | None,
+        event_serializer: "EventClientSerializer",
+        time_now: int,
+        store: "DataStore",
+        serialize_options: SerializeEventConfig,
+    ) -> JsonDict:
+        """
+        Serialize thread updates to JSON format.
+
+        This helper handles serialization of ThreadUpdate objects for both the
+        companion endpoint and the sliding sync extension.
+
+        Args:
+            thread_updates: Map of room_id to thread_root_id to ThreadUpdate
+            prev_batch_token: Global pagination token for fetching more updates
+            event_serializer: The event serializer to use
+            time_now: Current time in milliseconds for event serialization
+            store: Datastore for serializing stream tokens
+            serialize_options: Serialization config
+
+        Returns:
+            JSON-serializable dict with "updates" and optionally "prev_batch"
+        """
+        updates_dict: JsonDict = {}
+
+        for room_id, room_threads in thread_updates.items():
+            room_updates: JsonDict = {}
+            for thread_root_id, update in room_threads.items():
+                update_dict: JsonDict = {}
+
+                # Serialize thread_root event if present
+                if update.thread_root is not None:
+                    bundle_aggs_map = (
+                        {thread_root_id: update.bundled_aggregations}
+                        if update.bundled_aggregations is not None
+                        else None
+                    )
+                    serialized_events = await event_serializer.serialize_events(
+                        [update.thread_root],
+                        time_now,
+                        config=serialize_options,
+                        bundle_aggregations=bundle_aggs_map,
+                    )
+                    if serialized_events:
+                        update_dict["thread_root"] = serialized_events[0]
+
+                # Add per-thread prev_batch if present
+                if update.prev_batch is not None:
+                    update_dict["prev_batch"] = await update.prev_batch.to_string(store)
+
+                room_updates[thread_root_id] = update_dict
+
+            updates_dict[room_id] = room_updates
+
+        result: JsonDict = {"updates": updates_dict}
+
+        # Add global prev_batch token if present
+        if prev_batch_token is not None:
+            result["prev_batch"] = await prev_batch_token.to_string(store)
+
+        return result
 
     async def get_threads(
         self,
