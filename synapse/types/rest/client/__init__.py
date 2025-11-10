@@ -427,5 +427,3 @@ class SlidingSyncBody(RequestBodyModel):
         if value is not None:
             assert len(value) <= 100, f"Max lists: 100 but saw {len(value)}"
         return value
-
-
