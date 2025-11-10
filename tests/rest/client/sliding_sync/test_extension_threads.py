@@ -924,6 +924,250 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # Verify the thread root event is present
         self.assertIn("thread_root", thread_updates[thread_root_id])
 
+    def test_thread_updates_initial_sync(self) -> None:
+        """
+        Test that prev_batch from the threads extension response can be used
+        with the /thread_updates endpoint to get additional thread updates during
+        initial sync. This verifies:
+        1. The from parameter boundary is exclusive (no duplicates)
+        2. Using prev_batch as 'from' provides complete coverage (no gaps)
+        3. Works correctly with different numbers of threads
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create 5 thread roots
+        thread_ids = []
+        for i in range(5):
+            thread_root_id = self.helper.send(
+                room_id, body=f"Thread {i}", tok=user1_tok
+            )["event_id"]
+            thread_ids.append(thread_root_id)
+
+            # Add reply to each thread
+            self.helper.send_event(
+                room_id,
+                type="m.room.message",
+                content={
+                    "msgtype": "m.text",
+                    "body": f"Reply to thread {i}",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                tok=user1_tok,
+            )
+
+        # Do initial sync with threads extension enabled and limit=2
+        sync_body = {
+            "lists": {
+                "all-rooms": {
+                    "ranges": [[0, 10]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                    "limit": 2,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Should get 2 thread updates
+        thread_updates = response_body["extensions"][EXT_NAME]["updates"][room_id]
+        self.assertEqual(len(thread_updates), 2)
+        first_sync_threads = set(thread_updates.keys())
+
+        # Get the top-level prev_batch token from the extension
+        self.assertIn("prev_batch", response_body["extensions"][EXT_NAME])
+        prev_batch = response_body["extensions"][EXT_NAME]["prev_batch"]
+
+        # Use prev_batch with /thread_updates endpoint to get remaining updates
+        # Note: prev_batch should be used as 'from' parameter (upper bound for backward pagination)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&from={prev_batch}",
+            access_token=user1_tok,
+            content={},
+        )
+        self.assertEqual(channel.code, 200)
+
+        # Should get the remaining 3 thread updates
+        chunk = channel.json_body["chunk"]
+        self.assertIn(room_id, chunk)
+        self.assertEqual(len(chunk[room_id]), 3)
+
+        thread_updates_response_threads = set(chunk[room_id].keys())
+
+        # Verify no overlap - the from parameter boundary should be exclusive
+        self.assertEqual(
+            len(first_sync_threads & thread_updates_response_threads),
+            0,
+            "from parameter boundary should be exclusive - no thread should appear in both responses",
+        )
+
+        # Verify no gaps - all threads should be accounted for
+        all_threads = set(thread_ids)
+        combined_threads = first_sync_threads | thread_updates_response_threads
+        self.assertEqual(
+            combined_threads,
+            all_threads,
+            "Combined responses should include all thread updates with no gaps",
+        )
+
+    def test_thread_updates_incremental_sync(self) -> None:
+        """
+        Test the intended usage pattern from MSC4360: using prev_batch as 'from'
+        and a previous sync pos as 'to' with /thread_updates to fill gaps between
+        syncs. This verifies that using both bounds together provides complete
+        coverage with no gaps or duplicates.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create 3 threads initially
+        initial_thread_ids = []
+        for i in range(3):
+            thread_root_id = self.helper.send(
+                room_id, body=f"Thread {i}", tok=user1_tok
+            )["event_id"]
+            initial_thread_ids.append(thread_root_id)
+
+            self.helper.send_event(
+                room_id,
+                type="m.room.message",
+                content={
+                    "msgtype": "m.text",
+                    "body": f"Reply to thread {i}",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                tok=user1_tok,
+            )
+
+        # First sync
+        sync_body = {
+            "lists": {
+                "all-rooms": {
+                    "ranges": [[0, 10]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, pos1 = self.do_sync(sync_body, tok=user1_tok)
+
+        # Should get 3 thread updates
+        first_sync_threads = set(
+            response_body["extensions"][EXT_NAME]["updates"][room_id].keys()
+        )
+        self.assertEqual(len(first_sync_threads), 3)
+
+        # Create 3 more threads after the first sync
+        new_thread_ids = []
+        for i in range(3, 6):
+            thread_root_id = self.helper.send(
+                room_id, body=f"Thread {i}", tok=user1_tok
+            )["event_id"]
+            new_thread_ids.append(thread_root_id)
+
+            self.helper.send_event(
+                room_id,
+                type="m.room.message",
+                content={
+                    "msgtype": "m.text",
+                    "body": f"Reply to thread {i}",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                tok=user1_tok,
+            )
+
+        # Second sync with limit=1 to get only some of the new threads
+        sync_body_with_limit = {
+            "lists": {
+                "all-rooms": {
+                    "ranges": [[0, 10]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                    "limit": 1,
+                }
+            },
+        }
+        response_body, pos2 = self.do_sync(
+            sync_body_with_limit, tok=user1_tok, since=pos1
+        )
+
+        # Should get 1 thread update
+        second_sync_threads = set(
+            response_body["extensions"][EXT_NAME]["updates"][room_id].keys()
+        )
+        self.assertEqual(len(second_sync_threads), 1)
+
+        # Get prev_batch from the extension
+        self.assertIn("prev_batch", response_body["extensions"][EXT_NAME])
+        prev_batch = response_body["extensions"][EXT_NAME]["prev_batch"]
+
+        # Now use /thread_updates with from=prev_batch and to=pos1
+        # This should get the 2 remaining new threads (created after pos1, not returned in second sync)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/io.element.msc4360/thread_updates?dir=b&from={prev_batch}&to={pos1}",
+            access_token=user1_tok,
+            content={},
+        )
+        self.assertEqual(channel.code, 200)
+
+        chunk = channel.json_body["chunk"]
+        self.assertIn(room_id, chunk)
+        thread_updates_threads = set(chunk[room_id].keys())
+
+        # Should get exactly 2 threads
+        self.assertEqual(len(thread_updates_threads), 2)
+
+        # Verify no overlap with second sync
+        self.assertEqual(
+            len(second_sync_threads & thread_updates_threads),
+            0,
+            "No thread should appear in both second sync and thread_updates responses",
+        )
+
+        # Verify no overlap with first sync (to=pos1 should exclude those)
+        self.assertEqual(
+            len(first_sync_threads & thread_updates_threads),
+            0,
+            "Threads from first sync should not appear in thread_updates (to=pos1 excludes them)",
+        )
+
+        # Verify no gaps - all new threads should be accounted for
+        all_new_threads = set(new_thread_ids)
+        combined_new_threads = second_sync_threads | thread_updates_threads
+        self.assertEqual(
+            combined_new_threads,
+            all_new_threads,
+            "Combined responses should include all new thread updates with no gaps",
+        )
+
     def test_threads_only_from_rooms_in_list(self) -> None:
         """
         Test that thread updates are only returned for rooms that are in the

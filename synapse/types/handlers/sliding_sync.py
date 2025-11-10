@@ -37,7 +37,8 @@ from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 
 if TYPE_CHECKING:
-    from synapse.handlers.relations import BundledAggregations
+    from synapse.handlers.relations import BundledAggregations, ThreadUpdate
+
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -409,30 +410,7 @@ class SlidingSyncResult:
                     to paginate through older thread updates.
             """
 
-            @attr.s(slots=True, frozen=True, auto_attribs=True)
-            class ThreadUpdate:
-                """Information about a single thread that has new activity.
-
-                Attributes:
-                    thread_root: The thread root event, if requested via include_roots in the
-                        request. This is the event that started the thread.
-                    prev_batch: A pagination token (exclusive) for fetching older events in this
-                        specific thread. Only present if the thread has multiple updates in the
-                        sync window. This token can be used with the /relations endpoint with
-                        dir=b to paginate backwards through the thread's history.
-                    bundled_aggregations: Bundled aggregations for the thread root event,
-                        including the latest_event in the thread (found in
-                        unsigned.m.relations.m.thread). Only present if thread_root is included.
-                """
-
-                thread_root: EventBase | None
-                prev_batch: StreamToken | None
-                bundled_aggregations: "BundledAggregations | None" = None
-
-                def __bool__(self) -> bool:
-                    return bool(self.thread_root) or bool(self.prev_batch)
-
-            updates: Mapping[str, Mapping[str, ThreadUpdate]] | None
+            updates: Mapping[str, Mapping[str, "ThreadUpdate"]] | None
             prev_batch: StreamToken | None
 
             def __bool__(self) -> bool:
