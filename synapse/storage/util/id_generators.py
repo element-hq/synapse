@@ -591,6 +591,16 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
     def get_next_mult_txn(self, txn: LoggingTransaction, n: int) -> List[int]:
         """
+        Generate multiple IDs for immediate use within a database transaction.
+
+        The IDs will automatically be marked as finished at the end of the
+        database transaction, therefore the stream rows MUST be persisted
+        within the active transaction (MUST NOT be persisted in a later
+        transaction).
+
+        The replication notifier will automatically be notified when the
+        transaction ends successfully.
+
         Usage:
 
             stream_id = stream_id_gen.get_next_txn(txn)
