@@ -1,1 +1,1 @@
-Reduce cardinality of `synapse_storage_events_persisted_events_sep_total` metric by removing `origin_type` label.
+Reduce cardinality of `synapse_storage_events_persisted_events_sep_total` metric by removing `origin_entity` label.
