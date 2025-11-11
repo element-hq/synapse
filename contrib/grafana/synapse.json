@@ -2254,7 +2254,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_events_persisted_by_event_type{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "sum by(type) (rate(synapse_storage_events_persisted_events_sep_total{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size]))",
               "format": "time_series",
               "instant": false,
               "intervalFactor": 2,
