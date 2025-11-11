@@ -374,7 +374,7 @@ class PersistEventsStore:
 
             for event, context in events_and_contexts:
                 if context.app_service:
-                    origin_type = "local"
+                    origin_type = "application_service"
                 elif self.hs.is_mine_id(event.sender):
                     origin_type = "local"
                 else:
