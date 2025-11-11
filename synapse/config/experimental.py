@@ -595,4 +595,4 @@ class ExperimentalConfig(Config):
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
 
         # MSC4354: Sticky Events
-        self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
+        self.msc4354_enabled_value: bool = experimental.get("msc4354_enabled", False)

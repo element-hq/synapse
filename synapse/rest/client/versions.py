@@ -81,6 +81,9 @@ class VersionsRestServlet(RestServlet):
             msc3575_enabled = await self.store.is_feature_enabled(
                 user_id, ExperimentalFeature.MSC3575
             )
+            msc4354_enabled = await self.store.is_feature_enabled(
+                user_id, ExperimentalFeature.MSC4354
+            )
 
         return (
             200,
@@ -183,7 +186,7 @@ class VersionsRestServlet(RestServlet):
                     # MSC4169: Backwards-compatible redaction sending using `/send`
                     "com.beeper.msc4169": self.config.experimental.msc4169_enabled,
                     # MSC4354: Sticky events
-                    "org.matrix.msc4354": self.config.experimental.msc4354_enabled,
+                    "org.matrix.msc4354": msc4354_enabled,
                 },
             },
         )

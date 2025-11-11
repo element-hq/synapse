@@ -82,6 +82,7 @@ from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 from synapse.util.metrics import Measure
 from synapse.visibility import filter_events_for_client
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -2178,6 +2179,7 @@ class SyncHandler:
 
         since_token = sync_result_builder.since_token
         user_id = sync_result_builder.sync_config.user.to_string()
+        calculate_sticky_events = self.store.is_feature_enabled(user_id, ExperimentalFeature.MSC4354)
 
         blocks_all_rooms = (
             sync_result_builder.sync_config.filter_collection.blocks_all_rooms()
@@ -2216,7 +2218,7 @@ class SyncHandler:
             sync_result_builder.now_token = now_token
 
         sticky_by_room: Dict[str, Set[str]] = {}
-        if self.hs_config.experimental.msc4354_enabled:
+        if await calculate_sticky_events:
             now_token, sticky_by_room = await self.sticky_events_by_room(
                 sync_result_builder, now_token, since_token
             )

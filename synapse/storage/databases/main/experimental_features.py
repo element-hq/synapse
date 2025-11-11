@@ -114,7 +114,7 @@ class ExperimentalFeaturesStore(CacheInvalidationWorkerStore):
 
         if feature.is_globally_enabled(self.hs.config):
             return True
-
+msc4354_enabled
         # if it's not enabled globally, check if it is enabled per-user
         res = await self.db_pool.simple_select_one_onecol(
             table="per_user_experimental_features",

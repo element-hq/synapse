@@ -50,6 +50,7 @@ from synapse.types import (
 )
 from synapse.types.state import StateFilter
 from synapse.util.clock import Clock
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 
 logger = logging.getLogger(__name__)
 filtered_event_logger = logging.getLogger("synapse.visibility.filtered_event_debug")
@@ -110,6 +111,7 @@ async def filter_events_for_client(
     # We copy the events list to guarantee any modifications we make will only
     # happen within the function.
     events_before_filtering = events.copy()
+    sticky_events_enabled = await storage.main.is_feature_enabled(user_id, ExperimentalFeature.MSC4354)
     # Default case is to *exclude* soft-failed events
     events = [e for e in events if not e.internal_metadata.is_soft_failed()]
     client_config = await storage.main.get_admin_client_config_for_user(user_id)
@@ -203,7 +205,7 @@ async def filter_events_for_client(
         # to the cache!
         cloned = clone_event(filtered)
         cloned.unsigned[EventUnsignedContentFields.MEMBERSHIP] = user_membership
-        if storage.main.config.experimental.msc4354_enabled:
+        if sticky_events_enabled:
             sticky_duration = cloned.sticky_duration()
             if sticky_duration:
                 now = storage.main.clock.time_msec()

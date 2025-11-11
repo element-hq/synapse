@@ -511,8 +511,6 @@ class FederationSender(AbstractFederationSender):
 
     def notify_new_server_joined(self, server: str, room_id: str) -> None:
         # We currently only use this notification for MSC4354: Sticky Events.
-        if not self.hs.config.experimental.msc4354_enabled:
-            return
         # fire off a processing loop in the background
         self.hs.run_as_background_process(
             "process_new_server_joined_over_federation",
