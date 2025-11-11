@@ -150,12 +150,14 @@ jobs:
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
         env:
-          # Skip testing for platforms which various libraries don't have wheels
-          # for, and so need extra build deps.
+          # The platforms that we build for are determined by the
+          # `tool.cibuildwheel.skip` option in `pyproject.toml`.
+
+          # We skip testing wheels for the following platforms in CI:
           #
-          # cp39-*: Python 3.9 is EOL.
-          # cp3??t-*: Free-threaded builds are not currently supported.
-          CIBW_TEST_SKIP: pp3*-* cp39-* cp3??t-* *i686* *musl*
+          # pp3*-* (PyPy wheels) broke in CI (TODO: investigate).
+          # musl: (TODO: investigate).
+          CIBW_TEST_SKIP: pp3*-* *musl*
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:

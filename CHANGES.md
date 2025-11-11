@@ -1,4 +1,4 @@
-# Synapse 1.142.0rc4 (2025-11-07)
+# Synapse 1.142.0 (2025-11-11)
 
 ## Dropped support for Python 3.9
 
@@ -28,6 +28,15 @@ At present, publishing MacOS Python wheels will continue for the next release
 of these wheels downstream, please reach out to us in
 [#synapse-dev:matrix.org](https://matrix.to/#/#synapse-dev:matrix.org). We'd
 love to hear from you!
+
+## Internal Changes
+
+- Properly stop building wheels for Python 3.9 and free-threaded CPython. ([\#19154](https://github.com/element-hq/synapse/issues/19154))
+
+
+
+
+# Synapse 1.142.0rc4 (2025-11-07)
 
 ## Bugfixes
 
