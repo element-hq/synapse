@@ -1,1 +1,0 @@
-Properly stop building wheels for Python 3.9 and free-threaded CPython.
