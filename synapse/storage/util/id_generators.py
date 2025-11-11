@@ -175,7 +175,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
     Uses a Postgres sequence to coordinate ID assignment, but positions of other
     writers will only get updated when `advance` is called (by replication).
 
-    Note: Only works with Postgres.
+    On SQLite, falls back to a single-writer implementation, which is fine because
+    Synapse only supports monolith mode when SQLite is the database driver.
 
     Warning: Streams using this generator start at ID 2, because ID 1 is always assumed
         to have been 'seen as persisted'.
@@ -536,6 +537,16 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
     def get_next_txn(self, txn: LoggingTransaction) -> int:
         """
+        Generate an ID for immediate use within a database transaction.
+
+        The ID will automatically be marked as finished at the end of the
+        database transaction, therefore the stream rows MUST be persisted
+        within the active transaction (MUST NOT be persisted in a later
+        transaction).
+
+        The replication notifier will automatically be notified when the
+        transaction ends successfully.
+
         Usage:
 
             stream_id = stream_id_gen.get_next_txn(txn)
@@ -573,6 +584,16 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
     def get_next_mult_txn(self, txn: LoggingTransaction, n: int) -> list[int]:
         """
+        Generate multiple IDs for immediate use within a database transaction.
+
+        The IDs will automatically be marked as finished at the end of the
+        database transaction, therefore the stream rows MUST be persisted
+        within the active transaction (MUST NOT be persisted in a later
+        transaction).
+
+        The replication notifier will automatically be notified when the
+        transaction ends successfully.
+
         Usage:
 
             stream_id = stream_id_gen.get_next_txn(txn)

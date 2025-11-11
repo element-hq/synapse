@@ -30,6 +30,13 @@ class ParseModel(BaseModel):
 
     but otherwise uses Pydantic's default behaviour.
 
+    Strict mode can adversely affect some types of fields, and should be disabled
+    for a field if:
+
+    - the field's type is a `Path` or `FilePath`. Strict mode will refuse to
+      coerce from `str` (likely what the yaml parser will produce) to `FilePath`,
+      raising a `ValidationError`.
+
     For now, ignore unknown fields. In the future, we could change this so that unknown
     config values cause a ValidationError, provided the error messages are meaningful to
     server operators.
