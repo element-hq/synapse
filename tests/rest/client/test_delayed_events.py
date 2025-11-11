@@ -198,11 +198,11 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
 
     @parameterized.expand(
-        [
+        (
             (action, action_in_path)
             for action in ("cancel", "restart", "send")
             for action_in_path in (True, False)
-        ]
+        )
     )
     def test_update_delayed_event_without_match(
         self, action: str, action_in_path: bool
