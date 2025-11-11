@@ -21,7 +21,7 @@
 
 import logging
 import string
-from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Sequence
+from typing import TYPE_CHECKING, Iterable, Literal, Sequence
 
 from synapse.api.constants import MAX_ALIAS_LENGTH, EventTypes
 from synapse.api.errors import (
@@ -73,8 +73,8 @@ class DirectoryHandler:
         self,
         room_alias: RoomAlias,
         room_id: str,
-        servers: Optional[Iterable[str]] = None,
-        creator: Optional[str] = None,
+        servers: Iterable[str] | None = None,
+        creator: str | None = None,
     ) -> None:
         # general association creation for both human users and app services
 
@@ -108,7 +108,7 @@ class DirectoryHandler:
         requester: Requester,
         room_alias: RoomAlias,
         room_id: str,
-        servers: Optional[List[str]] = None,
+        servers: list[str] | None = None,
         check_membership: bool = True,
     ) -> None:
         """Attempt to create a new alias
@@ -252,7 +252,7 @@ class DirectoryHandler:
             )
         await self._delete_association(room_alias)
 
-    async def _delete_association(self, room_alias: RoomAlias) -> Optional[str]:
+    async def _delete_association(self, room_alias: RoomAlias) -> str | None:
         if not self.hs.is_mine(room_alias):
             raise SynapseError(400, "Room alias must be local")
 
@@ -263,16 +263,16 @@ class DirectoryHandler:
     async def get_association(self, room_alias: RoomAlias) -> JsonDict:
         room_id = None
         if self.hs.is_mine(room_alias):
-            result: Optional[
-                RoomAliasMapping
-            ] = await self.get_association_from_room_alias(room_alias)
+            result: (
+                RoomAliasMapping | None
+            ) = await self.get_association_from_room_alias(room_alias)
 
             if result:
                 room_id = result.room_id
                 servers = result.servers
         else:
             try:
-                fed_result: Optional[JsonDict] = await self.federation.make_query(
+                fed_result: JsonDict | None = await self.federation.make_query(
                     destination=room_alias.domain,
                     query_type="directory",
                     args={"room_alias": room_alias.to_string()},
@@ -387,7 +387,7 @@ class DirectoryHandler:
 
     async def get_association_from_room_alias(
         self, room_alias: RoomAlias
-    ) -> Optional[RoomAliasMapping]:
+    ) -> RoomAliasMapping | None:
         result = await self.store.get_association_from_room_alias(room_alias)
         if not result:
             # Query AS to see if it exists
@@ -395,7 +395,7 @@ class DirectoryHandler:
             result = await as_handler.query_room_alias_exists(room_alias)
         return result
 
-    def can_modify_alias(self, alias: RoomAlias, user_id: Optional[str] = None) -> bool:
+    def can_modify_alias(self, alias: RoomAlias, user_id: str | None = None) -> bool:
         # Any application service "interested" in an alias they are regexing on
         # can modify the alias.
         # Users can only modify the alias if ALL the interested services have

@@ -22,7 +22,7 @@
 import json
 import logging
 import urllib.parse
-from typing import TYPE_CHECKING, Any, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from twisted.internet import protocol
 from twisted.internet.interfaces import ITCPTransport
@@ -65,8 +65,8 @@ assert all(header.lower() == header for header in HOP_BY_HOP_HEADERS_LOWERCASE)
 
 
 def parse_connection_header_value(
-    connection_header_value: Optional[bytes],
-) -> Set[str]:
+    connection_header_value: bytes | None,
+) -> set[str]:
     """
     Parse the `Connection` header to determine which headers we should not be copied
     over from the remote response.
@@ -86,7 +86,7 @@ def parse_connection_header_value(
         The set of header names that should not be copied over from the remote response.
         The keys are lowercased.
     """
-    extra_headers_to_remove: Set[str] = set()
+    extra_headers_to_remove: set[str] = set()
     if connection_header_value:
         extra_headers_to_remove = {
             connection_option.decode("ascii").strip().lower()
@@ -140,7 +140,7 @@ class ProxyResource(_AsyncResource):
             "Invalid Proxy-Authorization header.", Codes.UNAUTHORIZED
         )
 
-    async def _async_render(self, request: "SynapseRequest") -> Tuple[int, Any]:
+    async def _async_render(self, request: "SynapseRequest") -> tuple[int, Any]:
         uri = urllib.parse.urlparse(request.uri)
         assert uri.scheme == b"matrix-federation"
 
@@ -237,7 +237,7 @@ class _ProxyResponseBody(protocol.Protocol):
     request.
     """
 
-    transport: Optional[ITCPTransport] = None
+    transport: ITCPTransport | None = None
 
     def __init__(self, request: "SynapseRequest") -> None:
         self._request = request

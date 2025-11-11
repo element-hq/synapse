@@ -24,13 +24,8 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Collection,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Set,
-    Tuple,
     cast,
 )
 
@@ -258,7 +253,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         return self._device_list_id_gen
 
     async def count_devices_by_users(
-        self, user_ids: Optional[Collection[str]] = None
+        self, user_ids: Collection[str] | None = None
     ) -> int:
         """Retrieve number of all devices of given users.
         Only returns number of devices that are not marked as hidden.
@@ -284,7 +279,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             )
 
             txn.execute(sql + clause, args)
-            return cast(Tuple[int], txn.fetchone())[0]
+            return cast(tuple[int], txn.fetchone())[0]
 
         if not user_ids:
             return 0
@@ -297,9 +292,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         self,
         user_id: str,
         device_id: str,
-        initial_device_display_name: Optional[str],
-        auth_provider_id: Optional[str] = None,
-        auth_provider_session_id: Optional[str] = None,
+        initial_device_display_name: str | None,
+        auth_provider_id: str | None = None,
+        auth_provider_session_id: str | None = None,
     ) -> bool:
         """Ensure the given device is known; add it to the store if not
 
@@ -381,7 +376,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             device_ids: The IDs of the devices to delete
         """
 
-        def _delete_devices_txn(txn: LoggingTransaction, device_ids: List[str]) -> None:
+        def _delete_devices_txn(txn: LoggingTransaction, device_ids: list[str]) -> None:
             self.db_pool.simple_delete_many_txn(
                 txn,
                 table="devices",
@@ -445,7 +440,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             )
 
     async def update_device(
-        self, user_id: str, device_id: str, new_display_name: Optional[str] = None
+        self, user_id: str, device_id: str, new_display_name: str | None = None
     ) -> None:
         """Update a device. Only updates the device if it is not marked as
         hidden.
@@ -473,7 +468,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     @cached(tree=True)
     async def get_device(
         self, user_id: str, device_id: str
-    ) -> Optional[Mapping[str, Any]]:
+    ) -> Mapping[str, Any] | None:
         """Retrieve a device. Only returns devices that are not marked as
         hidden.
 
@@ -497,7 +492,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     async def get_devices_by_user(
         self, user_id: str
-    ) -> Dict[str, Dict[str, Optional[str]]]:
+    ) -> dict[str, dict[str, str | None]]:
         """Retrieve all of a user's registered devices. Only returns devices
         that are not marked as hidden.
 
@@ -508,7 +503,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             and "display_name" for each device. Display name may be null.
         """
         devices = cast(
-            List[Tuple[str, str, Optional[str]]],
+            list[tuple[str, str, str | None]],
             await self.db_pool.simple_select_list(
                 table="devices",
                 keyvalues={"user_id": user_id, "hidden": False},
@@ -524,7 +519,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     async def get_devices_by_auth_provider_session_id(
         self, auth_provider_id: str, auth_provider_session_id: str
-    ) -> List[Tuple[str, str]]:
+    ) -> list[tuple[str, str]]:
         """Retrieve the list of devices associated with a SSO IdP session ID.
 
         Args:
@@ -534,7 +529,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             A list of dicts containing the device_id and the user_id of each device
         """
         return cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="device_auth_providers",
                 keyvalues={
@@ -549,7 +544,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     @trace
     async def get_device_updates_by_remote(
         self, destination: str, from_stream_id: int, limit: int
-    ) -> Tuple[int, List[Tuple[str, JsonDict]]]:
+    ) -> tuple[int, list[tuple[str, JsonDict]]]:
         """Get a stream of device updates to send to the given remote server.
 
         Args:
@@ -659,8 +654,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         last_processed_stream_id = from_stream_id
 
         # A map of (user ID, device ID) to (stream ID, context).
-        query_map: Dict[Tuple[str, str], Tuple[int, Optional[str]]] = {}
-        cross_signing_keys_by_user: Dict[str, Dict[str, object]] = {}
+        query_map: dict[tuple[str, str], tuple[int, str | None]] = {}
+        cross_signing_keys_by_user: dict[str, dict[str, object]] = {}
         for user_id, device_id, update_stream_id, update_context in updates:
             # Calculate the remaining length budget.
             # Note that, for now, each entry in `cross_signing_keys_by_user`
@@ -766,7 +761,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         from_stream_id: int,
         now_stream_id: int,
         limit: int,
-    ) -> List[Tuple[str, str, int, Optional[str]]]:
+    ) -> list[tuple[str, str, int, str | None]]:
         """Return device update information for a given remote destination
 
         Args:
@@ -792,14 +787,14 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         """
         txn.execute(sql, (destination, from_stream_id, now_stream_id, limit))
 
-        return cast(List[Tuple[str, str, int, Optional[str]]], txn.fetchall())
+        return cast(list[tuple[str, str, int, str | None]], txn.fetchall())
 
     async def _get_device_update_edus_by_remote(
         self,
         destination: str,
         from_stream_id: int,
-        query_map: Dict[Tuple[str, str], Tuple[int, Optional[str]]],
-    ) -> List[Tuple[str, dict]]:
+        query_map: dict[tuple[str, str], tuple[int, str | None]],
+    ) -> list[tuple[str, dict]]:
         """Returns a list of device update EDUs as well as E2EE keys
 
         Args:
@@ -933,7 +928,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         txn.execute(sql, (destination, stream_id))
 
     async def add_user_signature_change_to_streams(
-        self, from_user_id: str, user_ids: List[str]
+        self, from_user_id: str, user_ids: list[str]
     ) -> int:
         """Persist that a user has made new signatures
 
@@ -962,7 +957,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         self,
         txn: LoggingTransaction,
         from_user_id: str,
-        user_ids: List[str],
+        user_ids: list[str],
         stream_id: int,
     ) -> None:
         txn.call_after(
@@ -984,8 +979,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     @trace
     @cancellable
     async def get_user_devices_from_cache(
-        self, user_ids: Set[str], user_and_device_ids: List[Tuple[str, str]]
-    ) -> Tuple[Set[str], Dict[str, Mapping[str, JsonMapping]]]:
+        self, user_ids: set[str], user_and_device_ids: list[tuple[str, str]]
+    ) -> tuple[set[str], dict[str, Mapping[str, JsonMapping]]]:
         """Get the devices (and keys if any) for remote users from the cache.
 
         Args:
@@ -1005,13 +1000,13 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         user_ids_not_in_cache = unique_user_ids - user_ids_in_cache
 
         # First fetch all the users which all devices are to be returned.
-        results: Dict[str, Mapping[str, JsonMapping]] = {}
+        results: dict[str, Mapping[str, JsonMapping]] = {}
         for user_id in user_ids:
             if user_id in user_ids_in_cache:
                 results[user_id] = await self.get_cached_devices_for_user(user_id)
         # Then fetch all device-specific requests, but skip users we've already
         # fetched all devices for.
-        device_specific_results: Dict[str, Dict[str, JsonMapping]] = {}
+        device_specific_results: dict[str, dict[str, JsonMapping]] = {}
         for user_id, device_id in user_and_device_ids:
             if user_id in user_ids_in_cache and user_id not in user_ids:
                 device = await self._get_cached_user_device(user_id, device_id)
@@ -1025,7 +1020,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     async def get_users_whose_devices_are_cached(
         self, user_ids: StrCollection
-    ) -> Set[str]:
+    ) -> set[str]:
         """Checks which of the given users we have cached the devices for."""
         user_map = await self.get_device_list_last_stream_id_for_remotes(user_ids)
 
@@ -1056,7 +1051,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         self, user_id: str
     ) -> Mapping[str, JsonMapping]:
         devices = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="device_lists_remote_cache",
                 keyvalues={"user_id": user_id},
@@ -1071,7 +1066,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         self,
         from_key: MultiWriterStreamToken,
         to_key: MultiWriterStreamToken,
-    ) -> Set[str]:
+    ) -> set[str]:
         """Get all users whose devices have changed in the given range.
 
         Args:
@@ -1130,8 +1125,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         self,
         from_key: MultiWriterStreamToken,
         user_ids: Collection[str],
-        to_key: Optional[MultiWriterStreamToken] = None,
-    ) -> Set[str]:
+        to_key: MultiWriterStreamToken | None = None,
+    ) -> set[str]:
         """Get set of users whose devices have changed since `from_key` that
         are in the given list of user_ids.
 
@@ -1164,14 +1159,14 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             txn: LoggingTransaction,
             from_key: MultiWriterStreamToken,
             to_key: MultiWriterStreamToken,
-        ) -> Set[str]:
+        ) -> set[str]:
             sql = """
                 SELECT user_id, stream_id, instance_name
                 FROM device_lists_stream
                 WHERE  ? < stream_id AND stream_id <= ? AND %s
             """
 
-            changes: Set[str] = set()
+            changes: set[str] = set()
 
             # Query device changes with a batch of users at a time
             for chunk in batch_iter(user_ids_to_check, 100):
@@ -1204,7 +1199,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     async def get_users_whose_signatures_changed(
         self, user_id: str, from_key: MultiWriterStreamToken
-    ) -> Set[str]:
+    ) -> set[str]:
         """Get the users who have new cross-signing signatures made by `user_id` since
         `from_key`.
 
@@ -1243,7 +1238,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     async def get_all_device_list_changes_for_remotes(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple]], int, bool]:
         """Get updates for device lists replication stream.
 
         Args:
@@ -1270,7 +1265,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         def _get_all_device_list_changes_for_remotes(
             txn: Cursor,
-        ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+        ) -> tuple[list[tuple[int, tuple]], int, bool]:
             # This query Does The Right Thing where it'll correctly apply the
             # bounds to the inner queries.
             sql = """
@@ -1302,7 +1297,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     @cached(max_entries=10000)
     async def get_device_list_last_stream_id_for_remote(
         self, user_id: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Get the last stream_id we got for a user. May be None if we haven't
         got any information for them.
         """
@@ -1320,9 +1315,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     )
     async def get_device_list_last_stream_id_for_remotes(
         self, user_ids: Iterable[str]
-    ) -> Mapping[str, Optional[str]]:
+    ) -> Mapping[str, str | None]:
         rows = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_many_batch(
                 table="device_lists_remote_extremeties",
                 column="user_id",
@@ -1332,15 +1327,15 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             ),
         )
 
-        results: Dict[str, Optional[str]] = dict.fromkeys(user_ids)
+        results: dict[str, str | None] = dict.fromkeys(user_ids)
         results.update(rows)
 
         return results
 
     async def get_user_ids_requiring_device_list_resync(
         self,
-        user_ids: Optional[Collection[str]] = None,
-    ) -> Set[str]:
+        user_ids: Collection[str] | None = None,
+    ) -> set[str]:
         """Given a list of remote users return the list of users that we
         should resync the device lists for. If None is given instead of a list,
         return every user that we should resync the device lists for.
@@ -1350,7 +1345,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         """
         if user_ids:
             rows = cast(
-                List[Tuple[str]],
+                list[tuple[str]],
                 await self.db_pool.simple_select_many_batch(
                     table="device_lists_remote_resync",
                     column="user_id",
@@ -1361,7 +1356,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             )
         else:
             rows = cast(
-                List[Tuple[str]],
+                list[tuple[str]],
                 await self.db_pool.simple_select_list(
                     table="device_lists_remote_resync",
                     keyvalues=None,
@@ -1406,7 +1401,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             desc="mark_remote_user_device_cache_as_valid",
         )
 
-    async def handle_potentially_left_users(self, user_ids: Set[str]) -> None:
+    async def handle_potentially_left_users(self, user_ids: set[str]) -> None:
         """Given a set of remote users check if the server still shares a room with
         them. If not then mark those users' device cache as stale.
         """
@@ -1423,7 +1418,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     def handle_potentially_left_users_txn(
         self,
         txn: LoggingTransaction,
-        user_ids: Set[str],
+        user_ids: set[str],
     ) -> None:
         """Given a set of remote users check if the server still shares a room with
         them. If not then mark those users' device cache as stale.
@@ -1461,9 +1456,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             txn, self.get_device_list_last_stream_id_for_remote, (user_id,)
         )
 
-    async def get_dehydrated_device(
-        self, user_id: str
-    ) -> Optional[Tuple[str, JsonDict]]:
+    async def get_dehydrated_device(self, user_id: str) -> tuple[str, JsonDict] | None:
         """Retrieve the information for a dehydrated device.
 
         Args:
@@ -1488,8 +1481,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         device_id: str,
         device_data: str,
         time: int,
-        keys: Optional[JsonDict] = None,
-    ) -> Optional[str]:
+        keys: JsonDict | None = None,
+    ) -> str | None:
         # TODO: make keys non-optional once support for msc2697 is dropped
         if keys:
             device_keys = keys.get("device_keys", None)
@@ -1538,8 +1531,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         device_id: str,
         device_data: JsonDict,
         time_now: int,
-        keys: Optional[dict] = None,
-    ) -> Optional[str]:
+        keys: dict | None = None,
+    ) -> str | None:
         """Store a dehydrated device for a user.
 
         Args:
@@ -1672,7 +1665,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     async def get_local_devices_not_accessed_since(
         self, since_ms: int
-    ) -> Dict[str, List[str]]:
+    ) -> dict[str, list[str]]:
         """Retrieves local devices that haven't been accessed since a given date.
 
         Args:
@@ -1687,20 +1680,20 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         def get_devices_not_accessed_since_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[str, str]]:
+        ) -> list[tuple[str, str]]:
             sql = """
                 SELECT user_id, device_id
                 FROM devices WHERE last_seen < ? AND hidden = FALSE
             """
             txn.execute(sql, (since_ms,))
-            return cast(List[Tuple[str, str]], txn.fetchall())
+            return cast(list[tuple[str, str]], txn.fetchall())
 
         rows = await self.db_pool.runInteraction(
             "get_devices_not_accessed_since",
             get_devices_not_accessed_since_txn,
         )
 
-        devices: Dict[str, List[str]] = {}
+        devices: dict[str, list[str]] = {}
         for user_id, device_id in rows:
             # Remote devices are never stale from our point of view.
             if self.hs.is_mine_id(user_id):
@@ -1728,7 +1721,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         room_ids: Collection[str],
         from_token: MultiWriterStreamToken,
         to_token: MultiWriterStreamToken,
-    ) -> Optional[Set[str]]:
+    ) -> set[str] | None:
         """Return the set of users whose devices have changed in the given rooms
         since the given stream ID.
 
@@ -1759,7 +1752,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         def _get_device_list_changes_in_rooms_txn(
             txn: LoggingTransaction,
             chunk: list[str],
-        ) -> Set[str]:
+        ) -> set[str]:
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "room_id", chunk
             )
@@ -1788,7 +1781,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         return changes
 
-    async def get_all_device_list_changes(self, from_id: int, to_id: int) -> Set[str]:
+    async def get_all_device_list_changes(self, from_id: int, to_id: int) -> set[str]:
         """Return the set of rooms where devices have changed since the given
         stream ID.
 
@@ -1807,7 +1800,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         def _get_all_device_list_changes_txn(
             txn: LoggingTransaction,
-        ) -> Set[str]:
+        ) -> set[str]:
             txn.execute(sql, (from_id, to_id))
             return {room_id for (room_id,) in txn}
 
@@ -1818,7 +1811,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     async def get_device_list_changes_in_room(
         self, room_id: str, min_stream_id: int
-    ) -> Collection[Tuple[str, str]]:
+    ) -> Collection[tuple[str, str]]:
         """Get all device list changes that happened in the room since the given
         stream ID.
 
@@ -1834,9 +1827,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         def get_device_list_changes_in_room_txn(
             txn: LoggingTransaction,
-        ) -> Collection[Tuple[str, str]]:
+        ) -> Collection[tuple[str, str]]:
             txn.execute(sql, (room_id, min_stream_id))
-            return cast(Collection[Tuple[str, str]], txn.fetchall())
+            return cast(Collection[tuple[str, str]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_device_list_changes_in_room",
@@ -1911,7 +1904,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         )
 
     async def update_remote_device_list_cache(
-        self, user_id: str, devices: List[dict], stream_id: int
+        self, user_id: str, devices: list[dict], stream_id: int
     ) -> None:
         """Replace the entire cache of the remote user's devices.
 
@@ -1932,7 +1925,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         )
 
     def _update_remote_device_list_cache_txn(
-        self, txn: LoggingTransaction, user_id: str, devices: List[dict], stream_id: int
+        self, txn: LoggingTransaction, user_id: str, devices: list[dict], stream_id: int
     ) -> None:
         """Replace the list of cached devices for this user with the given list."""
         self.db_pool.simple_delete_txn(
@@ -1967,7 +1960,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         user_id: str,
         device_ids: StrCollection,
         room_ids: StrCollection,
-    ) -> Optional[int]:
+    ) -> int | None:
         """Persist that a user's devices have been updated, and which hosts
         (if any) should be poked.
 
@@ -2016,7 +2009,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
             return stream_ids[-1]
 
-        last_stream_id: Optional[int] = None
+        last_stream_id: int | None = None
         for batch_device_ids in batch_iter(device_ids, 1000):
             last_stream_id = await self.db_pool.runInteraction(
                 "add_device_change_to_stream",
@@ -2031,7 +2024,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         txn: LoggingTransaction,
         user_id: str,
         device_ids: Collection[str],
-        stream_ids: List[int],
+        stream_ids: list[int],
     ) -> None:
         txn.call_after(
             self._device_list_stream_cache.entity_has_changed,
@@ -2076,7 +2069,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         device_id: str,
         hosts: Collection[str],
         stream_id: int,
-        context: Optional[Dict[str, str]],
+        context: dict[str, str] | None,
     ) -> None:
         if self._device_list_federation_stream_cache:
             for host in hosts:
@@ -2163,8 +2156,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         user_id: str,
         device_ids: StrCollection,
         room_ids: StrCollection,
-        stream_ids: List[int],
-        context: Dict[str, str],
+        stream_ids: list[int],
+        context: dict[str, str],
     ) -> None:
         """Record the user in the room has updated their device."""
 
@@ -2208,7 +2201,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     async def get_uncoverted_outbound_room_pokes(
         self, start_stream_id: int, start_room_id: str, limit: int = 10
-    ) -> List[Tuple[str, str, str, int, Optional[Dict[str, str]]]]:
+    ) -> list[tuple[str, str, str, int, dict[str, str] | None]]:
         """Get device list changes by room that have not yet been handled and
         written to `device_lists_outbound_pokes`.
 
@@ -2236,7 +2229,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         def get_uncoverted_outbound_room_pokes_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[str, str, str, int, Optional[Dict[str, str]]]]:
+        ) -> list[tuple[str, str, str, int, dict[str, str] | None]]:
             txn.execute(
                 sql,
                 (
@@ -2270,7 +2263,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         device_id: str,
         room_id: str,
         hosts: Collection[str],
-        context: Optional[Dict[str, str]],
+        context: dict[str, str] | None,
     ) -> None:
         """Queue the device update to be sent to the given set of hosts,
         calculated from the room ID.
@@ -2327,7 +2320,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     async def get_pending_remote_device_list_updates_for_room(
         self, room_id: str
-    ) -> Collection[Tuple[str, str]]:
+    ) -> Collection[tuple[str, str]]:
         """Get the set of remote device list updates from the pending table for
         the room.
         """
@@ -2361,16 +2354,16 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         def get_pending_remote_device_list_updates_for_room_txn(
             txn: LoggingTransaction,
-        ) -> Collection[Tuple[str, str]]:
+        ) -> Collection[tuple[str, str]]:
             txn.execute(sql, (room_id, min_device_stream_id))
-            return cast(Collection[Tuple[str, str]], txn.fetchall())
+            return cast(Collection[tuple[str, str]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_pending_remote_device_list_updates_for_room",
             get_pending_remote_device_list_updates_for_room_txn,
         )
 
-    async def get_device_change_last_converted_pos(self) -> Tuple[int, str]:
+    async def get_device_change_last_converted_pos(self) -> tuple[int, str]:
         """
         Get the position of the last row in `device_list_changes_in_room` that has been
         converted to `device_lists_outbound_pokes`.
@@ -2388,7 +2381,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             retcols=["stream_id", "room_id"],
             desc="get_device_change_last_converted_pos",
         )
-        return cast(Tuple[int, str], min(rows))
+        return cast(tuple[int, str], min(rows))
 
     async def set_device_change_last_converted_pos(
         self,

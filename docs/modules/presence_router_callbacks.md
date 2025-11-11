@@ -23,7 +23,7 @@ _First introduced in Synapse v1.42.0_
 ```python 
 async def get_users_for_states(
     state_updates: Iterable["synapse.api.UserPresenceState"],
-) -> Dict[str, Set["synapse.api.UserPresenceState"]]
+) -> dict[str, set["synapse.api.UserPresenceState"]]
 ```
 **Requires** `get_interested_users` to also be registered
 
@@ -45,7 +45,7 @@ _First introduced in Synapse v1.42.0_
 ```python
 async def get_interested_users(
     user_id: str
-) -> Union[Set[str], "synapse.module_api.PRESENCE_ALL_USERS"]
+) -> set[str] | "synapse.module_api.PRESENCE_ALL_USERS"
 ```
 **Requires** `get_users_for_states` to also be registered
 
@@ -73,7 +73,7 @@ that `@alice:example.org` receives all presence updates from `@bob:example.com` 
 `@charlie:somewhere.org`, regardless of whether Alice shares a room with any of them.
 
 ```python
-from typing import Dict, Iterable, Set, Union
+from typing import Iterable
 
 from synapse.module_api import ModuleApi
 
@@ -90,7 +90,7 @@ class CustomPresenceRouter:
     async def get_users_for_states(
         self,
         state_updates: Iterable["synapse.api.UserPresenceState"],
-    ) -> Dict[str, Set["synapse.api.UserPresenceState"]]:
+    ) -> dict[str, set["synapse.api.UserPresenceState"]]:
         res = {}
         for update in state_updates:
             if (
@@ -104,7 +104,7 @@ class CustomPresenceRouter:
     async def get_interested_users(
         self,
         user_id: str,
-    ) -> Union[Set[str], "synapse.module_api.PRESENCE_ALL_USERS"]:
+    ) -> set[str] | "synapse.module_api.PRESENCE_ALL_USERS":
         if user_id == "@alice:example.com":
             return {"@bob:example.com", "@charlie:somewhere.org"}
 

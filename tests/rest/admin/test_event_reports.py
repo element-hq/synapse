@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List
 
 from twisted.internet.testing import MemoryReactor
 
@@ -441,7 +440,7 @@ class EventReportsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that all attributes are present in an event report"""
         for c in content:
             self.assertIn("id", c)

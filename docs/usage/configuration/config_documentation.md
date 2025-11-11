@@ -2573,6 +2573,28 @@ Example configuration:
 turn_allow_guests: false
 ```
 ---
+### `matrix_rtc`
+
+*(object)* Options related to MatrixRTC. Defaults to `{}`.
+
+This setting has the following sub-options:
+
+* `transports` (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to `[]`.
+
+  Options for each entry include:
+
+  * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
+
+  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+
+Example configuration:
+```yaml
+matrix_rtc:
+  transports:
+  - type: livekit
+    livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
+```
+---
 ## Registration
 
 Registration can be rate-limited using the parameters in the [Ratelimiting](#ratelimiting) section of this manual.
@@ -3793,7 +3815,7 @@ This setting has the following sub-options:
 
 * `localdb_enabled` (boolean): Set to false to disable authentication against the local password database. This is ignored if `enabled` is false, and is only useful if you have other `password_providers`. Defaults to `true`.
 
-* `pepper` (string|null): Set the value here to a secret random string for extra security. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
+* `pepper` (string|null): A secret random string that will be appended to user's passwords before they are hashed. This improves the security of short passwords. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
 
 * `policy` (object): Define and enforce a password policy, such as minimum lengths for passwords, etc. This is an implementation of MSC2000.
 

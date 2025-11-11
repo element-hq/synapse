@@ -1,5 +1,4 @@
-import time
-from typing import Callable, Collection, List, Optional, Tuple
+from typing import Callable, Collection
 from unittest import mock
 from unittest.mock import AsyncMock, Mock
 
@@ -57,8 +56,8 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
         )
 
         # whenever send_transaction is called, record the pdu data
-        self.pdus: List[JsonDict] = []
-        self.failed_pdus: List[JsonDict] = []
+        self.pdus: list[JsonDict] = []
+        self.failed_pdus: list[JsonDict] = []
         self.is_online = True
         self.federation_transport_client.send_transaction.side_effect = (
             self.record_transaction
@@ -74,7 +73,7 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
         return config
 
     async def record_transaction(
-        self, txn: Transaction, json_cb: Optional[Callable[[], JsonDict]]
+        self, txn: Transaction, json_cb: Callable[[], JsonDict] | None
     ) -> JsonDict:
         if json_cb is None:
             # The tests seem to expect that this method raises in this situation.
@@ -271,7 +270,7 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
 
     def make_fake_destination_queue(
         self, destination: str = "host2"
-    ) -> Tuple[PerDestinationQueue, List[EventBase]]:
+    ) -> tuple[PerDestinationQueue, list[EventBase]]:
         """
         Makes a fake per-destination queue.
         """
@@ -281,8 +280,8 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
 
         async def fake_send(
             destination_tm: str,
-            pending_pdus: List[EventBase],
-            _pending_edus: List[Edu],
+            pending_pdus: list[EventBase],
+            _pending_edus: list[Edu],
         ) -> None:
             assert destination == destination_tm
             results_list.extend(pending_pdus)

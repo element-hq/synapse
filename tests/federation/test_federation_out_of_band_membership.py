@@ -23,7 +23,7 @@ import logging
 import time
 import urllib.parse
 from http import HTTPStatus
-from typing import Any, Callable, Optional, Set, Tuple, TypeVar, Union
+from typing import Any, Callable, TypeVar
 from unittest.mock import Mock
 
 import attr
@@ -146,8 +146,8 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self.storage_controllers = hs.get_storage_controllers()
 
     def do_sync(
-        self, sync_body: JsonDict, *, since: Optional[str] = None, tok: str
-    ) -> Tuple[JsonDict, str]:
+        self, sync_body: JsonDict, *, since: str | None = None, tok: str
+    ) -> tuple[JsonDict, str]:
         """Do a sliding sync request with given body.
 
         Asserts the request was successful.
@@ -326,13 +326,13 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         async def get_json(
             destination: str,
             path: str,
-            args: Optional[QueryParams] = None,
+            args: QueryParams | None = None,
             retry_on_dns_fail: bool = True,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
             ignore_backoff: bool = False,
             try_trailing_slash_on_400: bool = False,
-            parser: Optional[ByteParser[T]] = None,
-        ) -> Union[JsonDict, T]:
+            parser: ByteParser[T] | None = None,
+        ) -> JsonDict | T:
             if (
                 path
                 == f"/_matrix/federation/v1/make_join/{urllib.parse.quote_plus(remote_room_id)}/{urllib.parse.quote_plus(local_user1_id)}"
@@ -350,22 +350,22 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self.federation_http_client.get_json.side_effect = get_json
 
         # PDU's that hs1 sent to hs2
-        collected_pdus_from_hs1_federation_send: Set[str] = set()
+        collected_pdus_from_hs1_federation_send: set[str] = set()
 
         async def put_json(
             destination: str,
             path: str,
-            args: Optional[QueryParams] = None,
-            data: Optional[JsonDict] = None,
-            json_data_callback: Optional[Callable[[], JsonDict]] = None,
+            args: QueryParams | None = None,
+            data: JsonDict | None = None,
+            json_data_callback: Callable[[], JsonDict] | None = None,
             long_retries: bool = False,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
             ignore_backoff: bool = False,
             backoff_on_404: bool = False,
             try_trailing_slash_on_400: bool = False,
-            parser: Optional[ByteParser[T]] = None,
+            parser: ByteParser[T] | None = None,
             backoff_on_all_error_codes: bool = False,
-        ) -> Union[JsonDict, T, SendJoinResponse]:
+        ) -> JsonDict | T | SendJoinResponse:
             if (
                 path.startswith(
                     f"/_matrix/federation/v2/send_join/{urllib.parse.quote_plus(remote_room_id)}/"
@@ -503,22 +503,22 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         T = TypeVar("T")
 
         # PDU's that hs1 sent to hs2
-        collected_pdus_from_hs1_federation_send: Set[str] = set()
+        collected_pdus_from_hs1_federation_send: set[str] = set()
 
         async def put_json(
             destination: str,
             path: str,
-            args: Optional[QueryParams] = None,
-            data: Optional[JsonDict] = None,
-            json_data_callback: Optional[Callable[[], JsonDict]] = None,
+            args: QueryParams | None = None,
+            data: JsonDict | None = None,
+            json_data_callback: Callable[[], JsonDict] | None = None,
             long_retries: bool = False,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
             ignore_backoff: bool = False,
             backoff_on_404: bool = False,
             try_trailing_slash_on_400: bool = False,
-            parser: Optional[ByteParser[T]] = None,
+            parser: ByteParser[T] | None = None,
             backoff_on_all_error_codes: bool = False,
-        ) -> Union[JsonDict, T]:
+        ) -> JsonDict | T:
             if path.startswith("/_matrix/federation/v1/send/") and data is not None:
                 for pdu in data.get("pdus", []):
                     event = event_from_pdu_json(pdu, room_version)

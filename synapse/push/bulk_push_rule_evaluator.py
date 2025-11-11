@@ -24,14 +24,8 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Collection,
-    Dict,
-    FrozenSet,
-    List,
     Mapping,
-    Optional,
     Sequence,
-    Tuple,
-    Union,
     cast,
 )
 
@@ -237,7 +231,7 @@ class BulkPushRuleEvaluator:
         event: EventBase,
         context: EventContext,
         event_id_to_event: Mapping[str, EventBase],
-    ) -> Tuple[dict, Optional[int]]:
+    ) -> tuple[dict, int | None]:
         """
         Given an event and an event context, get the power level event relevant to the event
         and the power level of the sender of the event.
@@ -309,13 +303,13 @@ class BulkPushRuleEvaluator:
 
     async def _related_events(
         self, event: EventBase
-    ) -> Dict[str, Dict[str, JsonValue]]:
+    ) -> dict[str, dict[str, JsonValue]]:
         """Fetches the related events for 'event'. Sets the im.vector.is_falling_back key if the event is from a fallback relation
 
         Returns:
             Mapping of relation type to flattened events.
         """
-        related_events: Dict[str, Dict[str, JsonValue]] = {}
+        related_events: dict[str, dict[str, JsonValue]] = {}
         if self._related_event_match_enabled:
             related_event_id = event.content.get("m.relates_to", {}).get("event_id")
             relation_type = event.content.get("m.relates_to", {}).get("rel_type")
@@ -352,7 +346,7 @@ class BulkPushRuleEvaluator:
         return related_events
 
     async def action_for_events_by_user(
-        self, events_and_context: List[EventPersistencePair]
+        self, events_and_context: list[EventPersistencePair]
     ) -> None:
         """Given a list of events and their associated contexts, evaluate the push rules
         for each event, check if the message should increment the unread count, and
@@ -394,7 +388,7 @@ class BulkPushRuleEvaluator:
             count_as_unread = _should_count_as_unread(event, context)
 
         rules_by_user = await self._get_rules_for_event(event)
-        actions_by_user: Dict[str, Collection[Union[Mapping, str]]] = {}
+        actions_by_user: dict[str, Collection[Mapping | str]] = {}
 
         # Gather a bunch of info in parallel.
         #
@@ -409,7 +403,7 @@ class BulkPushRuleEvaluator:
             profiles,
         ) = await make_deferred_yieldable(
             cast(
-                "Deferred[Tuple[int, Tuple[dict, Optional[int]], Dict[str, Dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
+                "Deferred[tuple[int, tuple[dict, int | None], dict[str, dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
                 gather_results(
                     (
                         run_in_background(  # type: ignore[call-overload]
@@ -481,7 +475,7 @@ class BulkPushRuleEvaluator:
             self.hs.config.experimental.msc4306_enabled,
         )
 
-        msc4306_thread_subscribers: Optional[FrozenSet[str]] = None
+        msc4306_thread_subscribers: frozenset[str] | None = None
         if self.hs.config.experimental.msc4306_enabled and thread_id != MAIN_TIMELINE:
             # pull out, in batch, all local subscribers to this thread
             # (in the common case, they will all be getting processed for push
@@ -514,7 +508,7 @@ class BulkPushRuleEvaluator:
                 # current user, it'll be added to the dict later.
                 actions_by_user[uid] = []
 
-            msc4306_thread_subscription_state: Optional[bool] = None
+            msc4306_thread_subscription_state: bool | None = None
             if msc4306_thread_subscribers is not None:
                 msc4306_thread_subscription_state = uid in msc4306_thread_subscribers
 
@@ -556,10 +550,10 @@ class BulkPushRuleEvaluator:
         )
 
 
-MemberMap = Dict[str, Optional[EventIdMembership]]
-Rule = Dict[str, dict]
-RulesByUser = Dict[str, List[Rule]]
-StateGroup = Union[object, int]
+MemberMap = dict[str, EventIdMembership | None]
+Rule = dict[str, dict]
+RulesByUser = dict[str, list[Rule]]
+StateGroup = object | int
 
 
 def _is_simple_value(value: Any) -> bool:
@@ -571,10 +565,10 @@ def _is_simple_value(value: Any) -> bool:
 
 
 def _flatten_dict(
-    d: Union[EventBase, Mapping[str, Any]],
-    prefix: Optional[List[str]] = None,
-    result: Optional[Dict[str, JsonValue]] = None,
-) -> Dict[str, JsonValue]:
+    d: EventBase | Mapping[str, Any],
+    prefix: list[str] | None = None,
+    result: dict[str, JsonValue] | None = None,
+) -> dict[str, JsonValue]:
     """
     Given a JSON dictionary (or event) which might contain sub dictionaries,
     flatten it into a single layer dictionary by combining the keys & sub-keys.

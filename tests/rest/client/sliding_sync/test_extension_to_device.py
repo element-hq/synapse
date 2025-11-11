@@ -12,7 +12,6 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 import logging
-from typing import List
 
 from parameterized import parameterized_class
 
@@ -59,7 +58,7 @@ class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
         super().prepare(reactor, clock, hs)
 
     def _assert_to_device_response(
-        self, response_body: JsonDict, expected_messages: List[JsonDict]
+        self, response_body: JsonDict, expected_messages: list[JsonDict]
     ) -> str:
         """Assert the sliding sync response was successful and has the expected
         to-device messages.

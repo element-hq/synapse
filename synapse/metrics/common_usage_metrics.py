@@ -62,7 +62,7 @@ class CommonUsageMetricsManager:
         """
         return await self._collect()
 
-    async def setup(self) -> None:
+    def setup(self) -> None:
         """Keep the gauges for common usage metrics up to date."""
         self._hs.run_as_background_process(
             desc="common_usage_metrics_update_gauges",

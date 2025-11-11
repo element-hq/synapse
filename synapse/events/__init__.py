@@ -25,14 +25,9 @@ import collections.abc
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Generic,
     Iterable,
-    List,
     Literal,
-    Optional,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     overload,
@@ -99,21 +94,21 @@ class DictProperty(Generic[T]):
     def __get__(
         self,
         instance: Literal[None],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: type[_DictPropertyInstance] | None = None,
     ) -> "DictProperty": ...
 
     @overload
     def __get__(
         self,
         instance: _DictPropertyInstance,
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: type[_DictPropertyInstance] | None = None,
     ) -> T: ...
 
     def __get__(
         self,
-        instance: Optional[_DictPropertyInstance],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
-    ) -> Union[T, "DictProperty"]:
+        instance: _DictPropertyInstance | None,
+        owner: type[_DictPropertyInstance] | None = None,
+    ) -> T | "DictProperty":
         # if the property is accessed as a class property rather than an instance
         # property, return the property itself rather than the value
         if instance is None:
@@ -165,21 +160,21 @@ class DefaultDictProperty(DictProperty, Generic[T]):
     def __get__(
         self,
         instance: Literal[None],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: type[_DictPropertyInstance] | None = None,
     ) -> "DefaultDictProperty": ...
 
     @overload
     def __get__(
         self,
         instance: _DictPropertyInstance,
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: type[_DictPropertyInstance] | None = None,
     ) -> T: ...
 
     def __get__(
         self,
-        instance: Optional[_DictPropertyInstance],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
-    ) -> Union[T, "DefaultDictProperty"]:
+        instance: _DictPropertyInstance | None,
+        owner: type[_DictPropertyInstance] | None = None,
+    ) -> T | "DefaultDictProperty":
         if instance is None:
             return self
         assert isinstance(instance, EventBase)
@@ -197,10 +192,10 @@ class EventBase(metaclass=abc.ABCMeta):
         self,
         event_dict: JsonDict,
         room_version: RoomVersion,
-        signatures: Dict[str, Dict[str, str]],
+        signatures: dict[str, dict[str, str]],
         unsigned: JsonDict,
         internal_metadata_dict: JsonDict,
-        rejected_reason: Optional[str],
+        rejected_reason: str | None,
     ):
         assert room_version.event_format == self.format_version
 
@@ -215,10 +210,10 @@ class EventBase(metaclass=abc.ABCMeta):
 
     depth: DictProperty[int] = DictProperty("depth")
     content: DictProperty[JsonDict] = DictProperty("content")
-    hashes: DictProperty[Dict[str, str]] = DictProperty("hashes")
+    hashes: DictProperty[dict[str, str]] = DictProperty("hashes")
     origin_server_ts: DictProperty[int] = DictProperty("origin_server_ts")
     sender: DictProperty[str] = DictProperty("sender")
-    # TODO state_key should be Optional[str]. This is generally asserted in Synapse
+    # TODO state_key should be str | None. This is generally asserted in Synapse
     # by calling is_state() first (which ensures it is not None), but it is hard (not possible?)
     # to properly annotate that calling is_state() asserts that state_key exists
     # and is non-None. It would be better to replace such direct references with
@@ -240,7 +235,7 @@ class EventBase(metaclass=abc.ABCMeta):
         return self.content["membership"]
 
     @property
-    def redacts(self) -> Optional[str]:
+    def redacts(self) -> str | None:
         """MSC2176 moved the redacts field into the content."""
         if self.room_version.updated_redaction_rules:
             return self.content.get("redacts")
@@ -249,7 +244,7 @@ class EventBase(metaclass=abc.ABCMeta):
     def is_state(self) -> bool:
         return self.get_state_key() is not None
 
-    def get_state_key(self) -> Optional[str]:
+    def get_state_key(self) -> str | None:
         """Get the state key of this event, or None if it's not a state event"""
         return self._dict.get("state_key")
 
@@ -259,13 +254,13 @@ class EventBase(metaclass=abc.ABCMeta):
 
         return d
 
-    def get(self, key: str, default: Optional[Any] = None) -> Any:
+    def get(self, key: str, default: Any | None = None) -> Any:
         return self._dict.get(key, default)
 
     def get_internal_metadata_dict(self) -> JsonDict:
         return self.internal_metadata.get_dict()
 
-    def get_pdu_json(self, time_now: Optional[int] = None) -> JsonDict:
+    def get_pdu_json(self, time_now: int | None = None) -> JsonDict:
         pdu_json = self.get_dict()
 
         if time_now is not None and "age_ts" in pdu_json["unsigned"]:
@@ -292,19 +287,19 @@ class EventBase(metaclass=abc.ABCMeta):
 
         return template_json
 
-    def __getitem__(self, field: str) -> Optional[Any]:
+    def __getitem__(self, field: str) -> Any | None:
         return self._dict[field]
 
     def __contains__(self, field: str) -> bool:
         return field in self._dict
 
-    def items(self) -> List[Tuple[str, Optional[Any]]]:
+    def items(self) -> list[tuple[str, Any | None]]:
         return list(self._dict.items())
 
     def keys(self) -> Iterable[str]:
         return self._dict.keys()
 
-    def prev_event_ids(self) -> List[str]:
+    def prev_event_ids(self) -> list[str]:
         """Returns the list of prev event IDs. The order matches the order
         specified in the event, though there is no meaning to it.
 
@@ -371,8 +366,8 @@ class FrozenEvent(EventBase):
         self,
         event_dict: JsonDict,
         room_version: RoomVersion,
-        internal_metadata_dict: Optional[JsonDict] = None,
-        rejected_reason: Optional[str] = None,
+        internal_metadata_dict: JsonDict | None = None,
+        rejected_reason: str | None = None,
     ):
         internal_metadata_dict = internal_metadata_dict or {}
 
@@ -423,8 +418,8 @@ class FrozenEventV2(EventBase):
         self,
         event_dict: JsonDict,
         room_version: RoomVersion,
-        internal_metadata_dict: Optional[JsonDict] = None,
-        rejected_reason: Optional[str] = None,
+        internal_metadata_dict: JsonDict | None = None,
+        rejected_reason: str | None = None,
     ):
         internal_metadata_dict = internal_metadata_dict or {}
 
@@ -450,7 +445,7 @@ class FrozenEventV2(EventBase):
         else:
             frozen_dict = event_dict
 
-        self._event_id: Optional[str] = None
+        self._event_id: str | None = None
 
         super().__init__(
             frozen_dict,
@@ -476,7 +471,7 @@ class FrozenEventV2(EventBase):
     def room_id(self) -> str:
         return self._dict["room_id"]
 
-    def prev_event_ids(self) -> List[str]:
+    def prev_event_ids(self) -> list[str]:
         """Returns the list of prev event IDs. The order matches the order
         specified in the event, though there is no meaning to it.
 
@@ -525,8 +520,8 @@ class FrozenEventV4(FrozenEventV3):
         self,
         event_dict: JsonDict,
         room_version: RoomVersion,
-        internal_metadata_dict: Optional[JsonDict] = None,
-        rejected_reason: Optional[str] = None,
+        internal_metadata_dict: JsonDict | None = None,
+        rejected_reason: str | None = None,
     ):
         super().__init__(
             event_dict=event_dict,
@@ -534,7 +529,7 @@ class FrozenEventV4(FrozenEventV3):
             internal_metadata_dict=internal_metadata_dict,
             rejected_reason=rejected_reason,
         )
-        self._room_id: Optional[str] = None
+        self._room_id: str | None = None
 
     @property
     def room_id(self) -> str:
@@ -577,7 +572,7 @@ class FrozenEventV4(FrozenEventV3):
 
 def _event_type_from_format_version(
     format_version: int,
-) -> Type[Union[FrozenEvent, FrozenEventV2, FrozenEventV3]]:
+) -> type[FrozenEvent | FrozenEventV2 | FrozenEventV3]:
     """Returns the python type to use to construct an Event object for the
     given event format version.
 
@@ -603,8 +598,8 @@ def _event_type_from_format_version(
 def make_event_from_dict(
     event_dict: JsonDict,
     room_version: RoomVersion = RoomVersions.V1,
-    internal_metadata_dict: Optional[JsonDict] = None,
-    rejected_reason: Optional[str] = None,
+    internal_metadata_dict: JsonDict | None = None,
+    rejected_reason: str | None = None,
 ) -> EventBase:
     """Construct an EventBase from the given event dict"""
     event_type = _event_type_from_format_version(room_version.event_format)
@@ -621,10 +616,10 @@ class _EventRelation:
     rel_type: str
     # The aggregation key. Will be None if the rel_type is not m.annotation or is
     # not a string.
-    aggregation_key: Optional[str]
+    aggregation_key: str | None
 
 
-def relation_from_event(event: EventBase) -> Optional[_EventRelation]:
+def relation_from_event(event: EventBase) -> _EventRelation | None:
     """
     Attempt to parse relation information an event.
 
@@ -688,4 +683,4 @@ class StrippedStateEvent:
     type: str
     state_key: str
     sender: str
-    content: Dict[str, Any]
+    content: dict[str, Any]

@@ -34,11 +34,6 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
     TypeVar,
     cast,
 )
@@ -62,6 +57,7 @@ from synapse.api.auth_blocking import AuthBlocking
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
 from synapse.app._base import unregister_sighups
+from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.appservice.api import ApplicationServiceApi
 from synapse.appservice.scheduler import ApplicationServiceScheduler
 from synapse.config.homeserver import HomeServerConfig
@@ -146,6 +142,7 @@ from synapse.http.client import (
     SimpleHttpClient,
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
+from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import (
     all_later_gauges_to_clean_up_on_shutdown,
@@ -277,7 +274,7 @@ class ShutdownInfo:
 
     func: Callable[..., Any]
     trigger_id: _SystemEventID
-    kwargs: Dict[str, object]
+    kwargs: dict[str, object]
 
 
 class HomeServer(metaclass=abc.ABCMeta):
@@ -312,7 +309,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def DATASTORE_CLASS(self) -> Type["SQLBaseStore"]:
+    def DATASTORE_CLASS(self) -> type["SQLBaseStore"]:
         # This is overridden in derived application classes
         # (such as synapse.app.homeserver.SynapseHomeServer) and gives the class to be
         # instantiated during setup() for future return by get_datastores()
@@ -322,7 +319,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self,
         hostname: str,
         config: HomeServerConfig,
-        reactor: Optional[ISynapseReactor] = None,
+        reactor: ISynapseReactor | None = None,
     ):
         """
         Args:
@@ -340,35 +337,35 @@ class HomeServer(metaclass=abc.ABCMeta):
         # the key we use to sign events and requests
         self.signing_key = config.key.signing_key[0]
         self.config = config
-        self._listening_services: List[Port] = []
-        self._metrics_listeners: List[Tuple[WSGIServer, Thread]] = []
-        self.start_time: Optional[int] = None
+        self._listening_services: list[Port] = []
+        self._metrics_listeners: list[tuple[WSGIServer, Thread]] = []
+        self.start_time: int | None = None
 
         self._instance_id = random_string(5)
         self._instance_name = config.worker.instance_name
 
         self.version_string = f"Synapse/{SYNAPSE_VERSION}"
 
-        self.datastores: Optional[Databases] = None
+        self.datastores: Databases | None = None
 
-        self._module_web_resources: Dict[str, Resource] = {}
+        self._module_web_resources: dict[str, Resource] = {}
         self._module_web_resources_consumed = False
 
         # This attribute is set by the free function `refresh_certificate`.
-        self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
+        self.tls_server_context_factory: IOpenSSLContextFactory | None = None
 
         self._is_shutdown = False
-        self._async_shutdown_handlers: List[ShutdownInfo] = []
-        self._sync_shutdown_handlers: List[ShutdownInfo] = []
-        self._background_processes: set[defer.Deferred[Optional[Any]]] = set()
+        self._async_shutdown_handlers: list[ShutdownInfo] = []
+        self._sync_shutdown_handlers: list[ShutdownInfo] = []
+        self._background_processes: set[defer.Deferred[Any | None]] = set()
 
     def run_as_background_process(
         self,
         desc: "LiteralString",
-        func: Callable[..., Awaitable[Optional[R]]],
+        func: Callable[..., Awaitable[R | None]],
         *args: Any,
         **kwargs: Any,
-    ) -> "defer.Deferred[Optional[R]]":
+    ) -> "defer.Deferred[R | None]":
         """Run the given function in its own logcontext, with resource metrics
 
         This should be used to wrap processes which are fired off to run in the
@@ -510,7 +507,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         for background_process in list(self._background_processes):
             try:
-                background_process.cancel()
+                with PreserveLoggingContext():
+                    background_process.cancel()
             except Exception:
                 pass
         self._background_processes.clear()
@@ -643,6 +641,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         for i in self.REQUIRED_ON_BACKGROUND_TASK_STARTUP:
             getattr(self, "get_" + i + "_handler")()
         self.get_task_scheduler()
+        self.get_common_usage_metrics_manager().setup()
+        start_phone_stats_home(self)
 
     def get_reactor(self) -> ISynapseReactor:
         """
@@ -1105,7 +1105,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         return ReplicationDataHandler(self)
 
     @cache_in_self
-    def get_replication_streams(self) -> Dict[str, Stream]:
+    def get_replication_streams(self) -> dict[str, Stream]:
         return {stream.NAME: stream(self) for stream in STREAMS_MAP.values()}
 
     @cache_in_self

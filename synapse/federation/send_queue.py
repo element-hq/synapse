@@ -40,14 +40,9 @@ import logging
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
-    Dict,
     Hashable,
     Iterable,
-    List,
-    Optional,
     Sized,
-    Tuple,
-    Type,
 )
 
 import attr
@@ -77,7 +72,7 @@ class QueueNames(str, Enum):
     PRESENCE_DESTINATIONS = "presence_destinations"
 
 
-queue_name_to_gauge_map: Dict[QueueNames, LaterGauge] = {}
+queue_name_to_gauge_map: dict[QueueNames, LaterGauge] = {}
 
 for queue_name in QueueNames:
     queue_name_to_gauge_map[queue_name] = LaterGauge(
@@ -100,23 +95,23 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         # We may have multiple federation sender instances, so we need to track
         # their positions separately.
         self._sender_instances = hs.config.worker.federation_shard_config.instances
-        self._sender_positions: Dict[str, int] = {}
+        self._sender_positions: dict[str, int] = {}
 
         # Pending presence map user_id -> UserPresenceState
-        self.presence_map: Dict[str, UserPresenceState] = {}
+        self.presence_map: dict[str, UserPresenceState] = {}
 
         # Stores the destinations we need to explicitly send presence to about a
         # given user.
         # Stream position -> (user_id, destinations)
-        self.presence_destinations: SortedDict[int, Tuple[str, Iterable[str]]] = (
+        self.presence_destinations: SortedDict[int, tuple[str, Iterable[str]]] = (
             SortedDict()
         )
 
         # (destination, key) -> EDU
-        self.keyed_edu: Dict[Tuple[str, tuple], Edu] = {}
+        self.keyed_edu: dict[tuple[str, tuple], Edu] = {}
 
         # stream position -> (destination, key)
-        self.keyed_edu_changed: SortedDict[int, Tuple[str, tuple]] = SortedDict()
+        self.keyed_edu_changed: SortedDict[int, tuple[str, tuple]] = SortedDict()
 
         self.edus: SortedDict[int, Edu] = SortedDict()
 
@@ -226,7 +221,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         destination: str,
         edu_type: str,
         content: JsonDict,
-        key: Optional[Hashable] = None,
+        key: Hashable | None = None,
     ) -> None:
         """As per FederationSender"""
         if self.is_mine_server_name(destination):
@@ -300,7 +295,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
 
     async def get_replication_rows(
         self, instance_name: str, from_token: int, to_token: int, target_row_count: int
-    ) -> Tuple[List[Tuple[int, Tuple]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple]], int, bool]:
         """Get rows to be sent over federation between the two tokens
 
         Args:
@@ -323,7 +318,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
 
         # list of tuple(int, BaseFederationRow), where the first is the position
         # of the federation stream.
-        rows: List[Tuple[int, BaseFederationRow]] = []
+        rows: list[tuple[int, BaseFederationRow]] = []
 
         # Fetch presence to send to destinations
         i = self.presence_destinations.bisect_right(from_token)
@@ -418,7 +413,7 @@ class BaseFederationRow:
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class PresenceDestinationsRow(BaseFederationRow):
     state: UserPresenceState
-    destinations: List[str]
+    destinations: list[str]
 
     TypeId = "pd"
 
@@ -441,7 +436,7 @@ class KeyedEduRow(BaseFederationRow):
     typing EDUs clobber based on room_id.
     """
 
-    key: Tuple[str, ...]  # the edu key passed to send_edu
+    key: tuple[str, ...]  # the edu key passed to send_edu
     edu: Edu
 
     TypeId = "k"
@@ -476,7 +471,7 @@ class EduRow(BaseFederationRow):
         buff.edus.setdefault(self.edu.destination, []).append(self.edu)
 
 
-_rowtypes: Tuple[Type[BaseFederationRow], ...] = (
+_rowtypes: tuple[type[BaseFederationRow], ...] = (
     PresenceDestinationsRow,
     KeyedEduRow,
     EduRow,
@@ -488,16 +483,16 @@ TypeToRow = {Row.TypeId: Row for Row in _rowtypes}
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class ParsedFederationStreamData:
     # list of tuples of UserPresenceState and destinations
-    presence_destinations: List[Tuple[UserPresenceState, List[str]]]
+    presence_destinations: list[tuple[UserPresenceState, list[str]]]
     # dict of destination -> { key -> Edu }
-    keyed_edus: Dict[str, Dict[Tuple[str, ...], Edu]]
+    keyed_edus: dict[str, dict[tuple[str, ...], Edu]]
     # dict of destination -> [Edu]
-    edus: Dict[str, List[Edu]]
+    edus: dict[str, list[Edu]]
 
 
 async def process_rows_for_federation(
     transaction_queue: FederationSender,
-    rows: List[FederationStream.FederationStreamRow],
+    rows: list[FederationStream.FederationStreamRow],
 ) -> None:
     """Parse a list of rows from the federation stream and put them in the
     transaction queue ready for sending to the relevant homeservers.

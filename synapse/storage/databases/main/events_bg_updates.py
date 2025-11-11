@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, cast
 
 import attr
 
@@ -97,7 +97,7 @@ class _CalculateChainCover:
     # Map from room_id to last depth/stream processed for each room that we have
     # processed all events for (i.e. the rooms we can flip the
     # `has_auth_chain_index` for)
-    finished_room_map: Dict[str, Tuple[int, int]]
+    finished_room_map: dict[str, tuple[int, int]]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -109,7 +109,7 @@ class _JoinedRoomStreamOrderingUpdate:
     # The most recent event stream_ordering for the room
     most_recent_event_stream_ordering: int
     # The most recent event `bump_stamp` for the room
-    most_recent_bump_stamp: Optional[int]
+    most_recent_bump_stamp: int | None
 
 
 class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseStore):
@@ -451,7 +451,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             chunks = [event_ids[i : i + 100] for i in range(0, len(event_ids), 100)]
             for chunk in chunks:
                 ev_rows = cast(
-                    List[Tuple[str, str]],
+                    list[tuple[str, str]],
                     self.db_pool.simple_select_many_txn(
                         txn,
                         table="event_json",
@@ -527,8 +527,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # The set of extremity event IDs that we're checking this round
             original_set = set()
 
-            # A dict[str, Set[str]] of event ID to their prev events.
-            graph: Dict[str, Set[str]] = {}
+            # A dict[str, set[str]] of event ID to their prev events.
+            graph: dict[str, set[str]] = {}
 
             # The set of descendants of the original set that are not rejected
             # nor soft-failed. Ancestors of these events should be removed
@@ -647,7 +647,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             if deleted:
                 # We now need to invalidate the caches of these rooms
                 rows = cast(
-                    List[Tuple[str]],
+                    list[tuple[str]],
                     self.db_pool.simple_select_many_txn(
                         txn,
                         table="events",
@@ -851,7 +851,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def get_rejected_events(
             txn: Cursor,
-        ) -> List[Tuple[str, str, JsonDict, bool, bool]]:
+        ) -> list[tuple[str, str, JsonDict, bool, bool]]:
             # Fetch rejected event json, their room version and whether we have
             # inserted them into the state_events or auth_events tables.
             #
@@ -883,7 +883,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
             return cast(
-                List[Tuple[str, str, JsonDict, bool, bool]],
+                list[tuple[str, str, JsonDict, bool, bool]],
                 [(row[0], row[1], db_to_json(row[2]), row[3], row[4]) for row in txn],
             )
 
@@ -1038,7 +1038,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         last_room_id: str,
         last_depth: int,
         last_stream: int,
-        batch_size: Optional[int],
+        batch_size: int | None,
         single_room: bool,
     ) -> _CalculateChainCover:
         """Calculate the chain cover for `batch_size` events, ordered by
@@ -1126,7 +1126,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         # We also need to fetch the auth events for them.
         auth_events = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             self.db_pool.simple_select_many_txn(
                 txn,
                 table="event_auth",
@@ -1137,7 +1137,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             ),
         )
 
-        event_to_auth_chain: Dict[str, List[str]] = {}
+        event_to_auth_chain: dict[str, list[str]] = {}
         for event_id, auth_id in auth_events:
             event_to_auth_chain.setdefault(event_id, []).append(auth_id)
 
@@ -1151,7 +1151,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             self.event_chain_id_gen,
             event_to_room_id,
             event_to_types,
-            cast(Dict[str, StrCollection], event_to_auth_chain),
+            cast(dict[str, StrCollection], event_to_auth_chain),
         )
 
         return _CalculateChainCover(
@@ -1256,7 +1256,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
             results = list(txn)
             # (event_id, parent_id, rel_type) for each relation
-            relations_to_insert: List[Tuple[str, str, str, str]] = []
+            relations_to_insert: list[tuple[str, str, str, str]] = []
             for event_id, event_json_raw in results:
                 try:
                     event_json = db_to_json(event_json_raw)
@@ -1636,7 +1636,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         # We don't need to fetch any progress state because we just grab the next N
         # events in `sliding_sync_joined_rooms_to_recalculate`
 
-        def _get_rooms_to_update_txn(txn: LoggingTransaction) -> List[Tuple[str]]:
+        def _get_rooms_to_update_txn(txn: LoggingTransaction) -> list[tuple[str]]:
             """
             Returns:
                 A list of room ID's to update along with the progress value
@@ -1658,7 +1658,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 (batch_size,),
             )
 
-            rooms_to_update_rows = cast(List[Tuple[str]], txn.fetchall())
+            rooms_to_update_rows = cast(list[tuple[str]], txn.fetchall())
 
             return rooms_to_update_rows
 
@@ -1674,9 +1674,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             return 0
 
         # Map from room_id to insert/update state values in the `sliding_sync_joined_rooms` table.
-        joined_room_updates: Dict[str, SlidingSyncStateInsertValues] = {}
+        joined_room_updates: dict[str, SlidingSyncStateInsertValues] = {}
         # Map from room_id to stream_ordering/bump_stamp, etc values
-        joined_room_stream_ordering_updates: Dict[
+        joined_room_stream_ordering_updates: dict[
             str, _JoinedRoomStreamOrderingUpdate
         ] = {}
         # As long as we get this value before we fetch the current state, we can use it
@@ -1886,17 +1886,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _find_memberships_to_update_txn(
             txn: LoggingTransaction,
-        ) -> List[
-            Tuple[
+        ) -> list[
+            tuple[
                 str,
-                Optional[str],
-                Optional[str],
+                str | None,
+                str | None,
                 str,
                 str,
                 str,
                 str,
                 int,
-                Optional[str],
+                str | None,
                 bool,
             ]
         ]:
@@ -1979,17 +1979,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 raise Exception("last_event_stream_ordering should not be None")
 
             memberships_to_update_rows = cast(
-                List[
-                    Tuple[
+                list[
+                    tuple[
                         str,
-                        Optional[str],
-                        Optional[str],
+                        str | None,
+                        str | None,
                         str,
                         str,
                         str,
                         str,
                         int,
-                        Optional[str],
+                        str | None,
                         bool,
                     ]
                 ],
@@ -2023,7 +2023,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _find_previous_invite_or_knock_membership_txn(
             txn: LoggingTransaction, room_id: str, user_id: str, event_id: str
-        ) -> Optional[Tuple[str, str]]:
+        ) -> tuple[str, str] | None:
             # Find the previous invite/knock event before the leave event
             #
             # Here are some notes on how we landed on this query:
@@ -2085,11 +2085,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             return event_id, membership
 
         # Map from (room_id, user_id) to ...
-        to_insert_membership_snapshots: Dict[
-            Tuple[str, str], SlidingSyncMembershipSnapshotSharedInsertValues
+        to_insert_membership_snapshots: dict[
+            tuple[str, str], SlidingSyncMembershipSnapshotSharedInsertValues
         ] = {}
-        to_insert_membership_infos: Dict[
-            Tuple[str, str], SlidingSyncMembershipInfoWithEventPos
+        to_insert_membership_infos: dict[
+            tuple[str, str], SlidingSyncMembershipInfoWithEventPos
         ] = {}
         for (
             room_id,
@@ -2510,7 +2510,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
             memberships_to_update_rows = cast(
-                List[Tuple[str, str, str, int, int]],
+                list[tuple[str, str, str, int, int]],
                 txn.fetchall(),
             )
             if not memberships_to_update_rows:
@@ -2519,9 +2519,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # Assemble the values to update
             #
             # (room_id, user_id)
-            key_values: List[Tuple[str, str]] = []
+            key_values: list[tuple[str, str]] = []
             # (forgotten,)
-            value_values: List[Tuple[int]] = []
+            value_values: list[tuple[int]] = []
             for (
                 room_id,
                 user_id,
@@ -2585,7 +2585,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         room_id_bound = progress.get("room_id", "")
 
-        def redo_max_depth_bg_update_txn(txn: LoggingTransaction) -> Tuple[bool, int]:
+        def redo_max_depth_bg_update_txn(txn: LoggingTransaction) -> tuple[bool, int]:
             txn.execute(
                 """
                 SELECT room_id, room_version FROM rooms
@@ -2597,8 +2597,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
             # Find the next room ID to process, with a relevant room version.
-            room_ids: List[str] = []
-            max_room_id: Optional[str] = None
+            room_ids: list[str] = []
+            max_room_id: str | None = None
             for room_id, room_version_str in txn:
                 max_room_id = room_id
 
@@ -2704,7 +2704,7 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
 
     # If we have nothing written to the `sliding_sync_joined_rooms` table, there is
     # nothing to clean up
-    row = cast(Optional[Tuple[int]], txn.fetchone())
+    row = cast(tuple[int] | None, txn.fetchone())
     max_stream_ordering_sliding_sync_joined_rooms_table = None
     depends_on = None
     if row is not None:
@@ -2830,7 +2830,7 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
 
     # If we have nothing written to the `sliding_sync_membership_snapshots` table,
     # there is nothing to clean up
-    row = cast(Optional[Tuple[int]], txn.fetchone())
+    row = cast(tuple[int] | None, txn.fetchone())
     max_stream_ordering_sliding_sync_membership_snapshots_table = None
     if row is not None:
         (max_stream_ordering_sliding_sync_membership_snapshots_table,) = row

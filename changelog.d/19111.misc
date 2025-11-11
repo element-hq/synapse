@@ -1,0 +1,1 @@
+Write union types as `X | Y` where possible, as per PEP 604, added in Python 3.10.

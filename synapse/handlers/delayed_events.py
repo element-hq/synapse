@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -74,10 +74,10 @@ class DelayedEventsHandler:
             cfg=self._config.ratelimiting.rc_delayed_event_mgmt,
         )
 
-        self._next_delayed_event_call: Optional[IDelayedCall] = None
+        self._next_delayed_event_call: IDelayedCall | None = None
 
         # The current position in the current_state_delta stream
-        self._event_pos: Optional[int] = None
+        self._event_pos: int | None = None
 
         # Guard to ensure we only process event deltas one at a time
         self._event_processing = False
@@ -226,7 +226,7 @@ class DelayedEventsHandler:
 
                 await self._store.update_delayed_events_stream_pos(max_pos)
 
-    async def _handle_state_deltas(self, deltas: List[StateDelta]) -> None:
+    async def _handle_state_deltas(self, deltas: list[StateDelta]) -> None:
         """
         Process current state deltas to cancel other users' pending delayed events
         that target the same state.
@@ -327,8 +327,8 @@ class DelayedEventsHandler:
         *,
         room_id: str,
         event_type: str,
-        state_key: Optional[str],
-        origin_server_ts: Optional[int],
+        state_key: str | None,
+        origin_server_ts: int | None,
         content: JsonDict,
         delay: int,
         sticky_duration_ms: Optional[int],
@@ -505,8 +505,8 @@ class DelayedEventsHandler:
 
         await self._send_events(events)
 
-    async def _send_events(self, events: List[DelayedEventDetails]) -> None:
-        sent_state: Set[Tuple[RoomID, EventType, StateKey]] = set()
+    async def _send_events(self, events: list[DelayedEventDetails]) -> None:
+        sent_state: set[tuple[RoomID, EventType, StateKey]] = set()
         for event in events:
             if event.state_key is not None:
                 state_info = (event.room_id, event.type, event.state_key)
@@ -529,7 +529,7 @@ class DelayedEventsHandler:
                     state_key=state_key,
                 )
 
-    def _schedule_next_at_or_none(self, next_send_ts: Optional[Timestamp]) -> None:
+    def _schedule_next_at_or_none(self, next_send_ts: Timestamp | None) -> None:
         if next_send_ts is not None:
             self._schedule_next_at(next_send_ts)
         elif self._next_delayed_event_call is not None:
@@ -550,7 +550,7 @@ class DelayedEventsHandler:
         else:
             self._next_delayed_event_call.reset(delay_sec)
 
-    async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
+    async def get_all_for_user(self, requester: Requester) -> list[JsonDict]:
         """Return all pending delayed events requested by the given user."""
         await self._delayed_event_mgmt_ratelimiter.ratelimit(
             requester,
@@ -563,7 +563,7 @@ class DelayedEventsHandler:
     async def _send_event(
         self,
         event: DelayedEventDetails,
-        txn_id: Optional[str] = None,
+        txn_id: str | None = None,
     ) -> None:
         user_id = UserID(event.user_localpart, self._config.server.server_name)
         user_id_str = user_id.to_string()
@@ -628,7 +628,7 @@ class DelayedEventsHandler:
     def _get_current_ts(self) -> Timestamp:
         return Timestamp(self._clock.time_msec())
 
-    def _next_send_ts_changed(self, next_send_ts: Optional[Timestamp]) -> bool:
+    def _next_send_ts_changed(self, next_send_ts: Timestamp | None) -> bool:
         # The DB alone knows if the next send time changed after adding/modifying
         # a delayed event, but if we were to ever miss updating our delayed call's
         # firing time, we may miss other updates. So, keep track of changes to the

@@ -31,17 +31,10 @@ from typing import (
     Callable,
     ClassVar,
     Collection,
-    Deque,
-    Dict,
     Generator,
     Generic,
     Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
     TypeVar,
-    Union,
 )
 
 import attr
@@ -143,7 +136,7 @@ class _PersistEventsTask:
 
     name: ClassVar[str] = "persist_event_batch"  # used for opentracing
 
-    events_and_contexts: List[EventPersistencePair]
+    events_and_contexts: list[EventPersistencePair]
     backfilled: bool
 
     def try_merge(self, task: "_EventPersistQueueTask") -> bool:
@@ -169,7 +162,7 @@ class _UpdateCurrentStateTask:
         return isinstance(task, _UpdateCurrentStateTask)
 
 
-_EventPersistQueueTask = Union[_PersistEventsTask, _UpdateCurrentStateTask]
+_EventPersistQueueTask = _PersistEventsTask | _UpdateCurrentStateTask
 _PersistResult = TypeVar("_PersistResult")
 
 
@@ -178,7 +171,7 @@ class _EventPersistQueueItem(Generic[_PersistResult]):
     task: _EventPersistQueueTask
     deferred: ObservableDeferred[_PersistResult]
 
-    parent_opentracing_span_contexts: List = attr.ib(factory=list)
+    parent_opentracing_span_contexts: list = attr.ib(factory=list)
     """A list of opentracing spans waiting for this batch"""
 
     opentracing_span_context: Any = None
@@ -208,8 +201,8 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
         """
         self.server_name = server_name
         self.hs = hs
-        self._event_persist_queues: Dict[str, Deque[_EventPersistQueueItem]] = {}
-        self._currently_persisting_rooms: Set[str] = set()
+        self._event_persist_queues: dict[str, deque[_EventPersistQueueItem]] = {}
+        self._currently_persisting_rooms: set[str] = set()
         self._per_item_callback = per_item_callback
 
     async def add_to_queue(
@@ -365,7 +358,7 @@ class EventsPersistenceStorageController:
         self,
         room_id: str,
         task: _EventPersistQueueTask,
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Callback for the _event_persist_queue
 
         Returns:
@@ -394,7 +387,7 @@ class EventsPersistenceStorageController:
         self,
         events_and_contexts: Iterable[EventPersistencePair],
         backfilled: bool = False,
-    ) -> Tuple[List[EventBase], RoomStreamToken]:
+    ) -> tuple[list[EventBase], RoomStreamToken]:
         """
         Write events to the database
         Args:
@@ -414,8 +407,8 @@ class EventsPersistenceStorageController:
             PartialStateConflictError: if attempting to persist a partial state event in
                 a room that has been un-partial stated.
         """
-        event_ids: List[str] = []
-        partitioned: Dict[str, List[EventPersistencePair]] = {}
+        event_ids: list[str] = []
+        partitioned: dict[str, list[EventPersistencePair]] = {}
         for event, ctx in events_and_contexts:
             partitioned.setdefault(event.room_id, []).append((event, ctx))
             event_ids.append(event.event_id)
@@ -431,8 +424,8 @@ class EventsPersistenceStorageController:
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "backfilled", str(backfilled))
 
         async def enqueue(
-            item: Tuple[str, List[EventPersistencePair]],
-        ) -> Dict[str, str]:
+            item: tuple[str, list[EventPersistencePair]],
+        ) -> dict[str, str]:
             room_id, evs_ctxs = item
             return await self._event_persist_queue.add_to_queue(
                 room_id,
@@ -447,7 +440,7 @@ class EventsPersistenceStorageController:
         #
         # Since we use `yieldable_gather_results` we need to merge the returned list
         # of dicts into one.
-        replaced_events: Dict[str, str] = {}
+        replaced_events: dict[str, str] = {}
         for d in ret_vals:
             replaced_events.update(d)
 
@@ -469,7 +462,7 @@ class EventsPersistenceStorageController:
     @trace
     async def persist_event(
         self, event: EventBase, context: EventContext, backfilled: bool = False
-    ) -> Tuple[EventBase, PersistedEventPosition, RoomStreamToken]:
+    ) -> tuple[EventBase, PersistedEventPosition, RoomStreamToken]:
         """
         Returns:
             The event, stream ordering of `event`, and the stream ordering of the
@@ -573,7 +566,7 @@ class EventsPersistenceStorageController:
 
     async def _persist_event_batch(
         self, room_id: str, task: _PersistEventsTask
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Callback for the _event_persist_queue
 
         Calculates the change to current state and forward extremities, and
@@ -592,7 +585,7 @@ class EventsPersistenceStorageController:
         events_and_contexts = task.events_and_contexts
         backfilled = task.backfilled
 
-        replaced_events: Dict[str, str] = {}
+        replaced_events: dict[str, str] = {}
         if not events_and_contexts:
             return replaced_events
 
@@ -763,8 +756,8 @@ class EventsPersistenceStorageController:
         return newly_joined_domains
 
     async def _calculate_new_forward_extremities_and_state_delta(
-        self, room_id: str, ev_ctx_rm: List[EventPersistencePair]
-    ) -> Tuple[Optional[Set[str]], Optional[DeltaState]]:
+        self, room_id: str, ev_ctx_rm: list[EventPersistencePair]
+    ) -> tuple[set[str] | None, DeltaState | None]:
         """Calculates the new forward extremities and state delta for a room
         given events to persist.
 
@@ -888,9 +881,9 @@ class EventsPersistenceStorageController:
     async def _calculate_new_extremities(
         self,
         room_id: str,
-        event_contexts: List[EventPersistencePair],
+        event_contexts: list[EventPersistencePair],
         latest_event_ids: AbstractSet[str],
-    ) -> Set[str]:
+    ) -> set[str]:
         """Calculates the new forward extremities for a room given events to
         persist.
 
@@ -948,10 +941,10 @@ class EventsPersistenceStorageController:
     async def _get_new_state_after_events(
         self,
         room_id: str,
-        events_context: List[EventPersistencePair],
+        events_context: list[EventPersistencePair],
         old_latest_event_ids: AbstractSet[str],
-        new_latest_event_ids: Set[str],
-    ) -> Tuple[Optional[StateMap[str]], Optional[StateMap[str]], Set[str]]:
+        new_latest_event_ids: set[str],
+    ) -> tuple[StateMap[str] | None, StateMap[str] | None, set[str]]:
         """Calculate the current state dict after adding some new events to
         a room
 
@@ -1122,11 +1115,11 @@ class EventsPersistenceStorageController:
     async def _prune_extremities(
         self,
         room_id: str,
-        new_latest_event_ids: Set[str],
+        new_latest_event_ids: set[str],
         resolved_state_group: int,
-        event_id_to_state_group: Dict[str, int],
-        events_context: List[EventPersistencePair],
-    ) -> Set[str]:
+        event_id_to_state_group: dict[str, int],
+        events_context: list[EventPersistencePair],
+    ) -> set[str]:
         """See if we can prune any of the extremities after calculating the
         resolved state.
         """
@@ -1193,7 +1186,7 @@ class EventsPersistenceStorageController:
             # as a first cut.
             events_to_check: Collection[EventBase] = [event]
             while events_to_check:
-                new_events: Set[str] = set()
+                new_events: set[str] = set()
                 for event_to_check in events_to_check:
                     if self.is_mine_id(event_to_check.sender):
                         if event_to_check.type != EventTypes.Dummy:
@@ -1262,7 +1255,7 @@ class EventsPersistenceStorageController:
     async def _is_server_still_joined(
         self,
         room_id: str,
-        ev_ctx_rm: List[EventPersistencePair],
+        ev_ctx_rm: list[EventPersistencePair],
         delta: DeltaState,
     ) -> bool:
         """Check if the server will still be joined after the given events have

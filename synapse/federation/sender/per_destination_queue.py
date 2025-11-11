@@ -23,7 +23,7 @@ import datetime
 import logging
 from collections import OrderedDict
 from types import TracebackType
-from typing import TYPE_CHECKING, Dict, Hashable, Iterable, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Hashable, Iterable
 
 import attr
 from prometheus_client import Counter
@@ -122,7 +122,7 @@ class PerDestinationQueue:
         self._destination = destination
         self.transmission_loop_running = False
         self._transmission_loop_enabled = True
-        self.active_transmission_loop: Optional[defer.Deferred] = None
+        self.active_transmission_loop: defer.Deferred | None = None
 
         # Flag to signal to any running transmission loop that there is new data
         # queued up to be sent.
@@ -143,19 +143,19 @@ class PerDestinationQueue:
 
         # Cache of the last successfully-transmitted stream ordering for this
         # destination (we are the only updater so this is safe)
-        self._last_successful_stream_ordering: Optional[int] = None
+        self._last_successful_stream_ordering: int | None = None
 
         # a queue of pending PDUs
-        self._pending_pdus: List[EventBase] = []
+        self._pending_pdus: list[EventBase] = []
 
         # XXX this is never actually used: see
         # https://github.com/matrix-org/synapse/issues/7549
-        self._pending_edus: List[Edu] = []
+        self._pending_edus: list[Edu] = []
 
         # Pending EDUs by their "key". Keyed EDUs are EDUs that get clobbered
         # based on their key (e.g. typing events by room_id)
         # Map of (edu_type, key) -> Edu
-        self._pending_edus_keyed: Dict[Tuple[str, Hashable], Edu] = {}
+        self._pending_edus_keyed: dict[tuple[str, Hashable], Edu] = {}
 
         # Map of user_id -> UserPresenceState of pending presence to be sent to this
         # destination
@@ -165,7 +165,7 @@ class PerDestinationQueue:
         #
         # Each receipt can only have a single receipt per
         # (room ID, receipt type, user ID, thread ID) tuple.
-        self._pending_receipt_edus: List[Dict[str, Dict[str, Dict[str, dict]]]] = []
+        self._pending_receipt_edus: list[dict[str, dict[str, dict[str, dict]]]] = []
 
         # stream_id of last successfully sent to-device message.
         # NB: may be a long or an int.
@@ -341,7 +341,7 @@ class PerDestinationQueue:
         )
 
     async def _transaction_transmission_loop(self) -> None:
-        pending_pdus: List[EventBase] = []
+        pending_pdus: list[EventBase] = []
         try:
             self.transmission_loop_running = True
             # This will throw if we wouldn't retry. We do this here so we fail
@@ -693,12 +693,12 @@ class PerDestinationQueue:
         if not self._pending_receipt_edus:
             self._rrs_pending_flush = False
 
-    def _pop_pending_edus(self, limit: int) -> List[Edu]:
+    def _pop_pending_edus(self, limit: int) -> list[Edu]:
         pending_edus = self._pending_edus
         pending_edus, self._pending_edus = pending_edus[:limit], pending_edus[limit:]
         return pending_edus
 
-    async def _get_device_update_edus(self, limit: int) -> Tuple[List[Edu], int]:
+    async def _get_device_update_edus(self, limit: int) -> tuple[list[Edu], int]:
         last_device_list = self._last_device_list_stream_id
 
         # Retrieve list of new device updates to send to the destination
@@ -719,7 +719,7 @@ class PerDestinationQueue:
 
         return edus, now_stream_id
 
-    async def _get_to_device_message_edus(self, limit: int) -> Tuple[List[Edu], int]:
+    async def _get_to_device_message_edus(self, limit: int) -> tuple[list[Edu], int]:
         last_device_stream_id = self._last_device_stream_id
         to_device_stream_id = self._store.get_to_device_stream_token()
         contents, stream_id = await self._store.get_new_device_msgs_for_remote(
@@ -770,12 +770,12 @@ class _TransactionQueueManager:
 
     queue: PerDestinationQueue
 
-    _device_stream_id: Optional[int] = None
-    _device_list_id: Optional[int] = None
-    _last_stream_ordering: Optional[int] = None
-    _pdus: List[EventBase] = attr.Factory(list)
+    _device_stream_id: int | None = None
+    _device_list_id: int | None = None
+    _last_stream_ordering: int | None = None
+    _pdus: list[EventBase] = attr.Factory(list)
 
-    async def __aenter__(self) -> Tuple[List[EventBase], List[Edu]]:
+    async def __aenter__(self) -> tuple[list[EventBase], list[Edu]]:
         # First we calculate the EDUs we want to send, if any.
 
         # There's a maximum number of EDUs that can be sent with a transaction,
@@ -795,7 +795,7 @@ class _TransactionQueueManager:
         if self.queue._pending_presence:
             # Only send max 50 presence entries in the EDU, to bound the amount
             # of data we're sending.
-            presence_to_add: List[JsonDict] = []
+            presence_to_add: list[JsonDict] = []
             while (
                 self.queue._pending_presence
                 and len(presence_to_add) < MAX_PRESENCE_STATES_PER_EDU
@@ -873,9 +873,9 @@ class _TransactionQueueManager:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
     ) -> None:
         if exc_type is not None:
             # Failed to send transaction, so we bail out.

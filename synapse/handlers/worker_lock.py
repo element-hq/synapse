@@ -26,11 +26,6 @@ from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
     Collection,
-    Dict,
-    Optional,
-    Tuple,
-    Type,
-    Union,
 )
 from weakref import WeakSet
 
@@ -75,9 +70,7 @@ class WorkerLocksHandler:
 
         # Map from lock name/key to set of `WaitingLock` that are active for
         # that lock.
-        self._locks: Dict[
-            Tuple[str, str], WeakSet[Union[WaitingLock, WaitingMultiLock]]
-        ] = {}
+        self._locks: dict[tuple[str, str], WeakSet[WaitingLock | WaitingMultiLock]] = {}
 
         self._clock.looping_call(self._cleanup_locks, 30_000)
 
@@ -141,7 +134,7 @@ class WorkerLocksHandler:
 
     def acquire_multi_read_write_lock(
         self,
-        lock_names: Collection[Tuple[str, str]],
+        lock_names: Collection[tuple[str, str]],
         *,
         write: bool,
     ) -> "WaitingMultiLock":
@@ -188,7 +181,7 @@ class WorkerLocksHandler:
             return
 
         def _wake_all_locks(
-            locks: Collection[Union[WaitingLock, WaitingMultiLock]],
+            locks: Collection[WaitingLock | WaitingMultiLock],
         ) -> None:
             for lock in locks:
                 deferred = lock.deferred
@@ -214,9 +207,9 @@ class WaitingLock:
     handler: WorkerLocksHandler
     lock_name: str
     lock_key: str
-    write: Optional[bool]
+    write: bool | None
     deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
-    _inner_lock: Optional[Lock] = None
+    _inner_lock: Lock | None = None
     _retry_interval: float = 0.1
     _lock_span: "opentracing.Scope" = attr.Factory(
         lambda: start_active_span("WaitingLock.lock")
@@ -261,10 +254,10 @@ class WaitingLock:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
         assert self._inner_lock
 
         self.handler.notify_lock_released(self.lock_name, self.lock_key)
@@ -289,7 +282,7 @@ class WaitingLock:
 
 @attr.s(auto_attribs=True, eq=False)
 class WaitingMultiLock:
-    lock_names: Collection[Tuple[str, str]]
+    lock_names: Collection[tuple[str, str]]
 
     write: bool
 
@@ -299,7 +292,7 @@ class WaitingMultiLock:
 
     deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
 
-    _inner_lock_cm: Optional[AsyncContextManager] = None
+    _inner_lock_cm: AsyncContextManager | None = None
     _retry_interval: float = 0.1
     _lock_span: "opentracing.Scope" = attr.Factory(
         lambda: start_active_span("WaitingLock.lock")
@@ -341,10 +334,10 @@ class WaitingMultiLock:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
         assert self._inner_lock_cm
 
         for lock_name, lock_key in self.lock_names:

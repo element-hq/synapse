@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 from unittest import mock
 
 from twisted.internet.testing import MemoryReactor
@@ -183,7 +182,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         else:
 
             async def get_event(
-                destination: str, event_id: str, timeout: Optional[int] = None
+                destination: str, event_id: str, timeout: int | None = None
             ) -> JsonDict:
                 self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 self.assertEqual(event_id, prev_event.event_id)
@@ -585,7 +584,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         room_state_endpoint_requested_count = 0
 
         async def get_event(
-            destination: str, event_id: str, timeout: Optional[int] = None
+            destination: str, event_id: str, timeout: int | None = None
         ) -> None:
             nonlocal event_endpoint_requested_count
             event_endpoint_requested_count += 1
@@ -1115,7 +1114,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         ):
 
             async def get_event(
-                destination: str, event_id: str, timeout: Optional[int] = None
+                destination: str, event_id: str, timeout: int | None = None
             ) -> JsonDict:
                 self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 self.assertEqual(event_id, missing_event.event_id)

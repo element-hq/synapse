@@ -23,14 +23,8 @@ import logging
 from enum import Enum, auto
 from typing import (
     Collection,
-    Dict,
     Final,
-    FrozenSet,
-    List,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 import attr
@@ -76,18 +70,18 @@ MEMBERSHIP_PRIORITY = (
     Membership.BAN,
 )
 
-_HISTORY_VIS_KEY: Final[Tuple[str, str]] = (EventTypes.RoomHistoryVisibility, "")
+_HISTORY_VIS_KEY: Final[tuple[str, str]] = (EventTypes.RoomHistoryVisibility, "")
 
 
 @trace
 async def filter_events_for_client(
     storage: StorageControllers,
     user_id: str,
-    events: List[EventBase],
+    events: list[EventBase],
     is_peeking: bool = False,
-    always_include_ids: FrozenSet[str] = frozenset(),
+    always_include_ids: frozenset[str] = frozenset(),
     filter_send_to_client: bool = True,
-) -> List[EventBase]:
+) -> list[EventBase]:
     """
     Check which events a user is allowed to see. If the user can see the event but its
     sender asked for their data to be erased, prune the content of the event.
@@ -160,14 +154,14 @@ async def filter_events_for_client(
 
     if filter_send_to_client:
         room_ids = {e.room_id for e in events}
-        retention_policies: Dict[str, RetentionPolicy] = {}
+        retention_policies: dict[str, RetentionPolicy] = {}
 
         for room_id in room_ids:
             retention_policies[
                 room_id
             ] = await storage.main.get_retention_policy_for_room(room_id)
 
-    def allowed(event: EventBase) -> Optional[EventBase]:
+    def allowed(event: EventBase) -> EventBase | None:
         state_after_event = event_id_to_state.get(event.event_id)
         filtered = _check_client_allowed_to_see_event(
             user_id=user_id,
@@ -190,7 +184,7 @@ async def filter_events_for_client(
         # we won't have such a state. The only outliers that are returned here are the
         # user's own membership event, so we can just inspect that.
 
-        user_membership_event: Optional[EventBase]
+        user_membership_event: EventBase | None
         if event.type == EventTypes.Member and event.state_key == user_id:
             user_membership_event = event
         elif state_after_event is not None:
@@ -360,12 +354,12 @@ def _check_client_allowed_to_see_event(
     clock: Clock,
     filter_send_to_client: bool,
     is_peeking: bool,
-    always_include_ids: FrozenSet[str],
+    always_include_ids: frozenset[str],
     sender_ignored: bool,
     retention_policy: RetentionPolicy,
-    state: Optional[StateMap[EventBase]],
+    state: StateMap[EventBase] | None,
     sender_erased: bool,
-) -> Optional[EventBase]:
+) -> EventBase | None:
     """Check with the given user is allowed to see the given event
 
     See `filter_events_for_client` for details about args
@@ -661,7 +655,7 @@ async def filter_events_for_server(
     redact: bool,
     filter_out_erased_senders: bool,
     filter_out_remote_partial_state_events: bool,
-) -> List[EventBase]:
+) -> list[EventBase]:
     """Filter a list of events based on whether the target server is allowed to
     see them.
 
@@ -696,7 +690,7 @@ async def filter_events_for_server(
     # otherwise a room could be fully joined after we retrieve those, which would then bypass
     # this check but would base the filtering on an outdated view of the membership events.
 
-    partial_state_invisible_event_ids: Set[str] = set()
+    partial_state_invisible_event_ids: set[str] = set()
     if filter_out_remote_partial_state_events:
         for e in events:
             sender_domain = get_domain_from_id(e.sender)
@@ -742,7 +736,7 @@ async def filter_events_for_server(
 
 async def _event_to_history_vis(
     storage: StorageControllers, events: Collection[EventBase]
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Get the history visibility at each of the given events
 
     Returns a map from event id to history_visibility setting
@@ -767,7 +761,7 @@ async def _event_to_history_vis(
     }
     vis_events = await storage.main.get_events(visibility_ids)
 
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
     for event in events:
         vis = HistoryVisibility.SHARED
         state_ids = event_to_state_ids.get(event.event_id)
@@ -789,7 +783,7 @@ async def _event_to_history_vis(
 
 async def _event_to_memberships(
     storage: StorageControllers, events: Collection[EventBase], server_name: str
-) -> Dict[str, StateMap[Tuple[str, str]]]:
+) -> dict[str, StateMap[tuple[str, str]]]:
     """Get the remote membership list at each of the given events
 
     Returns a map from event id to state map, which will contain only membership events
