@@ -2166,10 +2166,10 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_events_persisted_by_source_type{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_storage_events_persisted_events_sep_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{type}}",
+              "legendFormat": "{{origin_type}}",
               "refId": "D"
             }
           ],
