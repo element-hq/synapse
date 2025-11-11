@@ -13,5 +13,5 @@
 
 -- Set delayed events to be uniquely identifiable by their delay_id.
 
-INSERT INTO background_updates (update_name, progress_json) VALUES
-  ('delayed_events_idx', '{}');
+INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
+  (9301, 'delayed_events_idx', '{}');
