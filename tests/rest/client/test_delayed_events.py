@@ -210,7 +210,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         channel = self._update_delayed_event("abc", action, action_in_path)
         self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
 
-    @parameterized.expand((True, False))
+    @parameterized.expand(((True,), (False,)))
     def test_cancel_delayed_state_event(self, action_in_path: bool) -> None:
         state_key = "to_never_send"
 
@@ -254,7 +254,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-    @parameterized.expand((True, False))
+    @parameterized.expand(((True,), (False,)))
     @unittest.override_config(
         {"rc_delayed_event_mgmt": {"per_second": 0.5, "burst_count": 1}}
     )
@@ -278,7 +278,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         channel = self._update_delayed_event(delay_ids.pop(0), "cancel", action_in_path)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
-    @parameterized.expand((True, False))
+    @parameterized.expand(((True,), (False,)))
     def test_send_delayed_state_event(self, action_in_path: bool) -> None:
         state_key = "to_send_on_request"
 
@@ -320,7 +320,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-    @parameterized.expand((True, False))
+    @parameterized.expand(((True,), (False,)))
     @unittest.override_config({"rc_message": {"per_second": 2.5, "burst_count": 3}})
     def test_send_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
@@ -342,7 +342,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         channel = self._update_delayed_event(delay_ids.pop(0), "send", action_in_path)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
-    @parameterized.expand((True, False))
+    @parameterized.expand(((True,), (False,)))
     def test_restart_delayed_state_event(self, action_in_path: bool) -> None:
         state_key = "to_send_on_restarted_timeout"
 
@@ -399,7 +399,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-    @parameterized.expand((True, False))
+    @parameterized.expand(((True,), (False,)))
     @unittest.override_config(
         {"rc_delayed_event_mgmt": {"per_second": 0.5, "burst_count": 1}}
     )
