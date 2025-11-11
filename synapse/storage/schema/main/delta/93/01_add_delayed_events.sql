@@ -11,7 +11,10 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Remove `user_localpart` from the primary key of the `delayed_events` table.
+-- Set delayed events to be uniquely identifiable by their delay_id.
 
-ALTER TABLE delayed_events DROP CONSTRAINT delayed_events_pkey;
-ALTER TABLE delayed_events ADD PRIMARY KEY (delay_id);
+-- In practice, delay_ids are already unique because they are generated
+-- from cryptographically strong random strings.
+-- Therefore, adding this constraint is not expected to ever fail,
+-- despite the current pkey technically allowing non-unique delay_ids.
+CREATE UNIQUE INDEX delayed_events_idx ON delayed_events (delay_id);
