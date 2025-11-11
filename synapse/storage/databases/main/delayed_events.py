@@ -13,17 +13,25 @@
 #
 
 import logging
-from typing import NewType
+from typing import TYPE_CHECKING, NewType
 
 import attr
 
 from synapse.api.errors import NotFoundError
 from synapse.storage._base import SQLBaseStore, db_to_json
-from synapse.storage.database import LoggingTransaction, StoreError
+from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
+    LoggingTransaction,
+    StoreError,
+)
 from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID
 from synapse.util import stringutils
 from synapse.util.json import json_encoder
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +63,26 @@ class DelayedEventDetails(EventDetails):
 
 
 class DelayedEventsStore(SQLBaseStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+
+        # In practice, delay_ids are already unique because they are generated
+        # from cryptographically strong random strings.
+        # Therefore, adding this constraint is not expected to ever fail,
+        # despite the current pkey technically allowing non-unique delay_ids.
+        self.db_pool.updates.register_background_index_update(
+            update_name="delayed_events_idx",
+            index_name="delayed_events_idx",
+            table="delayed_events",
+            columns=("delay_id",),
+            unique=True,
+        )
+
     async def get_delayed_events_stream_pos(self) -> int:
         """
         Gets the stream position of the background process to watch for state events

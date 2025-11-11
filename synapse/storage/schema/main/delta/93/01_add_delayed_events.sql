@@ -13,8 +13,5 @@
 
 -- Set delayed events to be uniquely identifiable by their delay_id.
 
--- In practice, delay_ids are already unique because they are generated
--- from cryptographically strong random strings.
--- Therefore, adding this constraint is not expected to ever fail,
--- despite the current pkey technically allowing non-unique delay_ids.
-CREATE UNIQUE INDEX delayed_events_idx ON delayed_events (delay_id);
+INSERT INTO background_updates (update_name, progress_json) VALUES
+  ('delayed_events_idx', '{}');
