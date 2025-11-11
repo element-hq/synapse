@@ -71,6 +71,7 @@ class DelayedEventsStore(SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
 
+        # Set delayed events to be uniquely identifiable by their delay_id.
         # In practice, delay_ids are already unique because they are generated
         # from cryptographically strong random strings.
         # Therefore, adding this constraint is not expected to ever fail,

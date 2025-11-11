@@ -11,7 +11,5 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Set delayed events to be uniquely identifiable by their delay_id.
-
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
   (9301, 'delayed_events_idx', '{}');
