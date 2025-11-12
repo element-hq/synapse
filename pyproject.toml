@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.142.0rc4"
+version = "1.142.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -379,13 +379,23 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.cibuildwheel]
 # Skip unsupported platforms (by us or by Rust).
-# See https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip for the list of build targets.
+#
+# See https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip for the
+# list of supported build targets.
+#
+# Also see `.github/workflows/release-artifacts.yml` for the list of
+# architectures we build for (based on the runner OS types we use), as well as
+# the platforms we exclude from testing in CI.
+#
 # We skip:
-#  - CPython 3.8: EOLed
-#  - musllinux i686: excluded to reduce number of wheels we build.
-#    c.f. https://github.com/matrix-org/synapse/pull/12595#discussion_r963107677
-skip = "cp38* *-musllinux_i686"
-# Enable non-default builds.
+#  - free-threaded cpython builds: these are not currently supported.
+#  - cp38: Python 3.8 is end-of-life.
+#  - cp39: Python 3.9 is end-of-life.
+#  - i686: We don't support 32-bit platforms.
+skip = "cp3??t-* cp38-* cp39-* *i686*"
+# Enable non-default builds. See the list of available options:
+# https://cibuildwheel.pypa.io/en/stable/options#enable
+#
 # "pypy" used to be included by default up until cibuildwheel 3.
 enable = "pypy"
 
