@@ -1,3 +1,181 @@
+[project]
+name = "matrix-synapse"
+version = "1.142.0"
+description = "Homeserver for the Matrix decentralised comms protocol"
+readme = "README.rst"
+authors = [
+    { name = "Matrix.org Team and Contributors", email = "packages@matrix.org" }
+]
+requires-python = ">=3.10.0,<4.0.0"
+license = "AGPL-3.0-or-later OR LicenseRef-Element-Commercial"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Topic :: Communications :: Chat",
+]
+
+# Mandatory Dependencies
+dependencies = [
+    # we use the TYPE_CHECKER.redefine method added in jsonschema 3.0.0
+    "jsonschema>=3.0.0",
+    # 0.25.0 is the first version to support Python 3.14.
+    # We can remove this once https://github.com/python-jsonschema/jsonschema/issues/1426 is fixed
+    # and included in a release.
+    "rpds-py>=0.25.0",
+    # We choose 2.0 as a lower bound: the most recent backwards incompatible release.
+    # It seems generally available, judging by https://pkgs.org/search/?q=immutabledict
+    "immutabledict>=2.0",
+    # We require 2.1.0 or higher for type hints. Previous guard was >= 1.1.0
+    "unpaddedbase64>=2.1.0",
+    # We require 2.0.0 for immutabledict support.
+    "canonicaljson>=2.0.0,<3.0.0",
+    # we use the type definitions added in signedjson 1.1.
+    "signedjson>=1.1.0,<2.0.0",
+    # validating SSL certs for IP addresses requires service_identity 18.1.
+    "service-identity>=18.1.0",
+    # Twisted 18.9 introduces some logger improvements that the structured
+    # logger utilises
+    # Twisted 19.7.0 moves test helpers to a new module and deprecates the old location.
+    # Twisted 21.2.0 introduces contextvar support.
+    # We could likely bump this to 22.1 without making distro packagers'
+    # lives hard (as of 2025-07, distro support is Ubuntu LTS: 22.1, Debian stable: 22.4,
+    # RHEL 9: 22.10)
+    "Twisted[tls]>=21.2.0",
+    "treq>=21.5.0",
+    # Twisted has required pyopenssl 16.0 since about Twisted 16.6.
+    "pyOpenSSL>=16.0.0",
+    "PyYAML>=5.3",
+    "pyasn1>=0.1.9",
+    "pyasn1-modules>=0.0.7",
+    "bcrypt>=3.1.7",
+    # 10.0.1 minimum is mandatory here because of libwebp CVE-2023-4863.
+    # Packagers that already took care of libwebp can lower that down to 5.4.0.
+    "Pillow>=10.0.1",
+    # We use SortedDict.peekitem(), which was added in sortedcontainers 1.5.2.
+    # 2.0.5 updates collections.abc imports to avoid Python 3.10 incompatibility.
+    "sortedcontainers>=2.0.5",
+    "pymacaroons>=0.13.0",
+    "msgpack>=0.5.2",
+    "phonenumbers>=8.2.0",
+    # we use GaugeHistogramMetric, which was added in prom-client 0.4.0.
+    # `prometheus_client.metrics` was added in 0.5.0, so we require that too.
+    # We chose 0.6.0 as that is the current version in Debian Buster (oldstable).
+    "prometheus-client>=0.6.0",
+    # we use `order`, which arrived in attrs 19.2.0.
+    # Note: 21.1.0 broke `/sync`, see https://github.com/matrix-org/synapse/issues/9936
+    "attrs>=19.2.0,!=21.1.0",
+    "netaddr>=0.7.18",
+    # Jinja 2.x is incompatible with MarkupSafe>=2.1. To ensure that admins do not
+    # end up with a broken installation, with recent MarkupSafe but old Jinja, we
+    # add a lower bound to the Jinja2 dependency.
+    "Jinja2>=3.0",
+    # 3.2.0 updates collections.abc imports to avoid Python 3.10 incompatibility.
+    "bleach>=3.2.0",
+    # pydantic 2.12 depends on typing-extensions>=4.14.1
+    "typing-extensions>=4.14.1",
+    # We enforce that we have a `cryptography` version that bundles an `openssl`
+    # with the latest security patches.
+    "cryptography>=3.4.7",
+    # ijson 3.1.4 fixes a bug with "." in property names
+    "ijson>=3.1.4",
+    "matrix-common>=1.3.0,<2.0.0",
+    # We need packaging.verison.Version(...).major added in 20.0.
+    "packaging>=20.0",
+    "pydantic>=2.8;python_version < '3.14'",
+    "pydantic>=2.12;python_version >= '3.14'",
+
+    # This is for building the rust components during "poetry install", which
+    # currently ignores the `build-system.requires` directive (c.f.
+    # https://github.com/python-poetry/poetry/issues/6154). Both `pip install` and
+    # `poetry build` do the right thing without this explicit dependency.
+    #
+    # This isn't really a dev-dependency, as `poetry install --without dev` will fail,
+    # but the alternative is to add it to the main list of deps where it isn't
+    # needed.
+    "setuptools_rust>=1.3",
+
+    # This is used for parsing multipart responses
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+matrix-synapse-ldap3 = ["matrix-synapse-ldap3>=0.1"]
+postgres = [
+    "psycopg2>=2.8;platform_python_implementation != 'PyPy'",
+    "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
+    "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
+]
+saml2 = ["pysaml2>=4.5.0"]
+oidc = ["authlib>=0.15.1"]
+# systemd-python is necessary for logging to the systemd journal via
+# `systemd.journal.JournalHandler`, as is documented in
+# `contrib/systemd/log_config.yaml`.
+systemd = ["systemd-python>=231"]
+url-preview = ["lxml>=4.6.3"]
+sentry = ["sentry-sdk>=0.7.2"]
+opentracing = ["jaeger-client>=4.2.0", "opentracing>=2.2.0"]
+jwt = ["authlib"]
+# hiredis is not a *strict* dependency, but it makes things much faster.
+# (if it is not installed, we fall back to slow code.)
+redis = ["txredisapi>=1.4.7", "hiredis"]
+# Required to use experimental `caches.track_memory_usage` config option.
+cache-memory = ["pympler"]
+test = ["parameterized>=0.7.4", "idna>=2.5"]
+
+# The duplication here is awful.
+#
+# TODO: This can be resolved via PEP 735 dependency groups, which poetry supports
+# since 2.2.0. However, switching to that would require updating the command
+# developers use to install the `all` group. This would require some coordination.
+#
+# NB: the strings in this list must be *package* names, not extra names.
+# Some of our extra names _are_ package names, which can lead to great confusion.
+all = [
+    # matrix-synapse-ldap3
+    "matrix-synapse-ldap3>=0.1",
+    # postgres
+    "psycopg2>=2.8;platform_python_implementation != 'PyPy'",
+    "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
+    "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
+    # saml2
+    "pysaml2>=4.5.0",
+    # oidc and jwt
+    "authlib>=0.15.1",
+    # url-preview
+    "lxml>=4.6.3",
+    # sentry
+    "sentry-sdk>=0.7.2",
+    # opentracing
+    "jaeger-client>=4.2.0", "opentracing>=2.2.0",
+    # redis
+    "txredisapi>=1.4.7", "hiredis",
+    # cache-memory
+    "pympler",
+    # omitted:
+    #   - test: it's useful to have this separate from dev deps in the olddeps job
+    #   - systemd: this is a system-based requirement
+]
+
+[project.urls]
+repository = "https://github.com/element-hq/synapse"
+documentation = "https://element-hq.github.io/synapse/latest"
+"Issue Tracker" = "https://github.com/element-hq/synapse/issues"
+
+[project.scripts]
+synapse_homeserver = "synapse.app.homeserver:main"
+synapse_worker = "synapse.app.generic_worker:main"
+synctl = "synapse._scripts.synctl:main"
+
+export_signing_key = "synapse._scripts.export_signing_key:main"
+generate_config = "synapse._scripts.generate_config:main"
+generate_log_config = "synapse._scripts.generate_log_config:main"
+generate_signing_key = "synapse._scripts.generate_signing_key:main"
+hash_password = "synapse._scripts.hash_password:main"
+register_new_matrix_user = "synapse._scripts.register_new_matrix_user:main"
+synapse_port_db = "synapse._scripts.synapse_port_db:main"
+synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
+update_synapse_database = "synapse._scripts.update_synapse_database:main"
+
+
 [tool.towncrier]
     package = "synapse"
     filename = "CHANGES.md"
@@ -111,19 +289,8 @@ manifest-path = "rust/Cargo.toml"
 module-name = "synapse.synapse_rust"
 
 [tool.poetry]
-name = "matrix-synapse"
-version = "1.142.0"
-description = "Homeserver for the Matrix decentralised comms protocol"
-authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
-license = "AGPL-3.0-or-later OR LicenseRef-Element-Commercial"
-readme = "README.rst"
-repository = "https://github.com/element-hq/synapse"
 packages = [
     { include = "synapse" },
-]
-classifiers = [
-    "Development Status :: 5 - Production/Stable",
-    "Topic :: Communications :: Chat",
 ]
 include = [
     { path = "AUTHORS.rst", format = "sdist" },
@@ -153,191 +320,6 @@ exclude = [
 [tool.poetry.build]
 script = "build_rust.py"
 generate-setup-file = true
-
-[tool.poetry.scripts]
-synapse_homeserver = "synapse.app.homeserver:main"
-synapse_worker = "synapse.app.generic_worker:main"
-synctl = "synapse._scripts.synctl:main"
-
-export_signing_key = "synapse._scripts.export_signing_key:main"
-generate_config = "synapse._scripts.generate_config:main"
-generate_log_config = "synapse._scripts.generate_log_config:main"
-generate_signing_key = "synapse._scripts.generate_signing_key:main"
-hash_password = "synapse._scripts.hash_password:main"
-register_new_matrix_user = "synapse._scripts.register_new_matrix_user:main"
-synapse_port_db = "synapse._scripts.synapse_port_db:main"
-synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
-update_synapse_database = "synapse._scripts.update_synapse_database:main"
-
-[tool.poetry.dependencies]
-python = "^3.10.0"
-
-# Mandatory Dependencies
-# ----------------------
-# we use the TYPE_CHECKER.redefine method added in jsonschema 3.0.0
-jsonschema = ">=3.0.0"
-# 0.25.0 is the first version to support Python 3.14.
-# We can remove this once https://github.com/python-jsonschema/jsonschema/issues/1426 is fixed
-# and included in a release.
-rpds-py = ">=0.25.0"
-# We choose 2.0 as a lower bound: the most recent backwards incompatible release.
-# It seems generally available, judging by https://pkgs.org/search/?q=immutabledict
-immutabledict = ">=2.0"
-# We require 2.1.0 or higher for type hints. Previous guard was >= 1.1.0
-unpaddedbase64 = ">=2.1.0"
-# We require 2.0.0 for immutabledict support.
-canonicaljson = "^2.0.0"
-# we use the type definitions added in signedjson 1.1.
-signedjson = "^1.1.0"
-# validating SSL certs for IP addresses requires service_identity 18.1.
-service-identity = ">=18.1.0"
-# Twisted 18.9 introduces some logger improvements that the structured
-# logger utilises
-# Twisted 19.7.0 moves test helpers to a new module and deprecates the old location.
-# Twisted 21.2.0 introduces contextvar support.
-# We could likely bump this to 22.1 without making distro packagers'
-# lives hard (as of 2025-07, distro support is Ubuntu LTS: 22.1, Debian stable: 22.4,
-# RHEL 9: 22.10)
-Twisted = {extras = ["tls"], version = ">=21.2.0"}
-treq = ">=21.5.0"
-# Twisted has required pyopenssl 16.0 since about Twisted 16.6.
-pyOpenSSL = ">=16.0.0"
-PyYAML = ">=5.3"
-pyasn1 = ">=0.1.9"
-pyasn1-modules = ">=0.0.7"
-bcrypt = ">=3.1.7"
-# 10.0.1 minimum is mandatory here because of libwebp CVE-2023-4863.
-# Packagers that already took care of libwebp can lower that down to 5.4.0.
-Pillow = ">=10.0.1"
-# We use SortedDict.peekitem(), which was added in sortedcontainers 1.5.2.
-# 2.0.5 updates collections.abc imports to avoid Python 3.10 incompatibility.
-sortedcontainers = ">=2.0.5"
-pymacaroons = ">=0.13.0"
-msgpack = ">=0.5.2"
-phonenumbers = ">=8.2.0"
-# we use GaugeHistogramMetric, which was added in prom-client 0.4.0.
-# `prometheus_client.metrics` was added in 0.5.0, so we require that too.
-# We chose 0.6.0 as that is the current version in Debian Buster (oldstable).
-prometheus-client = ">=0.6.0"
-# we use `order`, which arrived in attrs 19.2.0.
-# Note: 21.1.0 broke `/sync`, see https://github.com/matrix-org/synapse/issues/9936
-attrs = ">=19.2.0,!=21.1.0"
-netaddr = ">=0.7.18"
-# Jinja 2.x is incompatible with MarkupSafe>=2.1. To ensure that admins do not
-# end up with a broken installation, with recent MarkupSafe but old Jinja, we
-# add a lower bound to the Jinja2 dependency.
-Jinja2 = ">=3.0"
-# 3.2.0 updates collections.abc imports to avoid Python 3.10 incompatibility.
-bleach = ">=3.2.0"
-# pydantic 2.12 depends on typing-extensions>=4.14.1
-typing-extensions = ">=4.14.1"
-# We enforce that we have a `cryptography` version that bundles an `openssl`
-# with the latest security patches.
-cryptography = ">=3.4.7"
-# ijson 3.1.4 fixes a bug with "." in property names
-ijson = ">=3.1.4"
-matrix-common = "^1.3.0"
-# We need packaging.verison.Version(...).major added in 20.0.
-packaging = ">=20.0"
-pydantic = [
-    { version = "~=2.8", python = "<3.14" },
-    { version = "~=2.12", python = ">=3.14" },
-]
-
-# This is for building the rust components during "poetry install", which
-# currently ignores the `build-system.requires` directive (c.f.
-# https://github.com/python-poetry/poetry/issues/6154). Both `pip install` and
-# `poetry build` do the right thing without this explicit dependency.
-#
-# This isn't really a dev-dependency, as `poetry install --without dev` will fail,
-# but the alternative is to add it to the main list of deps where it isn't
-# needed.
-setuptools_rust = ">=1.3"
-
-# This is used for parsing multipart responses
-python-multipart = ">=0.0.9"
-
-# Optional Dependencies
-# ---------------------
-matrix-synapse-ldap3 = { version = ">=0.1", optional = true }
-psycopg2 = { version = ">=2.8", markers = "platform_python_implementation != 'PyPy'", optional = true }
-psycopg2cffi = { version = ">=2.8", markers = "platform_python_implementation == 'PyPy'", optional = true }
-psycopg2cffi-compat = { version = "==1.1", markers = "platform_python_implementation == 'PyPy'", optional = true }
-pysaml2 = { version = ">=4.5.0", optional = true }
-authlib = { version = ">=0.15.1", optional = true }
-# systemd-python is necessary for logging to the systemd journal via
-# `systemd.journal.JournalHandler`, as is documented in
-# `contrib/systemd/log_config.yaml`.
-# Note: systemd-python 231 appears to have been yanked from pypi
-systemd-python = { version = ">=231", optional = true }
-# 4.6.3 removes usage of _PyGen_Send which is unavailable in CPython as of Python 3.10.
-lxml = { version = ">=4.6.3", optional = true }
-sentry-sdk = { version = ">=0.7.2", optional = true }
-opentracing = { version = ">=2.2.0", optional = true }
-# 4.2.0 updates collections.abc imports to avoid Python 3.10 incompatibility.
-jaeger-client = { version = ">=4.2.0", optional = true }
-txredisapi = { version = ">=1.4.7", optional = true }
-hiredis = { version = "*", optional = true }
-Pympler = { version = "*", optional = true }
-parameterized = { version = ">=0.7.4", optional = true }
-idna = { version = ">=2.5", optional = true }
-
-[tool.poetry.extras]
-# NB: Packages that should be part of `pip install matrix-synapse[all]` need to be specified
-# twice: once here, and once in the `all` extra.
-matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
-postgres = ["psycopg2", "psycopg2cffi", "psycopg2cffi-compat"]
-saml2 = ["pysaml2"]
-oidc = ["authlib"]
-# systemd-python is necessary for logging to the systemd journal via
-# `systemd.journal.JournalHandler`, as is documented in
-# `contrib/systemd/log_config.yaml`.
-systemd = ["systemd-python"]
-url-preview = ["lxml"]
-sentry = ["sentry-sdk"]
-opentracing = ["jaeger-client", "opentracing"]
-jwt = ["authlib"]
-# hiredis is not a *strict* dependency, but it makes things much faster.
-# (if it is not installed, we fall back to slow code.)
-redis = ["txredisapi", "hiredis"]
-# Required to use experimental `caches.track_memory_usage` config option.
-cache-memory = ["pympler"]
-test = ["parameterized", "idna"]
-
-# The duplication here is awful. I hate hate hate hate hate it. However, for now I want
-# to ensure you can still `pip install matrix-synapse[all]` like today. Two motivations:
-# 1) for new installations, I want instructions in existing documentation and tutorials
-#    out there to still work.
-# 2) I don't want to hard-code a list of extras into CI if I can help it. The ideal
-#    solution here would be something like https://github.com/python-poetry/poetry/issues/3413
-# Poetry 1.2's dependency groups might make this easier. But I'm not trying that out
-# until there's a stable release of 1.2.
-#
-# NB: the strings in this list must be *package* names, not extra names.
-# Some of our extra names _are_ package names, which can lead to great confusion.
-all = [
-    # matrix-synapse-ldap3
-    "matrix-synapse-ldap3",
-    # postgres
-    "psycopg2", "psycopg2cffi", "psycopg2cffi-compat",
-    # saml2
-    "pysaml2",
-    # oidc and jwt
-    "authlib",
-    # url-preview
-    "lxml",
-    # sentry
-    "sentry-sdk",
-    # opentracing
-    "jaeger-client", "opentracing",
-    # redis
-    "txredisapi", "hiredis",
-    # cache-memory
-    "pympler",
-    # omitted:
-    #   - test: it's useful to have this separate from dev deps in the olddeps job
-    #   - systemd: this is a system-based requirement
-]
 
 [tool.poetry.group.dev.dependencies]
 # We pin development dependencies in poetry.lock so that our tests don't start
@@ -391,7 +373,7 @@ tomli = ">=1.2.3"
 # runtime errors caused by build system changes.
 # We are happy to raise these upper bounds upon request,
 # provided we check that it's safe to do so (i.e. that CI passes).
-requires = ["poetry-core>=1.1.0,<=2.1.3", "setuptools_rust>=1.3,<=1.11.1"]
+requires = ["poetry-core>=2.0.0,<=2.1.3", "setuptools_rust>=1.3,<=1.11.1"]
 build-backend = "poetry.core.masonry.api"
 
 
