@@ -95,8 +95,27 @@ persist_event_counter = Counter(
 event_counter = Counter(
     "synapse_storage_events_persisted_events_sep",
     "",
-    labelnames=["type", "origin_type", SERVER_NAME_LABEL],
+    labelnames=[
+        "type",  # The event type or "*other*" for types we don't track
+        "origin_type",
+        SERVER_NAME_LABEL,
+    ],
 )
+
+# Event types that we track in the `events_counter` metric above.
+#
+# This list is chosen to balance tracking the most common event types that are
+# useful to monitor (and are likely to spike), while keeping the cardinality of
+# the metric low enough to avoid wasted resources.
+TRACKED_EVENT_TYPES = {
+    EventTypes.Message,
+    EventTypes.Encrypted,
+    EventTypes.Member,
+    EventTypes.ThirdPartyInvite,
+    EventTypes.Redaction,
+    EventTypes.Create,
+    EventTypes.Tombstone,
+}
 
 # State event type/key pairs that we need to gather to fill in the
 # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
@@ -379,8 +398,14 @@ class PersistEventsStore:
                 else:
                     origin_type = "remote"
 
+                # We only track a subset of event types, to avoid high
+                # cardinality in the metrics.
+                metrics_event_type = (
+                    event.type if event.type in TRACKED_EVENT_TYPES else "*other*"
+                )
+
                 event_counter.labels(
-                    type=event.type,
+                    type=metrics_event_type,
                     origin_type=origin_type,
                     **{SERVER_NAME_LABEL: self.server_name},
                 ).inc()
