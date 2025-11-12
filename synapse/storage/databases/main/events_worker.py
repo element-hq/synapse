@@ -1600,7 +1600,7 @@ class EventsWorkerStore(SQLBaseStore):
                 if d:
                     d.redactions.append(redacter)
 
-            # check for MSC4932 redactions
+            # check for MSC4293 redactions
             to_check = []
             events: list[_EventRow] = []
             for e in evs:
