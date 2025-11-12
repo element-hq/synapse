@@ -619,12 +619,13 @@ class LoggingContextFilter(logging.Filter):
             True to include the record in the log output.
         """
         context = current_context()
-        # `context` should never be `None`, but if it somehow ends up being, then we end
-        # up in a death spiral of infinite loops, so let's check, for robustness' sake.
+        # type-ignore: `context` should never be `None`, but if it somehow ends up
+        # being, then we end up in a death spiral of infinite loops, so let's check, for
+        # robustness' sake.
         #
         # Add some default values to avoid log formatting errors.
         if context is None:
-            record.request = self._default_request
+            record.request = self._default_request  # type: ignore[unreachable]
 
             # Avoid overwriting an existing `server_name` on the record. This is running in
             # the context of a global log record filter so there may be 3rd-party code that
