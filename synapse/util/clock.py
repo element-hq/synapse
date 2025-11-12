@@ -207,16 +207,6 @@ class Clock:
                 # logcontext to the reactor
                 return context.run_in_background(f, *args, **kwargs)
 
-        logger.debug(
-            "%s(%s): Scheduled looping call every %sms later",
-            looping_call_context_string,
-            instance_id,
-            msec,
-            # Find out who is scheduling the call which makes it easy to follow in the
-            # logs.
-            stack_info=True,
-        )
-
         # We can ignore the lint here since this is the one location LoopingCall's
         # should be created.
         call = task.LoopingCall(wrapped_f, *args, **kwargs)  # type: ignore[prefer-synapse-clock-looping-call]
@@ -230,6 +220,17 @@ class Clock:
             d = call.start(msec / 1000.0, now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
         self._looping_calls.append(call)
+
+        logger.debug(
+            "%s(%s): Scheduled looping call every %sms later",
+            looping_call_context_string,
+            instance_id,
+            msec,
+            # Find out who is scheduling the call which makes it easy to follow in the
+            # logs.
+            stack_info=True,
+        )
+
         return call
 
     def cancel_all_looping_calls(self, consumeErrors: bool = True) -> None:
@@ -319,6 +320,10 @@ class Clock:
                     # the callback raises an exception.
                     self._call_id_to_delayed_call.pop(call_id)
 
+        # We can ignore the lint here since this class is the one location callLater should
+        # be called.
+        call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
+
         logger.debug(
             "call_later(%s): Scheduled call for %ss later (tracked for shutdown: %s)",
             call_id,
@@ -328,10 +333,6 @@ class Clock:
             # logs.
             stack_info=True,
         )
-
-        # We can ignore the lint here since this class is the one location callLater should
-        # be called.
-        call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
 
         wrapped_call = DelayedCallWrapper(call, call_id, self)
         if call_later_cancel_on_shutdown:
@@ -389,8 +390,11 @@ class Clock:
             *args: Postional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
+        instance_id = random_string_insecure_fast(5)
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
+            logger.debug("call_when_running(%s): Executing callback", instance_id)
+
             # Since this callback can be invoked immediately if the reactor is already
             # running, we can't always assume that we're running in the sentinel
             # logcontext (i.e. we can't assert that we're in the sentinel context like
@@ -429,6 +433,14 @@ class Clock:
         # callWhenRunning should be called.
         self._reactor.callWhenRunning(wrapped_callback, *args, **kwargs)  # type: ignore[prefer-synapse-clock-call-when-running]
 
+        logger.debug(
+            "call_when_running(%s): Scheduled call",
+            instance_id,
+            # Find out who is scheduling the call which makes it easy to follow in the
+            # logs.
+            stack_info=True,
+        )
+
     def add_system_event_trigger(
         self,
         phase: str,
@@ -454,8 +466,16 @@ class Clock:
         Returns:
             an ID that can be used to remove this call with `reactor.removeSystemEventTrigger`.
         """
+        instance_id = random_string_insecure_fast(5)
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
+            logger.debug(
+                "add_system_event_trigger(%s): Executing %s %s callback",
+                instance_id,
+                phase,
+                event_type,
+            )
+
             assert context.current_context() is context.SENTINEL_CONTEXT, (
                 "Expected `add_system_event_trigger` callback from the reactor to start with the sentinel logcontext "
                 f"but saw {context.current_context()}. In other words, another task shouldn't have "
@@ -485,6 +505,16 @@ class Clock:
                 # awaitable returned by `f`) completes to avoid leaking the current
                 # logcontext to the reactor
                 context.run_in_background(callback, *args, **kwargs)
+
+        logger.debug(
+            "add_system_event_trigger(%s) for %s %s",
+            instance_id,
+            phase,
+            event_type,
+            # Find out who is scheduling the call which makes it easy to follow in the
+            # logs.
+            stack_info=True,
+        )
 
         # We can ignore the lint here since this class is the one location
         # `addSystemEventTrigger` should be called.
