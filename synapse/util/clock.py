@@ -14,6 +14,7 @@
 #
 
 
+import logging
 from typing import (
     Any,
     Callable,
@@ -30,8 +31,12 @@ from twisted.internet.task import LoopingCall
 from synapse.logging import context
 from synapse.types import ISynapseThreadlessReactor
 from synapse.util import log_failure
+from synapse.util.stringutils import random_string_insecure_fast
 
 P = ParamSpec("P")
+
+
+logger = logging.getLogger(__name__)
 
 
 class Clock:
@@ -245,6 +250,7 @@ class Clock:
                 issue, we can just track all delayed calls.
             **kwargs: Key arguments to pass to function.
         """
+        instance_id = random_string_insecure_fast(5)
 
         if self._is_shutdown:
             raise Exception("Cannot start delayed call. Clock has been shutdown")
@@ -253,6 +259,7 @@ class Clock:
             track_for_shutdown_cancellation: bool,
         ) -> Callable[P, None]:
             def wrapped_callback(*args: Any, **kwargs: Any) -> None:
+                logger.debug("call_later(%s): Executing callback", instance_id)
                 assert context.current_context() is context.SENTINEL_CONTEXT, (
                     "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
                     f"but saw {context.current_context()}. In other words, another task shouldn't have "
@@ -290,6 +297,15 @@ class Clock:
                         self._call_id_to_delayed_call.pop(call_id)
 
             return wrapped_callback
+
+        logger.debug(
+            "call_later(%s): Scheduled call for %ss later (tracked for shutdown: %s)",
+            instance_id,
+            delay,
+            call_later_cancel_on_shutdown,
+            # Find out who is scheduling the call
+            stack_info=True,
+        )
 
         if call_later_cancel_on_shutdown:
             call_id = self._delayed_call_id
