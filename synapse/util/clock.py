@@ -31,6 +31,7 @@ from twisted.internet.task import LoopingCall
 from synapse.logging import context
 from synapse.types import ISynapseThreadlessReactor
 from synapse.util import log_failure
+from synapse.util.stringutils import random_string_insecure_fast
 
 P = ParamSpec("P")
 
@@ -162,11 +163,20 @@ class Clock:
         **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Common functionality for `looping_call` and `looping_call_now`"""
+        instance_id = random_string_insecure_fast(5)
 
         if self._is_shutdown:
             raise Exception("Cannot start looping call. Clock has been shutdown")
 
+        looping_call_context_string = "looping_call"
+        if now:
+            looping_call_context_string = "looping_call_now"
+
         def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> Deferred:
+            logger.debug(
+                "%s(%s): Executing callback", looping_call_context_string, instance_id
+            )
+
             assert context.current_context() is context.SENTINEL_CONTEXT, (
                 "Expected `looping_call` callback from the reactor to start with the sentinel logcontext "
                 f"but saw {context.current_context()}. In other words, another task shouldn't have "
@@ -196,6 +206,16 @@ class Clock:
                 # awaitable returned by `f`) completes to avoid leaking the current
                 # logcontext to the reactor
                 return context.run_in_background(f, *args, **kwargs)
+
+        logger.debug(
+            "%s(%s): Scheduled looping call every %sms later",
+            looping_call_context_string,
+            instance_id,
+            msec,
+            # Find out who is scheduling the call which makes it easy to follow in the
+            # logs.
+            stack_info=True,
+        )
 
         # We can ignore the lint here since this is the one location LoopingCall's
         # should be created.
