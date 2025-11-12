@@ -843,7 +843,6 @@ class DelayedEventsStore(SQLBaseStore):
                     finalised_error = ?,
                     finalised_ts = ?
                 WHERE room_id = ? AND event_type = ? AND state_key = ?
-                    AND user_localpart <> ?
                     AND is_processed
                     AND finalised_ts IS NULL
                 """,
