@@ -1,0 +1,1 @@
+Reduce cardinality of `synapse_storage_events_persisted_events_sep_total` metric by removing `origin_entity` label. This also separates out events sent by local application services by changing the `origin_type` for such events to `application_service`.
