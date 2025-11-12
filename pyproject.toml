@@ -119,7 +119,9 @@ jwt = ["authlib"]
 redis = ["txredisapi>=1.4.7", "hiredis"]
 # Required to use experimental `caches.track_memory_usage` config option.
 cache-memory = ["pympler"]
-test = ["parameterized>=0.7.4", "idna>=2.5"]
+# If this is updated, don't forget to update the equivalent lines in
+# tool.poetry.group.dev.dependencies.
+test = ["parameterized>=0.9.0", "idna>=3.3"]
 
 # The duplication here is awful.
 #
@@ -346,10 +348,11 @@ types-setuptools = ">=57.4.0"
 # Dependencies which are exclusively required by unit test code. This is
 # NOT a list of all modules that are necessary to run the unit tests.
 # Tests assume that all optional dependencies are installed.
-# parameterized<0.7.4 can create classes with names that would normally be invalid
-# identifiers. trial really does not like this when running with multiple workers.
-parameterized = ">=0.7.4"
-idna = ">=2.5"
+#
+# If this is updated, don't forget to update the equivalent lines in
+# project.optional-dependencies.test.
+parameterized = ">=0.9.0"
+idna = ">=3.3"
 
 # The following are used by the release script
 click = ">=8.1.3"
