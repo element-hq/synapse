@@ -813,7 +813,8 @@ def timeout_deferred(
         # will have errbacked new_d, but in case it hasn't, errback it now.
 
         if not new_d.called:
-            new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
+            with PreserveLoggingContext():
+                new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
 
     # We don't track these calls since they are short.
     delayed_call = clock.call_later(
@@ -840,11 +841,13 @@ def timeout_deferred(
 
     def success_cb(val: _T) -> None:
         if not new_d.called:
-            new_d.callback(val)
+            with PreserveLoggingContext():
+                new_d.callback(val)
 
     def failure_cb(val: Failure) -> None:
         if not new_d.called:
-            new_d.errback(val)
+            with PreserveLoggingContext():
+                new_d.errback(val)
 
     deferred.addCallbacks(success_cb, failure_cb)
 
