@@ -1937,6 +1937,11 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11430"><a class="header" href="#upgrading-to-v11430">Upgrading to v1.143.0</a></h1>
+<h2 id="dropping-support-for-postgresql-13"><a class="header" href="#dropping-support-for-postgresql-13">Dropping support for PostgreSQL 13</a></h2>
+<p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we've dropped
+support for PostgreSQL 13, as it is no longer supported upstream.
+This release of Synapse requires PostgreSQL 14+.</p>
 <h1 id="upgrading-to-v11420"><a class="header" href="#upgrading-to-v11420">Upgrading to v1.142.0</a></h1>
 <h2 id="python-310-is-now-required"><a class="header" href="#python-310-is-now-required">Python 3.10+ is now required</a></h2>
 <p>The minimum supported Python version has been increased from v3.9 to v3.10.
