@@ -566,7 +566,7 @@ class FederationServer(FederationBase):
                     await self.check_server_matches_acl(origin_host, room_id)
                 except AuthError:
                     logger.warning(
-                        "Ignoring typing EDU for room %s from banned server", room_id
+                        "Ignoring typing EDU for room %s from banned server because of ACL's", room_id
                     )
                     return
 
