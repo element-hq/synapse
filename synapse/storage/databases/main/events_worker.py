@@ -1614,7 +1614,7 @@ class EventsWorkerStore(SQLBaseStore):
                     user_id = event_json.get("sender")
                     to_check.append((room_id, user_id))
                 except Exception as exc:
-                    raise InvalidEventError("Invalid event %s" % (event_id,)) from exc
+                    raise InvalidEventError(f"Invalid event {event_id}") from exc
 
             # likely that some of these events may be for the same room/user combo, in
             # which case we don't need to do redundant queries
