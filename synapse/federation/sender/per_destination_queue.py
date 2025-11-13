@@ -41,6 +41,7 @@ from synapse.events import EventBase
 from synapse.federation.units import Edu
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
+from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import SynapseTags, set_tag
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
 from synapse.types import JsonDict, ReadReceipt
@@ -186,7 +187,8 @@ class PerDestinationQueue:
         self._transaction_manager.shutdown()
         try:
             if self.active_transmission_loop is not None:
-                self.active_transmission_loop.cancel()
+                with PreserveLoggingContext():
+                    self.active_transmission_loop.cancel()
         except Exception:
             pass
 
