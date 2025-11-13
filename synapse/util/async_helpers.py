@@ -949,7 +949,8 @@ def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
         # propagating. we then `unpause` it once the wrapped deferred completes, to
         # propagate the exception.
         new_deferred.pause()
-        new_deferred.errback(Failure(CancelledError()))
+        with PreserveLoggingContext():
+            new_deferred.errback(Failure(CancelledError()))
 
         deferred.addBoth(lambda _: new_deferred.unpause())
 
