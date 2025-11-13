@@ -45,10 +45,10 @@ from synapse.api.errors import Codes, cs_error
 from synapse.http.server import finish_request, respond_with_json
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import (
+    PreserveLoggingContext,
     defer_to_threadpool,
     make_deferred_yieldable,
     run_in_background,
-    PreserveLoggingContext,
 )
 from synapse.util.async_helpers import DeferredEvent
 from synapse.util.clock import Clock

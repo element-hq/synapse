@@ -78,9 +78,9 @@ from synapse.http.proxyagent import ProxyAgent
 from synapse.http.replicationagent import ReplicationAgent
 from synapse.http.types import QueryParams
 from synapse.logging.context import (
+    PreserveLoggingContext,
     make_deferred_yieldable,
     run_in_background,
-    PreserveLoggingContext,
 )
 from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
