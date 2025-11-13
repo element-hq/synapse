@@ -1600,18 +1600,21 @@ class EventsWorkerStore(SQLBaseStore):
                 if d:
                     d.redactions.append(redacter)
 
-            # check for MSC4932 redactions
+            # check for MSC4293 redactions
             to_check = []
             events: list[_EventRow] = []
             for e in evs:
-                event = event_dict.get(e)
-                if not event:
-                    continue
-                events.append(event)
-                event_json = json.loads(event.json)
-                room_id = event_json.get("room_id")
-                user_id = event_json.get("sender")
-                to_check.append((room_id, user_id))
+                try:
+                    event = event_dict.get(e)
+                    if not event:
+                        continue
+                    events.append(event)
+                    event_json = json.loads(event.json)
+                    room_id = event_json.get("room_id")
+                    user_id = event_json.get("sender")
+                    to_check.append((room_id, user_id))
+                except Exception as exc:
+                    raise InvalidEventError(f"Invalid event {event_id}") from exc
 
             # likely that some of these events may be for the same room/user combo, in
             # which case we don't need to do redundant queries
