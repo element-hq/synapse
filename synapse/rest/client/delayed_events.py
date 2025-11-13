@@ -47,14 +47,11 @@ class UpdateDelayedEventServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.auth = hs.get_auth()
         self.delayed_events_handler = hs.get_delayed_events_handler()
 
     async def on_POST(
         self, request: SynapseRequest, delay_id: str
     ) -> tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request)
-
         body = parse_json_object_from_request(request)
         try:
             action = str(body["action"])
@@ -75,11 +72,65 @@ class UpdateDelayedEventServlet(RestServlet):
             )
 
         if enum_action == _UpdateDelayedEventAction.CANCEL:
-            await self.delayed_events_handler.cancel(requester, delay_id)
+            await self.delayed_events_handler.cancel(request, delay_id)
         elif enum_action == _UpdateDelayedEventAction.RESTART:
-            await self.delayed_events_handler.restart(requester, delay_id)
+            await self.delayed_events_handler.restart(request, delay_id)
         elif enum_action == _UpdateDelayedEventAction.SEND:
-            await self.delayed_events_handler.send(requester, delay_id)
+            await self.delayed_events_handler.send(request, delay_id)
+        return 200, {}
+
+
+class CancelDelayedEventServlet(RestServlet):
+    PATTERNS = client_patterns(
+        r"/org\.matrix\.msc4140/delayed_events/(?P<delay_id>[^/]+)/cancel$",
+        releases=(),
+    )
+    CATEGORY = "Delayed event management requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
+
+    async def on_POST(
+        self, request: SynapseRequest, delay_id: str
+    ) -> tuple[int, JsonDict]:
+        await self.delayed_events_handler.cancel(request, delay_id)
+        return 200, {}
+
+
+class RestartDelayedEventServlet(RestServlet):
+    PATTERNS = client_patterns(
+        r"/org\.matrix\.msc4140/delayed_events/(?P<delay_id>[^/]+)/restart$",
+        releases=(),
+    )
+    CATEGORY = "Delayed event management requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
+
+    async def on_POST(
+        self, request: SynapseRequest, delay_id: str
+    ) -> tuple[int, JsonDict]:
+        await self.delayed_events_handler.restart(request, delay_id)
+        return 200, {}
+
+
+class SendDelayedEventServlet(RestServlet):
+    PATTERNS = client_patterns(
+        r"/org\.matrix\.msc4140/delayed_events/(?P<delay_id>[^/]+)/send$",
+        releases=(),
+    )
+    CATEGORY = "Delayed event management requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
+
+    async def on_POST(
+        self, request: SynapseRequest, delay_id: str
+    ) -> tuple[int, JsonDict]:
+        await self.delayed_events_handler.send(request, delay_id)
         return 200, {}
 
 
@@ -108,4 +159,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     # The following can't currently be instantiated on workers.
     if hs.config.worker.worker_app is None:
         UpdateDelayedEventServlet(hs).register(http_server)
+        CancelDelayedEventServlet(hs).register(http_server)
+        RestartDelayedEventServlet(hs).register(http_server)
+        SendDelayedEventServlet(hs).register(http_server)
     DelayedEventsServlet(hs).register(http_server)
