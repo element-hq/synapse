@@ -978,15 +978,6 @@ class AwakenableSleeper:
         """Sleep for the given number of milliseconds, or return if the given
         `name` is explicitly woken up.
         """
-
-        # Create a deferred that gets called in N seconds
-        sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
-        call = self._clock.call_later(
-            delay_ms / 1000,
-            sleep_deferred.callback,
-            None,
-        )
-
         # Create a deferred that will get called if `wake` is called with
         # the same `name`.
         stream_set = self._streams.setdefault(name, set())
@@ -996,13 +987,14 @@ class AwakenableSleeper:
         try:
             # Wait for either the delay or for `wake` to be called.
             await make_deferred_yieldable(
-                defer.DeferredList(
-                    [sleep_deferred, notify_deferred],
-                    fireOnOneCallback=True,
-                    fireOnOneErrback=True,
-                    consumeErrors=True,
+                timeout_deferred(
+                    deferred=stop_cancellation(notify_deferred),
+                    timeout=delay_ms / 1000,
+                    clock=self._clock,
                 )
             )
+        except defer.TimeoutError:
+            pass
         finally:
             # Clean up the state
             curr_stream_set = self._streams.get(name)
@@ -1010,10 +1002,6 @@ class AwakenableSleeper:
                 curr_stream_set.discard(notify_deferred)
                 if len(curr_stream_set) == 0:
                     self._streams.pop(name)
-
-            # Cancel the sleep if we were woken up
-            if call.active():
-                call.cancel()
 
 
 class DeferredEvent:
