@@ -586,7 +586,7 @@ class FederationServer(FederationBase):
 
                 if to_remove:
                     logger.warning(
-                        "Ignoring receipts in EDU for rooms %s from banned server %s",
+                        "Ignoring receipts in EDU for rooms %s from banned server %s because of ACL's",
                         to_remove,
                         origin_host,
                     )
