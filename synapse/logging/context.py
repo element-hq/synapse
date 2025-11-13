@@ -619,19 +619,24 @@ class LoggingContextFilter(logging.Filter):
             True to include the record in the log output.
         """
         context = current_context()
-        record.request = self._default_request
-
-        # Avoid overwriting an existing `server_name` on the record. This is running in
-        # the context of a global log record filter so there may be 3rd-party code that
-        # adds their own `server_name` and we don't want to interfere with that
-        # (clobber).
-        if not hasattr(record, "server_name"):
-            record.server_name = "unknown_server_from_no_logcontext"
-
-        # context should never be None, but if it somehow ends up being, then
-        # we end up in a death spiral of infinite loops, so let's check, for
+        # type-ignore: `context` should never be `None`, but if it somehow ends up
+        # being, then we end up in a death spiral of infinite loops, so let's check, for
         # robustness' sake.
-        if context is not None:
+        #
+        # Add some default values to avoid log formatting errors.
+        if context is None:
+            record.request = self._default_request  # type: ignore[unreachable]
+
+            # Avoid overwriting an existing `server_name` on the record. This is running in
+            # the context of a global log record filter so there may be 3rd-party code that
+            # adds their own `server_name` and we don't want to interfere with that
+            # (clobber).
+            if not hasattr(record, "server_name"):
+                record.server_name = "unknown_server_from_no_logcontext"
+
+        # Otherwise, in the normal, expected case, fill in the log record attributes
+        # from the logcontext.
+        else:
 
             def safe_set(attr: str, value: Any) -> None:
                 """
