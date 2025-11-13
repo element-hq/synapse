@@ -48,6 +48,7 @@ from synapse.logging.context import (
     defer_to_threadpool,
     make_deferred_yieldable,
     run_in_background,
+    PreserveLoggingContext,
 )
 from synapse.util.async_helpers import DeferredEvent
 from synapse.util.clock import Clock
@@ -753,9 +754,10 @@ class ThreadedFileSender:
         self.wakeup_event.set()
 
         if not self.deferred.called:
-            self.deferred.errback(
-                ConsumerRequestedStopError("Consumer asked us to stop producing")
-            )
+            with PreserveLoggingContext():
+                self.deferred.errback(
+                    ConsumerRequestedStopError("Consumer asked us to stop producing")
+                )
 
     async def start_read_loop(self) -> None:
         """This is the loop that drives reading/writing"""
@@ -809,7 +811,8 @@ class ThreadedFileSender:
             self.consumer = None
 
         if not self.deferred.called:
-            self.deferred.errback(failure)
+            with PreserveLoggingContext():
+                self.deferred.errback(failure)
 
     def _finish(self) -> None:
         """Called when we have finished writing (either on success or
@@ -823,4 +826,5 @@ class ThreadedFileSender:
             self.consumer = None
 
         if not self.deferred.called:
-            self.deferred.callback(None)
+            with PreserveLoggingContext():
+                self.deferred.callback(None)

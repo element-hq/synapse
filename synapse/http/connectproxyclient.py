@@ -41,6 +41,8 @@ from twisted.internet.protocol import ClientFactory, connectionDone
 from twisted.python.failure import Failure
 from twisted.web import http
 
+from synapse.logging.context import PreserveLoggingContext
+
 logger = logging.getLogger(__name__)
 
 
@@ -176,14 +178,16 @@ class HTTPProxiedClientFactory(protocol.ClientFactory):
     def clientConnectionFailed(self, connector: IConnector, reason: Failure) -> None:
         logger.debug("Connection to proxy failed: %s", reason)
         if not self.on_connection.called:
-            self.on_connection.errback(reason)
+            with PreserveLoggingContext():
+                self.on_connection.errback(reason)
         if isinstance(self.wrapped_factory, ClientFactory):
             return self.wrapped_factory.clientConnectionFailed(connector, reason)
 
     def clientConnectionLost(self, connector: IConnector, reason: Failure) -> None:
         logger.debug("Connection to proxy lost: %s", reason)
         if not self.on_connection.called:
-            self.on_connection.errback(reason)
+            with PreserveLoggingContext():
+                self.on_connection.errback(reason)
         if isinstance(self.wrapped_factory, ClientFactory):
             return self.wrapped_factory.clientConnectionLost(connector, reason)
 
@@ -238,14 +242,16 @@ class HTTPConnectProtocol(protocol.Protocol):
         self.http_setup_client.connectionLost(reason)
 
         if not self.connected_deferred.called:
-            self.connected_deferred.errback(reason)
+            with PreserveLoggingContext():
+                self.connected_deferred.errback(reason)
 
     def proxyConnected(self, _: Union[None, "defer.Deferred[None]"]) -> None:
         self.wrapped_connection_started = True
         assert self.transport is not None
         self.wrapped_protocol.makeConnection(self.transport)
 
-        self.connected_deferred.callback(self.wrapped_protocol)
+        with PreserveLoggingContext():
+            self.connected_deferred.callback(self.wrapped_protocol)
 
         # Get any pending data from the http buf and forward it to the original protocol
         buf = self.http_setup_client.clearLineBuffer()
@@ -303,7 +309,8 @@ class HTTPConnectSetupClient(http.HTTPClient):
 
     def handleEndHeaders(self) -> None:
         logger.debug("End Headers")
-        self.on_connected.callback(None)
+        with PreserveLoggingContext():
+            self.on_connected.callback(None)
 
     def handleResponse(self, body: bytes) -> None:
         pass
