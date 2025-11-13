@@ -321,16 +321,7 @@ class DirectoryHandler:
         if not self.hs.is_mine(room_alias):
             raise SynapseError(400, "Room Alias is not hosted on this homeserver")
 
-        result = await self.get_association_from_room_alias(room_alias)
-
-        if result is not None:
-            return {"room_id": result.room_id, "servers": result.servers}
-        else:
-            raise SynapseError(
-                404,
-                "Room alias %r not found" % (room_alias.to_string(),),
-                Codes.NOT_FOUND,
-            )
+        return await self.get_association(room_alias)
 
     async def _update_canonical_alias(
         self, requester: Requester, user_id: str, room_id: str, room_alias: RoomAlias
