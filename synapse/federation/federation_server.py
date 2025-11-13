@@ -566,7 +566,8 @@ class FederationServer(FederationBase):
                     await self.check_server_matches_acl(origin_host, room_id)
                 except AuthError:
                     logger.warning(
-                        "Ignoring typing EDU for room %s from banned server because of ACL's", room_id
+                        "Ignoring typing EDU for room %s from banned server because of ACL's",
+                        room_id,
                     )
                     return
 
@@ -577,21 +578,21 @@ class FederationServer(FederationBase):
             # > forbidden by the room's ACL.
             if edu.edu_type == EduTypes.RECEIPT:
                 origin_host, _ = parse_server_name(origin)
-                to_remove = set()
+                to_remove_room_ids = set()
                 for room_id in edu.content.keys():
                     try:
                         await self.check_server_matches_acl(origin_host, room_id)
                     except AuthError:
-                        to_remove.add(room_id)
+                        to_remove_room_ids.add(room_id)
 
-                if to_remove:
+                if to_remove_room_ids:
                     logger.warning(
                         "Ignoring receipts in EDU for rooms %s from banned server %s because of ACL's",
-                        to_remove,
+                        to_remove_room_ids,
                         origin_host,
                     )
 
-                    for room_id in to_remove:
+                    for room_id in to_remove_room_ids:
                         edu.content.pop(room_id)
 
                     if not edu.content:
