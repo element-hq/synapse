@@ -23,12 +23,7 @@ async def check_auth(
     user: str,
     login_type: str,
     login_dict: "synapse.module_api.JsonDict",
-) -> Optional[
-    Tuple[
-        str, 
-        Optional[Callable[["synapse.module_api.LoginResponse"], Awaitable[None]]]
-    ]
-]
+) -> tuple[str, Callable[["synapse.module_api.LoginResponse"], Awaitable[None]] | None] | None
 ```
 
 The login type and field names should be provided by the user in the
@@ -67,12 +62,7 @@ async def check_3pid_auth(
     medium: str, 
     address: str,
     password: str,
-) -> Optional[
-    Tuple[
-        str, 
-        Optional[Callable[["synapse.module_api.LoginResponse"], Awaitable[None]]]
-    ]
-]
+) -> tuple[str, Callable[["synapse.module_api.LoginResponse"], Awaitable[None]] | None]
 ```
 
 Called when a user attempts to register or log in with a third party identifier,
@@ -98,7 +88,7 @@ _First introduced in Synapse v1.46.0_
 ```python
 async def on_logged_out(
     user_id: str,
-    device_id: Optional[str],
+    device_id: str | None,
     access_token: str
 ) -> None
 ``` 
@@ -119,7 +109,7 @@ _First introduced in Synapse v1.52.0_
 async def get_username_for_registration(
     uia_results: Dict[str, Any],
     params: Dict[str, Any],
-) -> Optional[str]
+) -> str | None
 ```
 
 Called when registering a new user. The module can return a username to set for the user
@@ -180,7 +170,7 @@ _First introduced in Synapse v1.54.0_
 async def get_displayname_for_registration(
     uia_results: Dict[str, Any],
     params: Dict[str, Any],
-) -> Optional[str]
+) -> str | None
 ```
 
 Called when registering a new user. The module can return a display name to set for the
@@ -259,12 +249,7 @@ class MyAuthProvider:
         username: str,
         login_type: str,
         login_dict: "synapse.module_api.JsonDict",
-    ) -> Optional[
-        Tuple[
-            str,
-            Optional[Callable[["synapse.module_api.LoginResponse"], Awaitable[None]]],
-        ]
-    ]:
+    ) -> tuple[str, Callable[["synapse.module_api.LoginResponse"], Awaitable[None]] | None] | None:
         if login_type != "my.login_type":
             return None
 
@@ -276,12 +261,7 @@ class MyAuthProvider:
         username: str,
         login_type: str,
         login_dict: "synapse.module_api.JsonDict",
-    ) -> Optional[
-        Tuple[
-            str,
-            Optional[Callable[["synapse.module_api.LoginResponse"], Awaitable[None]]],
-        ]
-    ]:
+    ) -> tuple[str, Callable[["synapse.module_api.LoginResponse"], Awaitable[None]] | None] | None:
         if login_type != "m.login.password":
             return None
 

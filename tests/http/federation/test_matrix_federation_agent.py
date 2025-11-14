@@ -20,7 +20,7 @@
 import base64
 import logging
 import os
-from typing import Generator, List, Optional, cast
+from typing import Generator, cast
 from unittest.mock import AsyncMock, call, patch
 
 import treq
@@ -45,6 +45,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import IPolicyForHTTPS, IResponse
 
 from synapse.config.homeserver import HomeServerConfig
+from synapse.config.server import parse_proxy_config
 from synapse.crypto.context_factory import FederationPolicyForHTTPS
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
 from synapse.http.federation.srv_resolver import Server, SrvResolver
@@ -64,7 +65,7 @@ from synapse.util.caches.ttlcache import TTLCache
 
 from tests import unittest
 from tests.http import dummy_address, get_test_ca_cert_file, wrap_server_factory_for_tls
-from tests.server import FakeTransport, ThreadedMemoryReactorClock
+from tests.server import FakeTransport, get_clock
 from tests.utils import checked_cast, default_config
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ logger = logging.getLogger(__name__)
 
 class MatrixFederationAgentTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.reactor = ThreadedMemoryReactorClock()
+        self.reactor, self.clock = get_clock()
 
         self.mock_resolver = AsyncMock(spec=SrvResolver)
 
@@ -84,16 +85,22 @@ class MatrixFederationAgentTests(unittest.TestCase):
 
         self.tls_factory = FederationPolicyForHTTPS(config)
 
-        self.well_known_cache: TTLCache[bytes, Optional[bytes]] = TTLCache(
-            "test_cache", timer=self.reactor.seconds
+        self.well_known_cache: TTLCache[bytes, bytes | None] = TTLCache(
+            cache_name="test_cache",
+            server_name="test_server",
+            timer=self.reactor.seconds,
         )
         self.had_well_known_cache: TTLCache[bytes, bool] = TTLCache(
-            "test_cache", timer=self.reactor.seconds
+            cache_name="test_cache",
+            server_name="test_server",
+            timer=self.reactor.seconds,
         )
         self.well_known_resolver = WellKnownResolver(
-            self.reactor,
-            Agent(self.reactor, contextFactory=self.tls_factory),
-            b"test-agent",
+            server_name="OUR_STUB_HOMESERVER_NAME",
+            reactor=self.reactor,
+            clock=self.clock,
+            agent=Agent(self.reactor, contextFactory=self.tls_factory),
+            user_agent=b"test-agent",
             well_known_cache=self.well_known_cache,
             had_well_known_cache=self.had_well_known_cache,
         )
@@ -102,8 +109,8 @@ class MatrixFederationAgentTests(unittest.TestCase):
         self,
         client_factory: IProtocolFactory,
         ssl: bool = True,
-        expected_sni: Optional[bytes] = None,
-        tls_sanlist: Optional[List[bytes]] = None,
+        expected_sni: bytes | None = None,
+        tls_sanlist: list[bytes] | None = None,
     ) -> HTTPChannel:
         """Builds a test server, and completes the outgoing client connection
         Args:
@@ -194,7 +201,10 @@ class MatrixFederationAgentTests(unittest.TestCase):
         """
         Sends a simple GET request via the agent, and checks its logcontext management
         """
-        with LoggingContext("one") as context:
+        with LoggingContext(
+            name="one",
+            server_name="test_server",
+        ) as context:
             fetch_d: Deferred[IResponse] = self.agent.request(b"GET", uri)
 
             # Nothing happened yet
@@ -218,7 +228,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         client_factory: IProtocolFactory,
         expected_sni: bytes,
         content: bytes,
-        response_headers: Optional[dict] = None,
+        response_headers: dict | None = None,
     ) -> HTTPChannel:
         """Handle an outgoing HTTPs connection: wire it up to a server, check that the
         request is for a .well-known, and send the response.
@@ -247,7 +257,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         self,
         request: Request,
         content: bytes,
-        headers: Optional[dict] = None,
+        headers: dict | None = None,
     ) -> None:
         """Check that an incoming request looks like a valid .well-known request, and
         send back the response.
@@ -269,11 +279,14 @@ class MatrixFederationAgentTests(unittest.TestCase):
         because it is created too early during setUp
         """
         return MatrixFederationAgent(
+            server_name="OUR_STUB_HOMESERVER_NAME",
             reactor=cast(ISynapseReactor, self.reactor),
+            clock=self.clock,
             tls_client_options_factory=self.tls_factory,
             user_agent=b"test-agent",  # Note that this is unused since _well_known_resolver is provided.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
+            proxy_config=parse_proxy_config({}),
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=self.well_known_resolver,
         )
@@ -384,7 +397,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
     def _do_get_via_proxy(
         self,
         expect_proxy_ssl: bool = False,
-        expected_auth_credentials: Optional[bytes] = None,
+        expected_auth_credentials: bytes | None = None,
     ) -> None:
         """Send a https federation request via an agent and check that it is correctly
             received at the proxy and client. The proxy can use either http or https.
@@ -1011,16 +1024,21 @@ class MatrixFederationAgentTests(unittest.TestCase):
         # Build a new agent and WellKnownResolver with a different tls factory
         tls_factory = FederationPolicyForHTTPS(config)
         agent = MatrixFederationAgent(
+            server_name="OUR_STUB_HOMESERVER_NAME",
             reactor=self.reactor,
+            clock=self.clock,
             tls_client_options_factory=tls_factory,
             user_agent=b"test-agent",  # This is unused since _well_known_resolver is passed below.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
+            proxy_config=None,
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=WellKnownResolver(
-                cast(ISynapseReactor, self.reactor),
-                Agent(self.reactor, contextFactory=tls_factory),
-                b"test-agent",
+                server_name="OUR_STUB_HOMESERVER_NAME",
+                reactor=cast(ISynapseReactor, self.reactor),
+                clock=self.clock,
+                agent=Agent(self.reactor, contextFactory=tls_factory),
+                user_agent=b"test-agent",
                 well_known_cache=self.well_known_cache,
                 had_well_known_cache=self.had_well_known_cache,
             ),
@@ -1822,7 +1840,7 @@ def _get_test_protocol_factory() -> IProtocolFactory:
 
 def _log_request(request: str) -> None:
     """Implements Factory.log, which is expected by Request.finish"""
-    logger.info(f"Completed request {request}")
+    logger.info("Completed request %s", request)
 
 
 @implementer(IPolicyForHTTPS)

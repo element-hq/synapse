@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -35,7 +35,7 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
@@ -116,7 +116,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         self._hs = hs
 
         # The current position in the current_state_delta stream
-        self.pos: Optional[int] = None
+        self.pos: int | None = None
 
         # Guard to ensure we only process deltas one at a time
         self._is_processing = False
@@ -124,23 +124,27 @@ class UserDirectoryHandler(StateDeltasHandler):
         # Guard to ensure we only have one process for refreshing remote profiles
         self._is_refreshing_remote_profiles = False
         # Handle to cancel the `call_later` of `kick_off_remote_profile_refresh_process`
-        self._refresh_remote_profiles_call_later: Optional[IDelayedCall] = None
+        self._refresh_remote_profiles_call_later: IDelayedCall | None = None
 
         # Guard to ensure we only have one process for refreshing remote profiles
         # for the given servers.
         # Set of server names.
-        self._is_refreshing_remote_profiles_for_servers: Set[str] = set()
+        self._is_refreshing_remote_profiles_for_servers: set[str] = set()
 
         if self.update_user_directory:
             self.notifier.add_replication_callback(self.notify_new_event)
 
             # We kick this off so that we don't have to wait for a change before
             # we start populating the user directory
-            self.clock.call_later(0, self.notify_new_event)
+            self.clock.call_later(
+                0,
+                self.notify_new_event,
+            )
 
             # Kick off the profile refresh process on startup
             self._refresh_remote_profiles_call_later = self.clock.call_later(
-                10, self.kick_off_remote_profile_refresh_process
+                10,
+                self.kick_off_remote_profile_refresh_process,
             )
 
     async def search_users(
@@ -192,7 +196,7 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_processing = False
 
         self._is_processing = True
-        run_as_background_process("user_directory.notify_new_event", process)
+        self._hs.run_as_background_process("user_directory.notify_new_event", process)
 
     async def handle_local_profile_change(
         self, user_id: str, profile: ProfileInfo
@@ -237,7 +241,9 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         # Loop round handling deltas until we're up to date
         while True:
-            with Measure(self.clock, "user_dir_delta"):
+            with Measure(
+                self.clock, name="user_dir_delta", server_name=self.server_name
+            ):
                 room_max_stream_ordering = self.store.get_room_max_stream_ordering()
                 if self.pos == room_max_stream_ordering:
                     return
@@ -258,13 +264,13 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self.pos = max_pos
 
                 # Expose current event processing position to prometheus
-                synapse.metrics.event_processing_positions.labels("user_dir").set(
-                    max_pos
-                )
+                synapse.metrics.event_processing_positions.labels(
+                    name="user_dir", **{SERVER_NAME_LABEL: self.server_name}
+                ).set(max_pos)
 
                 await self.store.update_user_directory_stream_pos(max_pos)
 
-    async def _handle_deltas(self, deltas: List[StateDelta]) -> None:
+    async def _handle_deltas(self, deltas: list[StateDelta]) -> None:
         """Called with the state deltas to process"""
         for delta in deltas:
             logger.debug(
@@ -293,8 +299,8 @@ class UserDirectoryHandler(StateDeltasHandler):
     async def _handle_room_publicity_change(
         self,
         room_id: str,
-        prev_event_id: Optional[str],
-        event_id: Optional[str],
+        prev_event_id: str | None,
+        event_id: str | None,
         typ: str,
     ) -> None:
         """Handle a room having potentially changed from/to world_readable/publicly
@@ -366,8 +372,8 @@ class UserDirectoryHandler(StateDeltasHandler):
     async def _handle_room_membership_event(
         self,
         room_id: str,
-        prev_event_id: Optional[str],
-        event_id: Optional[str],
+        prev_event_id: str | None,
+        event_id: str | None,
         state_key: str,
     ) -> None:
         """Process a single room membershp event.
@@ -460,7 +466,7 @@ class UserDirectoryHandler(StateDeltasHandler):
                     or await self.store.should_include_local_user_in_dir(other)
                 )
             ]
-            updates_to_users_who_share_rooms: Set[Tuple[str, str]] = set()
+            updates_to_users_who_share_rooms: set[tuple[str, str]] = set()
 
             # First, if the joining user is our local user then we need an
             # update for every other user in the room.
@@ -513,7 +519,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         self,
         user_id: str,
         room_id: str,
-        prev_event_id: Optional[str],
+        prev_event_id: str | None,
         event_id: str,
     ) -> None:
         """Check member event changes for any profile changes and update the
@@ -604,7 +610,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_refreshing_remote_profiles = False
 
         self._is_refreshing_remote_profiles = True
-        run_as_background_process("user_directory.refresh_remote_profiles", process)
+        self._hs.run_as_background_process(
+            "user_directory.refresh_remote_profiles", process
+        )
 
     async def _unsafe_refresh_remote_profiles(self) -> None:
         limit = MAX_SERVERS_TO_REFRESH_PROFILES_FOR_IN_ONE_GO - len(
@@ -648,8 +656,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 if not users:
                     return
                 _, _, next_try_at_ts = users[0]
+                delay = ((next_try_at_ts - self.clock.time_msec()) // 1000) + 2
                 self._refresh_remote_profiles_call_later = self.clock.call_later(
-                    ((next_try_at_ts - self.clock.time_msec()) // 1000) + 2,
+                    delay,
                     self.kick_off_remote_profile_refresh_process,
                 )
 
@@ -685,8 +694,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_refreshing_remote_profiles_for_servers.remove(server_name)
 
         self._is_refreshing_remote_profiles_for_servers.add(server_name)
-        run_as_background_process(
-            "user_directory.refresh_remote_profiles_for_remote_server", process
+        self._hs.run_as_background_process(
+            "user_directory.refresh_remote_profiles_for_remote_server",
+            process,
         )
 
     async def _unsafe_refresh_remote_profiles_for_remote_server(
@@ -749,10 +759,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                     )
                     continue
                 except Exception:
-                    logger.error(
+                    logger.exception(
                         "Failed to refresh profile for %r due to unhandled exception",
                         user_id,
-                        exc_info=True,
                     )
                     await self.store.set_remote_user_profile_in_user_dir_stale(
                         user_id,

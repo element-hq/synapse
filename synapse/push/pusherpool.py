@@ -20,18 +20,21 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable
 
 from prometheus_client import Gauge
 
 from synapse.api.errors import Codes, SynapseError
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.push.pusher import PusherFactory
-from synapse.replication.http.push import ReplicationRemovePusherRestServlet
+from synapse.replication.http.push import (
+    ReplicationDeleteAllPushersForUserRestServlet,
+    ReplicationRemovePusherRestServlet,
+)
 from synapse.types import JsonDict, RoomStreamToken, StrCollection
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.threepids import canonicalise_email
@@ -44,7 +47,9 @@ logger = logging.getLogger(__name__)
 
 
 synapse_pushers = Gauge(
-    "synapse_pushers", "Number of active synapse pushers", ["kind", "app_id"]
+    "synapse_pushers",
+    "Number of active synapse pushers",
+    labelnames=["kind", "app_id", SERVER_NAME_LABEL],
 )
 
 
@@ -64,7 +69,8 @@ class PusherPool:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = hs  # nb must be called this for @wrap_as_background_process
+        self.server_name = hs.hostname
         self.pusher_factory = PusherFactory(hs)
         self.store = self.hs.get_datastores().main
         self.clock = self.hs.get_clock()
@@ -78,9 +84,13 @@ class PusherPool:
 
         # We can only delete pushers on master.
         self._remove_pusher_client = None
+        self._delete_all_pushers_for_user_client = None
         if hs.config.worker.worker_app:
             self._remove_pusher_client = ReplicationRemovePusherRestServlet.make_client(
                 hs
+            )
+            self._delete_all_pushers_for_user_client = (
+                ReplicationDeleteAllPushersForUserRestServlet.make_client(hs)
             )
 
         # Record the last stream ID that we were poked about so we can get
@@ -90,7 +100,7 @@ class PusherPool:
         self._last_room_stream_id_seen = self.store.get_room_max_stream_ordering()
 
         # map from user id to app_id:pushkey to pusher
-        self.pushers: Dict[str, Dict[str, Pusher]] = {}
+        self.pushers: dict[str, dict[str, Pusher]] = {}
 
         self._account_validity_handler = hs.get_account_validity_handler()
 
@@ -99,7 +109,7 @@ class PusherPool:
         if not self._should_start_pushers:
             logger.info("Not starting pushers because they are disabled in the config")
             return
-        run_as_background_process("start_pushers", self._start_pushers)
+        self.hs.run_as_background_process("start_pushers", self._start_pushers)
 
     async def add_or_update_pusher(
         self,
@@ -109,12 +119,12 @@ class PusherPool:
         app_display_name: str,
         device_display_name: str,
         pushkey: str,
-        lang: Optional[str],
+        lang: str | None,
         data: JsonDict,
         profile_tag: str = "",
         enabled: bool = True,
-        device_id: Optional[str] = None,
-    ) -> Optional[Pusher]:
+        device_id: str | None = None,
+    ) -> Pusher | None:
         """Creates a new pusher and adds it to the pool
 
         Returns:
@@ -320,7 +330,7 @@ class PusherPool:
 
     async def _get_pusher_config_for_user_by_app_id_and_pushkey(
         self, user_id: str, app_id: str, pushkey: str
-    ) -> Optional[PusherConfig]:
+    ) -> PusherConfig | None:
         resultlist = await self.store.get_pushers_by_app_id_and_pushkey(app_id, pushkey)
 
         pusher_config = None
@@ -332,7 +342,7 @@ class PusherPool:
 
     async def process_pusher_change_by_id(
         self, app_id: str, pushkey: str, user_id: str
-    ) -> Optional[Pusher]:
+    ) -> Pusher | None:
         """Look up the details for the given pusher, and either start it if its
         "enabled" flag is True, or try to stop it otherwise.
 
@@ -371,7 +381,7 @@ class PusherPool:
 
         logger.info("Started pushers")
 
-    async def _start_pusher(self, pusher_config: PusherConfig) -> Optional[Pusher]:
+    async def _start_pusher(self, pusher_config: PusherConfig) -> Pusher | None:
         """Start the given pusher
 
         Args:
@@ -415,11 +425,17 @@ class PusherPool:
             previous_pusher.on_stop()
 
             synapse_pushers.labels(
-                type(previous_pusher).__name__, previous_pusher.app_id
+                kind=type(previous_pusher).__name__,
+                app_id=previous_pusher.app_id,
+                **{SERVER_NAME_LABEL: self.server_name},
             ).dec()
         byuser[appid_pushkey] = pusher
 
-        synapse_pushers.labels(type(pusher).__name__, pusher.app_id).inc()
+        synapse_pushers.labels(
+            kind=type(pusher).__name__,
+            app_id=pusher.app_id,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         logger.info("Starting pusher %s / %s", pusher.user_id, appid_pushkey)
 
@@ -454,6 +470,13 @@ class PusherPool:
                 app_id, pushkey, user_id
             )
 
+    async def delete_all_pushers_for_user(self, user_id: str) -> None:
+        """Deletes all pushers for a user."""
+        if self._delete_all_pushers_for_user_client is not None:
+            await self._delete_all_pushers_for_user_client(user_id=user_id)
+        else:
+            await self.store.delete_all_pushers_for_user(user_id=user_id)
+
     def maybe_stop_pusher(self, app_id: str, pushkey: str, user_id: str) -> None:
         """Stops a pusher with the given app ID and push key if one is running.
 
@@ -471,4 +494,8 @@ class PusherPool:
             pusher = byuser.pop(appid_pushkey)
             pusher.on_stop()
 
-            synapse_pushers.labels(type(pusher).__name__, pusher.app_id).dec()
+            synapse_pushers.labels(
+                kind=type(pusher).__name__,
+                app_id=pusher.app_id,
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).dec()

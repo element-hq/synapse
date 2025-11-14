@@ -86,14 +86,8 @@ from typing import (
     Callable,
     Collection,
     ContextManager,
-    Dict,
     Generator,
     Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Type,
 )
 
 from prometheus_client import Counter
@@ -105,9 +99,8 @@ from synapse.api.presence import UserDevicePresenceState, UserPresenceState
 from synapse.appservice import ApplicationService
 from synapse.events.presence_router import PresenceRouter
 from synapse.logging.context import run_in_background
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.replication.http.presence import (
@@ -137,24 +130,52 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-notified_presence_counter = Counter("synapse_handler_presence_notified_presence", "")
+notified_presence_counter = Counter(
+    "synapse_handler_presence_notified_presence", "", labelnames=[SERVER_NAME_LABEL]
+)
 federation_presence_out_counter = Counter(
-    "synapse_handler_presence_federation_presence_out", ""
+    "synapse_handler_presence_federation_presence_out",
+    "",
+    labelnames=[SERVER_NAME_LABEL],
 )
-presence_updates_counter = Counter("synapse_handler_presence_presence_updates", "")
-timers_fired_counter = Counter("synapse_handler_presence_timers_fired", "")
+presence_updates_counter = Counter(
+    "synapse_handler_presence_presence_updates", "", labelnames=[SERVER_NAME_LABEL]
+)
+timers_fired_counter = Counter(
+    "synapse_handler_presence_timers_fired", "", labelnames=[SERVER_NAME_LABEL]
+)
 federation_presence_counter = Counter(
-    "synapse_handler_presence_federation_presence", ""
+    "synapse_handler_presence_federation_presence", "", labelnames=[SERVER_NAME_LABEL]
 )
-bump_active_time_counter = Counter("synapse_handler_presence_bump_active_time", "")
+bump_active_time_counter = Counter(
+    "synapse_handler_presence_bump_active_time", "", labelnames=[SERVER_NAME_LABEL]
+)
 
-get_updates_counter = Counter("synapse_handler_presence_get_updates", "", ["type"])
+get_updates_counter = Counter(
+    "synapse_handler_presence_get_updates", "", labelnames=["type", SERVER_NAME_LABEL]
+)
 
 notify_reason_counter = Counter(
-    "synapse_handler_presence_notify_reason", "", ["locality", "reason"]
+    "synapse_handler_presence_notify_reason",
+    "",
+    labelnames=["locality", "reason", SERVER_NAME_LABEL],
 )
 state_transition_counter = Counter(
-    "synapse_handler_presence_state_transition", "", ["locality", "from", "to"]
+    "synapse_handler_presence_state_transition",
+    "",
+    labelnames=["locality", "from", "to", SERVER_NAME_LABEL],
+)
+
+presence_user_to_current_state_size_gauge = LaterGauge(
+    name="synapse_handlers_presence_user_to_current_state_size",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+presence_wheel_timer_size_gauge = LaterGauge(
+    name="synapse_handlers_presence_wheel_timer_size",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 # If a user was last active in the last LAST_ACTIVE_GRANULARITY, consider them
@@ -209,7 +230,7 @@ class BasePresenceHandler(abc.ABC):
 
         self._federation_queue = PresenceFederationQueue(hs, self)
 
-        self.VALID_PRESENCE: Tuple[str, ...] = (
+        self.VALID_PRESENCE: tuple[str, ...] = (
             PresenceState.ONLINE,
             PresenceState.UNAVAILABLE,
             PresenceState.OFFLINE,
@@ -226,7 +247,7 @@ class BasePresenceHandler(abc.ABC):
     async def user_syncing(
         self,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         affect_presence: bool,
         presence_state: str,
     ) -> ContextManager[None]:
@@ -249,7 +270,7 @@ class BasePresenceHandler(abc.ABC):
     @abc.abstractmethod
     def get_currently_syncing_users_for_replication(
         self,
-    ) -> Iterable[Tuple[str, Optional[str]]]:
+    ) -> Iterable[tuple[str, str | None]]:
         """Get an iterable of syncing users and devices on this worker, to send to the presence handler
 
         This is called when a replication connection is established. It should return
@@ -266,7 +287,7 @@ class BasePresenceHandler(abc.ABC):
 
     async def get_states(
         self, target_user_ids: Iterable[str]
-    ) -> List[UserPresenceState]:
+    ) -> list[UserPresenceState]:
         """Get the presence state for users."""
 
         updates_d = await self.current_state_for_users(target_user_ids)
@@ -279,7 +300,7 @@ class BasePresenceHandler(abc.ABC):
 
     async def current_state_for_users(
         self, user_ids: Iterable[str]
-    ) -> Dict[str, UserPresenceState]:
+    ) -> dict[str, UserPresenceState]:
         """Get the current presence state for multiple users.
 
         Returns:
@@ -318,7 +339,7 @@ class BasePresenceHandler(abc.ABC):
     async def set_state(
         self,
         target_user: UserID,
-        device_id: Optional[str],
+        device_id: str | None,
         state: JsonDict,
         force_notify: bool = False,
         is_sync: bool = False,
@@ -338,7 +359,7 @@ class BasePresenceHandler(abc.ABC):
 
     @abc.abstractmethod
     async def bump_presence_active_time(
-        self, user: UserID, device_id: Optional[str]
+        self, user: UserID, device_id: str | None
     ) -> None:
         """We've seen the user do something that indicates they're interacting
         with the app.
@@ -348,7 +369,7 @@ class BasePresenceHandler(abc.ABC):
         self,
         process_id: str,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         is_syncing: bool,
         sync_time_msec: int,
     ) -> None:
@@ -390,7 +411,7 @@ class BasePresenceHandler(abc.ABC):
         return self._federation_queue
 
     async def maybe_send_presence_to_interested_destinations(
-        self, states: List[UserPresenceState]
+        self, states: list[UserPresenceState]
     ) -> None:
         """If this instance is a federation sender, send the states to all
         destinations that are interested. Filters out any states for remote
@@ -474,9 +495,9 @@ class _NullContextManager(ContextManager[None]):
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         pass
 
@@ -484,6 +505,7 @@ class _NullContextManager(ContextManager[None]):
 class WorkerPresenceHandler(BasePresenceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+        self.server_name = hs.hostname
         self._presence_writer_instance = hs.config.worker.writers.presence[0]
 
         # Route presence EDUs to the right worker
@@ -494,32 +516,27 @@ class WorkerPresenceHandler(BasePresenceHandler):
 
         # The number of ongoing syncs on this process, by (user ID, device ID).
         # Empty if _presence_enabled is false.
-        self._user_device_to_num_current_syncs: Dict[
-            Tuple[str, Optional[str]], int
-        ] = {}
+        self._user_device_to_num_current_syncs: dict[tuple[str, str | None], int] = {}
 
         self.notifier = hs.get_notifier()
         self.instance_id = hs.get_instance_id()
 
         # (user_id, device_id) -> last_sync_ms. Lists the devices that have stopped
         # syncing but we haven't notified the presence writer of that yet
-        self._user_devices_going_offline: Dict[Tuple[str, Optional[str]], int] = {}
+        self._user_devices_going_offline: dict[tuple[str, str | None], int] = {}
 
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        self._send_stop_syncing_loop = self.clock.looping_call(
-            self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
+        self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS_MS)
+
+        hs.register_async_shutdown_handler(
+            phase="before",
+            eventType="shutdown",
+            shutdown_func=self._on_shutdown,
         )
 
-        hs.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "generic_presence.on_shutdown",
-            self._on_shutdown,
-        )
-
+    @wrap_as_background_process("WorkerPresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
         if self._track_presence:
             self.hs.get_replication_command_handler().send_command(
@@ -529,7 +546,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
     def send_user_sync(
         self,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         is_syncing: bool,
         last_sync_ms: int,
     ) -> None:
@@ -538,7 +555,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
                 self.instance_id, user_id, device_id, is_syncing, last_sync_ms
             )
 
-    def mark_as_coming_online(self, user_id: str, device_id: Optional[str]) -> None:
+    def mark_as_coming_online(self, user_id: str, device_id: str | None) -> None:
         """A user has started syncing. Send a UserSync to the presence writer,
         unless they had recently stopped syncing.
         """
@@ -548,7 +565,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
             # were offline
             self.send_user_sync(user_id, device_id, True, self.clock.time_msec())
 
-    def mark_as_going_offline(self, user_id: str, device_id: Optional[str]) -> None:
+    def mark_as_going_offline(self, user_id: str, device_id: str | None) -> None:
         """A user has stopped syncing. We wait before notifying the presence
         writer as its likely they'll come back soon. This allows us to avoid
         sending a stopped syncing immediately followed by a started syncing
@@ -571,7 +588,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
     async def user_syncing(
         self,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         affect_presence: bool,
         presence_state: str,
     ) -> ContextManager[None]:
@@ -620,7 +637,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
         return _user_syncing()
 
     async def notify_from_replication(
-        self, states: List[UserPresenceState], stream_id: int
+        self, states: list[UserPresenceState], stream_id: int
     ) -> None:
         parties = await get_interested_parties(self.store, self.presence_router, states)
         room_ids_to_states, users_to_states = parties
@@ -666,7 +683,9 @@ class WorkerPresenceHandler(BasePresenceHandler):
             old_state = self.user_to_current_state.get(new_state.user_id)
             self.user_to_current_state[new_state.user_id] = new_state
             is_mine = self.is_mine_id(new_state.user_id)
-            if not old_state or should_notify(old_state, new_state, is_mine):
+            if not old_state or should_notify(
+                old_state, new_state, is_mine, self.server_name
+            ):
                 state_to_notify.append(new_state)
 
         stream_id = token
@@ -677,7 +696,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
 
     def get_currently_syncing_users_for_replication(
         self,
-    ) -> Iterable[Tuple[str, Optional[str]]]:
+    ) -> Iterable[tuple[str, str | None]]:
         return [
             user_id_device_id
             for user_id_device_id, count in self._user_device_to_num_current_syncs.items()
@@ -687,7 +706,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
     async def set_state(
         self,
         target_user: UserID,
-        device_id: Optional[str],
+        device_id: str | None,
         state: JsonDict,
         force_notify: bool = False,
         is_sync: bool = False,
@@ -726,7 +745,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
         )
 
     async def bump_presence_active_time(
-        self, user: UserID, device_id: Optional[str]
+        self, user: UserID, device_id: str | None
     ) -> None:
         """We've seen the user do something that indicates they're interacting
         with the app.
@@ -747,6 +766,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
 class PresenceHandler(BasePresenceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+        self.server_name = hs.hostname
         self.wheel_timer: WheelTimer[str] = WheelTimer()
         self.notifier = hs.get_notifier()
 
@@ -756,16 +776,14 @@ class PresenceHandler(BasePresenceHandler):
             EduTypes.PRESENCE, self.incoming_presence
         )
 
-        LaterGauge(
-            "synapse_handlers_presence_user_to_current_state_size",
-            "",
-            [],
-            lambda: len(self.user_to_current_state),
+        presence_user_to_current_state_size_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self.user_to_current_state)},
         )
 
         # The per-device presence state, maps user to devices to per-device presence state.
-        self._user_to_device_to_current_state: Dict[
-            str, Dict[Optional[str], UserDevicePresenceState]
+        self._user_to_device_to_current_state: dict[
+            str, dict[str | None, UserDevicePresenceState]
         ] = {}
 
         now = self.clock.time_msec()
@@ -807,21 +825,17 @@ class PresenceHandler(BasePresenceHandler):
 
         # Set of users who have presence in the `user_to_current_state` that
         # have not yet been persisted
-        self.unpersisted_users_changes: Set[str] = set()
+        self.unpersisted_users_changes: set[str] = set()
 
-        hs.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "presence.on_shutdown",
-            self._on_shutdown,
+        hs.register_async_shutdown_handler(
+            phase="before",
+            eventType="shutdown",
+            shutdown_func=self._on_shutdown,
         )
 
         # Keeps track of the number of *ongoing* syncs on this process. While
         # this is non zero a user will never go offline.
-        self._user_device_to_num_current_syncs: Dict[
-            Tuple[str, Optional[str]], int
-        ] = {}
+        self._user_device_to_num_current_syncs: dict[tuple[str, str | None], int] = {}
 
         # Keeps track of the number of *ongoing* syncs on other processes.
         #
@@ -833,19 +847,24 @@ class PresenceHandler(BasePresenceHandler):
         # we assume that all the sync requests on that process have stopped.
         # Stored as a dict from process_id to set of (user_id, device_id), and
         # a dict of process_id to millisecond timestamp last updated.
-        self.external_process_to_current_syncs: Dict[
-            str, Set[Tuple[str, Optional[str]]]
+        self.external_process_to_current_syncs: dict[
+            str, set[tuple[str, str | None]]
         ] = {}
-        self.external_process_last_updated_ms: Dict[str, int] = {}
+        self.external_process_last_updated_ms: dict[str, int] = {}
 
-        self.external_sync_linearizer = Linearizer(name="external_sync_linearizer")
+        self.external_sync_linearizer = Linearizer(
+            name="external_sync_linearizer", clock=self.clock
+        )
 
         if self._track_presence:
             # Start a LoopingCall in 30s that fires every 5s.
             # The initial delay is to allow disconnected clients a chance to
             # reconnect before we treat them as offline.
             self.clock.call_later(
-                30, self.clock.looping_call, self._handle_timeouts, 5000
+                30,
+                self.clock.looping_call,
+                self._handle_timeouts,
+                5000,
             )
 
         # Presence information is persisted, whether or not it is being tracked
@@ -858,11 +877,9 @@ class PresenceHandler(BasePresenceHandler):
                 60 * 1000,
             )
 
-        LaterGauge(
-            "synapse_handlers_presence_wheel_timer_size",
-            "",
-            [],
-            lambda: len(self.wheel_timer),
+        presence_wheel_timer_size_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self.wheel_timer)},
         )
 
         # Used to handle sending of presence to newly joined users/servers
@@ -874,6 +891,7 @@ class PresenceHandler(BasePresenceHandler):
         self._event_pos = self.store.get_room_max_stream_ordering()
         self._event_processing = False
 
+    @wrap_as_background_process("PresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
         """Gets called when shutting down. This lets us persist any updates that
         we haven't yet persisted, e.g. updates that only changes some internal
@@ -941,7 +959,9 @@ class PresenceHandler(BasePresenceHandler):
 
         now = self.clock.time_msec()
 
-        with Measure(self.clock, "presence_update_states"):
+        with Measure(
+            self.clock, name="presence_update_states", server_name=self.server_name
+        ):
             # NOTE: We purposefully don't await between now and when we've
             # calculated what we want to do with the new states, to avoid races.
 
@@ -969,6 +989,7 @@ class PresenceHandler(BasePresenceHandler):
                     prev_state,
                     new_state,
                     is_mine=self.is_mine_id(user_id),
+                    our_server_name=self.server_name,
                     wheel_timer=self.wheel_timer,
                     now=now,
                     # When overriding disabled presence, don't kick off all the
@@ -988,10 +1009,14 @@ class PresenceHandler(BasePresenceHandler):
 
             # TODO: We should probably ensure there are no races hereafter
 
-            presence_updates_counter.inc(len(new_states))
+            presence_updates_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc(len(new_states))
 
             if to_notify:
-                notified_presence_counter.inc(len(to_notify))
+                notified_presence_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc(len(to_notify))
                 await self._persist_and_notify(list(to_notify.values()))
 
             self.unpersisted_users_changes |= {s.user_id for s in new_states}
@@ -1010,7 +1035,9 @@ class PresenceHandler(BasePresenceHandler):
                 if user_id not in to_notify
             }
             if to_federation_ping:
-                federation_presence_out_counter.inc(len(to_federation_ping))
+                federation_presence_out_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc(len(to_federation_ping))
 
                 hosts_to_states = await get_interested_remotes(
                     self.store,
@@ -1060,7 +1087,9 @@ class PresenceHandler(BasePresenceHandler):
             for user_id in users_to_check
         ]
 
-        timers_fired_counter.inc(len(states))
+        timers_fired_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+            len(states)
+        )
 
         # Set of user ID & device IDs which are currently syncing.
         syncing_user_devices = {
@@ -1083,7 +1112,7 @@ class PresenceHandler(BasePresenceHandler):
         return await self._update_states(changes)
 
     async def bump_presence_active_time(
-        self, user: UserID, device_id: Optional[str]
+        self, user: UserID, device_id: str | None
     ) -> None:
         """We've seen the user do something that indicates they're interacting
         with the app.
@@ -1094,7 +1123,7 @@ class PresenceHandler(BasePresenceHandler):
 
         user_id = user.to_string()
 
-        bump_active_time_counter.inc()
+        bump_active_time_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         now = self.clock.time_msec()
 
@@ -1112,7 +1141,7 @@ class PresenceHandler(BasePresenceHandler):
         # Update the user state, this will always update last_active_ts and
         # might update the presence state.
         prev_state = await self.current_state_for_user(user_id)
-        new_fields: Dict[str, Any] = {
+        new_fields: dict[str, Any] = {
             "last_active_ts": now,
             "state": _combine_device_states(devices.values()),
         }
@@ -1122,7 +1151,7 @@ class PresenceHandler(BasePresenceHandler):
     async def user_syncing(
         self,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         affect_presence: bool = True,
         presence_state: str = PresenceState.ONLINE,
     ) -> ContextManager[None]:
@@ -1182,7 +1211,7 @@ class PresenceHandler(BasePresenceHandler):
 
     def get_currently_syncing_users_for_replication(
         self,
-    ) -> Iterable[Tuple[str, Optional[str]]]:
+    ) -> Iterable[tuple[str, str | None]]:
         # since we are the process handling presence, there is nothing to do here.
         return []
 
@@ -1190,7 +1219,7 @@ class PresenceHandler(BasePresenceHandler):
         self,
         process_id: str,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         is_syncing: bool,
         sync_time_msec: int,
     ) -> None:
@@ -1278,7 +1307,7 @@ class PresenceHandler(BasePresenceHandler):
             )
             self.external_process_last_updated_ms.pop(process_id, None)
 
-    async def _persist_and_notify(self, states: List[UserPresenceState]) -> None:
+    async def _persist_and_notify(self, states: list[UserPresenceState]) -> None:
         """Persist states in the database, poke the notifier and send to
         interested remote servers
         """
@@ -1346,13 +1375,15 @@ class PresenceHandler(BasePresenceHandler):
             updates.append(prev_state.copy_and_replace(**new_fields))
 
         if updates:
-            federation_presence_counter.inc(len(updates))
+            federation_presence_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc(len(updates))
             await self._update_states(updates)
 
     async def set_state(
         self,
         target_user: UserID,
-        device_id: Optional[str],
+        device_id: str | None,
         state: JsonDict,
         force_notify: bool = False,
         is_sync: bool = False,
@@ -1405,7 +1436,7 @@ class PresenceHandler(BasePresenceHandler):
         # Based on the state of each user's device calculate the new presence state.
         presence = _combine_device_states(devices.values())
 
-        new_fields = {"state": presence}
+        new_fields: JsonDict = {"state": presence}
 
         if presence == PresenceState.ONLINE or presence == PresenceState.BUSY:
             new_fields["last_active_ts"] = now
@@ -1436,7 +1467,7 @@ class PresenceHandler(BasePresenceHandler):
 
     async def get_all_presence_updates(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, list]], int, bool]:
+    ) -> tuple[list[tuple[int, list]], int, bool]:
         """
         Gets a list of presence update rows from between the given stream ids.
         Each row has:
@@ -1492,14 +1523,18 @@ class PresenceHandler(BasePresenceHandler):
             finally:
                 self._event_processing = False
 
-        run_as_background_process("presence.notify_new_event", _process_presence)
+        self.hs.run_as_background_process(
+            "presence.notify_new_event", _process_presence
+        )
 
     async def _unsafe_process(self) -> None:
         # Loop round handling deltas until we're up to date
         while True:
-            with Measure(self.clock, "presence_delta"):
+            with Measure(
+                self.clock, name="presence_delta", server_name=self.server_name
+            ):
                 room_max_stream_ordering = self.store.get_room_max_stream_ordering()
-                if self._event_pos == room_max_stream_ordering:
+                if self._event_pos >= room_max_stream_ordering:
                     return
 
                 logger.debug(
@@ -1517,7 +1552,7 @@ class PresenceHandler(BasePresenceHandler):
                 # We may get multiple deltas for different rooms, but we want to
                 # handle them on a room by room basis, so we batch them up by
                 # room.
-                deltas_by_room: Dict[str, List[StateDelta]] = {}
+                deltas_by_room: dict[str, list[StateDelta]] = {}
                 for delta in deltas:
                     deltas_by_room.setdefault(delta.room_id, []).append(delta)
 
@@ -1527,11 +1562,11 @@ class PresenceHandler(BasePresenceHandler):
                 self._event_pos = max_pos
 
                 # Expose current event processing position to prometheus
-                synapse.metrics.event_processing_positions.labels("presence").set(
-                    max_pos
-                )
+                synapse.metrics.event_processing_positions.labels(
+                    name="presence", **{SERVER_NAME_LABEL: self.server_name}
+                ).set(max_pos)
 
-    async def _handle_state_delta(self, room_id: str, deltas: List[StateDelta]) -> None:
+    async def _handle_state_delta(self, room_id: str, deltas: list[StateDelta]) -> None:
         """Process current state deltas for the room to find new joins that need
         to be handled.
         """
@@ -1655,7 +1690,10 @@ class PresenceHandler(BasePresenceHandler):
 
 
 def should_notify(
-    old_state: UserPresenceState, new_state: UserPresenceState, is_mine: bool
+    old_state: UserPresenceState,
+    new_state: UserPresenceState,
+    is_mine: bool,
+    our_server_name: str,
 ) -> bool:
     """Decides if a presence state change should be sent to interested parties."""
     user_location = "remote"
@@ -1666,19 +1704,38 @@ def should_notify(
         return False
 
     if old_state.status_msg != new_state.status_msg:
-        notify_reason_counter.labels(user_location, "status_msg_change").inc()
+        notify_reason_counter.labels(
+            locality=user_location,
+            reason="status_msg_change",
+            **{SERVER_NAME_LABEL: our_server_name},
+        ).inc()
         return True
 
     if old_state.state != new_state.state:
-        notify_reason_counter.labels(user_location, "state_change").inc()
+        notify_reason_counter.labels(
+            locality=user_location,
+            reason="state_change",
+            **{SERVER_NAME_LABEL: our_server_name},
+        ).inc()
         state_transition_counter.labels(
-            user_location, old_state.state, new_state.state
+            **{
+                "locality": user_location,
+                # `from` is a reserved word in Python so we have to label it this way if
+                # we want to use keyword args.
+                "from": old_state.state,
+                "to": new_state.state,
+                SERVER_NAME_LABEL: our_server_name,
+            },
         ).inc()
         return True
 
     if old_state.state == PresenceState.ONLINE:
         if new_state.currently_active != old_state.currently_active:
-            notify_reason_counter.labels(user_location, "current_active_change").inc()
+            notify_reason_counter.labels(
+                locality=user_location,
+                reason="current_active_change",
+                **{SERVER_NAME_LABEL: our_server_name},
+            ).inc()
             return True
 
         if (
@@ -1688,14 +1745,18 @@ def should_notify(
             # Only notify about last active bumps if we're not currently active
             if not new_state.currently_active:
                 notify_reason_counter.labels(
-                    user_location, "last_active_change_online"
+                    locality=user_location,
+                    reason="last_active_change_online",
+                    **{SERVER_NAME_LABEL: our_server_name},
                 ).inc()
                 return True
 
     elif new_state.last_active_ts - old_state.last_active_ts > LAST_ACTIVE_GRANULARITY:
         # Always notify for a transition where last active gets bumped.
         notify_reason_counter.labels(
-            user_location, "last_active_change_not_online"
+            locality=user_location,
+            reason="last_active_change_not_online",
+            **{SERVER_NAME_LABEL: our_server_name},
         ).inc()
         return True
 
@@ -1759,24 +1820,26 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         # Same with get_presence_router:
         #
         #   AuthHandler -> Notifier -> PresenceEventSource -> ModuleApi -> AuthHandler
+        self.server_name = hs.hostname
         self.get_presence_handler = hs.get_presence_handler
         self.get_presence_router = hs.get_presence_router
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
 
     async def get_new_events(
         self,
         user: UserID,
-        from_key: Optional[int],
+        from_key: int | None,
         # Having a default limit doesn't match the EventSource API, but some
         # callers do not provide it. It is unused in this class.
         limit: int = 0,
-        room_ids: Optional[StrCollection] = None,
+        room_ids: StrCollection | None = None,
         is_guest: bool = False,
-        explicit_room_id: Optional[str] = None,
+        explicit_room_id: str | None = None,
         include_offline: bool = True,
-        service: Optional[ApplicationService] = None,
-    ) -> Tuple[List[UserPresenceState], int]:
+        service: ApplicationService | None = None,
+    ) -> tuple[list[UserPresenceState], int]:
         # The process for getting presence events are:
         #  1. Get the rooms the user is in.
         #  2. Get the list of user in the rooms.
@@ -1792,7 +1855,9 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         user_id = user.to_string()
         stream_change_cache = self.store.presence_stream_cache
 
-        with Measure(self.clock, "presence.get_new_events"):
+        with Measure(
+            self.clock, name="presence.get_new_events", server_name=self.server_name
+        ):
             if from_key is not None:
                 from_key = int(from_key)
 
@@ -1870,7 +1935,10 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
 
                     # If we have the full list of changes for presence we can
                     # simply check which ones share a room with the user.
-                    get_updates_counter.labels("stream").inc()
+                    get_updates_counter.labels(
+                        type="stream",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc()
 
                     sharing_users = await self.store.do_users_share_a_room(
                         user_id, updated_users
@@ -1883,7 +1951,10 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                 else:
                     # Too many possible updates. Find all users we can see and check
                     # if any of them have changed.
-                    get_updates_counter.labels("full").inc()
+                    get_updates_counter.labels(
+                        type="full",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc()
 
                     users_interested_in = (
                         await self.store.get_users_who_share_room_with_user(user_id)
@@ -1919,8 +1990,8 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         self,
         user_id: str,
         include_offline: bool,
-        from_key: Optional[int] = None,
-    ) -> List[UserPresenceState]:
+        from_key: int | None = None,
+    ) -> list[UserPresenceState]:
         """
         Computes the presence updates a user should receive.
 
@@ -1977,7 +2048,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
 
     def _filter_offline_presence_state(
         self, presence_updates: Iterable[UserPresenceState]
-    ) -> List[UserPresenceState]:
+    ) -> list[UserPresenceState]:
         """Given an iterable containing user presence updates, return a list with any offline
         presence states removed.
 
@@ -1998,12 +2069,12 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
 
 
 def handle_timeouts(
-    user_states: List[UserPresenceState],
+    user_states: list[UserPresenceState],
     is_mine_fn: Callable[[str], bool],
-    syncing_user_devices: AbstractSet[Tuple[str, Optional[str]]],
-    user_to_devices: Dict[str, Dict[Optional[str], UserDevicePresenceState]],
+    syncing_user_devices: AbstractSet[tuple[str, str | None]],
+    user_to_devices: dict[str, dict[str | None, UserDevicePresenceState]],
     now: int,
-) -> List[UserPresenceState]:
+) -> list[UserPresenceState]:
     """Checks the presence of users that have timed out and updates as
     appropriate.
 
@@ -2039,10 +2110,10 @@ def handle_timeouts(
 def handle_timeout(
     state: UserPresenceState,
     is_mine: bool,
-    syncing_device_ids: AbstractSet[Tuple[str, Optional[str]]],
-    user_devices: Dict[Optional[str], UserDevicePresenceState],
+    syncing_device_ids: AbstractSet[tuple[str, str | None]],
+    user_devices: dict[str | None, UserDevicePresenceState],
     now: int,
-) -> Optional[UserPresenceState]:
+) -> UserPresenceState | None:
     """Checks the presence of the user to see if any of the timers have elapsed
 
     Args:
@@ -2133,10 +2204,11 @@ def handle_update(
     prev_state: UserPresenceState,
     new_state: UserPresenceState,
     is_mine: bool,
+    our_server_name: str,
     wheel_timer: WheelTimer,
     now: int,
     persist: bool,
-) -> Tuple[UserPresenceState, bool, bool]:
+) -> tuple[UserPresenceState, bool, bool]:
     """Given a presence update:
         1. Add any appropriate timers.
         2. Check if we should notify anyone.
@@ -2145,6 +2217,7 @@ def handle_update(
         prev_state
         new_state
         is_mine: Whether the user is ours
+        our_server_name: The homeserver name of the our server (`hs.hostname`)
         wheel_timer
         now: Time now in ms
         persist: True if this state should persist until another update occurs.
@@ -2213,7 +2286,7 @@ def handle_update(
             )
 
     # Check whether the change was something worth notifying about
-    if should_notify(prev_state, new_state, is_mine):
+    if should_notify(prev_state, new_state, is_mine, our_server_name):
         new_state = new_state.copy_and_replace(last_federation_update_ts=now)
         persist_and_notify = True
 
@@ -2261,8 +2334,8 @@ def _combine_device_states(
 
 
 async def get_interested_parties(
-    store: DataStore, presence_router: PresenceRouter, states: List[UserPresenceState]
-) -> Tuple[Dict[str, List[UserPresenceState]], Dict[str, List[UserPresenceState]]]:
+    store: DataStore, presence_router: PresenceRouter, states: list[UserPresenceState]
+) -> tuple[dict[str, list[UserPresenceState]], dict[str, list[UserPresenceState]]]:
     """Given a list of states return which entities (rooms, users)
     are interested in the given states.
 
@@ -2275,8 +2348,8 @@ async def get_interested_parties(
         A 2-tuple of `(room_ids_to_states, users_to_states)`,
         with each item being a dict of `entity_name` -> `[UserPresenceState]`
     """
-    room_ids_to_states: Dict[str, List[UserPresenceState]] = {}
-    users_to_states: Dict[str, List[UserPresenceState]] = {}
+    room_ids_to_states: dict[str, list[UserPresenceState]] = {}
+    users_to_states: dict[str, list[UserPresenceState]] = {}
     for state in states:
         room_ids = await store.get_rooms_for_user(state.user_id)
         for room_id in room_ids:
@@ -2299,8 +2372,8 @@ async def get_interested_parties(
 async def get_interested_remotes(
     store: DataStore,
     presence_router: PresenceRouter,
-    states: List[UserPresenceState],
-) -> List[Tuple[StrCollection, Collection[UserPresenceState]]]:
+    states: list[UserPresenceState],
+) -> list[tuple[StrCollection, Collection[UserPresenceState]]]:
     """Given a list of presence states figure out which remote servers
     should be sent which.
 
@@ -2314,14 +2387,14 @@ async def get_interested_remotes(
     Returns:
         A map from destinations to presence states to send to that destination.
     """
-    hosts_and_states: List[Tuple[StrCollection, Collection[UserPresenceState]]] = []
+    hosts_and_states: list[tuple[StrCollection, Collection[UserPresenceState]]] = []
 
     # First we look up the rooms each user is in (as well as any explicit
     # subscriptions), then for each distinct room we look up the remote
     # hosts in those rooms.
     for state in states:
         room_ids = await store.get_rooms_for_user(state.user_id)
-        hosts: Set[str] = set()
+        hosts: set[str] = set()
         for room_id in room_ids:
             room_hosts = await store.get_current_hosts_in_room(room_id)
             hosts.update(room_hosts)
@@ -2390,12 +2463,12 @@ class PresenceFederationQueue:
         # stream_id, destinations, user_ids)`. We don't store the full states
         # for efficiency, and remote workers will already have the full states
         # cached.
-        self._queue: List[Tuple[int, int, StrCollection, Set[str]]] = []
+        self._queue: list[tuple[int, int, StrCollection, set[str]]] = []
 
         self._next_id = 1
 
         # Map from instance name to current token
-        self._current_tokens: Dict[str, int] = {}
+        self._current_tokens: dict[str, int] = {}
 
         if self._queue_presence_updates:
             self._clock.looping_call(self._clear_queue, self._CLEAR_ITEMS_EVERY_MS)
@@ -2464,7 +2537,7 @@ class PresenceFederationQueue:
         from_token: int,
         upto_token: int,
         target_row_count: int,
-    ) -> Tuple[List[Tuple[int, Tuple[str, str]]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple[str, str]]], int, bool]:
         """Get all the updates between the two tokens.
 
         We return rows in the form of `(destination, user_id)` to keep the size
@@ -2500,7 +2573,7 @@ class PresenceFederationQueue:
         # handle the case where `from_token` stream ID has already been dropped.
         start_idx = max(from_token + 1 - self._next_id, -len(self._queue))
 
-        to_send: List[Tuple[int, Tuple[str, str]]] = []
+        to_send: list[tuple[int, tuple[str, str]]] = []
         limited = False
         new_id = upto_token
         for _, stream_id, destinations, user_ids in self._queue[start_idx:]:
@@ -2548,7 +2621,7 @@ class PresenceFederationQueue:
         if not self._federation:
             return
 
-        hosts_to_users: Dict[str, Set[str]] = {}
+        hosts_to_users: dict[str, set[str]] = {}
         for row in rows:
             hosts_to_users.setdefault(row.destination, set()).add(row.user_id)
 

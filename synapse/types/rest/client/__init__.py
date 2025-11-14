@@ -18,17 +18,19 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
-
-from synapse._pydantic_compat import (
-    Extra,
+from pydantic import (
+    ConfigDict,
+    Field,
     StrictBool,
     StrictInt,
     StrictStr,
-    conint,
-    constr,
-    validator,
+    StringConstraints,
+    field_validator,
+    model_validator,
 )
+from pydantic_core import PydanticCustomError
+from typing_extensions import Annotated, Self
+
 from synapse.types.rest import RequestBodyModel
 from synapse.util.threepids import validate_email
 
@@ -43,39 +45,36 @@ class AuthenticationData(RequestBodyModel):
     `.dict(exclude_unset=True)` to access them.
     """
 
-    class Config:
-        extra = Extra.allow
+    model_config = ConfigDict(extra="allow")
 
-    session: Optional[StrictStr] = None
-    type: Optional[StrictStr] = None
+    session: StrictStr | None = None
+    type: StrictStr | None = None
 
 
-if TYPE_CHECKING:
-    ClientSecretStr = StrictStr
-else:
-    # See also assert_valid_client_secret()
-    ClientSecretStr = constr(
-        regex="[0-9a-zA-Z.=_-]",  # noqa: F722
+# See also assert_valid_client_secret()
+ClientSecretStr = Annotated[
+    str,
+    StringConstraints(
+        pattern="[0-9a-zA-Z.=_-]",
         min_length=1,
         max_length=255,
         strict=True,
-    )
+    ),
+]
 
 
 class ThreepidRequestTokenBody(RequestBodyModel):
     client_secret: ClientSecretStr
-    id_server: Optional[StrictStr]
-    id_access_token: Optional[StrictStr]
-    next_link: Optional[StrictStr]
+    id_server: StrictStr | None = None
+    id_access_token: StrictStr | None = None
+    next_link: StrictStr | None = None
     send_attempt: StrictInt
 
-    @validator("id_access_token", always=True)
-    def token_required_for_identity_server(
-        cls, token: Optional[str], values: Dict[str, object]
-    ) -> Optional[str]:
-        if values.get("id_server") is not None and token is None:
+    @model_validator(mode="after")
+    def token_required_for_identity_server(self) -> Self:
+        if self.id_server is not None and self.id_access_token is None:
             raise ValueError("id_access_token is required if an id_server is supplied.")
-        return token
+        return self
 
 
 class EmailRequestTokenBody(ThreepidRequestTokenBody):
@@ -86,14 +85,21 @@ class EmailRequestTokenBody(ThreepidRequestTokenBody):
     # know the exact spelling (eg. upper and lower case) of address in the database.
     # Without this, an email stored in the database as "foo@bar.com" would cause
     # user requests for "FOO@bar.com" to raise a Not Found error.
-    _email_validator = validator("email", allow_reuse=True)(validate_email)
+    @field_validator("email")
+    @classmethod
+    def _email_validator(cls, email: StrictStr) -> StrictStr:
+        try:
+            return validate_email(email)
+        except ValueError as e:
+            # To ensure backward compatibility of HTTP error codes, we return a
+            # Pydantic error with the custom, unrecognized error type
+            # "email_custom_err_type" instead of the default error type
+            # "value_error". This results in the more generic BAD_JSON HTTP
+            # error instead of the more specific INVALID_PARAM one.
+            raise PydanticCustomError("email_custom_err_type", str(e), None) from e
 
 
-if TYPE_CHECKING:
-    ISO3116_1_Alpha_2 = StrictStr
-else:
-    # Per spec: two-letter uppercase ISO-3166-1-alpha-2
-    ISO3116_1_Alpha_2 = constr(regex="[A-Z]{2}", strict=True)
+ISO3116_1_Alpha_2 = Annotated[str, StringConstraints(pattern="[A-Z]{2}", strict=True)]
 
 
 class MsisdnRequestTokenBody(ThreepidRequestTokenBody):
@@ -143,12 +149,10 @@ class SlidingSyncBody(RequestBodyModel):
                 (Max 1000 messages)
         """
 
-        required_state: List[Tuple[StrictStr, StrictStr]]
-        # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
-        if TYPE_CHECKING:
-            timeline_limit: int
-        else:
-            timeline_limit: conint(le=1000, strict=True)  # type: ignore[valid-type]
+        required_state: list[
+            Annotated[tuple[StrictStr, StrictStr], Field(strict=False)]
+        ]
+        timeline_limit: Annotated[int, Field(le=1000, strict=True)]
 
     class SlidingSyncList(CommonRoomParameters):
         """
@@ -240,25 +244,30 @@ class SlidingSyncBody(RequestBodyModel):
                     list of favourite rooms again.
             """
 
-            is_dm: Optional[StrictBool] = None
-            spaces: Optional[List[StrictStr]] = None
-            is_encrypted: Optional[StrictBool] = None
-            is_invite: Optional[StrictBool] = None
-            room_types: Optional[List[Union[StrictStr, None]]] = None
-            not_room_types: Optional[List[Union[StrictStr, None]]] = None
-            room_name_like: Optional[StrictStr] = None
-            tags: Optional[List[StrictStr]] = None
-            not_tags: Optional[List[StrictStr]] = None
+            is_dm: StrictBool | None = None
+            spaces: list[StrictStr] | None = None
+            is_encrypted: StrictBool | None = None
+            is_invite: StrictBool | None = None
+            room_types: list[StrictStr | None] | None = None
+            not_room_types: list[StrictStr | None] | None = None
+            room_name_like: StrictStr | None = None
+            tags: list[StrictStr] | None = None
+            not_tags: list[StrictStr] | None = None
 
-        # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
-        if TYPE_CHECKING:
-            ranges: Optional[List[Tuple[int, int]]] = None
-        else:
-            ranges: Optional[
-                List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]
-            ] = None  # type: ignore[valid-type]
-        slow_get_all_rooms: Optional[StrictBool] = False
-        filters: Optional[Filters] = None
+        ranges: (
+            list[
+                Annotated[
+                    tuple[
+                        Annotated[int, Field(ge=0, strict=True)],
+                        Annotated[int, Field(ge=0, strict=True)],
+                    ],
+                    Field(strict=False),
+                ]
+            ]
+            | None
+        ) = None
+        slow_get_all_rooms: StrictBool | None = False
+        filters: Filters | None = None
 
     class RoomSubscription(CommonRoomParameters):
         pass
@@ -281,14 +290,13 @@ class SlidingSyncBody(RequestBodyModel):
                 since: The `next_batch` from the previous sync response
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             limit: StrictInt = 100
-            since: Optional[StrictStr] = None
+            since: StrictStr | None = None
 
-            @validator("since")
-            def since_token_check(
-                cls, value: Optional[StrictStr]
-            ) -> Optional[StrictStr]:
+            @field_validator("since")
+            @classmethod
+            def since_token_check(cls, value: StrictStr | None) -> StrictStr | None:
                 # `since` comes in as an opaque string token but we know that it's just
                 # an integer representing the position in the device inbox stream. We
                 # want to pre-validate it to make sure it works fine in downstream code.
@@ -311,7 +319,7 @@ class SlidingSyncBody(RequestBodyModel):
                 enabled
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
 
         class AccountDataExtension(RequestBodyModel):
             """The Account Data extension (MSC3959)
@@ -324,11 +332,11 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[List[StrictStr]] = ["*"]
+            lists: list[StrictStr] | None = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[List[StrictStr]] = ["*"]
+            rooms: list[StrictStr] | None = ["*"]
 
         class ReceiptsExtension(RequestBodyModel):
             """The Receipts extension (MSC3960)
@@ -341,11 +349,11 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[List[StrictStr]] = ["*"]
+            lists: list[StrictStr] | None = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[List[StrictStr]] = ["*"]
+            rooms: list[StrictStr] | None = ["*"]
 
         class TypingExtension(RequestBodyModel):
             """The Typing Notification extension (MSC3961)
@@ -358,34 +366,48 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: Optional[StrictBool] = False
+            enabled: StrictBool | None = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[List[StrictStr]] = ["*"]
+            lists: list[StrictStr] | None = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[List[StrictStr]] = ["*"]
+            rooms: list[StrictStr] | None = ["*"]
 
-        to_device: Optional[ToDeviceExtension] = None
-        e2ee: Optional[E2eeExtension] = None
-        account_data: Optional[AccountDataExtension] = None
-        receipts: Optional[ReceiptsExtension] = None
-        typing: Optional[TypingExtension] = None
+        class ThreadSubscriptionsExtension(RequestBodyModel):
+            """The Thread Subscriptions extension (MSC4308)
 
-    conn_id: Optional[StrictStr]
+            Attributes:
+                enabled
+                limit: maximum number of subscription changes to return (default 100)
+            """
 
-    # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
-    if TYPE_CHECKING:
-        lists: Optional[Dict[str, SlidingSyncList]] = None
-    else:
-        lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]] = (
-            None  # type: ignore[valid-type]
+            enabled: StrictBool | None = False
+            limit: StrictInt = 100
+
+        to_device: ToDeviceExtension | None = None
+        e2ee: E2eeExtension | None = None
+        account_data: AccountDataExtension | None = None
+        receipts: ReceiptsExtension | None = None
+        typing: TypingExtension | None = None
+        thread_subscriptions: ThreadSubscriptionsExtension | None = Field(
+            None, alias="io.element.msc4308.thread_subscriptions"
         )
-    room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]] = None
-    extensions: Optional[Extensions] = None
 
-    @validator("lists")
+    conn_id: StrictStr | None = None
+    lists: (
+        dict[
+            Annotated[str, StringConstraints(max_length=64, strict=True)],
+            SlidingSyncList,
+        ]
+        | None
+    ) = None
+    room_subscriptions: dict[StrictStr, RoomSubscription] | None = None
+    extensions: Extensions | None = None
+
+    @field_validator("lists")
+    @classmethod
     def lists_length_check(
-        cls, value: Optional[Dict[str, SlidingSyncList]]
-    ) -> Optional[Dict[str, SlidingSyncList]]:
+        cls, value: dict[str, SlidingSyncList] | None
+    ) -> dict[str, SlidingSyncList] | None:
         if value is not None:
             assert len(value) <= 100, f"Max lists: 100 but saw {len(value)}"
         return value

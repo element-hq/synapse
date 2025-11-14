@@ -22,17 +22,15 @@
 
 import argparse
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import attr
-
-from synapse._pydantic_compat import (
-    BaseModel,
-    Extra,
+from pydantic import (
     StrictBool,
     StrictInt,
     StrictStr,
 )
+
 from synapse.config._base import (
     Config,
     ConfigError,
@@ -47,6 +45,7 @@ from synapse.config.server import (
     parse_listener_def,
 )
 from synapse.types import JsonDict
+from synapse.util.pydantic_models import ParseModel
 
 _DEPRECATED_WORKER_DUTY_OPTION_USED = """
 The '%s' configuration option is deprecated and will be removed in a future
@@ -80,7 +79,7 @@ MAIN_PROCESS_INSTANCE_MAP_NAME = "main"
 logger = logging.getLogger(__name__)
 
 
-def _instance_to_list_converter(obj: Union[str, List[str]]) -> List[str]:
+def _instance_to_list_converter(obj: str | list[str]) -> list[str]:
     """Helper for allowing parsing a string or list of strings to a config
     option expecting a list of strings.
     """
@@ -90,30 +89,7 @@ def _instance_to_list_converter(obj: Union[str, List[str]]) -> List[str]:
     return obj
 
 
-class ConfigModel(BaseModel):
-    """A custom version of Pydantic's BaseModel which
-
-     - ignores unknown fields and
-     - does not allow fields to be overwritten after construction,
-
-    but otherwise uses Pydantic's default behaviour.
-
-    For now, ignore unknown fields. In the future, we could change this so that unknown
-    config values cause a ValidationError, provided the error messages are meaningful to
-    server operators.
-
-    Subclassing in this way is recommended by
-    https://pydantic-docs.helpmanual.io/usage/model_config/#change-behaviour-globally
-    """
-
-    class Config:
-        # By default, ignore fields that we don't recognise.
-        extra = Extra.ignore
-        # By default, don't allow fields to be reassigned after parsing.
-        allow_mutation = False
-
-
-class InstanceTcpLocationConfig(ConfigModel):
+class InstanceTcpLocationConfig(ParseModel):
     """The host and port to talk to an instance via HTTP replication."""
 
     host: StrictStr
@@ -129,7 +105,7 @@ class InstanceTcpLocationConfig(ConfigModel):
         return f"{self.host}:{self.port}"
 
 
-class InstanceUnixLocationConfig(ConfigModel):
+class InstanceUnixLocationConfig(ParseModel):
     """The socket file to talk to an instance via HTTP replication."""
 
     path: StrictStr
@@ -143,7 +119,7 @@ class InstanceUnixLocationConfig(ConfigModel):
         return f"{self.path}"
 
 
-InstanceLocationConfig = Union[InstanceTcpLocationConfig, InstanceUnixLocationConfig]
+InstanceLocationConfig = InstanceTcpLocationConfig | InstanceUnixLocationConfig
 
 
 @attr.s
@@ -158,39 +134,47 @@ class WriterLocations:
             can only be a single instance.
         account_data: The instances that write to the account data streams. Currently
             can only be a single instance.
-        receipts: The instances that write to the receipts stream. Currently
-            can only be a single instance.
+        receipts: The instances that write to the receipts stream.
         presence: The instances that write to the presence stream. Currently
             can only be a single instance.
         push_rules: The instances that write to the push stream. Currently
             can only be a single instance.
+        device_lists: The instances that write to the device list stream.
     """
 
-    events: List[str] = attr.ib(
-        default=["master"],
+    events: list[str] = attr.ib(
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
-    typing: List[str] = attr.ib(
-        default=["master"],
+    typing: list[str] = attr.ib(
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
-    to_device: List[str] = attr.ib(
-        default=["master"],
+    to_device: list[str] = attr.ib(
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
-    account_data: List[str] = attr.ib(
-        default=["master"],
+    account_data: list[str] = attr.ib(
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
-    receipts: List[str] = attr.ib(
-        default=["master"],
+    receipts: list[str] = attr.ib(
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
-    presence: List[str] = attr.ib(
-        default=["master"],
+    presence: list[str] = attr.ib(
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
-    push_rules: List[str] = attr.ib(
+    push_rules: list[str] = attr.ib(
+        default=[MAIN_PROCESS_INSTANCE_NAME],
+        converter=_instance_to_list_converter,
+    )
+    device_lists: list[str] = attr.ib(
+        default=[MAIN_PROCESS_INSTANCE_NAME],
+        converter=_instance_to_list_converter,
+    )
+    thread_subscriptions: list[str] = attr.ib(
         default=["master"],
         converter=_instance_to_list_converter,
     )
@@ -206,8 +190,8 @@ class OutboundFederationRestrictedTo:
         locations: list of instance locations to connect to proxy via.
     """
 
-    instances: Optional[List[str]]
-    locations: List[InstanceLocationConfig] = attr.Factory(list)
+    instances: list[str] | None
+    locations: list[InstanceLocationConfig] = attr.Factory(list)
 
     def __contains__(self, instance: str) -> bool:
         # It feels a bit dirty to return `True` if `instances` is `None`, but it makes
@@ -262,10 +246,16 @@ class WorkerConfig(Config):
         if worker_replication_secret_path:
             if worker_replication_secret:
                 raise ConfigError(CONFLICTING_WORKER_REPLICATION_SECRET_OPTS_ERROR)
-            self.worker_replication_secret = read_file(
+            self.worker_replication_secret: str | None = read_file(
                 worker_replication_secret_path, ("worker_replication_secret_path",)
             ).strip()
         else:
+            if worker_replication_secret is not None and not isinstance(
+                worker_replication_secret, str
+            ):
+                raise ConfigError(
+                    "Config option must be a string", ("worker_replication_secret",)
+                )
             self.worker_replication_secret = worker_replication_secret
 
         self.worker_name = config.get("worker_name", self.worker_app)
@@ -305,7 +295,7 @@ class WorkerConfig(Config):
         # A map from instance name to host/port of their HTTP replication endpoint.
         # Check if the main process is declared. The main process itself doesn't need
         # this data as it would never have to talk to itself.
-        instance_map: Dict[str, Any] = config.get("instance_map", {})
+        instance_map: dict[str, Any] = config.get("instance_map", {})
 
         if self.instance_name is not MAIN_PROCESS_INSTANCE_NAME:
             # TODO: The next 3 condition blocks can be deleted after some time has
@@ -351,8 +341,8 @@ class WorkerConfig(Config):
                     % MAIN_PROCESS_INSTANCE_MAP_NAME
                 )
 
-        # type-ignore: the expression `Union[A, B]` is not a Type[Union[A, B]] currently
-        self.instance_map: Dict[str, InstanceLocationConfig] = (
+        # type-ignore: the expression `A | B` is not a `type[A | B]` currently
+        self.instance_map: dict[str, InstanceLocationConfig] = (
             parse_and_validate_mapping(
                 instance_map,
                 InstanceLocationConfig,  # type: ignore[arg-type]
@@ -376,7 +366,10 @@ class WorkerConfig(Config):
         ):
             instances = _instance_to_list_converter(getattr(self.writers, stream))
             for instance in instances:
-                if instance != "master" and instance not in self.instance_map:
+                if (
+                    instance != MAIN_PROCESS_INSTANCE_NAME
+                    and instance not in self.instance_map
+                ):
                     raise ConfigError(
                         "Instance %r is configured to write %s but does not appear in `instance_map` config."
                         % (instance, stream)
@@ -415,6 +408,11 @@ class WorkerConfig(Config):
                 "Must only specify one instance to handle `push` messages."
             )
 
+        if len(self.writers.device_lists) == 0:
+            raise ConfigError(
+                "Must specify at least one instance to handle `device_lists` messages."
+            )
+
         self.events_shard_config = RoutableShardedWorkerHandlingConfig(
             self.writers.events
         )
@@ -437,9 +435,12 @@ class WorkerConfig(Config):
         #
         # No effort is made to ensure only a single instance of these tasks is
         # running.
-        background_tasks_instance = config.get("run_background_tasks_on") or "master"
+        background_tasks_instance = (
+            config.get("run_background_tasks_on") or MAIN_PROCESS_INSTANCE_NAME
+        )
         self.run_background_tasks = (
-            self.worker_name is None and background_tasks_instance == "master"
+            self.worker_name is None
+            and background_tasks_instance == MAIN_PROCESS_INSTANCE_NAME
         ) or self.worker_name == background_tasks_instance
 
         self.should_notify_appservices = self._should_this_worker_perform_duty(
@@ -480,7 +481,7 @@ class WorkerConfig(Config):
 
     def _should_this_worker_perform_duty(
         self,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         legacy_master_option_name: str,
         legacy_worker_app_name: str,
         new_option_name: str,
@@ -511,9 +512,10 @@ class WorkerConfig(Config):
         # 'don't run here'.
         new_option_should_run_here = None
         if new_option_name in config:
-            designated_worker = config[new_option_name] or "master"
+            designated_worker = config[new_option_name] or MAIN_PROCESS_INSTANCE_NAME
             new_option_should_run_here = (
-                designated_worker == "master" and self.worker_name is None
+                designated_worker == MAIN_PROCESS_INSTANCE_NAME
+                and self.worker_name is None
             ) or designated_worker == self.worker_name
 
         legacy_option_should_run_here = None
@@ -572,11 +574,11 @@ class WorkerConfig(Config):
 
     def _worker_names_performing_this_duty(
         self,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         legacy_option_name: str,
         legacy_app_name: str,
         modern_instance_list_name: str,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Retrieves the names of the workers handling a given duty, by either legacy
         option or instance list.
@@ -610,7 +612,7 @@ class WorkerConfig(Config):
             # If no worker instances are set we check if the legacy option
             # is set, which means use the main process.
             if legacy_option:
-                worker_instances = ["master"]
+                worker_instances = [MAIN_PROCESS_INSTANCE_NAME]
 
             if self.worker_app == legacy_app_name:
                 if legacy_option:

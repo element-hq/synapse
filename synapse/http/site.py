@@ -22,7 +22,7 @@ import contextlib
 import logging
 import time
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Generator, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Generator
 
 import attr
 from zope.interface import implementer
@@ -30,6 +30,7 @@ from zope.interface import implementer
 from twisted.internet.address import UNIXAddress
 from twisted.internet.defer import Deferred
 from twisted.internet.interfaces import IAddress
+from twisted.internet.protocol import Protocol
 from twisted.python.failure import Failure
 from twisted.web.http import HTTPChannel
 from twisted.web.resource import IResource, Resource
@@ -44,6 +45,7 @@ from synapse.logging.context import (
     LoggingContext,
     PreserveLoggingContext,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, Requester
 
 if TYPE_CHECKING:
@@ -83,12 +85,14 @@ class SynapseRequest(Request):
         self,
         channel: HTTPChannel,
         site: "SynapseSite",
+        our_server_name: str,
         *args: Any,
         max_request_body_size: int = 1024,
-        request_id_header: Optional[str] = None,
+        request_id_header: str | None = None,
         **kw: Any,
     ):
         super().__init__(channel, *args, **kw)
+        self.our_server_name = our_server_name
         self._max_request_body_size = max_request_body_size
         self.request_id_header = request_id_header
         self.synapse_site = site
@@ -98,18 +102,18 @@ class SynapseRequest(Request):
 
         # The requester, if authenticated. For federation requests this is the
         # server name, for client requests this is the Requester object.
-        self._requester: Optional[Union[Requester, str]] = None
+        self._requester: Requester | str | None = None
 
         # An opentracing span for this request. Will be closed when the request is
         # completely processed.
-        self._opentracing_span: "Optional[opentracing.Span]" = None
+        self._opentracing_span: "opentracing.Span | None" = None
 
         # we can't yet create the logcontext, as we don't know the method.
-        self.logcontext: Optional[LoggingContext] = None
+        self.logcontext: LoggingContext | None = None
 
         # The `Deferred` to cancel if the client disconnects early and
         # `is_render_cancellable` is set. Expected to be set by `Resource.render`.
-        self.render_deferred: Optional["Deferred[None]"] = None
+        self.render_deferred: "Deferred[None]" | None = None
         # A boolean indicating whether `render_deferred` should be cancelled if the
         # client disconnects early. Expected to be set by the coroutine started by
         # `Resource.render`, if rendering is asynchronous.
@@ -123,11 +127,11 @@ class SynapseRequest(Request):
         self._is_processing = False
 
         # the time when the asynchronous request handler completed its processing
-        self._processing_finished_time: Optional[float] = None
+        self._processing_finished_time: float | None = None
 
         # what time we finished sending the response to the client (or the connection
         # dropped)
-        self.finish_time: Optional[float] = None
+        self.finish_time: float | None = None
 
     def __repr__(self) -> str:
         # We overwrite this so that we don't log ``access_token``
@@ -191,11 +195,11 @@ class SynapseRequest(Request):
         super().handleContentChunk(data)
 
     @property
-    def requester(self) -> Optional[Union[Requester, str]]:
+    def requester(self) -> Requester | str | None:
         return self._requester
 
     @requester.setter
-    def requester(self, value: Union[Requester, str]) -> None:
+    def requester(self, value: Requester | str) -> None:
         # Store the requester, and update some properties based on it.
 
         # This should only be called once.
@@ -242,7 +246,7 @@ class SynapseRequest(Request):
         Returns:
             The redacted URI as a string.
         """
-        uri: Union[bytes, str] = self.uri
+        uri: bytes | str = self.uri
         if isinstance(uri, bytes):
             uri = uri.decode("ascii", errors="replace")
         return redact_uri(uri)
@@ -257,12 +261,12 @@ class SynapseRequest(Request):
         Returns:
             The request method as a string.
         """
-        method: Union[bytes, str] = self.method
+        method: bytes | str = self.method
         if isinstance(method, bytes):
             return self.method.decode("ascii")
         return method
 
-    def get_authenticated_entity(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_authenticated_entity(self) -> tuple[str | None, str | None]:
         """
         Get the "authenticated" entity of the request, which might be the user
         performing the action, or a user being puppeted by a server admin.
@@ -299,10 +303,15 @@ class SynapseRequest(Request):
         # this is called once a Resource has been found to serve the request; in our
         # case the Resource in question will normally be a JsonResource.
 
-        # create a LogContext for this request
+        # Create a LogContext for this request
+        #
+        # We only care about associating logs and tallying up metrics at the per-request
+        # level so we don't worry about setting the `parent_context`; preventing us from
+        # unnecessarily piling up metrics on the main process's context.
         request_id = self.get_request_id()
         self.logcontext = LoggingContext(
-            request_id,
+            name=request_id,
+            server_name=self.our_server_name,
             request=ContextRequest(
                 request_id=request_id,
                 ip_address=self.get_client_ip_if_available(),
@@ -334,7 +343,11 @@ class SynapseRequest(Request):
             # dispatching to the handler, so that the handler
             # can update the servlet name in the request
             # metrics
-            requests_counter.labels(self.get_method(), self.request_metrics.name).inc()
+            requests_counter.labels(
+                method=self.get_method(),
+                servlet=self.request_metrics.name,
+                **{SERVER_NAME_LABEL: self.our_server_name},
+            ).inc()
 
     @contextlib.contextmanager
     def processing(self) -> Generator[None, None, None]:
@@ -390,7 +403,7 @@ class SynapseRequest(Request):
             with PreserveLoggingContext(self.logcontext):
                 self._finished_processing()
 
-    def connectionLost(self, reason: Union[Failure, Exception]) -> None:
+    def connectionLost(self, reason: Failure | Exception) -> None:
         """Called when the client connection is closed before the response is written.
 
         Overrides twisted.web.server.Request.connectionLost to record the finish time and
@@ -455,7 +468,7 @@ class SynapseRequest(Request):
                 self.request_metrics.name.
         """
         self.start_time = time.time()
-        self.request_metrics = RequestMetrics()
+        self.request_metrics = RequestMetrics(our_server_name=self.our_server_name)
         self.request_metrics.start(
             self.start_time, name=servlet_name, method=self.get_method()
         )
@@ -582,7 +595,7 @@ class XForwardedForRequest(SynapseRequest):
     """
 
     # the client IP and ssl flag, as extracted from the headers.
-    _forwarded_for: "Optional[_XForwardedForAddress]" = None
+    _forwarded_for: "_XForwardedForAddress | None" = None
     _forwarded_https: bool = False
 
     def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
@@ -648,6 +661,70 @@ class _XForwardedForAddress:
     host: str
 
 
+class SynapseProtocol(HTTPChannel):
+    """
+    Synapse-specific twisted http Protocol.
+
+    This is a small wrapper around the twisted HTTPChannel so we can track active
+    connections in order to close any outstanding connections on shutdown.
+    """
+
+    def __init__(
+        self,
+        site: "SynapseSite",
+        our_server_name: str,
+        max_request_body_size: int,
+        request_id_header: str | None,
+        request_class: type,
+    ):
+        super().__init__()
+        self.factory: SynapseSite = site
+        self.site = site
+        self.our_server_name = our_server_name
+        self.max_request_body_size = max_request_body_size
+        self.request_id_header = request_id_header
+        self.request_class = request_class
+
+    def connectionMade(self) -> None:
+        """
+        Called when a connection is made.
+
+        This may be considered the initializer of the protocol, because
+        it is called when the connection is completed.
+
+        Add the connection to the factory's connection list when it's established.
+        """
+        super().connectionMade()
+        self.factory.addConnection(self)
+
+    def connectionLost(self, reason: Failure) -> None:  # type: ignore[override]
+        """
+        Called when the connection is shut down.
+
+        Clear any circular references here, and any external references to this
+        Protocol. The connection has been closed. In our case, we need to remove the
+        connection from the factory's connection list, when it's lost.
+        """
+        super().connectionLost(reason)
+        self.factory.removeConnection(self)
+
+    def requestFactory(self, http_channel: HTTPChannel, queued: bool) -> SynapseRequest:  # type: ignore[override]
+        """
+        A callable used to build `twisted.web.iweb.IRequest` objects.
+
+        Use our own custom SynapseRequest type instead of the regular
+        twisted.web.server.Request.
+        """
+        return self.request_class(
+            self,
+            self.factory,
+            our_server_name=self.our_server_name,
+            max_request_body_size=self.max_request_body_size,
+            queued=queued,
+            request_id_header=self.request_id_header,
+        )
+
+
 class SynapseSite(ProxySite):
     """
     Synapse-specific twisted http Site
@@ -664,6 +741,7 @@ class SynapseSite(ProxySite):
 
     def __init__(
         self,
+        *,
         logger_name: str,
         site_tag: str,
         config: ListenerConfig,
@@ -694,25 +772,48 @@ class SynapseSite(ProxySite):
 
         self.site_tag = site_tag
         self.reactor: ISynapseReactor = reactor
+        self.server_name = hs.hostname
 
         assert config.http_options is not None
         proxied = config.http_options.x_forwarded
-        request_class = XForwardedForRequest if proxied else SynapseRequest
+        self.request_class = XForwardedForRequest if proxied else SynapseRequest
 
-        request_id_header = config.http_options.request_id_header
+        self.request_id_header = config.http_options.request_id_header
+        self.max_request_body_size = max_request_body_size
 
-        def request_factory(channel: HTTPChannel, queued: bool) -> Request:
-            return request_class(
-                channel,
-                self,
-                max_request_body_size=max_request_body_size,
-                queued=queued,
-                request_id_header=request_id_header,
-            )
-
-        self.requestFactory = request_factory  # type: ignore
         self.access_logger = logging.getLogger(logger_name)
         self.server_version_string = server_version_string.encode("ascii")
+        self.connections: list[Protocol] = []
+
+    def buildProtocol(self, addr: IAddress) -> SynapseProtocol:
+        protocol = SynapseProtocol(
+            self,
+            self.server_name,
+            self.max_request_body_size,
+            self.request_id_header,
+            self.request_class,
+        )
+        return protocol
+
+    def addConnection(self, protocol: Protocol) -> None:
+        self.connections.append(protocol)
+
+    def removeConnection(self, protocol: Protocol) -> None:
+        if protocol in self.connections:
+            self.connections.remove(protocol)
+
+    def stopFactory(self) -> None:
+        super().stopFactory()
+
+        # Shutdown any connections which are still active.
+        # These can be long lived HTTP connections which wouldn't normally be closed
+        # when calling `shutdown` on the respective `Port`.
+        # Closing the connections here is required for us to fully shutdown the
+        # `SynapseHomeServer` in order for it to be garbage collected.
+        for protocol in self.connections[:]:
+            if protocol.transport is not None:
+                protocol.transport.loseConnection()
+        self.connections.clear()
 
     def log(self, request: SynapseRequest) -> None:  # type: ignore[override]
         pass
@@ -720,5 +821,5 @@ class SynapseSite(ProxySite):
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)
 class RequestInfo:
-    user_agent: Optional[str]
+    user_agent: str | None
     ip: str

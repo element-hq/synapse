@@ -23,7 +23,7 @@ import shutil
 import tempfile
 from binascii import unhexlify
 from io import BytesIO
-from typing import Any, BinaryIO, ClassVar, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, BinaryIO, ClassVar, Literal
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 
@@ -33,8 +33,8 @@ from PIL import Image as Image
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred
+from twisted.internet.testing import MemoryReactor
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
@@ -56,7 +56,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, media
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomAlias
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeChannel
@@ -150,8 +150,8 @@ class TestImage:
     data: bytes
     content_type: bytes
     extension: bytes
-    expected_cropped: Optional[bytes] = None
-    expected_scaled: Optional[bytes] = None
+    expected_cropped: bytes | None = None
+    expected_scaled: bytes | None = None
     expected_found: bool = True
     unable_to_thumbnail: bool = False
     is_inline: bool = True
@@ -297,12 +297,12 @@ class MediaRepoTests(unittest.HomeserverTestCase):
     user_id = "@test:user"
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.fetches: List[
-            Tuple[
-                "Deferred[Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]]]",
+        self.fetches: list[
+            tuple[
+                "Deferred[tuple[bytes, tuple[int, dict[bytes, list[bytes]]]]]",
                 str,
                 str,
-                Optional[QueryParams],
+                QueryParams | None,
             ]
         ] = []
 
@@ -313,16 +313,16 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             download_ratelimiter: Ratelimiter,
             ip_address: Any,
             max_size: int,
-            args: Optional[QueryParams] = None,
+            args: QueryParams | None = None,
             retry_on_dns_fail: bool = True,
             ignore_backoff: bool = False,
             follow_redirects: bool = False,
-        ) -> "Deferred[Tuple[int, Dict[bytes, List[bytes]]]]":
+        ) -> "Deferred[tuple[int, dict[bytes, list[bytes]]]]":
             """A mock for MatrixFederationHttpClient.get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]],
-            ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+                r: tuple[bytes, tuple[int, dict[bytes, list[bytes]]]],
+            ) -> tuple[int, dict[bytes, list[bytes]]]:
                 data, response = r
                 output_stream.write(data)
                 return response
@@ -332,7 +332,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
                 output_stream.write(f.value.response)
                 return f
 
-            d: Deferred[Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]]] = Deferred()
+            d: Deferred[tuple[bytes, tuple[int, dict[bytes, list[bytes]]]]] = Deferred()
             self.fetches.append((d, destination, path, args))
             # Note that this callback changes the value held by d.
             d_after_callback = d.addCallbacks(write_to, write_err)
@@ -370,13 +370,13 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         self.media_id = "example.com/12345"
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
 
     def _req(
-        self, content_disposition: Optional[bytes], include_content_type: bool = True
+        self, content_disposition: bytes | None, include_content_type: bool = True
     ) -> FakeChannel:
         channel = self.make_request(
             "GET",
@@ -654,7 +654,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
     def _test_thumbnail(
         self,
         method: str,
-        expected_body: Optional[bytes],
+        expected_body: bytes | None,
         expected_found: bool,
         unable_to_thumbnail: bool = False,
     ) -> None:
@@ -860,15 +860,15 @@ class TestSpamCheckerLegacy:
     Uses the legacy Spam-Checker API.
     """
 
-    def __init__(self, config: Dict[str, Any], api: ModuleApi) -> None:
+    def __init__(self, config: dict[str, Any], api: ModuleApi) -> None:
         self.config = config
         self.api = api
 
     @staticmethod
-    def parse_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    def parse_config(config: dict[str, Any]) -> dict[str, Any]:
         return config
 
-    async def check_event_for_spam(self, event: EventBase) -> Union[bool, str]:
+    async def check_event_for_spam(self, event: EventBase) -> bool | str:
         return False  # allow all events
 
     async def user_may_invite(
@@ -911,12 +911,12 @@ class SpamCheckerTestCaseLegacy(unittest.HomeserverTestCase):
 
         load_legacy_spam_checkers(hs)
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = default_config("test")
 
         config.update(
@@ -965,14 +965,14 @@ class SpamCheckerTestCase(unittest.HomeserverTestCase):
             check_media_file_for_spam=self.check_media_file_for_spam
         )
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
 
     async def check_media_file_for_spam(
         self, file_wrapper: ReadableFileWrapper, file_info: FileInfo
-    ) -> Union[Codes, Literal["NOT_SPAM"], Tuple[Codes, JsonDict]]:
+    ) -> Codes | Literal["NOT_SPAM"] | tuple[Codes, JsonDict]:
         buf = BytesIO()
         await file_wrapper.write_chunks_to(buf.write)
 
@@ -1028,7 +1028,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
         self.client = hs.get_federation_http_client()
         self.store = hs.get_datastores().main
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         # We need to manually set the resource tree to include media, the
         # default only does `/_matrix/client` APIs.
         return {"/_matrix/media": self.hs.get_media_repository_resource()}
@@ -1259,7 +1259,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
 
 
 def read_body(
-    response: IResponse, stream: ByteWriteable, max_size: Optional[int]
+    response: IResponse, stream: ByteWriteable, max_size: int | None
 ) -> Deferred:
     d: Deferred = defer.Deferred()
     stream.write(SMALL_PNG)
@@ -1280,7 +1280,7 @@ class MediaHashesTestCase(unittest.HomeserverTestCase):
         self.store = hs.get_datastores().main
         self.client = hs.get_federation_http_client()
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -1360,3 +1360,42 @@ class MediaHashesTestCase(unittest.HomeserverTestCase):
             store_media.sha256,
             SMALL_PNG_SHA256,
         )
+
+
+class MediaRepoSizeModuleCallbackTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+        self.mock_result = True  # Allow all uploads by default
+
+        hs.get_module_api().register_media_repository_callbacks(
+            is_user_allowed_to_upload_media_of_size=self.is_user_allowed_to_upload_media_of_size,
+        )
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    async def is_user_allowed_to_upload_media_of_size(
+        self, user_id: str, size: int
+    ) -> bool:
+        self.last_user_id = user_id
+        self.last_size = size
+        return self.mock_result
+
+    def test_upload_allowed(self) -> None:
+        self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=200)
+        assert self.last_user_id == self.user
+        assert self.last_size == len(SMALL_PNG)
+
+    def test_upload_not_allowed(self) -> None:
+        self.mock_result = False
+        self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=413)
+        assert self.last_user_id == self.user
+        assert self.last_size == len(SMALL_PNG)

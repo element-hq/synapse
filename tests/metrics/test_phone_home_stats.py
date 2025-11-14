@@ -14,7 +14,7 @@
 import logging
 from unittest.mock import AsyncMock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.app.phone_stats_home import (
     PHONE_HOME_INTERVAL_SECONDS,
@@ -23,7 +23,7 @@ from synapse.app.phone_stats_home import (
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock

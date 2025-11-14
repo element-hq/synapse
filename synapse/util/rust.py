@@ -24,7 +24,6 @@ import os
 import urllib.parse
 from hashlib import blake2b
 from importlib.metadata import Distribution, PackageNotFoundError
-from typing import Optional
 
 import synapse
 from synapse.synapse_rust import get_rust_file_digest
@@ -80,7 +79,7 @@ def _hash_rust_files_in_directory(directory: str) -> str:
     return hasher.hexdigest()
 
 
-def get_synapse_source_directory() -> Optional[str]:
+def get_synapse_source_directory() -> str | None:
     """Try and find the source directory of synapse for editable installs (like
     those used in development).
 

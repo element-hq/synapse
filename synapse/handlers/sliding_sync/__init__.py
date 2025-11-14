@@ -15,7 +15,7 @@
 import itertools
 import logging
 from itertools import chain
-from typing import TYPE_CHECKING, AbstractSet, Dict, List, Mapping, Optional, Set, Tuple
+from typing import TYPE_CHECKING, AbstractSet, Mapping
 
 from prometheus_client import Histogram
 from typing_extensions import assert_never
@@ -38,6 +38,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
@@ -79,7 +80,7 @@ logger = logging.getLogger(__name__)
 sync_processing_time = Histogram(
     "synapse_sliding_sync_processing_time",
     "Time taken to generate a sliding sync response, ignoring wait times.",
-    ["initial"],
+    labelnames=["initial", SERVER_NAME_LABEL],
 )
 
 # Limit the number of state_keys we should remember sending down the connection for each
@@ -94,6 +95,7 @@ MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER = 100
 
 class SlidingSyncHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
@@ -112,9 +114,9 @@ class SlidingSyncHandler:
         self,
         requester: Requester,
         sync_config: SlidingSyncConfig,
-        from_token: Optional[SlidingSyncStreamToken] = None,
+        from_token: SlidingSyncStreamToken | None = None,
         timeout_ms: int = 0,
-    ) -> SlidingSyncResult:
+    ) -> tuple[SlidingSyncResult, bool]:
         """
         Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
@@ -126,9 +128,16 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
             timeout_ms: The time in milliseconds to wait for new data to arrive. If 0,
-                we will immediately but there might not be any new data so we just return an
-                empty response.
+                we will respond immediately but there might not be any new data so we just
+                return an empty response.
+
+        Returns:
+            A tuple containing the `SlidingSyncResult` and whether we waited for new
+            activity before responding. Knowing whether we waited is useful in traces
+            to filter out long-running requests where we were just waiting.
         """
+        did_wait = False
+
         # If the user is not part of the mau group, then check that limits have
         # not been exceeded (if not part of the group by this point, almost certain
         # auth_blocking will occur)
@@ -147,7 +156,7 @@ class SlidingSyncHandler:
                 logger.warning(
                     "Timed out waiting for worker to catch up. Returning empty response"
                 )
-                return SlidingSyncResult.empty(from_token)
+                return SlidingSyncResult.empty(from_token), did_wait
 
             # If we've spent significant time waiting to catch up, take it off
             # the timeout.
@@ -183,15 +192,16 @@ class SlidingSyncHandler:
                 current_sync_callback,
                 from_token=from_token.stream_token,
             )
+            did_wait = True
 
-        return result
+        return result, did_wait
 
     @trace
     async def current_sync_for_user(
         self,
         sync_config: SlidingSyncConfig,
         to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken] = None,
+        from_token: SlidingSyncStreamToken | None = None,
     ) -> SlidingSyncResult:
         """
         Generates the response body of a Sliding Sync result, represented as a
@@ -201,7 +211,7 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
-            to_token: The point in the stream to sync up to.
+            to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
         """
@@ -252,7 +262,7 @@ class SlidingSyncHandler:
         relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
 
         # Fetch room data
-        rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
+        rooms: dict[str, SlidingSyncResult.RoomResult] = {}
 
         new_connection_state = previous_connection_state.get_mutable()
 
@@ -368,9 +378,9 @@ class SlidingSyncHandler:
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
 
         end_time_s = self.clock.time()
-        sync_processing_time.labels(from_token is not None).observe(
-            end_time_s - start_time_s
-        )
+        sync_processing_time.labels(
+            initial=from_token is not None, **{SERVER_NAME_LABEL: self.server_name}
+        ).observe(end_time_s - start_time_s)
 
         return sliding_sync_result
 
@@ -480,7 +490,7 @@ class SlidingSyncHandler:
         room_membership_for_user_at_to_token: RoomsForUserType,
         from_token: RoomStreamToken,
         to_token: RoomStreamToken,
-    ) -> List[StateDelta]:
+    ) -> list[StateDelta]:
         """
         Get the state deltas between two tokens taking into account the user's
         membership. If the user is LEAVE/BAN, we will only get the state deltas up to
@@ -540,7 +550,7 @@ class SlidingSyncHandler:
         room_id: str,
         room_sync_config: RoomSyncConfig,
         room_membership_for_user_at_to_token: RoomsForUserType,
-        from_token: Optional[SlidingSyncStreamToken],
+        from_token: SlidingSyncStreamToken | None,
         to_token: StreamToken,
         newly_joined: bool,
         newly_left: bool,
@@ -667,11 +677,11 @@ class SlidingSyncHandler:
         # membership. Currently, we have to make all of these optional because
         # `invite`/`knock` rooms only have `stripped_state`. See
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
-        timeline_events: List[EventBase] = []
-        bundled_aggregations: Optional[Dict[str, BundledAggregations]] = None
-        limited: Optional[bool] = None
-        prev_batch_token: Optional[StreamToken] = None
-        num_live: Optional[int] = None
+        timeline_events: list[EventBase] = []
+        bundled_aggregations: dict[str, BundledAggregations] | None = None
+        limited: bool | None = None
+        prev_batch_token: StreamToken | None = None
+        num_live: int | None = None
         if (
             room_sync_config.timeline_limit > 0
             # No timeline for invite/knock rooms (just `stripped_state`)
@@ -803,7 +813,7 @@ class SlidingSyncHandler:
 
         # Figure out any stripped state events for invite/knocks. This allows the
         # potential joiner to identify the room.
-        stripped_state: List[JsonDict] = []
+        stripped_state: list[JsonDict] = []
         if room_membership_for_user_at_to_token.membership in (
             Membership.INVITE,
             Membership.KNOCK,
@@ -840,7 +850,7 @@ class SlidingSyncHandler:
         # For incremental syncs, we can do this first to determine if something relevant
         # has changed and strategically avoid fetching other costly things.
         room_state_delta_id_map: MutableStateMap[str] = {}
-        name_event_id: Optional[str] = None
+        name_event_id: str | None = None
         membership_changed = False
         name_changed = False
         avatar_changed = False
@@ -904,7 +914,7 @@ class SlidingSyncHandler:
         # We only need the room summary for calculating heroes, however if we do
         # fetch it then we can use it to calculate `joined_count` and
         # `invited_count`.
-        room_membership_summary: Optional[Mapping[str, MemberSummary]] = None
+        room_membership_summary: Mapping[str, MemberSummary] | None = None
 
         # `heroes` are required if the room name is not set.
         #
@@ -914,7 +924,7 @@ class SlidingSyncHandler:
         # see https://github.com/matrix-org/matrix-spec/issues/380. This means that
         # clients won't be able to calculate the room name when necessary and just a
         # pitfall we have to deal with until that spec issue is resolved.
-        hero_user_ids: List[str] = []
+        hero_user_ids: list[str] = []
         # TODO: Should we also check for `EventTypes.CanonicalAlias`
         # (`m.room.canonical_alias`) as a fallback for the room name? see
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
@@ -940,8 +950,8 @@ class SlidingSyncHandler:
         #
         # Similarly to other metadata, we only need to calculate the member
         # counts if this is an initial sync or the memberships have changed.
-        joined_count: Optional[int] = None
-        invited_count: Optional[int] = None
+        joined_count: int | None = None
+        invited_count: int | None = None
         if (
             initial or membership_changed
         ) and room_membership_for_user_at_to_token.membership == Membership.JOIN:
@@ -1026,7 +1036,7 @@ class SlidingSyncHandler:
                 )
                 required_state_filter = StateFilter.all()
             else:
-                required_state_types: List[Tuple[str, Optional[str]]] = []
+                required_state_types: list[tuple[str, str | None]] = []
                 num_wild_state_keys = 0
                 lazy_load_room_members = False
                 num_others = 0
@@ -1047,7 +1057,7 @@ class SlidingSyncHandler:
                             lazy_load_room_members = True
 
                             # Everyone in the timeline is relevant
-                            timeline_membership: Set[str] = set()
+                            timeline_membership: set[str] = set()
                             if timeline_events is not None:
                                 for timeline_event in timeline_events:
                                     # Anyone who sent a message is relevant
@@ -1136,7 +1146,7 @@ class SlidingSyncHandler:
 
         # The required state map to store in the room sync config, if it has
         # changed.
-        changed_required_state_map: Optional[Mapping[str, AbstractSet[str]]] = None
+        changed_required_state_map: Mapping[str, AbstractSet[str]] | None = None
 
         # We can return all of the state that was requested if this was the first
         # time we've sent the room down this connection.
@@ -1195,7 +1205,7 @@ class SlidingSyncHandler:
             required_room_state = required_state_filter.filter_state(room_state)
 
         # Find the room name and avatar from the state
-        room_name: Optional[str] = None
+        room_name: str | None = None
         # TODO: Should we also check for `EventTypes.CanonicalAlias`
         # (`m.room.canonical_alias`) as a fallback for the room name? see
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
@@ -1203,13 +1213,13 @@ class SlidingSyncHandler:
         if name_event is not None:
             room_name = name_event.content.get("name")
 
-        room_avatar: Optional[str] = None
+        room_avatar: str | None = None
         avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
         if avatar_event is not None:
             room_avatar = avatar_event.content.get("url")
 
         # Assemble heroes: extract the info from the state we just fetched
-        heroes: List[SlidingSyncResult.RoomResult.StrippedHero] = []
+        heroes: list[SlidingSyncResult.RoomResult.StrippedHero] = []
         for hero_user_id in hero_user_ids:
             member_event = room_state.get((EventTypes.Member, hero_user_id))
             if member_event is not None:
@@ -1364,9 +1374,9 @@ class SlidingSyncHandler:
         self,
         room_id: str,
         to_token: StreamToken,
-        timeline: List[EventBase],
+        timeline: list[EventBase],
         check_outside_timeline: bool,
-    ) -> Optional[int]:
+    ) -> int | None:
         """Get a bump stamp for the room, if we have a bump event and it has
         changed.
 
@@ -1469,7 +1479,7 @@ def _required_state_changes(
     prev_required_state_map: Mapping[str, AbstractSet[str]],
     request_required_state_map: Mapping[str, AbstractSet[str]],
     state_deltas: StateMap[str],
-) -> Tuple[Optional[Mapping[str, AbstractSet[str]]], StateFilter]:
+) -> tuple[Mapping[str, AbstractSet[str]] | None, StateFilter]:
     """Calculates the changes between the required state room config from the
     previous requests compared with the current request.
 
@@ -1514,15 +1524,15 @@ def _required_state_changes(
 
     # Contains updates to the required state map compared with the previous room
     # config. This has the same format as `RoomSyncConfig.required_state`
-    changes: Dict[str, AbstractSet[str]] = {}
+    changes: dict[str, AbstractSet[str]] = {}
 
     # The set of types/state keys that we need to fetch and return to the
     # client. Passed to `StateFilter.from_types(...)`
-    added: List[Tuple[str, Optional[str]]] = []
+    added: list[tuple[str, str | None]] = []
 
     # Convert the list of state deltas to map from type to state_keys that have
     # changed.
-    changed_types_to_state_keys: Dict[str, Set[str]] = {}
+    changed_types_to_state_keys: dict[str, set[str]] = {}
     for event_type, state_key in state_deltas:
         changed_types_to_state_keys.setdefault(event_type, set()).add(state_key)
 

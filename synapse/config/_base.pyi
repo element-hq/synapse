@@ -2,17 +2,11 @@ import argparse
 from typing import (
     Any,
     Collection,
-    Dict,
     Iterable,
     Iterator,
-    List,
     Literal,
     MutableMapping,
-    Optional,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
     overload,
 )
 
@@ -36,6 +30,8 @@ from synapse.config import (  # noqa: F401
     jwt,
     key,
     logger,
+    mas,
+    matrixrtc,
     metrics,
     modules,
     oembed,
@@ -59,13 +55,14 @@ from synapse.config import (  # noqa: F401
     tls,
     tracer,
     user_directory,
+    user_types,
     voip,
     workers,
 )
 from synapse.types import StrSequence
 
 class ConfigError(Exception):
-    def __init__(self, msg: str, path: Optional[StrSequence] = None):
+    def __init__(self, msg: str, path: StrSequence | None = None):
         self.msg = msg
         self.path = path
 
@@ -122,9 +119,12 @@ class RootConfig:
     retention: retention.RetentionConfig
     background_updates: background_updates.BackgroundUpdateConfig
     auto_accept_invites: auto_accept_invites.AutoAcceptInvitesConfig
+    user_types: user_types.UserTypesConfig
+    mas: mas.MasConfig
+    matrix_rtc: matrixrtc.MatrixRtcConfig
 
-    config_classes: List[Type["Config"]] = ...
-    config_files: List[str]
+    config_classes: list[type["Config"]] = ...
+    config_files: list[str]
     def __init__(self, config_files: Collection[str] = ...) -> None: ...
     def invoke_all(
         self, func_name: str, *args: Any, **kwargs: Any
@@ -133,7 +133,7 @@ class RootConfig:
     def invoke_all_static(cls, func_name: str, *args: Any, **kwargs: Any) -> None: ...
     def parse_config_dict(
         self,
-        config_dict: Dict[str, Any],
+        config_dict: dict[str, Any],
         config_dir_path: str,
         data_dir_path: str,
         allow_secrets_in_config: bool = ...,
@@ -144,19 +144,19 @@ class RootConfig:
         data_dir_path: str,
         server_name: str,
         generate_secrets: bool = ...,
-        report_stats: Optional[bool] = ...,
+        report_stats: bool | None = ...,
         open_private_ports: bool = ...,
-        listeners: Optional[Any] = ...,
-        tls_certificate_path: Optional[str] = ...,
-        tls_private_key_path: Optional[str] = ...,
+        listeners: Any | None = ...,
+        tls_certificate_path: str | None = ...,
+        tls_private_key_path: str | None = ...,
     ) -> str: ...
     @classmethod
     def load_or_generate_config(
-        cls: Type[TRootConfig], description: str, argv: List[str]
-    ) -> Optional[TRootConfig]: ...
+        cls: type[TRootConfig], description: str, argv_options: list[str]
+    ) -> TRootConfig | None: ...
     @classmethod
     def load_config(
-        cls: Type[TRootConfig], description: str, argv: List[str]
+        cls: type[TRootConfig], description: str, argv_options: list[str]
     ) -> TRootConfig: ...
     @classmethod
     def add_arguments_to_parser(
@@ -164,8 +164,8 @@ class RootConfig:
     ) -> None: ...
     @classmethod
     def load_config_with_parser(
-        cls: Type[TRootConfig], parser: argparse.ArgumentParser, argv: List[str]
-    ) -> Tuple[TRootConfig, argparse.Namespace]: ...
+        cls: type[TRootConfig], parser: argparse.ArgumentParser, argv_options: list[str]
+    ) -> tuple[TRootConfig, argparse.Namespace]: ...
     def generate_missing_files(
         self, config_dict: dict, config_dir_path: str
     ) -> None: ...
@@ -181,11 +181,11 @@ class Config:
     default_template_dir: str
     def __init__(self, root_config: RootConfig = ...) -> None: ...
     @staticmethod
-    def parse_size(value: Union[str, int]) -> int: ...
+    def parse_size(value: str | int) -> int: ...
     @staticmethod
-    def parse_duration(value: Union[str, int]) -> int: ...
+    def parse_duration(value: str | int) -> int: ...
     @staticmethod
-    def abspath(file_path: Optional[str]) -> str: ...
+    def abspath(file_path: str | None) -> str: ...
     @classmethod
     def path_exists(cls, file_path: str) -> bool: ...
     @classmethod
@@ -197,16 +197,16 @@ class Config:
     def read_template(self, filenames: str) -> jinja2.Template: ...
     def read_templates(
         self,
-        filenames: List[str],
-        custom_template_directories: Optional[Iterable[str]] = None,
-    ) -> List[jinja2.Template]: ...
+        filenames: list[str],
+        custom_template_directories: Iterable[str] | None = None,
+    ) -> list[jinja2.Template]: ...
 
-def read_config_files(config_files: Iterable[str]) -> Dict[str, Any]: ...
-def find_config_files(search_paths: List[str]) -> List[str]: ...
+def read_config_files(config_files: Iterable[str]) -> dict[str, Any]: ...
+def find_config_files(search_paths: list[str]) -> list[str]: ...
 
 class ShardedWorkerHandlingConfig:
-    instances: List[str]
-    def __init__(self, instances: List[str]) -> None: ...
+    instances: list[str]
+    def __init__(self, instances: list[str]) -> None: ...
     def should_handle(self, instance_name: str, key: str) -> bool: ...  # noqa: F811
 
 class RoutableShardedWorkerHandlingConfig(ShardedWorkerHandlingConfig):

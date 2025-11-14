@@ -25,14 +25,9 @@ import collections.abc
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Generic,
     Iterable,
-    List,
     Literal,
-    Optional,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     overload,
@@ -41,10 +36,13 @@ from typing import (
 import attr
 from unpaddedbase64 import encode_base64
 
-from synapse.api.constants import EventTypes, RelationTypes
+from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
 from synapse.synapse_rust.events import EventInternalMetadata
-from synapse.types import JsonDict, StrCollection
+from synapse.types import (
+    JsonDict,
+    StrCollection,
+)
 from synapse.util.caches import intern_dict
 from synapse.util.frozenutils import freeze
 
@@ -91,21 +89,21 @@ class DictProperty(Generic[T]):
     def __get__(
         self,
         instance: Literal[None],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: type[_DictPropertyInstance] | None = None,
     ) -> "DictProperty": ...
 
     @overload
     def __get__(
         self,
         instance: _DictPropertyInstance,
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: type[_DictPropertyInstance] | None = None,
     ) -> T: ...
 
     def __get__(
         self,
-        instance: Optional[_DictPropertyInstance],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
-    ) -> Union[T, "DictProperty"]:
+        instance: _DictPropertyInstance | None,
+        owner: type[_DictPropertyInstance] | None = None,
+    ) -> T | "DictProperty":
         # if the property is accessed as a class property rather than an instance
         # property, return the property itself rather than the value
         if instance is None:
@@ -157,21 +155,21 @@ class DefaultDictProperty(DictProperty, Generic[T]):
     def __get__(
         self,
         instance: Literal[None],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: type[_DictPropertyInstance] | None = None,
     ) -> "DefaultDictProperty": ...
 
     @overload
     def __get__(
         self,
         instance: _DictPropertyInstance,
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: type[_DictPropertyInstance] | None = None,
     ) -> T: ...
 
     def __get__(
         self,
-        instance: Optional[_DictPropertyInstance],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
-    ) -> Union[T, "DefaultDictProperty"]:
+        instance: _DictPropertyInstance | None,
+        owner: type[_DictPropertyInstance] | None = None,
+    ) -> T | "DefaultDictProperty":
         if instance is None:
             return self
         assert isinstance(instance, EventBase)
@@ -189,10 +187,10 @@ class EventBase(metaclass=abc.ABCMeta):
         self,
         event_dict: JsonDict,
         room_version: RoomVersion,
-        signatures: Dict[str, Dict[str, str]],
+        signatures: dict[str, dict[str, str]],
         unsigned: JsonDict,
         internal_metadata_dict: JsonDict,
-        rejected_reason: Optional[str],
+        rejected_reason: str | None,
     ):
         assert room_version.event_format == self.format_version
 
@@ -207,12 +205,10 @@ class EventBase(metaclass=abc.ABCMeta):
 
     depth: DictProperty[int] = DictProperty("depth")
     content: DictProperty[JsonDict] = DictProperty("content")
-    hashes: DictProperty[Dict[str, str]] = DictProperty("hashes")
-    origin: DictProperty[str] = DictProperty("origin")
+    hashes: DictProperty[dict[str, str]] = DictProperty("hashes")
     origin_server_ts: DictProperty[int] = DictProperty("origin_server_ts")
-    room_id: DictProperty[str] = DictProperty("room_id")
     sender: DictProperty[str] = DictProperty("sender")
-    # TODO state_key should be Optional[str]. This is generally asserted in Synapse
+    # TODO state_key should be str | None. This is generally asserted in Synapse
     # by calling is_state() first (which ensures it is not None), but it is hard (not possible?)
     # to properly annotate that calling is_state() asserts that state_key exists
     # and is non-None. It would be better to replace such direct references with
@@ -226,11 +222,15 @@ class EventBase(metaclass=abc.ABCMeta):
         raise NotImplementedError()
 
     @property
+    def room_id(self) -> str:
+        raise NotImplementedError()
+
+    @property
     def membership(self) -> str:
         return self.content["membership"]
 
     @property
-    def redacts(self) -> Optional[str]:
+    def redacts(self) -> str | None:
         """MSC2176 moved the redacts field into the content."""
         if self.room_version.updated_redaction_rules:
             return self.content.get("redacts")
@@ -239,7 +239,7 @@ class EventBase(metaclass=abc.ABCMeta):
     def is_state(self) -> bool:
         return self.get_state_key() is not None
 
-    def get_state_key(self) -> Optional[str]:
+    def get_state_key(self) -> str | None:
         """Get the state key of this event, or None if it's not a state event"""
         return self._dict.get("state_key")
 
@@ -249,13 +249,13 @@ class EventBase(metaclass=abc.ABCMeta):
 
         return d
 
-    def get(self, key: str, default: Optional[Any] = None) -> Any:
+    def get(self, key: str, default: Any | None = None) -> Any:
         return self._dict.get(key, default)
 
     def get_internal_metadata_dict(self) -> JsonDict:
         return self.internal_metadata.get_dict()
 
-    def get_pdu_json(self, time_now: Optional[int] = None) -> JsonDict:
+    def get_pdu_json(self, time_now: int | None = None) -> JsonDict:
         pdu_json = self.get_dict()
 
         if time_now is not None and "age_ts" in pdu_json["unsigned"]:
@@ -282,19 +282,19 @@ class EventBase(metaclass=abc.ABCMeta):
 
         return template_json
 
-    def __getitem__(self, field: str) -> Optional[Any]:
+    def __getitem__(self, field: str) -> Any | None:
         return self._dict[field]
 
     def __contains__(self, field: str) -> bool:
         return field in self._dict
 
-    def items(self) -> List[Tuple[str, Optional[Any]]]:
+    def items(self) -> list[tuple[str, Any | None]]:
         return list(self._dict.items())
 
     def keys(self) -> Iterable[str]:
         return self._dict.keys()
 
-    def prev_event_ids(self) -> List[str]:
+    def prev_event_ids(self) -> list[str]:
         """Returns the list of prev event IDs. The order matches the order
         specified in the event, though there is no meaning to it.
 
@@ -347,8 +347,8 @@ class FrozenEvent(EventBase):
         self,
         event_dict: JsonDict,
         room_version: RoomVersion,
-        internal_metadata_dict: Optional[JsonDict] = None,
-        rejected_reason: Optional[str] = None,
+        internal_metadata_dict: JsonDict | None = None,
+        rejected_reason: str | None = None,
     ):
         internal_metadata_dict = internal_metadata_dict or {}
 
@@ -387,6 +387,10 @@ class FrozenEvent(EventBase):
     def event_id(self) -> str:
         return self._event_id
 
+    @property
+    def room_id(self) -> str:
+        return self._dict["room_id"]
+
 
 class FrozenEventV2(EventBase):
     format_version = EventFormatVersions.ROOM_V3  # All events of this type are V2
@@ -395,8 +399,8 @@ class FrozenEventV2(EventBase):
         self,
         event_dict: JsonDict,
         room_version: RoomVersion,
-        internal_metadata_dict: Optional[JsonDict] = None,
-        rejected_reason: Optional[str] = None,
+        internal_metadata_dict: JsonDict | None = None,
+        rejected_reason: str | None = None,
     ):
         internal_metadata_dict = internal_metadata_dict or {}
 
@@ -422,7 +426,7 @@ class FrozenEventV2(EventBase):
         else:
             frozen_dict = event_dict
 
-        self._event_id: Optional[str] = None
+        self._event_id: str | None = None
 
         super().__init__(
             frozen_dict,
@@ -444,7 +448,11 @@ class FrozenEventV2(EventBase):
         self._event_id = "$" + encode_base64(compute_event_reference_hash(self)[1])
         return self._event_id
 
-    def prev_event_ids(self) -> List[str]:
+    @property
+    def room_id(self) -> str:
+        return self._dict["room_id"]
+
+    def prev_event_ids(self) -> list[str]:
         """Returns the list of prev event IDs. The order matches the order
         specified in the event, though there is no meaning to it.
 
@@ -482,9 +490,70 @@ class FrozenEventV3(FrozenEventV2):
         return self._event_id
 
 
+class FrozenEventV4(FrozenEventV3):
+    """FrozenEventV4 for MSC4291 room IDs are hashes"""
+
+    format_version = EventFormatVersions.ROOM_V11_HYDRA_PLUS
+
+    """Override the room_id for m.room.create events"""
+
+    def __init__(
+        self,
+        event_dict: JsonDict,
+        room_version: RoomVersion,
+        internal_metadata_dict: JsonDict | None = None,
+        rejected_reason: str | None = None,
+    ):
+        super().__init__(
+            event_dict=event_dict,
+            room_version=room_version,
+            internal_metadata_dict=internal_metadata_dict,
+            rejected_reason=rejected_reason,
+        )
+        self._room_id: str | None = None
+
+    @property
+    def room_id(self) -> str:
+        # if we have calculated the room ID already, don't do it again.
+        if self._room_id:
+            return self._room_id
+
+        is_create_event = self.type == EventTypes.Create and self.get_state_key() == ""
+
+        # for non-create events: use the supplied value from the JSON, as per FrozenEventV3
+        if not is_create_event:
+            self._room_id = self._dict["room_id"]
+            assert self._room_id is not None
+            return self._room_id
+
+        # for create events: calculate the room ID
+        from synapse.crypto.event_signing import compute_event_reference_hash
+
+        self._room_id = "!" + encode_base64(
+            compute_event_reference_hash(self)[1], urlsafe=True
+        )
+        return self._room_id
+
+    def auth_event_ids(self) -> StrCollection:
+        """Returns the list of auth event IDs. The order matches the order
+        specified in the event, though there is no meaning to it.
+        Returns:
+            The list of event IDs of this event's auth_events
+            Includes the creation event ID for convenience of all the codepaths
+            which expects the auth chain to include the creator ID, even though
+            it's explicitly not included on the wire. Excludes the create event
+            for the create event itself.
+        """
+        create_event_id = "$" + self.room_id[1:]
+        assert create_event_id not in self._dict["auth_events"]
+        if self.type == EventTypes.Create and self.get_state_key() == "":
+            return self._dict["auth_events"]  # should be []
+        return self._dict["auth_events"] + [create_event_id]
+
+
 def _event_type_from_format_version(
     format_version: int,
-) -> Type[Union[FrozenEvent, FrozenEventV2, FrozenEventV3]]:
+) -> type[FrozenEvent | FrozenEventV2 | FrozenEventV3]:
     """Returns the python type to use to construct an Event object for the
     given event format version.
 
@@ -501,6 +570,8 @@ def _event_type_from_format_version(
         return FrozenEventV2
     elif format_version == EventFormatVersions.ROOM_V4_PLUS:
         return FrozenEventV3
+    elif format_version == EventFormatVersions.ROOM_V11_HYDRA_PLUS:
+        return FrozenEventV4
     else:
         raise Exception("No event format %r" % (format_version,))
 
@@ -508,8 +579,8 @@ def _event_type_from_format_version(
 def make_event_from_dict(
     event_dict: JsonDict,
     room_version: RoomVersion = RoomVersions.V1,
-    internal_metadata_dict: Optional[JsonDict] = None,
-    rejected_reason: Optional[str] = None,
+    internal_metadata_dict: JsonDict | None = None,
+    rejected_reason: str | None = None,
 ) -> EventBase:
     """Construct an EventBase from the given event dict"""
     event_type = _event_type_from_format_version(room_version.event_format)
@@ -526,10 +597,10 @@ class _EventRelation:
     rel_type: str
     # The aggregation key. Will be None if the rel_type is not m.annotation or is
     # not a string.
-    aggregation_key: Optional[str]
+    aggregation_key: str | None
 
 
-def relation_from_event(event: EventBase) -> Optional[_EventRelation]:
+def relation_from_event(event: EventBase) -> _EventRelation | None:
     """
     Attempt to parse relation information an event.
 
@@ -560,6 +631,23 @@ def relation_from_event(event: EventBase) -> Optional[_EventRelation]:
     return _EventRelation(parent_id, rel_type, aggregation_key)
 
 
+def is_creator(create: EventBase, user_id: str) -> bool:
+    """
+    Return true if the provided user ID is the room creator.
+
+    This includes additional creators in MSC4289.
+    """
+    assert create.type == EventTypes.Create
+    if create.sender == user_id:
+        return True
+    if create.room_version.msc4289_creator_power_enabled:
+        additional_creators = set(
+            create.content.get(EventContentFields.ADDITIONAL_CREATORS, [])
+        )
+        return user_id in additional_creators
+    return False
+
+
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class StrippedStateEvent:
     """
@@ -576,4 +664,4 @@ class StrippedStateEvent:
     type: str
     state_key: str
     sender: str
-    content: Dict[str, Any]
+    content: dict[str, Any]

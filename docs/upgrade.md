@@ -117,15 +117,174 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.143.0
+
+## Dropping support for PostgreSQL 13
+
+In line with our [deprecation policy](deprecation_policy.md), we've dropped
+support for PostgreSQL 13, as it is no longer supported upstream.
+This release of Synapse requires PostgreSQL 14+.
+
+# Upgrading to v1.142.0
+
+## Python 3.10+ is now required
+
+The minimum supported Python version has been increased from v3.9 to v3.10.
+You will need Python 3.10+ to run Synapse v1.142.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+## SQLite 3.40.0+ is now required
+
+The minimum supported SQLite version has been increased from 3.27.0 to 3.40.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+
+# Upgrading to v1.141.0
+
+## Docker images now based on Debian `trixie` with Python 3.13
+
+The Docker images are now based on Debian `trixie` and use Python 3.13. If you
+are using the Docker images as a base image you may need to e.g. adjust the
+paths you mount any additional Python packages at.
+
+# Upgrading to v1.140.0
+
+## Users of `synapse-s3-storage-provider` must update the module to `v1.6.0`
+
+Deployments that make use of the
+[synapse-s3-storage-provider](https://github.com/matrix-org/synapse-s3-storage-provider/)
+module must update it to
+[v1.6.0](https://github.com/matrix-org/synapse-s3-storage-provider/releases/tag/v1.6.0),
+otherwise users will be unable to upload or download media.
+
+# Upgrading to v1.139.0
+
+## `/register` requests from old application service implementations may break when using MAS
+
+Application Services that do not set `inhibit_login=true` when calling `POST
+/_matrix/client/v3/register` will receive the error
+`IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED` in response. This is a
+result of [MSC4190: Device management for application
+services](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) which
+adds new endpoints for application services to create encryption-ready devices
+with other than `/login` or `/register` without `inhibit_login=true`.
+
+If an application service you use starts to fail with the mentioned error,
+ensure it is up to date. If it is, then kindly let the author know that they
+need to update their implementation to call `/register` with
+`inhibit_login=true`.
+
+# Upgrading to v1.138.2
+
+## Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin
+
+Ubuntu 24.10 Oracular Oriole [has been end-of-life since 10 Jul
+2025](https://endoflife.date/ubuntu). This release drops support for Ubuntu
+24.10, and in its place adds support for Ubuntu 25.04 Plucky Puffin.
+
+This notice also applies to the v1.139.0 release.
+
+# Upgrading to v1.136.0
+
+## Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`
+
+The `run_as_background_process` function is now a method of the `ModuleApi` class. If
+you were using the function directly from the module API, it will continue to work fine
+but the background process metrics will not include an accurate `server_name` label.
+This kind of metric labeling isn't relevant for many use cases and is used to
+differentiate Synapse instances running in the same Python process (relevant to Synapse
+Pro: Small Hosts). We recommend updating your usage to use the new
+`ModuleApi.run_as_background_process` method to stay on top of future changes.
+
+<details>
+<summary>Example <code>run_as_background_process</code> upgrade</summary>
+
+Before:
+```python
+class MyModule:
+    def __init__(self, module_api: ModuleApi) -> None:
+        run_as_background_process(__name__ + ":setup_database", self.setup_database)
+```
+
+After:
+```python
+class MyModule:
+    def __init__(self, module_api: ModuleApi) -> None:
+        module_api.run_as_background_process(__name__ + ":setup_database", self.setup_database)
+```
+
+</details>
+
+## Metric labels have changed on `synapse_federation_last_received_pdu_time` and `synapse_federation_last_sent_pdu_time`
+
+Previously, the `synapse_federation_last_received_pdu_time` and
+`synapse_federation_last_sent_pdu_time` metrics both used the `server_name` label to
+differentiate between different servers that we send and receive events from.
+
+Since we're now using the `server_name` label to differentiate between different Synapse
+homeserver instances running in the same process, these metrics have been changed as follows:
+
+ - `synapse_federation_last_received_pdu_time` now uses the `origin_server_name` label
+ - `synapse_federation_last_sent_pdu_time` now uses the `destination_server_name` label
+
+The Grafana dashboard JSON in `contrib/grafana/synapse.json` has been updated to reflect
+this change but you will need to manually update your own existing Grafana dashboards
+using these metrics.
+
+## Stable integration with Matrix Authentication Service
+
+Support for [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service) is now stable, with a simplified configuration.
+This stable integration requires MAS 0.20.0 or later.
+
+The existing `experimental_features.msc3861` configuration option is now deprecated and will be removed in Synapse v1.137.0.
+
+Synapse deployments already using MAS should now use the new configuration options:
+
+```yaml
+matrix_authentication_service:
+  # Enable the MAS integration
+  enabled: true
+  # The base URL where Synapse will contact MAS
+  endpoint: http://localhost:8080
+  # The shared secret used to authenticate MAS requests, must be the same as `matrix.secret` in the MAS configuration
+  # See https://element-hq.github.io/matrix-authentication-service/reference/configuration.html#matrix
+  secret: "asecurerandomsecretstring"
+```
+
+They must remove the `experimental_features.msc3861` configuration option from their configuration.
+
+They can also remove the client previously used by Synapse [in the MAS configuration](https://element-hq.github.io/matrix-authentication-service/reference/configuration.html#clients) as it is no longer in use.
+
+# Upgrading to v1.135.0
+
+## `on_user_registration` module API callback may now run on any worker
+
+Previously, the `on_user_registration` callback would only run on the main
+process. Modules relying on this callback must assume that they may now be
+called from any worker, not just the main process.
+
+# Upgrading to v1.134.0
+
+## ICU bundled with Synapse
+
+Synapse now uses the Rust `icu` library for improved user search. Installing the
+native ICU library on your system is no longer required.
+
 # Upgrading to v1.130.0
 
 ## Documented endpoint which can be delegated to a federation worker
 
 The endpoint `^/_matrix/federation/v1/version$` can be delegated to a federation
-worker. This is not new behaviour, but had not been documented yet. The 
-[list of delegatable endpoints](workers.md#synapseappgeneric_worker) has 
+worker. This is not new behaviour, but had not been documented yet. The
+[list of delegatable endpoints](workers.md#synapseappgeneric_worker) has
 been updated to include it. Make sure to check your reverse proxy rules if you
-are using workers. 
+are using workers.
 
 # Upgrading to v1.126.0
 

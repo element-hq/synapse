@@ -18,14 +18,14 @@
 #
 #
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

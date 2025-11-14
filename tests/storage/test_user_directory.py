@@ -19,11 +19,11 @@
 #
 #
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, cast
 from unittest import mock
 from unittest.mock import Mock, patch
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, UserTypes
 from synapse.appservice import ApplicationService
@@ -32,23 +32,16 @@ from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
 from synapse.storage import DataStore
 from synapse.storage.background_updates import _BackgroundUpdateHandler
-from synapse.storage.databases.main import user_directory
 from synapse.storage.databases.main.user_directory import (
     _parse_words_with_icu,
-    _parse_words_with_regex,
 )
 from synapse.storage.roommember import ProfileInfo
-from synapse.util import Clock
+from synapse.types import UserID
+from synapse.util.clock import Clock
 
 from tests.server import ThreadedMemoryReactorClock
 from tests.test_utils.event_injection import inject_member_event
 from tests.unittest import HomeserverTestCase, override_config
-
-try:
-    import icu
-except ImportError:
-    icu = None  # type: ignore
-
 
 ALICE = "@alice:a"
 BOB = "@bob:b"
@@ -63,21 +56,21 @@ class GetUserDirectoryTables:
     def __init__(self, store: DataStore):
         self.store = store
 
-    async def get_users_in_public_rooms(self) -> Set[Tuple[str, str]]:
+    async def get_users_in_public_rooms(self) -> set[tuple[str, str]]:
         """Fetch the entire `users_in_public_rooms` table.
 
         Returns a list of tuples (user_id, room_id) where room_id is public and
         contains the user with the given id.
         """
         r = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.store.db_pool.simple_select_list(
                 "users_in_public_rooms", None, ("user_id", "room_id")
             ),
         )
         return set(r)
 
-    async def get_users_who_share_private_rooms(self) -> Set[Tuple[str, str, str]]:
+    async def get_users_who_share_private_rooms(self) -> set[tuple[str, str, str]]:
         """Fetch the entire `users_who_share_private_rooms` table.
 
         Returns a set of tuples (user_id, other_user_id, room_id) corresponding
@@ -85,7 +78,7 @@ class GetUserDirectoryTables:
         """
 
         rows = cast(
-            List[Tuple[str, str, str]],
+            list[tuple[str, str, str]],
             await self.store.db_pool.simple_select_list(
                 "users_who_share_private_rooms",
                 None,
@@ -94,13 +87,13 @@ class GetUserDirectoryTables:
         )
         return set(rows)
 
-    async def get_users_in_user_directory(self) -> Set[str]:
+    async def get_users_in_user_directory(self) -> set[str]:
         """Fetch the set of users in the `user_directory` table.
 
         This is useful when checking we've correctly excluded users from the directory.
         """
         result = cast(
-            List[Tuple[str]],
+            list[tuple[str]],
             await self.store.db_pool.simple_select_list(
                 "user_directory",
                 None,
@@ -109,7 +102,7 @@ class GetUserDirectoryTables:
         )
         return {row[0] for row in result}
 
-    async def get_profiles_in_user_directory(self) -> Dict[str, ProfileInfo]:
+    async def get_profiles_in_user_directory(self) -> dict[str, ProfileInfo]:
         """Fetch users and their profiles from the `user_directory` table.
 
         This is useful when we want to inspect display names and avatars.
@@ -117,7 +110,7 @@ class GetUserDirectoryTables:
         thing missing is an unused room_id column.
         """
         rows = cast(
-            List[Tuple[str, Optional[str], Optional[str]]],
+            list[tuple[str, str | None, str | None]],
             await self.store.db_pool.simple_select_list(
                 "user_directory",
                 None,
@@ -131,7 +124,7 @@ class GetUserDirectoryTables:
 
     async def get_tables(
         self,
-    ) -> Tuple[Set[str], Set[Tuple[str, str]], Set[Tuple[str, str, str]]]:
+    ) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str, str]]]:
         """Multiple tests want to inspect these tables, so expose them together."""
         return (
             await self.get_users_in_user_directory(),
@@ -161,7 +154,7 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
             token="i_am_an_app_service",
             id="1234",
             namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
-            sender="@as:test",
+            sender=UserID.from_string("@as:test"),
         )
 
         mock_load_appservices = Mock(return_value=[self.appservice])
@@ -284,7 +277,7 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
 
     def _create_rooms_and_inject_memberships(
         self, creator: str, token: str, joiner: str
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """Create a public and private room as a normal user.
         Then get the `joiner` into those rooms.
         """
@@ -386,7 +379,7 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
 
         # Join the AS sender to rooms owned by the normal user.
         public, private = self._create_rooms_and_inject_memberships(
-            user, token, self.appservice.sender
+            user, token, self.appservice.sender.to_string()
         )
 
         # Rebuild the directory.
@@ -438,8 +431,6 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
 
 
 class UserDirectoryStoreTestCase(HomeserverTestCase):
-    use_icu = False
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
 
@@ -450,12 +441,6 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(self.store.update_profile_in_user_dir(BOBBY, "bobby", None))
         self.get_success(self.store.update_profile_in_user_dir(BELA, "Bela", None))
         self.get_success(self.store.add_users_in_public_rooms("!room:id", (ALICE, BOB)))
-
-        self._restore_use_icu = user_directory.USE_ICU
-        user_directory.USE_ICU = self.use_icu
-
-    def tearDown(self) -> None:
-        user_directory.USE_ICU = self._restore_use_icu
 
     def test_search_user_dir(self) -> None:
         # normally when alice searches the directory she should just find
@@ -648,24 +633,14 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
     test_search_user_dir_accent_insensitivity.skip = "not supported yet"  # type: ignore
 
 
-class UserDirectoryStoreTestCaseWithIcu(UserDirectoryStoreTestCase):
-    use_icu = True
-
-    if not icu:
-        skip = "Requires PyICU"
-
-
 class UserDirectoryICUTestCase(HomeserverTestCase):
-    if not icu:
-        skip = "Requires PyICU"
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.user_dir_helper = GetUserDirectoryTables(self.store)
 
     def test_icu_word_boundary(self) -> None:
-        """Tests that we correctly detect word boundaries when ICU (International
-        Components for Unicode) support is available.
+        """Tests that we correctly detect word boundaries with ICU
+        (International Components for Unicode).
         """
 
         display_name = "Gáo"
@@ -714,12 +689,3 @@ class UserDirectoryICUTestCase(HomeserverTestCase):
         self.assertEqual(_parse_words_with_icu("user-1"), ["user-1"])
         self.assertEqual(_parse_words_with_icu("user-ab"), ["user-ab"])
         self.assertEqual(_parse_words_with_icu("user.--1"), ["user", "-1"])
-
-    def test_regex_word_boundary_punctuation(self) -> None:
-        """
-        Tests the behaviour of punctuation with the non-ICU tokeniser
-        """
-        self.assertEqual(
-            _parse_words_with_regex("lazy'fox jumped:over the.dog"),
-            ["lazy", "fox", "jumped", "over", "the", "dog"],
-        )

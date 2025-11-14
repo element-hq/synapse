@@ -23,17 +23,13 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
+    Awaitable,
     Callable,
     Collection,
-    Dict,
     Generator,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Tuple,
     TypeVar,
-    Union,
 )
 
 import attr
@@ -42,6 +38,7 @@ from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
 from twisted.internet.interfaces import IDelayedCall
+from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
 
 from synapse.api import errors
@@ -49,6 +46,7 @@ from synapse.api.constants import ProfileFields
 from synapse.api.errors import SynapseError
 from synapse.api.presence import UserPresenceState
 from synapse.config import ConfigError
+from synapse.config.repository import MediaUploadLimit
 from synapse.events import EventBase
 from synapse.events.presence_router import (
     GET_INTERESTED_USERS_CALLBACK,
@@ -66,7 +64,6 @@ from synapse.handlers.auth import (
     ON_LOGGED_OUT_CALLBACK,
     AuthHandler,
 )
-from synapse.handlers.device import DeviceHandler
 from synapse.handlers.push_rules import RuleSpec, check_actions
 from synapse.http.client import SimpleHttpClient
 from synapse.http.server import (
@@ -78,10 +75,13 @@ from synapse.http.servlet import parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import (
     defer_to_thread,
+    defer_to_threadpool,
     make_deferred_yieldable,
     run_in_background,
 )
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics.background_process_metrics import (
+    run_as_background_process as _run_as_background_process,
+)
 from synapse.module_api.callbacks.account_validity_callbacks import (
     IS_USER_EXPIRED_CALLBACK,
     ON_LEGACY_ADMIN_REQUEST,
@@ -90,12 +90,23 @@ from synapse.module_api.callbacks.account_validity_callbacks import (
     ON_USER_LOGIN_CALLBACK,
     ON_USER_REGISTRATION_CALLBACK,
 )
+from synapse.module_api.callbacks.media_repository_callbacks import (
+    GET_MEDIA_CONFIG_FOR_USER_CALLBACK,
+    GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK,
+    IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK,
+    ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK,
+)
+from synapse.module_api.callbacks.ratelimit_callbacks import (
+    GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK,
+    RatelimitOverride,
+)
 from synapse.module_api.callbacks.spamchecker_callbacks import (
     CHECK_EVENT_FOR_SPAM_CALLBACK,
     CHECK_LOGIN_FOR_SPAM_CALLBACK,
     CHECK_MEDIA_FILE_FOR_SPAM_CALLBACK,
     CHECK_REGISTRATION_FOR_SPAM_CALLBACK,
     CHECK_USERNAME_FOR_SPAM_CALLBACK,
+    FEDERATED_USER_MAY_INVITE_CALLBACK,
     SHOULD_DROP_FEDERATED_EVENT_CALLBACK,
     USER_MAY_CREATE_ROOM_ALIAS_CALLBACK,
     USER_MAY_CREATE_ROOM_CALLBACK,
@@ -103,6 +114,7 @@ from synapse.module_api.callbacks.spamchecker_callbacks import (
     USER_MAY_JOIN_ROOM_CALLBACK,
     USER_MAY_PUBLISH_ROOM_CALLBACK,
     USER_MAY_SEND_3PID_INVITE_CALLBACK,
+    USER_MAY_SEND_STATE_EVENT_CALLBACK,
     SpamCheckerModuleApiCallbacks,
 )
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
@@ -143,12 +155,15 @@ from synapse.types import (
     create_requester,
 )
 from synapse.types.state import StateFilter
-from synapse.util import Clock
 from synapse.util.async_helpers import maybe_awaitable
 from synapse.util.caches.descriptors import CachedFunction, cached as _cached
+from synapse.util.clock import Clock
 from synapse.util.frozenutils import freeze
 
 if TYPE_CHECKING:
+    # Old versions don't have `LiteralString`
+    from typing_extensions import LiteralString
+
     from synapse.app.generic_worker import GenericWorkerStore
     from synapse.server import HomeServer
 
@@ -189,6 +204,8 @@ __all__ = [
     "ProfileInfo",
     "RoomAlias",
     "UserProfile",
+    "RatelimitOverride",
+    "MediaUploadLimit",
 ]
 
 logger = logging.getLogger(__name__)
@@ -206,11 +223,78 @@ class UserIpAndAgent:
     last_seen: int
 
 
+def run_as_background_process(
+    desc: "LiteralString",
+    func: Callable[..., Awaitable[T | None]],
+    *args: Any,
+    bg_start_span: bool = True,
+    **kwargs: Any,
+) -> "defer.Deferred[T | None]":
+    """
+    XXX: Deprecated: use `ModuleApi.run_as_background_process` instead.
+
+    Run the given function in its own logcontext, with resource metrics
+
+    This should be used to wrap processes which are fired off to run in the
+    background, instead of being associated with a particular request.
+
+    It returns a Deferred which completes when the function completes, but it doesn't
+    follow the synapse logcontext rules, which makes it appropriate for passing to
+    clock.looping_call and friends (or for firing-and-forgetting in the middle of a
+    normal synapse async function).
+
+    Args:
+        desc: a description for this background process type
+        server_name: The homeserver name that this background process is being run for
+            (this should be `hs.hostname`).
+        func: a function, which may return a Deferred or a coroutine
+        bg_start_span: Whether to start an opentracing span. Defaults to True.
+            Should only be disabled for processes that will not log to or tag
+            a span.
+        args: positional args for func
+        kwargs: keyword args for func
+
+    Returns:
+        Deferred which returns the result of func, or `None` if func raises.
+        Note that the returned Deferred does not follow the synapse logcontext
+        rules.
+    """
+
+    logger.warning(
+        "Using deprecated `run_as_background_process` that's exported from the Module API. "
+        "Prefer `ModuleApi.run_as_background_process` instead.",
+    )
+
+    # Historically, since this function is exported from the module API, we can't just
+    # change the signature to require a `server_name` argument. Since
+    # `run_as_background_process` internally in Synapse requires `server_name` now, we
+    # just have to stub this out with a placeholder value and tell people to use the new
+    # function instead.
+    stub_server_name = "synapse_module_running_from_unknown_server"
+
+    # Ignore the linter error here. Since this is leveraging the
+    # `run_as_background_process` function directly and we don't want to break the
+    # module api, we need to keep the function signature the same. This means we don't
+    # have access to the running `HomeServer` and cannot track this background process
+    # for cleanup during shutdown.
+    # This is not an issue during runtime and is only potentially problematic if the
+    # application cares about being able to garbage collect `HomeServer` instances
+    # during runtime.
+    return _run_as_background_process(  # type: ignore[untracked-background-process]
+        desc,
+        stub_server_name,
+        func,
+        *args,
+        bg_start_span=bg_start_span,
+        **kwargs,
+    )
+
+
 def cached(
     *,
     max_entries: int = 1000,
-    num_args: Optional[int] = None,
-    uncached_args: Optional[Collection[str]] = None,
+    num_args: int | None = None,
+    uncached_args: Collection[str] | None = None,
 ) -> Callable[[F], CachedFunction[F]]:
     """Returns a decorator that applies a memoizing cache around the function. This
     decorator behaves similarly to functools.lru_cache.
@@ -252,7 +336,7 @@ class ModuleApi:
 
         # TODO: Fix this type hint once the types for the data stores have been ironed
         #       out.
-        self._store: Union[DataStore, "GenericWorkerStore"] = hs.get_datastores().main
+        self._store: DataStore | "GenericWorkerStore" = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self._auth = hs.get_auth()
         self._auth_handler = auth_handler
@@ -267,13 +351,15 @@ class ModuleApi:
         self._device_handler = hs.get_device_handler()
         self.custom_template_dir = hs.config.server.custom_template_directory
         self._callbacks = hs.get_module_api_callbacks()
-        self.msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
+        self._auth_delegation_enabled = (
+            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+        )
         self._event_serializer = hs.get_event_client_serializer()
 
         try:
             app_name = self._hs.config.email.email_app_name
 
-            self._from_string = self._hs.config.email.email_notif_from % {
+            self._from_string = self._hs.config.email.email_notif_from % {  # type: ignore[operator]
                 "app": app_name
             }
         except (KeyError, TypeError):
@@ -299,24 +385,20 @@ class ModuleApi:
     def register_spam_checker_callbacks(
         self,
         *,
-        check_event_for_spam: Optional[CHECK_EVENT_FOR_SPAM_CALLBACK] = None,
-        should_drop_federated_event: Optional[
-            SHOULD_DROP_FEDERATED_EVENT_CALLBACK
-        ] = None,
-        user_may_join_room: Optional[USER_MAY_JOIN_ROOM_CALLBACK] = None,
-        user_may_invite: Optional[USER_MAY_INVITE_CALLBACK] = None,
-        user_may_send_3pid_invite: Optional[USER_MAY_SEND_3PID_INVITE_CALLBACK] = None,
-        user_may_create_room: Optional[USER_MAY_CREATE_ROOM_CALLBACK] = None,
-        user_may_create_room_alias: Optional[
-            USER_MAY_CREATE_ROOM_ALIAS_CALLBACK
-        ] = None,
-        user_may_publish_room: Optional[USER_MAY_PUBLISH_ROOM_CALLBACK] = None,
-        check_username_for_spam: Optional[CHECK_USERNAME_FOR_SPAM_CALLBACK] = None,
-        check_registration_for_spam: Optional[
-            CHECK_REGISTRATION_FOR_SPAM_CALLBACK
-        ] = None,
-        check_media_file_for_spam: Optional[CHECK_MEDIA_FILE_FOR_SPAM_CALLBACK] = None,
-        check_login_for_spam: Optional[CHECK_LOGIN_FOR_SPAM_CALLBACK] = None,
+        check_event_for_spam: CHECK_EVENT_FOR_SPAM_CALLBACK | None = None,
+        should_drop_federated_event: SHOULD_DROP_FEDERATED_EVENT_CALLBACK | None = None,
+        user_may_join_room: USER_MAY_JOIN_ROOM_CALLBACK | None = None,
+        user_may_invite: USER_MAY_INVITE_CALLBACK | None = None,
+        federated_user_may_invite: FEDERATED_USER_MAY_INVITE_CALLBACK | None = None,
+        user_may_send_3pid_invite: USER_MAY_SEND_3PID_INVITE_CALLBACK | None = None,
+        user_may_create_room: USER_MAY_CREATE_ROOM_CALLBACK | None = None,
+        user_may_create_room_alias: USER_MAY_CREATE_ROOM_ALIAS_CALLBACK | None = None,
+        user_may_publish_room: USER_MAY_PUBLISH_ROOM_CALLBACK | None = None,
+        user_may_send_state_event: USER_MAY_SEND_STATE_EVENT_CALLBACK | None = None,
+        check_username_for_spam: CHECK_USERNAME_FOR_SPAM_CALLBACK | None = None,
+        check_registration_for_spam: CHECK_REGISTRATION_FOR_SPAM_CALLBACK | None = None,
+        check_media_file_for_spam: CHECK_MEDIA_FILE_FOR_SPAM_CALLBACK | None = None,
+        check_login_for_spam: CHECK_LOGIN_FOR_SPAM_CALLBACK | None = None,
     ) -> None:
         """Registers callbacks for spam checking capabilities.
 
@@ -327,6 +409,7 @@ class ModuleApi:
             should_drop_federated_event=should_drop_federated_event,
             user_may_join_room=user_may_join_room,
             user_may_invite=user_may_invite,
+            federated_user_may_invite=federated_user_may_invite,
             user_may_send_3pid_invite=user_may_send_3pid_invite,
             user_may_create_room=user_may_create_room,
             user_may_create_room_alias=user_may_create_room_alias,
@@ -335,17 +418,18 @@ class ModuleApi:
             check_registration_for_spam=check_registration_for_spam,
             check_media_file_for_spam=check_media_file_for_spam,
             check_login_for_spam=check_login_for_spam,
+            user_may_send_state_event=user_may_send_state_event,
         )
 
     def register_account_validity_callbacks(
         self,
         *,
-        is_user_expired: Optional[IS_USER_EXPIRED_CALLBACK] = None,
-        on_user_registration: Optional[ON_USER_REGISTRATION_CALLBACK] = None,
-        on_user_login: Optional[ON_USER_LOGIN_CALLBACK] = None,
-        on_legacy_send_mail: Optional[ON_LEGACY_SEND_MAIL_CALLBACK] = None,
-        on_legacy_renew: Optional[ON_LEGACY_RENEW_CALLBACK] = None,
-        on_legacy_admin_request: Optional[ON_LEGACY_ADMIN_REQUEST] = None,
+        is_user_expired: IS_USER_EXPIRED_CALLBACK | None = None,
+        on_user_registration: ON_USER_REGISTRATION_CALLBACK | None = None,
+        on_user_login: ON_USER_LOGIN_CALLBACK | None = None,
+        on_legacy_send_mail: ON_LEGACY_SEND_MAIL_CALLBACK | None = None,
+        on_legacy_renew: ON_LEGACY_RENEW_CALLBACK | None = None,
+        on_legacy_admin_request: ON_LEGACY_ADMIN_REQUEST | None = None,
     ) -> None:
         """Registers callbacks for account validity capabilities.
 
@@ -360,31 +444,60 @@ class ModuleApi:
             on_legacy_admin_request=on_legacy_admin_request,
         )
 
+    def register_ratelimit_callbacks(
+        self,
+        *,
+        get_ratelimit_override_for_user: GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
+        | None = None,
+    ) -> None:
+        """Registers callbacks for ratelimit capabilities.
+        Added in Synapse v1.132.0.
+        """
+        return self._callbacks.ratelimit.register_callbacks(
+            get_ratelimit_override_for_user=get_ratelimit_override_for_user,
+        )
+
+    def register_media_repository_callbacks(
+        self,
+        *,
+        get_media_config_for_user: GET_MEDIA_CONFIG_FOR_USER_CALLBACK | None = None,
+        is_user_allowed_to_upload_media_of_size: IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK
+        | None = None,
+        get_media_upload_limits_for_user: GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK
+        | None = None,
+        on_media_upload_limit_exceeded: ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK
+        | None = None,
+    ) -> None:
+        """Registers callbacks for media repository capabilities.
+        Added in Synapse v1.132.0.
+        """
+        return self._callbacks.media_repository.register_callbacks(
+            get_media_config_for_user=get_media_config_for_user,
+            is_user_allowed_to_upload_media_of_size=is_user_allowed_to_upload_media_of_size,
+            get_media_upload_limits_for_user=get_media_upload_limits_for_user,
+            on_media_upload_limit_exceeded=on_media_upload_limit_exceeded,
+        )
+
     def register_third_party_rules_callbacks(
         self,
         *,
-        check_event_allowed: Optional[CHECK_EVENT_ALLOWED_CALLBACK] = None,
-        on_create_room: Optional[ON_CREATE_ROOM_CALLBACK] = None,
-        check_threepid_can_be_invited: Optional[
-            CHECK_THREEPID_CAN_BE_INVITED_CALLBACK
-        ] = None,
-        check_visibility_can_be_modified: Optional[
-            CHECK_VISIBILITY_CAN_BE_MODIFIED_CALLBACK
-        ] = None,
-        on_new_event: Optional[ON_NEW_EVENT_CALLBACK] = None,
-        check_can_shutdown_room: Optional[CHECK_CAN_SHUTDOWN_ROOM_CALLBACK] = None,
-        check_can_deactivate_user: Optional[CHECK_CAN_DEACTIVATE_USER_CALLBACK] = None,
-        on_profile_update: Optional[ON_PROFILE_UPDATE_CALLBACK] = None,
-        on_user_deactivation_status_changed: Optional[
-            ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK
-        ] = None,
-        on_threepid_bind: Optional[ON_THREEPID_BIND_CALLBACK] = None,
-        on_add_user_third_party_identifier: Optional[
-            ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
-        ] = None,
-        on_remove_user_third_party_identifier: Optional[
-            ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
-        ] = None,
+        check_event_allowed: CHECK_EVENT_ALLOWED_CALLBACK | None = None,
+        on_create_room: ON_CREATE_ROOM_CALLBACK | None = None,
+        check_threepid_can_be_invited: CHECK_THREEPID_CAN_BE_INVITED_CALLBACK
+        | None = None,
+        check_visibility_can_be_modified: CHECK_VISIBILITY_CAN_BE_MODIFIED_CALLBACK
+        | None = None,
+        on_new_event: ON_NEW_EVENT_CALLBACK | None = None,
+        check_can_shutdown_room: CHECK_CAN_SHUTDOWN_ROOM_CALLBACK | None = None,
+        check_can_deactivate_user: CHECK_CAN_DEACTIVATE_USER_CALLBACK | None = None,
+        on_profile_update: ON_PROFILE_UPDATE_CALLBACK | None = None,
+        on_user_deactivation_status_changed: ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK
+        | None = None,
+        on_threepid_bind: ON_THREEPID_BIND_CALLBACK | None = None,
+        on_add_user_third_party_identifier: ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
+        | None = None,
+        on_remove_user_third_party_identifier: ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
+        | None = None,
     ) -> None:
         """Registers callbacks for third party event rules capabilities.
 
@@ -408,8 +521,8 @@ class ModuleApi:
     def register_presence_router_callbacks(
         self,
         *,
-        get_users_for_states: Optional[GET_USERS_FOR_STATES_CALLBACK] = None,
-        get_interested_users: Optional[GET_INTERESTED_USERS_CALLBACK] = None,
+        get_users_for_states: GET_USERS_FOR_STATES_CALLBACK | None = None,
+        get_interested_users: GET_INTERESTED_USERS_CALLBACK | None = None,
     ) -> None:
         """Registers callbacks for presence router capabilities.
 
@@ -423,24 +536,21 @@ class ModuleApi:
     def register_password_auth_provider_callbacks(
         self,
         *,
-        check_3pid_auth: Optional[CHECK_3PID_AUTH_CALLBACK] = None,
-        on_logged_out: Optional[ON_LOGGED_OUT_CALLBACK] = None,
-        auth_checkers: Optional[
-            Dict[Tuple[str, Tuple[str, ...]], CHECK_AUTH_CALLBACK]
-        ] = None,
-        is_3pid_allowed: Optional[IS_3PID_ALLOWED_CALLBACK] = None,
-        get_username_for_registration: Optional[
-            GET_USERNAME_FOR_REGISTRATION_CALLBACK
-        ] = None,
-        get_displayname_for_registration: Optional[
-            GET_DISPLAYNAME_FOR_REGISTRATION_CALLBACK
-        ] = None,
+        check_3pid_auth: CHECK_3PID_AUTH_CALLBACK | None = None,
+        on_logged_out: ON_LOGGED_OUT_CALLBACK | None = None,
+        auth_checkers: dict[tuple[str, tuple[str, ...]], CHECK_AUTH_CALLBACK]
+        | None = None,
+        is_3pid_allowed: IS_3PID_ALLOWED_CALLBACK | None = None,
+        get_username_for_registration: GET_USERNAME_FOR_REGISTRATION_CALLBACK
+        | None = None,
+        get_displayname_for_registration: GET_DISPLAYNAME_FOR_REGISTRATION_CALLBACK
+        | None = None,
     ) -> None:
         """Registers callbacks for password auth provider capabilities.
 
         Added in Synapse v1.46.0.
         """
-        if self.msc3861_oauth_delegation_enabled:
+        if self._auth_delegation_enabled:
             raise ConfigError(
                 "Cannot use password auth provider callbacks when OAuth delegation is enabled"
             )
@@ -458,8 +568,8 @@ class ModuleApi:
         self,
         *,
         on_update: ON_UPDATE_CALLBACK,
-        default_batch_size: Optional[DEFAULT_BATCH_SIZE_CALLBACK] = None,
-        min_batch_size: Optional[MIN_BATCH_SIZE_CALLBACK] = None,
+        default_batch_size: DEFAULT_BATCH_SIZE_CALLBACK | None = None,
+        min_batch_size: MIN_BATCH_SIZE_CALLBACK | None = None,
     ) -> None:
         """Registers background update controller callbacks.
 
@@ -476,7 +586,7 @@ class ModuleApi:
     def register_account_data_callbacks(
         self,
         *,
-        on_account_data_updated: Optional[ON_ACCOUNT_DATA_UPDATED_CALLBACK] = None,
+        on_account_data_updated: ON_ACCOUNT_DATA_UPDATED_CALLBACK | None = None,
     ) -> None:
         """Registers account data callbacks.
 
@@ -505,9 +615,8 @@ class ModuleApi:
     def register_add_extra_fields_to_unsigned_client_event_callbacks(
         self,
         *,
-        add_field_to_unsigned_callback: Optional[
-            ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
-        ] = None,
+        add_field_to_unsigned_callback: ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
+        | None = None,
     ) -> None:
         """Registers a callback that can be used to add fields to the unsigned
         section of events.
@@ -578,7 +687,7 @@ class ModuleApi:
         return self._server_name
 
     @property
-    def worker_name(self) -> Optional[str]:
+    def worker_name(self) -> str | None:
         """The name of the worker this specific instance is running as per the
         "worker_name" configuration setting, or None if it's the main process.
 
@@ -587,7 +696,7 @@ class ModuleApi:
         return self._hs.config.worker.worker_name
 
     @property
-    def worker_app(self) -> Optional[str]:
+    def worker_app(self) -> str | None:
         """The name of the worker app this specific instance is running as per the
         "worker_app" configuration setting, or None if it's the main process.
 
@@ -595,7 +704,7 @@ class ModuleApi:
         """
         return self._hs.config.worker.worker_app
 
-    async def get_userinfo_by_id(self, user_id: str) -> Optional[UserInfo]:
+    async def get_userinfo_by_id(self, user_id: str) -> UserInfo | None:
         """Get user info by user_id
 
         Added in Synapse v1.41.0.
@@ -650,7 +759,7 @@ class ModuleApi:
         Returns:
             True if the user is a server admin, False otherwise.
         """
-        return await self._store.is_server_admin(UserID.from_string(user_id))
+        return await self._store.is_server_admin(user_id)
 
     async def set_user_admin(self, user_id: str, admin: bool) -> None:
         """Sets if a user is a server admin.
@@ -696,7 +805,7 @@ class ModuleApi:
         user_id = UserID.from_string(f"@{localpart}:{server_name}")
         return await self._store.get_profileinfo(user_id)
 
-    async def get_threepids_for_user(self, user_id: str) -> List[Dict[str, str]]:
+    async def get_threepids_for_user(self, user_id: str) -> list[dict[str, str]]:
         """Look up the threepids (email addresses and phone numbers) associated with the
         given Matrix user ID.
 
@@ -713,7 +822,7 @@ class ModuleApi:
         """
         return [attr.asdict(t) for t in await self._store.user_get_threepids(user_id)]
 
-    def check_user_exists(self, user_id: str) -> "defer.Deferred[Optional[str]]":
+    def check_user_exists(self, user_id: str) -> "defer.Deferred[str | None]":
         """Check if user exists.
 
         Added in Synapse v0.25.0.
@@ -731,9 +840,9 @@ class ModuleApi:
     def register(
         self,
         localpart: str,
-        displayname: Optional[str] = None,
-        emails: Optional[List[str]] = None,
-    ) -> Generator["defer.Deferred[Any]", Any, Tuple[str, str]]:
+        displayname: str | None = None,
+        emails: list[str] | None = None,
+    ) -> Generator["defer.Deferred[Any]", Any, tuple[str, str]]:
         """Registers a new user with given localpart and optional displayname, emails.
 
         Also returns an access token for the new user.
@@ -762,8 +871,8 @@ class ModuleApi:
     def register_user(
         self,
         localpart: str,
-        displayname: Optional[str] = None,
-        emails: Optional[List[str]] = None,
+        displayname: str | None = None,
+        emails: list[str] | None = None,
         admin: bool = False,
     ) -> "defer.Deferred[str]":
         """Registers a new user with given localpart and optional displayname, emails.
@@ -796,9 +905,9 @@ class ModuleApi:
     def register_device(
         self,
         user_id: str,
-        device_id: Optional[str] = None,
-        initial_display_name: Optional[str] = None,
-    ) -> "defer.Deferred[Tuple[str, str, Optional[int], Optional[str]]]":
+        device_id: str | None = None,
+        initial_display_name: str | None = None,
+    ) -> "defer.Deferred[tuple[str, str, int | None, str | None]]":
         """Register a device for a user and generate an access token.
 
         Added in Synapse v1.2.0.
@@ -848,8 +957,8 @@ class ModuleApi:
         self,
         user_id: str,
         duration_in_ms: int = (2 * 60 * 1000),
-        auth_provider_id: Optional[str] = None,
-        auth_provider_session_id: Optional[str] = None,
+        auth_provider_id: str | None = None,
+        auth_provider_session_id: str | None = None,
     ) -> str:
         """Create a login token suitable for m.login.token authentication
 
@@ -880,8 +989,6 @@ class ModuleApi:
     ) -> Generator["defer.Deferred[Any]", Any, None]:
         """Invalidate an access token for a user
 
-        Can only be called from the main process.
-
         Added in Synapse v0.25.0.
 
         Args:
@@ -894,10 +1001,6 @@ class ModuleApi:
         Raises:
             synapse.api.errors.AuthError: the access token is invalid
         """
-        assert isinstance(self._device_handler, DeviceHandler), (
-            "invalidate_access_token can only be called on the main process"
-        )
-
         # see if the access token corresponds to a device
         user_info = yield defer.ensureDeferred(
             self._auth.get_user_by_access_token(access_token)
@@ -958,7 +1061,7 @@ class ModuleApi:
         )
 
     async def invalidate_cache(
-        self, cached_func: CachedFunction, keys: Tuple[Any, ...]
+        self, cached_func: CachedFunction, keys: tuple[Any, ...]
     ) -> None:
         """Invalidate a cache entry of a cached function across workers. The cached function
         needs to be registered on all workers first with `register_cached_function`.
@@ -1011,7 +1114,7 @@ class ModuleApi:
 
     @defer.inlineCallbacks
     def get_state_events_in_room(
-        self, room_id: str, types: Iterable[Tuple[str, Optional[str]]]
+        self, room_id: str, types: Iterable[tuple[str, str | None]]
     ) -> Generator[defer.Deferred, Any, Iterable[EventBase]]:
         """Gets current state events for the given room.
 
@@ -1042,8 +1145,8 @@ class ModuleApi:
         target: str,
         room_id: str,
         new_membership: str,
-        content: Optional[JsonDict] = None,
-        remote_room_hosts: Optional[List[str]] = None,
+        content: JsonDict | None = None,
+        remote_room_hosts: list[str] | None = None,
     ) -> EventBase:
         """Updates the membership of a user to the given value.
 
@@ -1219,7 +1322,7 @@ class ModuleApi:
             )
 
     async def set_presence_for_users(
-        self, users: Mapping[str, Tuple[str, Optional[str]]]
+        self, users: Mapping[str, tuple[str, str | None]]
     ) -> None:
         """
         Update the internal presence state of users.
@@ -1254,7 +1357,7 @@ class ModuleApi:
         f: Callable,
         msec: float,
         *args: object,
-        desc: Optional[str] = None,
+        desc: str | None = None,
         run_on_all_instances: bool = False,
         **kwargs: object,
     ) -> None:
@@ -1285,7 +1388,7 @@ class ModuleApi:
 
         if self._hs.config.worker.run_background_tasks or run_on_all_instances:
             self._clock.looping_call(
-                run_as_background_process,
+                self._hs.run_as_background_process,
                 msec,
                 desc,
                 lambda: maybe_awaitable(f(*args, **kwargs)),
@@ -1313,7 +1416,7 @@ class ModuleApi:
         msec: float,
         f: Callable,
         *args: object,
-        desc: Optional[str] = None,
+        desc: str | None = None,
         **kwargs: object,
     ) -> IDelayedCall:
         """Wraps a function as a background process and calls it in a given number of milliseconds.
@@ -1343,7 +1446,7 @@ class ModuleApi:
         return self._clock.call_later(
             # convert ms to seconds as needed by call_later.
             msec * 0.001,
-            run_as_background_process,
+            self._hs.run_as_background_process,
             desc,
             lambda: maybe_awaitable(f(*args, **kwargs)),
         )
@@ -1359,11 +1462,11 @@ class ModuleApi:
     async def send_http_push_notification(
         self,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         content: JsonDict,
-        tweaks: Optional[JsonMapping] = None,
-        default_payload: Optional[JsonMapping] = None,
-    ) -> Dict[str, bool]:
+        tweaks: JsonMapping | None = None,
+        default_payload: JsonMapping | None = None,
+    ) -> dict[str, bool]:
         """Send an HTTP push notification that is forwarded to the registered push gateway
         for the specified user/device.
 
@@ -1427,9 +1530,9 @@ class ModuleApi:
 
     def read_templates(
         self,
-        filenames: List[str],
-        custom_template_directory: Optional[str] = None,
-    ) -> List[jinja2.Template]:
+        filenames: list[str],
+        custom_template_directory: str | None = None,
+    ) -> list[jinja2.Template]:
         """Read and load the content of the template files at the given location.
         By default, Synapse will look for these templates in its configured template
         directory, but another directory to search in can be provided.
@@ -1449,7 +1552,7 @@ class ModuleApi:
             (td for td in (self.custom_template_dir, custom_template_directory) if td),
         )
 
-    def is_mine(self, id: Union[str, DomainSpecificString]) -> bool:
+    def is_mine(self, id: str | DomainSpecificString) -> bool:
         """
         Checks whether an ID (user id, room, ...) comes from this homeserver.
 
@@ -1468,7 +1571,7 @@ class ModuleApi:
 
     async def get_user_ip_and_agents(
         self, user_id: str, since_ts: int = 0
-    ) -> List[UserIpAndAgent]:
+    ) -> list[UserIpAndAgent]:
         """
         Return the list of user IPs and agents for a user.
 
@@ -1511,7 +1614,7 @@ class ModuleApi:
     async def get_room_state(
         self,
         room_id: str,
-        event_filter: Optional[Iterable[Tuple[str, Optional[str]]]] = None,
+        event_filter: Iterable[tuple[str, str | None]] | None = None,
     ) -> StateMap[EventBase]:
         """Returns the current state of the given room.
 
@@ -1550,6 +1653,44 @@ class ModuleApi:
 
         return {key: state_events[event_id] for key, event_id in state_ids.items()}
 
+    def run_as_background_process(
+        self,
+        desc: "LiteralString",
+        func: Callable[..., Awaitable[T | None]],
+        *args: Any,
+        bg_start_span: bool = True,
+        **kwargs: Any,
+    ) -> "defer.Deferred[T | None]":
+        """Run the given function in its own logcontext, with resource metrics
+
+        This should be used to wrap processes which are fired off to run in the
+        background, instead of being associated with a particular request.
+
+        It returns a Deferred which completes when the function completes, but it doesn't
+        follow the synapse logcontext rules, which makes it appropriate for passing to
+        clock.looping_call and friends (or for firing-and-forgetting in the middle of a
+        normal synapse async function).
+
+        Args:
+            desc: a description for this background process type
+            server_name: The homeserver name that this background process is being run for
+                (this should be `hs.hostname`).
+            func: a function, which may return a Deferred or a coroutine
+            bg_start_span: Whether to start an opentracing span. Defaults to True.
+                Should only be disabled for processes that will not log to or tag
+                a span.
+            args: positional args for func
+            kwargs: keyword args for func
+
+        Returns:
+            Deferred which returns the result of func, or `None` if func raises.
+            Note that the returned Deferred does not follow the synapse logcontext
+            rules.
+        """
+        return self._hs.run_as_background_process(
+            desc, func, *args, bg_start_span=bg_start_span, **kwargs
+        )
+
     async def defer_to_thread(
         self,
         f: Callable[P, T],
@@ -1569,6 +1710,33 @@ class ModuleApi:
             The return value of the function once ran in a thread.
         """
         return await defer_to_thread(self._hs.get_reactor(), f, *args, **kwargs)
+
+    async def defer_to_threadpool(
+        self,
+        threadpool: ThreadPool,
+        f: Callable[P, T],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> T:
+        """Runs the given function in a separate thread from the given thread pool.
+
+        Allows specifying a custom thread pool instead of using the default Synapse
+        one. To use the default Synapse threadpool, use `defer_to_thread` instead.
+
+        Added in Synapse v1.140.0.
+
+        Args:
+            threadpool: The thread pool to use.
+            f: The function to run.
+            args: The function's arguments.
+            kwargs: The function's keyword arguments.
+
+        Returns:
+            The return value of the function once ran in a thread.
+        """
+        return await defer_to_threadpool(
+            self._hs.get_reactor(), threadpool, f, *args, **kwargs
+        )
 
     async def check_username(self, username: str) -> None:
         """Checks if the provided username uses the grammar defined in the Matrix
@@ -1610,9 +1778,7 @@ class ModuleApi:
         """
         await self._store.add_user_bound_threepid(user_id, medium, address, id_server)
 
-    def check_push_rule_actions(
-        self, actions: List[Union[str, Dict[str, str]]]
-    ) -> None:
+    def check_push_rule_actions(self, actions: list[str | dict[str, str]]) -> None:
         """Checks if the given push rule actions are valid according to the Matrix
         specification.
 
@@ -1635,7 +1801,7 @@ class ModuleApi:
         scope: str,
         kind: str,
         rule_id: str,
-        actions: List[Union[str, Dict[str, str]]],
+        actions: list[str | dict[str, str]],
     ) -> None:
         """Changes the actions of an existing push rule for the given user.
 
@@ -1673,8 +1839,8 @@ class ModuleApi:
         )
 
     async def get_monthly_active_users_by_service(
-        self, start_timestamp: Optional[int] = None, end_timestamp: Optional[int] = None
-    ) -> List[Tuple[str, str]]:
+        self, start_timestamp: int | None = None, end_timestamp: int | None = None
+    ) -> list[tuple[str, str]]:
         """Generates list of monthly active users and their services.
         Please see corresponding storage docstring for more details.
 
@@ -1694,7 +1860,7 @@ class ModuleApi:
             start_timestamp, end_timestamp
         )
 
-    async def get_canonical_room_alias(self, room_id: RoomID) -> Optional[RoomAlias]:
+    async def get_canonical_room_alias(self, room_id: RoomID) -> RoomAlias | None:
         """
         Retrieve the given room's current canonical alias.
 
@@ -1720,7 +1886,7 @@ class ModuleApi:
             return RoomAlias.from_string(room_alias_str)
         return None
 
-    async def lookup_room_alias(self, room_alias: str) -> Tuple[str, List[str]]:
+    async def lookup_room_alias(self, room_alias: str) -> tuple[str, list[str]]:
         """
         Get the room ID associated with a room alias.
 
@@ -1749,8 +1915,8 @@ class ModuleApi:
         user_id: str,
         config: JsonDict,
         ratelimit: bool = True,
-        creator_join_profile: Optional[JsonDict] = None,
-    ) -> Tuple[str, Optional[str]]:
+        creator_join_profile: JsonDict | None = None,
+    ) -> tuple[str, str | None]:
         """Creates a new room.
 
         Added in Synapse v1.65.0.
@@ -1920,7 +2086,7 @@ class AccountDataManager:
                 f"{user_id} is not local to this homeserver; can't access account data for remote users."
             )
 
-    async def get_global(self, user_id: str, data_type: str) -> Optional[JsonMapping]:
+    async def get_global(self, user_id: str, data_type: str) -> JsonMapping | None:
         """
         Gets some global account data, of a specified type, for the specified user.
 

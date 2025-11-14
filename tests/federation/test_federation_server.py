@@ -20,12 +20,11 @@
 #
 import logging
 from http import HTTPStatus
-from typing import Optional, Union
 from unittest.mock import Mock
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import FederationError
@@ -40,10 +39,12 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
+
+logger = logging.getLogger(__name__)
 
 
 class FederationServerTests(unittest.FederatingHomeserverTestCase):
@@ -190,12 +191,12 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
         async def post_json(
             destination: str,
             path: str,
-            data: Optional[JsonDict] = None,
+            data: JsonDict | None = None,
             long_retries: bool = False,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
             ignore_backoff: bool = False,
-            args: Optional[QueryParams] = None,
-        ) -> Union[JsonDict, list]:
+            args: QueryParams | None = None,
+        ) -> JsonDict | list:
             # If it asks us for new missing events, give them NOTHING
             if path.startswith("/_matrix/federation/v1/get_missing_events/"):
                 return {"events": []}
@@ -227,7 +228,10 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
             room_version=RoomVersions.V10,
         )
 
-        with LoggingContext("test-context"):
+        with LoggingContext(
+            name="test-context",
+            server_name=self.hs.hostname,
+        ):
             failure = self.get_failure(
                 self.federation_event_handler.on_receive_pdu(
                     self.OTHER_SERVER_NAME, lying_event
@@ -252,7 +256,7 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
 class ServerACLsTestCase(unittest.TestCase):
     def test_blocked_server(self) -> None:
         e = _create_acl_event({"allow": ["*"], "deny": ["evil.com"]})
-        logging.info("ACL event: %s", e.content)
+        logger.info("ACL event: %s", e.content)
 
         server_acl_evalutor = server_acl_evaluator_from_event(e)
 
@@ -266,7 +270,7 @@ class ServerACLsTestCase(unittest.TestCase):
 
     def test_block_ip_literals(self) -> None:
         e = _create_acl_event({"allow_ip_literals": False, "allow": ["*"]})
-        logging.info("ACL event: %s", e.content)
+        logger.info("ACL event: %s", e.content)
 
         server_acl_evalutor = server_acl_evaluator_from_event(e)
 
@@ -457,7 +461,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(r[("m.room.member", joining_user)].membership, "join")
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 3}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 3}})
     def test_make_join_respects_room_join_rate_limit(self) -> None:
         # In the test setup, two users join the room. Since the rate limiter burst
         # count is 3, a new make_join request to the room should be accepted.
@@ -479,7 +483,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.TOO_MANY_REQUESTS, channel.json_body)
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 3}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 3}})
     def test_send_join_contributes_to_room_join_rate_limit_and_is_limited(self) -> None:
         # Make two make_join requests up front. (These are rate limited, but do not
         # contribute to the rate limit.)
@@ -533,7 +537,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.member",
-            "origin": "test.servx",
             "content": {"membership": "join"},
             "auth_events": [],
             "unsigned": {"malicious garbage": "hackz", "more warez": "more hackz"},
@@ -550,7 +553,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.member",
-            "origin": "test.servx",
             "auth_events": [],
             "content": {"membership": "join"},
             "unsigned": {
@@ -577,7 +579,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.power_levels",
-            "origin": "test.servx",
             "content": {},
             "auth_events": [],
             "unsigned": {

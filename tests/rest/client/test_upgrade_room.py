@@ -18,17 +18,16 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 from unittest.mock import patch
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventContentFields, EventTypes, RoomTypes
+from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.rest import admin
 from synapse.rest.client import login, room, room_upgrade_rest_servlet
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeChannel
@@ -56,8 +55,8 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
 
     def _upgrade_room(
         self,
-        token: Optional[str] = None,
-        room_id: Optional[str] = None,
+        token: str | None = None,
+        room_id: str | None = None,
         expire_cache: bool = True,
     ) -> FakeChannel:
         if expire_cache:
@@ -411,3 +410,24 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
 
         channel = self._upgrade_room(expire_cache=False)
         self.assertEqual(200, channel.code, channel.result)
+
+    def test_bans(self) -> None:
+        """
+        Test that bans get copied over when upgrading a room.
+        """
+
+        users_to_ban = ["@user2:test", "@user3:test", "@user4:test"]
+        for user in users_to_ban:
+            self.helper.ban(self.room_id, self.creator, user, tok=self.creator_token)
+
+        channel = self._upgrade_room(self.creator_token)
+        self.assertEqual(200, channel.code, channel.result)
+
+        for user in users_to_ban:
+            content = self.helper.get_state(
+                self.room_id,
+                event_type=EventTypes.Member,
+                state_key=user,
+                tok=self.creator_token,
+            )
+            self.assertEqual(content[EventContentFields.MEMBERSHIP], Membership.BAN)

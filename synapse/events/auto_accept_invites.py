@@ -20,7 +20,7 @@
 #
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import SynapseError
@@ -34,6 +34,7 @@ class InviteAutoAccepter:
     def __init__(self, config: AutoAcceptInvitesConfig, api: ModuleApi):
         # Keep a reference to the Module API.
         self._api = api
+        self.server_name = api.server_name
         self._config = config
 
         if not self._config.enabled:
@@ -118,7 +119,6 @@ class InviteAutoAccepter:
             event.state_key,
             event.room_id,
             "join",
-            bg_start_span=False,
         )
 
         if is_direct_message:
@@ -146,7 +146,7 @@ class InviteAutoAccepter:
         # Be careful: we convert the outer frozendict into a dict here,
         # but the contents of the dict are still frozen (tuples in lieu of lists,
         # etc.)
-        dm_map: Dict[str, Tuple[str, ...]] = dict(
+        dm_map: dict[str, tuple[str, ...]] = dict(
             await self._api.account_data_manager.get_global(
                 user_id, AccountDataTypes.DIRECT
             )
@@ -195,15 +195,18 @@ class InviteAutoAccepter:
             except SynapseError as e:
                 if e.code == HTTPStatus.FORBIDDEN:
                     logger.debug(
-                        f"Update_room_membership was forbidden. This can sometimes be expected for remote invites. Exception: {e}"
+                        "Update_room_membership was forbidden. This can sometimes be expected for remote invites. Exception: %s",
+                        e,
                     )
                 else:
-                    logger.warn(
-                        f"Update_room_membership raised the following unexpected (SynapseError) exception: {e}"
+                    logger.warning(
+                        "Update_room_membership raised the following unexpected (SynapseError) exception: %s",
+                        e,
                     )
             except Exception as e:
-                logger.warn(
-                    f"Update_room_membership raised the following unexpected exception: {e}"
+                logger.warning(
+                    "Update_room_membership raised the following unexpected exception: %s",
+                    e,
                 )
 
             sleep = 2**retries

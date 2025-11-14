@@ -18,17 +18,16 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import importlib.resources as importlib_resources
 import os
 import re
 from email.parser import Parser
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 from unittest.mock import Mock
 
-import pkg_resources
-
 from twisted.internet.interfaces import IReactorTCP
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import LoginType, Membership
@@ -40,7 +39,7 @@ from synapse.rest.synapse.client.password_reset import PasswordResetSubmitTokenR
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeSite, make_request
@@ -59,11 +58,12 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
 
         # Email config.
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": False,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "smtp_host": "127.0.0.1",
             "smtp_port": 20,
             "require_transport_security": False,
@@ -87,7 +87,7 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         ) -> None:
             self.email_attempts.append(msg_bytes)
 
-        self.email_attempts: List[bytes] = []
+        self.email_attempts: list[bytes] = []
         hs.get_send_email_handler()._sendmail = sendmail
 
         return hs
@@ -363,7 +363,7 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         email: str,
         client_secret: str,
         ip: str = "127.0.0.1",
-        next_link: Optional[str] = None,
+        next_link: str | None = None,
     ) -> str:
         body = {"client_secret": client_secret, "email": email, "send_attempt": 1}
         if next_link is not None:
@@ -384,7 +384,7 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
 
         return channel.json_body["sid"]
 
-    def _validate_token(self, link: str, next_link: Optional[str] = None) -> None:
+    def _validate_token(self, link: str, next_link: str | None = None) -> None:
         # Remove the host
         path = link.replace("https://example.com", "")
 
@@ -721,7 +721,7 @@ class WhoamiTestCase(unittest.HomeserverTestCase):
         register.register_servlets,
     ]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["allow_guest_access"] = True
         return config
@@ -764,10 +764,10 @@ class WhoamiTestCase(unittest.HomeserverTestCase):
         as_token = "i_am_an_app_service"
 
         appservice = ApplicationService(
-            as_token,
+            token=as_token,
             id="1234",
             namespaces={"users": [{"regex": user_id, "exclusive": True}]},
-            sender=user_id,
+            sender=UserID.from_string(user_id),
         )
         self.hs.get_datastores().main.services_cache.append(appservice)
 
@@ -798,11 +798,12 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
 
         # Email config.
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": False,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "smtp_host": "127.0.0.1",
             "smtp_port": 20,
             "require_transport_security": False,
@@ -826,7 +827,7 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         ) -> None:
             self.email_attempts.append(msg_bytes)
 
-        self.email_attempts: List[bytes] = []
+        self.email_attempts: list[bytes] = []
         self.hs.get_send_email_handler()._sendmail = sendmail
 
         return self.hs
@@ -1151,9 +1152,9 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         self,
         email: str,
         client_secret: str,
-        next_link: Optional[str] = None,
+        next_link: str | None = None,
         expect_code: int = HTTPStatus.OK,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Request a validation token to add an email address to a user's account
 
         Args:
@@ -1200,7 +1201,9 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
         )
-        self.assertEqual(expected_errcode, channel.json_body["errcode"])
+        self.assertEqual(
+            expected_errcode, channel.json_body["errcode"], msg=channel.result["body"]
+        )
         self.assertIn(expected_error, channel.json_body["error"])
 
     def _validate_token(self, link: str) -> None:
@@ -1391,10 +1394,10 @@ class AccountStatusTestCase(unittest.HomeserverTestCase):
         async def post_json(
             destination: str,
             path: str,
-            data: Optional[JsonDict] = None,
+            data: JsonDict | None = None,
             *a: Any,
             **kwa: Any,
-        ) -> Union[JsonDict, list]:
+        ) -> JsonDict | list:
             if destination == "remote":
                 return {
                     "account_statuses": {
@@ -1500,11 +1503,11 @@ class AccountStatusTestCase(unittest.HomeserverTestCase):
 
     def _test_status(
         self,
-        users: Optional[List[str]],
+        users: list[str] | None,
         expected_status_code: int = HTTPStatus.OK,
-        expected_statuses: Optional[Dict[str, Dict[str, bool]]] = None,
-        expected_failures: Optional[List[str]] = None,
-        expected_errcode: Optional[str] = None,
+        expected_statuses: dict[str, dict[str, bool]] | None = None,
+        expected_failures: list[str] | None = None,
+        expected_errcode: str | None = None,
     ) -> None:
         """Send a request to the account status endpoint and check that the response
         matches with what's expected.

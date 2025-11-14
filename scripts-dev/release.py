@@ -32,15 +32,17 @@ import time
 import urllib.request
 from os import path
 from tempfile import TemporaryDirectory
-from typing import Any, List, Match, Optional, Union
+from typing import Any, Match
 
 import attr
 import click
-import commonmark
 import git
+import github
+import github.Auth
 from click.exceptions import ClickException
 from git import GitCommandError, Repo
 from github import BadCredentialsException, Github
+from markdown_it import MarkdownIt
 from packaging import version
 
 
@@ -254,6 +256,12 @@ def _prepare() -> None:
     # Update the version specified in pyproject.toml.
     subprocess.check_output(["poetry", "version", new_version])
 
+    # Update config schema $id.
+    schema_file = "schema/synapse-config.schema.yaml"
+    major_minor_version = ".".join(new_version.split(".")[:2])
+    url = f"https://element-hq.github.io/synapse/schema/synapse/v{major_minor_version}/synapse-config.schema.json"
+    subprocess.check_output(["sed", "-i", f"0,/^\\$id: .*/s||$id: {url}|", schema_file])
+
     # Generate changelogs.
     generate_and_write_changelog(synapse_repo, current_version, new_version)
 
@@ -308,7 +316,10 @@ def _prepare() -> None:
     )
 
     print("Opening the changelog in your browser...")
-    print("Please ask #synapse-dev to give it a check.")
+    print(
+        "Please review it using the release notes review checklist: https://element-hq.github.io/synapse/develop/development/internal_documentation/release_notes_review_checklist.html"
+    )
+    print("And post it in #synapse-dev for cursory review from the team.")
     click.launch(
         f"https://github.com/element-hq/synapse/blob/{synapse_repo.active_branch.name}/CHANGES.md"
     )
@@ -316,11 +327,11 @@ def _prepare() -> None:
 
 @cli.command()
 @click.option("--gh-token", envvar=["GH_TOKEN", "GITHUB_TOKEN"])
-def tag(gh_token: Optional[str]) -> None:
+def tag(gh_token: str | None) -> None:
     _tag(gh_token)
 
 
-def _tag(gh_token: Optional[str]) -> None:
+def _tag(gh_token: str | None) -> None:
     """Tags the release and generates a draft GitHub release"""
 
     # Test that the GH Token is valid before continuing.
@@ -391,7 +402,7 @@ def _tag(gh_token: Optional[str]) -> None:
         return
 
     # Create a new draft release
-    gh = Github(gh_token)
+    gh = Github(auth=github.Auth.Token(token=gh_token))
     gh_repo = gh.get_repo("element-hq/synapse")
     release = gh_repo.create_git_release(
         tag=tag_name,
@@ -422,7 +433,7 @@ def _publish(gh_token: str) -> None:
 
     if gh_token:
         # Test that the GH Token is valid before continuing.
-        gh = Github(gh_token)
+        gh = Github(auth=github.Auth.Token(token=gh_token))
         gh.get_user()
 
     # Make sure we're in a git repo.
@@ -435,7 +446,7 @@ def _publish(gh_token: str) -> None:
         return
 
     # Publish the draft release
-    gh = Github(gh_token)
+    gh = Github(auth=github.Auth.Token(token=gh_token))
     gh_repo = gh.get_repo("element-hq/synapse")
     for release in gh_repo.get_releases():
         if release.title == tag_name:
@@ -460,11 +471,11 @@ def _publish(gh_token: str) -> None:
 
 @cli.command()
 @click.option("--gh-token", envvar=["GH_TOKEN", "GITHUB_TOKEN"], required=False)
-def upload(gh_token: Optional[str]) -> None:
+def upload(gh_token: str | None) -> None:
     _upload(gh_token)
 
 
-def _upload(gh_token: Optional[str]) -> None:
+def _upload(gh_token: str | None) -> None:
     """Upload release to pypi."""
 
     # Test that the GH Token is valid before continuing.
@@ -480,8 +491,13 @@ def _upload(gh_token: Optional[str]) -> None:
         click.echo(f"Tag {tag_name} ({tag.commit}) is not currently checked out!")
         click.get_current_context().abort()
 
+    if gh_token:
+        gh = Github(auth=github.Auth.Token(token=gh_token))
+    else:
+        # Use github anonymously.
+        gh = Github()
+
     # Query all the assets corresponding to this release.
-    gh = Github(gh_token)
     gh_repo = gh.get_repo("element-hq/synapse")
     gh_release = gh_repo.get_release(tag_name)
 
@@ -560,11 +576,11 @@ def _merge_into(repo: Repo, source: str, target: str) -> None:
 
 @cli.command()
 @click.option("--gh-token", envvar=["GH_TOKEN", "GITHUB_TOKEN"], required=False)
-def wait_for_actions(gh_token: Optional[str]) -> None:
+def wait_for_actions(gh_token: str | None) -> None:
     _wait_for_actions(gh_token)
 
 
-def _wait_for_actions(gh_token: Optional[str]) -> None:
+def _wait_for_actions(gh_token: str | None) -> None:
     # Test that the GH Token is valid before continuing.
     check_valid_gh_token(gh_token)
 
@@ -633,7 +649,16 @@ def _notify(message: str) -> None:
 
 
 @cli.command()
-def merge_back() -> None:
+# Although this option is not used, allow it anyways. Otherwise the user will
+# receive an error when providing it, which is annoying as other commands accept
+# it.
+@click.option(
+    "--gh-token",
+    "_gh_token",
+    envvar=["GH_TOKEN", "GITHUB_TOKEN"],
+    required=False,
+)
+def merge_back(_gh_token: str | None) -> None:
     _merge_back()
 
 
@@ -681,7 +706,16 @@ def _merge_back() -> None:
 
 
 @cli.command()
-def announce() -> None:
+# Although this option is not used, allow it anyways. Otherwise the user will
+# receive an error when providing it, which is annoying as other commands accept
+# it.
+@click.option(
+    "--gh-token",
+    "_gh_token",
+    envvar=["GH_TOKEN", "GITHUB_TOKEN"],
+    required=False,
+)
+def announce(_gh_token: str | None) -> None:
     _announce()
 
 
@@ -690,18 +724,31 @@ def _announce() -> None:
 
     current_version = get_package_version()
     tag_name = f"v{current_version}"
+    is_rc = "rc" in tag_name
 
-    click.echo(
-        f"""
+    release_text = f"""
+### Synapse {current_version} {"🧪" if is_rc else "🚀"}
+
 Hi everyone. Synapse {current_version} has just been released.
+"""
 
+    if "rc" in tag_name:
+        release_text += (
+            "\nThis is a release candidate. Please help us test it out "
+            "before the final release by deploying it to non-production environments, "
+            "and reporting any issues you find to "
+            "[the issue tracker](https://github.com/element-hq/synapse/issues). Thanks!\n"
+        )
+
+    release_text += f"""
 [notes](https://github.com/element-hq/synapse/releases/tag/{tag_name}) | \
 [docker](https://hub.docker.com/r/matrixdotorg/synapse/tags?name={tag_name}) | \
 [debs](https://packages.matrix.org/debian/) | \
 [pypi](https://pypi.org/project/matrix-synapse/{current_version}/)"""
-    )
 
-    if "rc" in tag_name:
+    click.echo(release_text)
+
+    if is_rc:
         click.echo(
             """
 Announce the RC in
@@ -726,7 +773,7 @@ Ask the designated people to do the blog and tweets."""
 def full(gh_token: str) -> None:
     if gh_token:
         # Test that the GH Token is valid before continuing.
-        gh = Github(gh_token)
+        gh = Github(auth=github.Auth.Token(token=gh_token))
         gh.get_user()
 
     click.echo("1. If this is a security release, read the security wiki page.")
@@ -795,12 +842,16 @@ def get_repo_and_check_clean_checkout(
         raise click.ClickException(
             f"{path} is not a git repository (expecting a {name} repository)."
         )
-    if repo.is_dirty():
-        raise click.ClickException(f"Uncommitted changes exist in {path}.")
+    while repo.is_dirty():
+        if not click.confirm(
+            f"Uncommitted changes exist in {path}. Commit or stash them. Ready to continue?"
+        ):
+            raise click.ClickException("Aborted.")
+
     return repo
 
 
-def check_valid_gh_token(gh_token: Optional[str]) -> None:
+def check_valid_gh_token(gh_token: str | None) -> None:
     """Check that a github token is valid, if supplied"""
 
     if not gh_token:
@@ -808,7 +859,7 @@ def check_valid_gh_token(gh_token: Optional[str]) -> None:
         return
 
     try:
-        gh = Github(gh_token)
+        gh = Github(auth=github.Auth.Token(token=gh_token))
 
         # We need to lookup name to trigger a request.
         _name = gh.get_user().name
@@ -816,7 +867,7 @@ def check_valid_gh_token(gh_token: Optional[str]) -> None:
         raise click.ClickException(f"Github credentials are bad: {e}")
 
 
-def find_ref(repo: git.Repo, ref_name: str) -> Optional[git.HEAD]:
+def find_ref(repo: git.Repo, ref_name: str) -> git.HEAD | None:
     """Find the branch/ref, looking first locally then in the remote."""
     if ref_name in repo.references:
         return repo.references[ref_name]
@@ -845,7 +896,7 @@ def get_changes_for_version(wanted_version: version.Version) -> str:
 
     # First we parse the changelog so that we can split it into sections based
     # on the release headings.
-    ast = commonmark.Parser().parse(changes)
+    tokens = MarkdownIt().parse(changes)
 
     @attr.s(auto_attribs=True)
     class VersionSection:
@@ -853,22 +904,25 @@ def get_changes_for_version(wanted_version: version.Version) -> str:
 
         # These are 0-based.
         start_line: int
-        end_line: Optional[int] = None  # Is none if its the last entry
+        end_line: int | None = None  # Is none if its the last entry
 
-    headings: List[VersionSection] = []
-    for node, _ in ast.walker():
-        # We look for all text nodes that are in a level 1 heading.
-        if node.t != "text":
+    headings: list[VersionSection] = []
+    for i, token in enumerate(tokens):
+        # We look for level 1 headings (h1 tags).
+        if token.type != "heading_open" or token.tag != "h1":
             continue
 
-        if node.parent.t != "heading" or node.parent.level != 1:
-            continue
+        # The next token should be an inline token containing the heading text
+        if i + 1 < len(tokens) and tokens[i + 1].type == "inline":
+            heading_text = tokens[i + 1].content
+            # The map property contains [line_begin, line_end] (0-based)
+            start_line = token.map[0] if token.map else 0
 
-        # If we have a previous heading then we update its `end_line`.
-        if headings:
-            headings[-1].end_line = node.parent.sourcepos[0][0] - 1
+            # If we have a previous heading then we update its `end_line`.
+            if headings:
+                headings[-1].end_line = start_line
 
-        headings.append(VersionSection(node.literal, node.parent.sourcepos[0][0] - 1))
+            headings.append(VersionSection(heading_text, start_line))
 
     changes_by_line = changes.split("\n")
 
@@ -937,7 +991,7 @@ def build_dependabot_changelog(repo: Repo, current_version: version.Version) -> 
     messages = []
     for commit in reversed(commits):
         if commit.author.name == "dependabot[bot]":
-            message: Union[str, bytes] = commit.message
+            message: str | bytes = commit.message
             if isinstance(message, bytes):
                 message = message.decode("utf-8")
             messages.append(message.split("\n", maxsplit=1)[0])

@@ -220,29 +220,24 @@
       "yBucketBound": "auto"
     },
     {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
       "datasource": {
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${DS_PROMETHEUS}",
+        "type": "prometheus"
       },
-      "description": "",
+      "aliasColors": {},
+      "dashLength": 10,
       "fieldConfig": {
         "defaults": {
           "links": []
         },
         "overrides": []
       },
-      "fill": 0,
-      "fillGradient": 0,
       "gridPos": {
         "h": 9,
         "w": 12,
         "x": 12,
         "y": 1
       },
-      "hiddenSeries": false,
       "id": 152,
       "legend": {
         "avg": false,
@@ -255,71 +250,81 @@
         "values": false
       },
       "lines": true,
-      "linewidth": 0,
-      "links": [],
       "nullPointMode": "connected",
       "options": {
         "alertThreshold": true
       },
       "paceLength": 10,
-      "percentage": false,
-      "pluginVersion": "9.2.2",
+      "pluginVersion": "10.4.3",
       "pointradius": 5,
-      "points": false,
       "renderer": "flot",
       "seriesOverrides": [
         {
           "alias": "Avg",
           "fill": 0,
-          "linewidth": 3
+          "linewidth": 3,
+          "$$hashKey": "object:48"
         },
         {
           "alias": "99%",
           "color": "#C4162A",
-          "fillBelowTo": "90%"
+          "fillBelowTo": "90%",
+          "$$hashKey": "object:49"
         },
         {
           "alias": "90%",
           "color": "#FF7383",
-          "fillBelowTo": "75%"
+          "fillBelowTo": "75%",
+          "$$hashKey": "object:50"
         },
         {
           "alias": "75%",
           "color": "#FFEE52",
-          "fillBelowTo": "50%"
+          "fillBelowTo": "50%",
+          "$$hashKey": "object:51"
         },
         {
           "alias": "50%",
           "color": "#73BF69",
-          "fillBelowTo": "25%"
+          "fillBelowTo": "25%",
+          "$$hashKey": "object:52"
         },
         {
           "alias": "25%",
           "color": "#1F60C4",
-          "fillBelowTo": "5%"
+          "fillBelowTo": "5%",
+          "$$hashKey": "object:53"
         },
         {
           "alias": "5%",
-          "lines": false
+          "lines": false,
+          "$$hashKey": "object:54"
         },
         {
           "alias": "Average",
           "color": "rgb(255, 255, 255)",
           "lines": true,
-          "linewidth": 3
+          "linewidth": 3,
+          "$$hashKey": "object:55"
         },
         {
-          "alias": "Events",
+          "alias": "Local events being persisted",
+          "color": "#96d98D",
+          "points": true,
+          "yaxis": 2,
+          "zindex": -3,
+          "$$hashKey": "object:56"
+        },
+        {
+          "$$hashKey": "object:329",
           "color": "#B877D9",
-          "hideTooltip": true,
+          "alias": "All events being persisted",
           "points": true,
           "yaxis": 2,
           "zindex": -3
         }
       ],
       "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
       "targets": [
         {
           "datasource": {
@@ -384,7 +389,20 @@
           },
           "expr": "sum(rate(synapse_http_server_response_time_seconds_sum{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size])) / sum(rate(synapse_http_server_response_time_seconds_count{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size]))",
           "legendFormat": "Average",
-          "refId": "H"
+          "refId": "H",
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(rate(synapse_http_server_response_time_seconds_count{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Local events being persisted",
+          "refId": "E",
+          "editorMode": "code"
         },
         {
           "datasource": {
@@ -393,8 +411,9 @@
           "expr": "sum(rate(synapse_storage_events_persisted_events_total{instance=\"$instance\"}[$bucket_size]))",
           "hide": false,
           "instant": false,
-          "legendFormat": "Events",
-          "refId": "E"
+          "legendFormat": "All events being persisted",
+          "refId": "I",
+          "editorMode": "code"
         }
       ],
       "thresholds": [
@@ -428,7 +447,9 @@
       "xaxis": {
         "mode": "time",
         "show": true,
-        "values": []
+        "values": [],
+        "name": null,
+        "buckets": null
       },
       "yaxes": [
         {
@@ -450,7 +471,20 @@
       ],
       "yaxis": {
         "align": false
-      }
+      },
+      "bars": false,
+      "dashes": false,
+      "description": "",
+      "fill": 0,
+      "fillGradient": 0,
+      "hiddenSeries": false,
+      "linewidth": 0,
+      "percentage": false,
+      "points": false,
+      "stack": false,
+      "steppedLine": false,
+      "timeFrom": null,
+      "timeShift": null
     },
     {
       "aliasColors": {},
@@ -2132,10 +2166,10 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_events_persisted_by_source_type{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_storage_events_persisted_events_sep_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{type}}",
+              "legendFormat": "{{origin_type}}",
               "refId": "D"
             }
           ],
@@ -2220,7 +2254,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_events_persisted_by_event_type{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "sum by(type) (rate(synapse_storage_events_persisted_events_sep_total{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size]))",
               "format": "time_series",
               "instant": false,
               "intervalFactor": 2,
@@ -2232,99 +2266,6 @@
           "thresholds": [],
           "timeRegions": [],
           "title": "Events/s by Type",
-          "tooltip": {
-            "shared": false,
-            "sort": 2,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "mode": "time",
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "hertz",
-              "logBase": 1,
-              "min": "0",
-              "show": true
-            },
-            {
-              "format": "short",
-              "logBase": 1,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false
-          }
-        },
-        {
-          "aliasColors": {
-            "irc-freenode (local)": "#EAB839"
-          },
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": {
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "decimals": 1,
-          "fill": 1,
-          "fillGradient": 0,
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 0,
-            "y": 44
-          },
-          "hiddenSeries": false,
-          "id": 44,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": false,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": false,
-            "min": false,
-            "show": true,
-            "total": false,
-            "values": false
-          },
-          "lines": true,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null",
-          "options": {
-            "alertThreshold": true
-          },
-          "percentage": false,
-          "pluginVersion": "9.2.2",
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "datasource": {
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "expr": "rate(synapse_storage_events_persisted_by_origin{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{origin_entity}} ({{origin_type}})",
-              "refId": "A",
-              "step": 20
-            }
-          ],
-          "thresholds": [],
-          "timeRegions": [],
-          "title": "Events/s by Origin",
           "tooltip": {
             "shared": false,
             "sort": 2,
@@ -4362,7 +4303,7 @@
               "exemplar": false,
               "expr": "(time() - max without (job, index, host) (avg_over_time(synapse_federation_last_received_pdu_time[10m]))) / 60",
               "instant": false,
-              "legendFormat": "{{server_name}} ",
+              "legendFormat": "{{origin_server_name}} ",
               "range": true,
               "refId": "A"
             }
@@ -4484,7 +4425,7 @@
               "exemplar": false,
               "expr": "(time() - max without (job, index, host) (avg_over_time(synapse_federation_last_sent_pdu_time[10m]))) / 60",
               "instant": false,
-              "legendFormat": "{{server_name}}",
+              "legendFormat": "{{destination_server_name}}",
               "range": true,
               "refId": "A"
             }

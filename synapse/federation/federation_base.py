@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Awaitable, Callable, Sequence
 
 from synapse.api.constants import MAX_DEPTH, EventContentFields, EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
@@ -67,7 +67,7 @@ class FederationBase:
 
         # We need to define this lazily otherwise we get a cyclic dependency.
         # self._policy_handler = hs.get_room_policy_handler()
-        self._policy_handler: Optional[RoomPolicyHandler] = None
+        self._policy_handler: RoomPolicyHandler | None = None
 
     def _lazily_get_policy_handler(self) -> RoomPolicyHandler:
         """Lazily get the room policy handler.
@@ -88,9 +88,8 @@ class FederationBase:
         self,
         room_version: RoomVersion,
         pdu: EventBase,
-        record_failure_callback: Optional[
-            Callable[[EventBase, str], Awaitable[None]]
-        ] = None,
+        record_failure_callback: Callable[[EventBase, str], Awaitable[None]]
+        | None = None,
     ) -> EventBase:
         """Checks that event is correctly signed by the sending server.
 
@@ -174,6 +173,7 @@ class FederationBase:
                 "Event not allowed by policy server, soft-failing %s", pdu.event_id
             )
             pdu.internal_metadata.soft_failed = True
+            pdu.internal_metadata.policy_server_spammy = True
             # Note: we don't redact the event so admins can inspect the event after the
             # fact. Other processes may redact the event, but that won't be applied to
             # the database copy of the event until the server's config requires it.
@@ -304,7 +304,7 @@ def _is_invite_via_3pid(event: EventBase) -> bool:
 
 def parse_events_from_pdu_json(
     pdus_json: Sequence[JsonDict], room_version: RoomVersion
-) -> List[EventBase]:
+) -> list[EventBase]:
     return [
         event_from_pdu_json(pdu_json, room_version)
         for pdu_json in filter_pdus_for_valid_depth(pdus_json)
@@ -322,8 +322,7 @@ def event_from_pdu_json(pdu_json: JsonDict, room_version: RoomVersion) -> EventB
         SynapseError: if the pdu is missing required fields or is otherwise
             not a valid matrix event
     """
-    # we could probably enforce a bunch of other fields here (room_id, sender,
-    # origin, etc etc)
+    # we could probably enforce a bunch of other fields here (room_id, sender, etc.)
     assert_params_in_dict(pdu_json, ("type", "depth"))
 
     # Strip any unauthorized values from "unsigned" if they exist
@@ -343,6 +342,21 @@ def event_from_pdu_json(pdu_json: JsonDict, room_version: RoomVersion) -> EventB
     if room_version.strict_canonicaljson:
         validate_canonicaljson(pdu_json)
 
+    # enforce that MSC4291 auth events don't include the create event.
+    # N.B. if they DO include a spurious create event, it'll fail auth checks elsewhere, so we don't
+    # need to do expensive DB lookups to find which event ID is the create event here.
+    if room_version.msc4291_room_ids_as_hashes:
+        room_id = pdu_json.get("room_id")
+        if room_id:
+            create_event_id = "$" + room_id[1:]
+            auth_events = pdu_json.get("auth_events")
+            if auth_events:
+                if create_event_id in auth_events:
+                    raise SynapseError(
+                        400,
+                        "auth_events must not contain the create event",
+                        Codes.BAD_JSON,
+                    )
     event = make_event_from_dict(pdu_json, room_version)
     return event
 

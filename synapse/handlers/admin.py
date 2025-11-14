@@ -24,13 +24,8 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
-    List,
     Mapping,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 import attr
@@ -75,7 +70,7 @@ class AdminHandler:
 
         self.hs = hs
 
-    async def get_redact_task(self, redact_id: str) -> Optional[ScheduledTask]:
+    async def get_redact_task(self, redact_id: str) -> ScheduledTask | None:
         """Get the current status of an active redaction process
 
         Args:
@@ -103,11 +98,9 @@ class AdminHandler:
 
         return ret
 
-    async def get_user(self, user: UserID) -> Optional[JsonMapping]:
+    async def get_user(self, user: UserID) -> JsonMapping | None:
         """Function to get user details"""
-        user_info: Optional[UserInfo] = await self._store.get_user_by_id(
-            user.to_string()
-        )
+        user_info: UserInfo | None = await self._store.get_user_by_id(user.to_string())
         if user_info is None:
             return None
 
@@ -218,7 +211,7 @@ class AdminHandler:
             to_key = RoomStreamToken(stream=stream_ordering)
 
             # Events that we've processed in this room
-            written_events: Set[str] = set()
+            written_events: set[str] = set()
 
             # We need to track gaps in the events stream so that we can then
             # write out the state at those events. We do this by keeping track
@@ -231,7 +224,7 @@ class AdminHandler:
             # The reverse mapping to above, i.e. map from unseen event to events
             # that have the unseen event in their prev_events, i.e. the unseen
             # events "children".
-            unseen_to_child_events: Dict[str, Set[str]] = {}
+            unseen_to_child_events: dict[str, set[str]] = {}
 
             # We fetch events in the room the user could see by fetching *all*
             # events that we have and then filtering, this isn't the most
@@ -358,8 +351,9 @@ class AdminHandler:
         user_id: str,
         rooms: list,
         requester: JsonMapping,
-        reason: Optional[str],
-        limit: Optional[int],
+        use_admin: bool,
+        reason: str | None,
+        limit: int | None,
     ) -> str:
         """
         Start a task redacting the events of the given user in the given rooms
@@ -368,6 +362,7 @@ class AdminHandler:
             user_id: the user ID of the user whose events should be redacted
             rooms: the rooms in which to redact the user's events
             requester: the user requesting the events
+            use_admin: whether to use the admin account to issue the redactions
             reason: reason for requesting the redaction, ie spam, etc
             limit: limit on the number of events in each room to redact
 
@@ -395,6 +390,7 @@ class AdminHandler:
                 "rooms": rooms,
                 "requester": requester,
                 "user_id": user_id,
+                "use_admin": use_admin,
                 "reason": reason,
                 "limit": limit,
             },
@@ -409,7 +405,7 @@ class AdminHandler:
 
     async def _redact_all_events(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[Mapping[str, Any]], Optional[str]]:
+    ) -> tuple[TaskStatus, Mapping[str, Any] | None, str | None]:
         """
         Task to redact all of a users events in the given rooms, tracking which, if any, events
         whose redaction failed
@@ -426,9 +422,17 @@ class AdminHandler:
         user_id = task.params.get("user_id")
         assert user_id is not None
 
-        # puppet the user if they're ours, otherwise use admin to redact
+        use_admin = task.params.get("use_admin", False)
+
+        # default to puppeting the user unless they are not local or it's been requested to
+        # use the admin user to issue the redactions
+        requester_id = (
+            admin.user.to_string()
+            if use_admin or not self.hs.is_mine_id(user_id)
+            else user_id
+        )
         requester = create_requester(
-            user_id if self.hs.is_mine_id(user_id) else admin.user.to_string(),
+            requester_id,
             authenticated_entity=admin.user.to_string(),
         )
 
@@ -495,7 +499,7 @@ class AdminHandler:
                     )
                 except Exception as ex:
                     logger.info(
-                        f"Redaction of event {event.event_id} failed due to: {ex}"
+                        "Redaction of event %s failed due to: %s", event.event_id, ex
                     )
                     result["failed_redactions"][event.event_id] = str(ex)
                     await self._task_scheduler.update_task(task.id, result=result)
@@ -507,7 +511,7 @@ class ExfiltrationWriter(metaclass=abc.ABCMeta):
     """Interface used to specify how to write exported data."""
 
     @abc.abstractmethod
-    def write_events(self, room_id: str, events: List[EventBase]) -> None:
+    def write_events(self, room_id: str, events: list[EventBase]) -> None:
         """Write a batch of events for a room."""
         raise NotImplementedError()
 

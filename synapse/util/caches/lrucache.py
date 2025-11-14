@@ -30,34 +30,26 @@ from typing import (
     Any,
     Callable,
     Collection,
-    Dict,
     Generic,
     Iterable,
-    List,
     Literal,
-    Optional,
-    Set,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
     cast,
     overload,
 )
 
-from twisted.internet import reactor
-from twisted.internet.interfaces import IReactorTime
+from twisted.internet import defer
 
 from synapse.config import cache as cache_config
-from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.metrics.jemalloc import get_jemalloc_stats
-from synapse.util import Clock, caches
+from synapse.util import caches
 from synapse.util.caches import CacheMetric, EvictionReason, register_cache
 from synapse.util.caches.treecache import (
     TreeCache,
     iterate_tree_cache_entry,
     iterate_tree_cache_items,
 )
+from synapse.util.clock import Clock
 from synapse.util.linked_list import ListNode
 
 if TYPE_CHECKING:
@@ -118,103 +110,121 @@ USE_GLOBAL_LIST = False
 GLOBAL_ROOT = ListNode["_Node"].create_root_node()
 
 
-@wrap_as_background_process("LruCache._expire_old_entries")
-async def _expire_old_entries(
-    clock: Clock, expiry_seconds: float, autotune_config: Optional[dict]
-) -> None:
+def _expire_old_entries(
+    server_name: str,
+    hs: "HomeServer",
+    clock: Clock,
+    expiry_seconds: float,
+    autotune_config: dict | None,
+) -> "defer.Deferred[None]":
     """Walks the global cache list to find cache entries that haven't been
     accessed in the given number of seconds, or if a given memory threshold has been breached.
     """
-    if autotune_config:
-        max_cache_memory_usage = autotune_config["max_cache_memory_usage"]
-        target_cache_memory_usage = autotune_config["target_cache_memory_usage"]
-        min_cache_ttl = autotune_config["min_cache_ttl"] / 1000
 
-    now = int(clock.time())
-    node = GLOBAL_ROOT.prev_node
-    assert node is not None
+    async def _internal_expire_old_entries(
+        clock: Clock, expiry_seconds: float, autotune_config: dict | None
+    ) -> None:
+        if autotune_config:
+            max_cache_memory_usage = autotune_config["max_cache_memory_usage"]
+            target_cache_memory_usage = autotune_config["target_cache_memory_usage"]
+            min_cache_ttl = autotune_config["min_cache_ttl"] / 1000
 
-    i = 0
+        now = int(clock.time())
+        node = GLOBAL_ROOT.prev_node
+        assert node is not None
 
-    logger.debug("Searching for stale caches")
+        i = 0
 
-    evicting_due_to_memory = False
+        logger.debug("Searching for stale caches")
 
-    # determine if we're evicting due to memory
-    jemalloc_interface = get_jemalloc_stats()
-    if jemalloc_interface and autotune_config:
-        try:
-            jemalloc_interface.refresh_stats()
-            mem_usage = jemalloc_interface.get_stat("allocated")
-            if mem_usage > max_cache_memory_usage:
-                logger.info("Begin memory-based cache eviction.")
-                evicting_due_to_memory = True
-        except Exception:
-            logger.warning(
-                "Unable to read allocated memory, skipping memory-based cache eviction."
-            )
+        evicting_due_to_memory = False
 
-    while node is not GLOBAL_ROOT:
-        # Only the root node isn't a `_TimedListNode`.
-        assert isinstance(node, _TimedListNode)
-
-        # if node has not aged past expiry_seconds and we are not evicting due to memory usage, there's
-        # nothing to do here
-        if (
-            node.last_access_ts_secs > now - expiry_seconds
-            and not evicting_due_to_memory
-        ):
-            break
-
-        # if entry is newer than min_cache_entry_ttl then do not evict and don't evict anything newer
-        if evicting_due_to_memory and now - node.last_access_ts_secs < min_cache_ttl:
-            break
-
-        cache_entry = node.get_cache_entry()
-        next_node = node.prev_node
-
-        # The node should always have a reference to a cache entry and a valid
-        # `prev_node`, as we only drop them when we remove the node from the
-        # list.
-        assert next_node is not None
-        assert cache_entry is not None
-        cache_entry.drop_from_cache()
-
-        # Check mem allocation periodically if we are evicting a bunch of caches
-        if jemalloc_interface and evicting_due_to_memory and (i + 1) % 100 == 0:
+        # determine if we're evicting due to memory
+        jemalloc_interface = get_jemalloc_stats()
+        if jemalloc_interface and autotune_config:
             try:
                 jemalloc_interface.refresh_stats()
                 mem_usage = jemalloc_interface.get_stat("allocated")
-                if mem_usage < target_cache_memory_usage:
-                    evicting_due_to_memory = False
-                    logger.info("Stop memory-based cache eviction.")
+                if mem_usage > max_cache_memory_usage:
+                    logger.info("Begin memory-based cache eviction.")
+                    evicting_due_to_memory = True
             except Exception:
                 logger.warning(
-                    "Unable to read allocated memory, this may affect memory-based cache eviction."
+                    "Unable to read allocated memory, skipping memory-based cache eviction."
                 )
-                # If we've failed to read the current memory usage then we
-                # should stop trying to evict based on memory usage
-                evicting_due_to_memory = False
 
-        # If we do lots of work at once we yield to allow other stuff to happen.
-        if (i + 1) % 10000 == 0:
-            logger.debug("Waiting during drop")
-            if node.last_access_ts_secs > now - expiry_seconds:
-                await clock.sleep(0.5)
-            else:
-                await clock.sleep(0)
-            logger.debug("Waking during drop")
+        while node is not GLOBAL_ROOT:
+            # Only the root node isn't a `_TimedListNode`.
+            assert isinstance(node, _TimedListNode)
 
-        node = next_node
+            # if node has not aged past expiry_seconds and we are not evicting due to memory usage, there's
+            # nothing to do here
+            if (
+                node.last_access_ts_secs > now - expiry_seconds
+                and not evicting_due_to_memory
+            ):
+                break
 
-        # If we've yielded then our current node may have been evicted, so we
-        # need to check that its still valid.
-        if node.prev_node is None:
-            break
+            # if entry is newer than min_cache_entry_ttl then do not evict and don't evict anything newer
+            if (
+                evicting_due_to_memory
+                and now - node.last_access_ts_secs < min_cache_ttl
+            ):
+                break
 
-        i += 1
+            cache_entry = node.get_cache_entry()
+            next_node = node.prev_node
 
-    logger.info("Dropped %d items from caches", i)
+            # The node should always have a reference to a cache entry and a valid
+            # `prev_node`, as we only drop them when we remove the node from the
+            # list.
+            assert next_node is not None
+            assert cache_entry is not None
+            cache_entry.drop_from_cache()
+
+            # Check mem allocation periodically if we are evicting a bunch of caches
+            if jemalloc_interface and evicting_due_to_memory and (i + 1) % 100 == 0:
+                try:
+                    jemalloc_interface.refresh_stats()
+                    mem_usage = jemalloc_interface.get_stat("allocated")
+                    if mem_usage < target_cache_memory_usage:
+                        evicting_due_to_memory = False
+                        logger.info("Stop memory-based cache eviction.")
+                except Exception:
+                    logger.warning(
+                        "Unable to read allocated memory, this may affect memory-based cache eviction."
+                    )
+                    # If we've failed to read the current memory usage then we
+                    # should stop trying to evict based on memory usage
+                    evicting_due_to_memory = False
+
+            # If we do lots of work at once we yield to allow other stuff to happen.
+            if (i + 1) % 10000 == 0:
+                logger.debug("Waiting during drop")
+                if node.last_access_ts_secs > now - expiry_seconds:
+                    await clock.sleep(0.5)
+                else:
+                    await clock.sleep(0)
+                logger.debug("Waking during drop")
+
+            node = next_node
+
+            # If we've yielded then our current node may have been evicted, so we
+            # need to check that its still valid.
+            if node.prev_node is None:
+                break
+
+            i += 1
+
+        logger.info("Dropped %d items from caches", i)
+
+    return hs.run_as_background_process(
+        "LruCache._expire_old_entries",
+        _internal_expire_old_entries,
+        clock,
+        expiry_seconds,
+        autotune_config,
+    )
 
 
 def setup_expire_lru_cache_entries(hs: "HomeServer") -> None:
@@ -234,10 +244,13 @@ def setup_expire_lru_cache_entries(hs: "HomeServer") -> None:
     global USE_GLOBAL_LIST
     USE_GLOBAL_LIST = True
 
+    server_name = hs.hostname
     clock = hs.get_clock()
     clock.looping_call(
         _expire_old_entries,
         30 * 1000,
+        server_name,
+        hs,
         clock,
         expiry_time,
         hs.config.caches.cache_autotuning,
@@ -266,7 +279,7 @@ class _Node(Generic[KT, VT]):
         prune_unread_entries: bool = True,
     ):
         self._list_node = ListNode.insert_after(self, root)
-        self._global_list_node: Optional[_TimedListNode] = None
+        self._global_list_node: _TimedListNode | None = None
         if USE_GLOBAL_LIST and prune_unread_entries:
             self._global_list_node = _TimedListNode.insert_after(self, GLOBAL_ROOT)
             self._global_list_node.update_last_access(clock)
@@ -288,7 +301,7 @@ class _Node(Generic[KT, VT]):
         # footprint down. Storing `None` is free as its a singleton, while empty
         # lists are 56 bytes (and empty sets are 216 bytes, if we did the naive
         # thing and used sets).
-        self.callbacks: Optional[List[Callable[[], None]]] = None
+        self.callbacks: list[Callable[[], None]] | None = None
 
         self.add_callbacks(callbacks)
 
@@ -376,24 +389,61 @@ class LruCache(Generic[KT, VT]):
     If cache_type=TreeCache, all keys must be tuples.
     """
 
+    @overload
     def __init__(
         self,
+        *,
         max_size: int,
-        cache_name: Optional[str] = None,
-        cache_type: Type[Union[dict, TreeCache]] = dict,
-        size_callback: Optional[Callable[[VT], int]] = None,
-        metrics_collection_callback: Optional[Callable[[], None]] = None,
+        clock: Clock,
+        server_name: str,
+        cache_name: str,
+        cache_type: type[dict | TreeCache] = dict,
+        size_callback: Callable[[VT], int] | None = None,
+        metrics_collection_callback: Callable[[], None] | None = None,
         apply_cache_factor_from_config: bool = True,
-        clock: Optional[Clock] = None,
         prune_unread_entries: bool = True,
-        extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
+        extra_index_cb: Callable[[KT, VT], KT] | None = None,
+    ): ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        max_size: int,
+        clock: Clock,
+        server_name: str,
+        cache_name: Literal[None] = None,
+        cache_type: type[dict | TreeCache] = dict,
+        size_callback: Callable[[VT], int] | None = None,
+        metrics_collection_callback: Callable[[], None] | None = None,
+        apply_cache_factor_from_config: bool = True,
+        prune_unread_entries: bool = True,
+        extra_index_cb: Callable[[KT, VT], KT] | None = None,
+    ): ...
+
+    def __init__(
+        self,
+        *,
+        max_size: int,
+        clock: Clock,
+        server_name: str,
+        cache_name: str | None = None,
+        cache_type: type[dict | TreeCache] = dict,
+        size_callback: Callable[[VT], int] | None = None,
+        metrics_collection_callback: Callable[[], None] | None = None,
+        apply_cache_factor_from_config: bool = True,
+        prune_unread_entries: bool = True,
+        extra_index_cb: Callable[[KT, VT], KT] | None = None,
     ):
         """
         Args:
             max_size: The maximum amount of entries the cache can hold
 
-            cache_name: The name of this cache, for the prometheus metrics. If unset,
-                no metrics will be reported on this cache.
+            server_name: The homeserver name that this cache is associated with
+                (used to label the metric) (`hs.hostname`).
+
+            cache_name: The name of this cache, for the prometheus metrics. If unset, no
+                metrics will be reported on this cache.
 
             cache_type:
                 type of underlying cache to be used. Typically one of dict
@@ -432,14 +482,7 @@ class LruCache(Generic[KT, VT]):
 
                 Note: The new key does not have to be unique.
         """
-        # Default `clock` to something sensible. Note that we rename it to
-        # `real_clock` so that mypy doesn't think its still `Optional`.
-        if clock is None:
-            real_clock = Clock(cast(IReactorTime, reactor))
-        else:
-            real_clock = clock
-
-        cache: Union[Dict[KT, _Node[KT, VT]], TreeCache] = cache_type()
+        cache: dict[KT, _Node[KT, VT]] | TreeCache = cache_type()
         self.cache = cache  # Used for introspection.
         self.apply_cache_factor_from_config = apply_cache_factor_from_config
 
@@ -455,13 +498,14 @@ class LruCache(Generic[KT, VT]):
 
         # register_cache might call our "set_cache_factor" callback; there's nothing to
         # do yet when we get resized.
-        self._on_resize: Optional[Callable[[], None]] = None
+        self._on_resize: Callable[[], None] | None = None
 
-        if cache_name is not None:
-            metrics: Optional[CacheMetric] = register_cache(
-                "lru_cache",
-                cache_name,
-                self,
+        if cache_name is not None and server_name is not None:
+            metrics: CacheMetric | None = register_cache(
+                cache_type="lru_cache",
+                cache_name=cache_name,
+                cache=self,
+                server_name=server_name,
                 collect_callback=metrics_collection_callback,
             )
         else:
@@ -478,7 +522,7 @@ class LruCache(Generic[KT, VT]):
 
         lock = threading.Lock()
 
-        extra_index: Dict[KT, Set[KT]] = {}
+        extra_index: dict[KT, set[KT]] = {}
 
         def evict() -> None:
             while cache_len() > self.max_size:
@@ -529,7 +573,7 @@ class LruCache(Generic[KT, VT]):
                 key,
                 value,
                 weak_ref_to_self,
-                real_clock,
+                clock,
                 callbacks,
                 prune_unread_entries,
             )
@@ -547,7 +591,7 @@ class LruCache(Generic[KT, VT]):
                 metrics.inc_memory_usage(node.memory)
 
         def move_node_to_front(node: _Node[KT, VT]) -> None:
-            node.move_to_front(real_clock, list_root)
+            node.move_to_front(clock, list_root)
 
         def delete_node(node: _Node[KT, VT]) -> int:
             node.drop_from_lists()
@@ -579,7 +623,7 @@ class LruCache(Generic[KT, VT]):
             callbacks: Collection[Callable[[], None]] = ...,
             update_metrics: bool = ...,
             update_last_access: bool = ...,
-        ) -> Optional[VT]: ...
+        ) -> VT | None: ...
 
         @overload
         def cache_get(
@@ -588,16 +632,16 @@ class LruCache(Generic[KT, VT]):
             callbacks: Collection[Callable[[], None]] = ...,
             update_metrics: bool = ...,
             update_last_access: bool = ...,
-        ) -> Union[T, VT]: ...
+        ) -> T | VT: ...
 
         @synchronized
         def cache_get(
             key: KT,
-            default: Optional[T] = None,
+            default: T | None = None,
             callbacks: Collection[Callable[[], None]] = (),
             update_metrics: bool = True,
             update_last_access: bool = True,
-        ) -> Union[None, T, VT]:
+        ) -> None | T | VT:
             """Look up a key in the cache
 
             Args:
@@ -631,21 +675,21 @@ class LruCache(Generic[KT, VT]):
             key: tuple,
             default: Literal[None] = None,
             update_metrics: bool = True,
-        ) -> Union[None, Iterable[Tuple[KT, VT]]]: ...
+        ) -> None | Iterable[tuple[KT, VT]]: ...
 
         @overload
         def cache_get_multi(
             key: tuple,
             default: T,
             update_metrics: bool = True,
-        ) -> Union[T, Iterable[Tuple[KT, VT]]]: ...
+        ) -> T | Iterable[tuple[KT, VT]]: ...
 
         @synchronized
         def cache_get_multi(
             key: tuple,
-            default: Optional[T] = None,
+            default: T | None = None,
             update_metrics: bool = True,
-        ) -> Union[None, T, Iterable[Tuple[KT, VT]]]:
+        ) -> None | T | Iterable[tuple[KT, VT]]:
             """Returns a generator yielding all entries under the given key.
 
             Can only be used if backed by a tree cache.
@@ -723,13 +767,13 @@ class LruCache(Generic[KT, VT]):
                 return value
 
         @overload
-        def cache_pop(key: KT, default: Literal[None] = None) -> Optional[VT]: ...
+        def cache_pop(key: KT, default: Literal[None] = None) -> VT | None: ...
 
         @overload
-        def cache_pop(key: KT, default: T) -> Union[T, VT]: ...
+        def cache_pop(key: KT, default: T) -> T | VT: ...
 
         @synchronized
-        def cache_pop(key: KT, default: Optional[T] = None) -> Union[None, T, VT]:
+        def cache_pop(key: KT, default: T | None = None) -> None | T | VT:
             node = cache.get(key, None)
             if node:
                 evicted_len = delete_node(node)
@@ -879,22 +923,22 @@ class AsyncLruCache(Generic[KT, VT]):
         self._lru_cache: LruCache[KT, VT] = LruCache(*args, **kwargs)
 
     async def get(
-        self, key: KT, default: Optional[T] = None, update_metrics: bool = True
-    ) -> Optional[VT]:
+        self, key: KT, default: T | None = None, update_metrics: bool = True
+    ) -> VT | None:
         return self._lru_cache.get(key, update_metrics=update_metrics)
 
     async def get_external(
         self,
         key: KT,
-        default: Optional[T] = None,
+        default: T | None = None,
         update_metrics: bool = True,
-    ) -> Optional[VT]:
+    ) -> VT | None:
         # This method should fetch from any configured external cache, in this case noop.
         return None
 
     def get_local(
-        self, key: KT, default: Optional[T] = None, update_metrics: bool = True
-    ) -> Optional[VT]:
+        self, key: KT, default: T | None = None, update_metrics: bool = True
+    ) -> VT | None:
         return self._lru_cache.get(key, update_metrics=update_metrics)
 
     async def set(self, key: KT, value: VT) -> None:

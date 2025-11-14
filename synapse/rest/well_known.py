@@ -18,16 +18,17 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple, cast
+from typing import TYPE_CHECKING
 
 from twisted.web.resource import Resource
 from twisted.web.server import Request
 
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import NotFoundError
 from synapse.http.server import DirectServeJsonResource
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict
-from synapse.util import json_encoder
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import parse_server_name
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ class WellKnownBuilder:
         self._config = hs.config
         self._auth = hs.get_auth()
 
-    async def get_well_known(self) -> Optional[JsonDict]:
+    async def get_well_known(self) -> JsonDict | None:
         if not self._config.server.serve_client_wellknown:
             return None
 
@@ -52,18 +53,25 @@ class WellKnownBuilder:
                 "base_url": self._config.registration.default_identity_server
             }
 
-        # We use the MSC3861 values as they are used by multiple MSCs
-        if self._config.experimental.msc3861.enabled:
+        if self._config.mas.enabled:
+            assert isinstance(self._auth, MasDelegatedAuth)
+
+            result["org.matrix.msc2965.authentication"] = {
+                "issuer": await self._auth.issuer(),
+                "account": await self._auth.account_management_url(),
+            }
+
+        elif self._config.experimental.msc3861.enabled:
             # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
             # We import lazily here because of the authlib requirement
             from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 
-            auth = cast(MSC3861DelegatedAuth, self._auth)
+            assert isinstance(self._auth, MSC3861DelegatedAuth)
 
             result["org.matrix.msc2965.authentication"] = {
-                "issuer": await auth.issuer(),
+                "issuer": await self._auth.issuer(),
             }
-            account_management_url = await auth.account_management_url()
+            account_management_url = await self._auth.account_management_url()
             if account_management_url is not None:
                 result["org.matrix.msc2965.authentication"]["account"] = (
                     account_management_url
@@ -86,10 +94,10 @@ class ClientWellKnownResource(DirectServeJsonResource):
     isLeaf = 1
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__()
+        super().__init__(clock=hs.get_clock())
         self._well_known_builder = WellKnownBuilder(hs)
 
-    async def _async_render_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         r = await self._well_known_builder.get_well_known()
         if not r:
             raise NotFoundError(".well-known not available")

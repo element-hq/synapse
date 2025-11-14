@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.http.server import DirectServeJsonResource
 from synapse.http.site import SynapseRequest
@@ -44,13 +44,13 @@ class FederationWhitelistResource(DirectServeJsonResource):
     PATH = "/_synapse/client/v1/config/federation_whitelist"
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__()
+        super().__init__(clock=hs.get_clock())
 
         self._federation_whitelist = hs.config.federation.federation_domain_whitelist
 
         self._auth = hs.get_auth()
 
-    async def _async_render_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await self._auth.get_user_by_req(request)
 
         whitelist = []

@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import attr
 
@@ -66,7 +66,7 @@ class SlidingSyncConnectionStore:
     async def get_and_clear_connection_positions(
         self,
         sync_config: SlidingSyncConfig,
-        from_token: Optional[SlidingSyncStreamToken],
+        from_token: SlidingSyncStreamToken | None,
     ) -> PerConnectionState:
         """Fetch the per-connection state for the token.
 
@@ -93,7 +93,7 @@ class SlidingSyncConnectionStore:
     async def record_new_state(
         self,
         sync_config: SlidingSyncConfig,
-        from_token: Optional[SlidingSyncStreamToken],
+        from_token: SlidingSyncStreamToken | None,
         new_connection_state: MutablePerConnectionState,
     ) -> int:
         """Record updated per-connection state, returning the connection

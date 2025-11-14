@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import Dict, Iterable, List, Tuple, cast
+from typing import Iterable, cast
 
 from synapse.config.appservice import load_appservices
 from synapse.config.homeserver import HomeServerConfig
@@ -44,7 +44,7 @@ def run_upgrade(
     config: HomeServerConfig,
 ) -> None:
     cur.execute("SELECT name FROM users")
-    rows = cast(Iterable[Tuple[str]], cur.fetchall())
+    rows = cast(Iterable[tuple[str]], cur.fetchall())
 
     config_files = []
     try:
@@ -54,7 +54,7 @@ def run_upgrade(
 
     appservices = load_appservices(config.server.server_name, config_files)
 
-    owned: Dict[str, List[str]] = {}
+    owned: dict[str, list[str]] = {}
 
     for row in rows:
         user_id = row[0]
@@ -63,8 +63,11 @@ def run_upgrade(
                 if user_id in owned.keys():
                     logger.error(
                         "user_id %s was owned by more than one application"
-                        " service (IDs %s and %s); assigning arbitrarily to %s"
-                        % (user_id, owned[user_id], appservice.id, owned[user_id])
+                        " service (IDs %s and %s); assigning arbitrarily to %s",
+                        user_id,
+                        owned[user_id],
+                        appservice.id,
+                        owned[user_id],
                     )
                 owned.setdefault(appservice.id, []).append(user_id)
 

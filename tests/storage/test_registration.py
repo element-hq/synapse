@@ -18,13 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import UserTypes
 from synapse.api.errors import ThreepidValidationError
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, UserInfo
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase, override_config
 

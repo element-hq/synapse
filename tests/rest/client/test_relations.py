@@ -20,17 +20,17 @@
 #
 
 import urllib.parse
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable
 from unittest.mock import AsyncMock, patch
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, RelationTypes
 from synapse.rest import admin
 from synapse.rest.client import login, register, relations, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeChannel
@@ -48,7 +48,7 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
     ]
     hijack_auth = False
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         # We need to enable msc1849 support for aggregations
         config = super().default_config()
 
@@ -69,7 +69,7 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         res = self.helper.send(self.room, body="Hi!", tok=self.user_token)
         self.parent_id = res["event_id"]
 
-    def _create_user(self, localpart: str) -> Tuple[str, str]:
+    def _create_user(self, localpart: str) -> tuple[str, str]:
         user_id = self.register_user(localpart, "abc123")
         access_token = self.login(localpart, "abc123")
 
@@ -79,10 +79,10 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         self,
         relation_type: str,
         event_type: str,
-        key: Optional[str] = None,
-        content: Optional[dict] = None,
-        access_token: Optional[str] = None,
-        parent_id: Optional[str] = None,
+        key: str | None = None,
+        content: dict | None = None,
+        access_token: str | None = None,
+        parent_id: str | None = None,
         expected_response_code: int = 200,
     ) -> FakeChannel:
         """Helper function to send a relation pointing at `self.parent_id`
@@ -123,7 +123,7 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(expected_response_code, channel.code, channel.json_body)
         return channel
 
-    def _get_related_events(self) -> List[str]:
+    def _get_related_events(self) -> list[str]:
         """
         Requests /relations on the parent ID and returns a list of event IDs.
         """
@@ -149,7 +149,7 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, channel.json_body)
         return channel.json_body["unsigned"].get("m.relations", {})
 
-    def _find_event_in_chunk(self, events: List[JsonDict]) -> JsonDict:
+    def _find_event_in_chunk(self, events: list[JsonDict]) -> JsonDict:
         """
         Find the parent event in a chunk of events and assert that it has the proper bundled aggregations.
         """
@@ -845,8 +845,8 @@ class RelationPaginationTestCase(BaseRelationsTestCase):
             )
             expected_event_ids.append(channel.json_body["event_id"])
 
-        prev_token: Optional[str] = ""
-        found_event_ids: List[str] = []
+        prev_token: str | None = ""
+        found_event_ids: list[str] = []
         for _ in range(20):
             from_token = ""
             if prev_token:
@@ -1085,7 +1085,7 @@ class BundledAggregationsTestCase(BaseRelationsTestCase):
         relation_type: str,
         assertion_callable: Callable[[JsonDict], None],
         expected_db_txn_for_event: int,
-        access_token: Optional[str] = None,
+        access_token: str | None = None,
     ) -> None:
         """
         Makes requests to various endpoints which should include bundled aggregations
@@ -1181,7 +1181,7 @@ class BundledAggregationsTestCase(BaseRelationsTestCase):
                 bundled_aggregations,
             )
 
-        self._test_bundled_aggregations(RelationTypes.REFERENCE, assert_annotations, 6)
+        self._test_bundled_aggregations(RelationTypes.REFERENCE, assert_annotations, 7)
 
     def test_thread(self) -> None:
         """
@@ -1226,21 +1226,21 @@ class BundledAggregationsTestCase(BaseRelationsTestCase):
 
         # The "user" sent the root event and is making queries for the bundled
         # aggregations: they have participated.
-        self._test_bundled_aggregations(RelationTypes.THREAD, _gen_assert(True), 6)
+        self._test_bundled_aggregations(RelationTypes.THREAD, _gen_assert(True), 7)
         # The "user2" sent replies in the thread and is making queries for the
         # bundled aggregations: they have participated.
         #
         # Note that this re-uses some cached values, so the total number of
         # queries is much smaller.
         self._test_bundled_aggregations(
-            RelationTypes.THREAD, _gen_assert(True), 3, access_token=self.user2_token
+            RelationTypes.THREAD, _gen_assert(True), 4, access_token=self.user2_token
         )
 
         # A user with no interactions with the thread: they have not participated.
         user3_id, user3_token = self._create_user("charlie")
         self.helper.join(self.room, user=user3_id, tok=user3_token)
         self._test_bundled_aggregations(
-            RelationTypes.THREAD, _gen_assert(False), 3, access_token=user3_token
+            RelationTypes.THREAD, _gen_assert(False), 4, access_token=user3_token
         )
 
     def test_thread_with_bundled_aggregations_for_latest(self) -> None:
@@ -1287,7 +1287,7 @@ class BundledAggregationsTestCase(BaseRelationsTestCase):
                 bundled_aggregations["latest_event"].get("unsigned"),
             )
 
-        self._test_bundled_aggregations(RelationTypes.THREAD, assert_thread, 6)
+        self._test_bundled_aggregations(RelationTypes.THREAD, assert_thread, 7)
 
     def test_nested_thread(self) -> None:
         """
@@ -1484,9 +1484,9 @@ class RelationIgnoredUserTestCase(BaseRelationsTestCase):
     def _test_ignored_user(
         self,
         relation_type: str,
-        allowed_event_ids: List[str],
-        ignored_event_ids: List[str],
-    ) -> Tuple[JsonDict, JsonDict]:
+        allowed_event_ids: list[str],
+        ignored_event_ids: list[str],
+    ) -> tuple[JsonDict, JsonDict]:
         """
         Fetch the relations and ensure they're all there, then ignore user2, and
         repeat.
@@ -1600,7 +1600,7 @@ class RelationRedactionTestCase(BaseRelationsTestCase):
         )
         self.assertEqual(200, channel.code, channel.json_body)
 
-    def _get_threads(self) -> List[Tuple[str, str]]:
+    def _get_threads(self) -> list[tuple[str, str]]:
         """Request the threads in the room and returns a list of thread ID and latest event ID."""
         # Request the threads in the room.
         channel = self.make_request(
@@ -1793,7 +1793,7 @@ class RelationRedactionTestCase(BaseRelationsTestCase):
 
 
 class ThreadsTestCase(BaseRelationsTestCase):
-    def _get_threads(self, body: JsonDict) -> List[Tuple[str, str]]:
+    def _get_threads(self, body: JsonDict) -> list[tuple[str, str]]:
         return [
             (
                 ev["event_id"],

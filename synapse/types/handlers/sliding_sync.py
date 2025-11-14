@@ -21,23 +21,18 @@ from typing import (
     AbstractSet,
     Any,
     Callable,
-    Dict,
     Final,
     Generic,
-    List,
     Mapping,
     MutableMapping,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
     TypeVar,
     cast,
 )
 
 import attr
+from pydantic import ConfigDict
 
-from synapse._pydantic_compat import Extra
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.types import (
@@ -50,6 +45,7 @@ from synapse.types import (
     SlidingSyncStreamToken,
     StrCollection,
     StreamToken,
+    ThreadSubscriptionsToken,
     UserID,
 )
 from synapse.types.rest.client import SlidingSyncBody
@@ -68,15 +64,12 @@ class SlidingSyncConfig(SlidingSyncBody):
 
     user: UserID
     requester: Requester
-
-    # Pydantic config
-    class Config:
-        # By default, ignore fields that we don't recognise.
-        extra = Extra.ignore
-        # By default, don't allow fields to be reassigned after parsing.
-        allow_mutation = False
-        # Allow custom types like `UserID` to be used in the model
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(
+        extra="ignore",
+        frozen=True,
+        # Allow custom types like `UserID` to be used in the model.
+        arbitrary_types_allowed=True,
+    )
 
 
 class OperationType(Enum):
@@ -172,31 +165,31 @@ class SlidingSyncResult:
         @attr.s(slots=True, frozen=True, auto_attribs=True)
         class StrippedHero:
             user_id: str
-            display_name: Optional[str]
-            avatar_url: Optional[str]
+            display_name: str | None
+            avatar_url: str | None
 
-        name: Optional[str]
-        avatar: Optional[str]
-        heroes: Optional[List[StrippedHero]]
+        name: str | None
+        avatar: str | None
+        heroes: list[StrippedHero] | None
         is_dm: bool
         initial: bool
         unstable_expanded_timeline: bool
         # Should be empty for invite/knock rooms with `stripped_state`
-        required_state: List[EventBase]
+        required_state: list[EventBase]
         # Should be empty for invite/knock rooms with `stripped_state`
-        timeline_events: List[EventBase]
-        bundled_aggregations: Optional[Dict[str, "BundledAggregations"]]
+        timeline_events: list[EventBase]
+        bundled_aggregations: dict[str, "BundledAggregations"] | None
         # Optional because it's only relevant to invite/knock rooms
-        stripped_state: List[JsonDict]
+        stripped_state: list[JsonDict]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        prev_batch: Optional[StreamToken]
+        prev_batch: StreamToken | None
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        limited: Optional[bool]
+        limited: bool | None
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        num_live: Optional[int]
-        bump_stamp: Optional[int]
-        joined_count: Optional[int]
-        invited_count: Optional[int]
+        num_live: int | None
+        bump_stamp: int | None
+        joined_count: int | None
+        invited_count: int | None
         notification_count: int
         highlight_count: int
 
@@ -239,11 +232,11 @@ class SlidingSyncResult:
             """
 
             op: OperationType
-            range: Tuple[int, int]
-            room_ids: List[str]
+            range: tuple[int, int]
+            room_ids: list[str]
 
         count: int
-        ops: List[Operation]
+        ops: list[Operation]
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class Extensions:
@@ -287,7 +280,7 @@ class SlidingSyncResult:
             """
 
             # Only present on incremental syncs
-            device_list_updates: Optional[DeviceListUpdates]
+            device_list_updates: DeviceListUpdates | None
             device_one_time_keys_count: Mapping[str, int]
             device_unused_fallback_key_types: Sequence[str]
 
@@ -357,11 +350,50 @@ class SlidingSyncResult:
             def __bool__(self) -> bool:
                 return bool(self.room_id_to_typing_map)
 
-        to_device: Optional[ToDeviceExtension] = None
-        e2ee: Optional[E2eeExtension] = None
-        account_data: Optional[AccountDataExtension] = None
-        receipts: Optional[ReceiptsExtension] = None
-        typing: Optional[TypingExtension] = None
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ThreadSubscriptionsExtension:
+            """The Thread Subscriptions extension (MSC4308)
+
+            Attributes:
+                subscribed: map (room_id -> thread_root_id -> info) of new or changed subscriptions
+                unsubscribed: map (room_id -> thread_root_id -> info) of new unsubscriptions
+                prev_batch: if present, there is a gap and the client can use this token to backpaginate
+            """
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadSubscription:
+                # always present when `subscribed`
+                automatic: bool | None
+
+                # the same as our stream_id; useful for clients to resolve
+                # race conditions locally
+                bump_stamp: int
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadUnsubscription:
+                # the same as our stream_id; useful for clients to resolve
+                # race conditions locally
+                bump_stamp: int
+
+            # room_id -> event_id (of thread root) -> the subscription change
+            subscribed: Mapping[str, Mapping[str, ThreadSubscription]] | None
+            # room_id -> event_id (of thread root) -> the unsubscription
+            unsubscribed: Mapping[str, Mapping[str, ThreadUnsubscription]] | None
+            prev_batch: ThreadSubscriptionsToken | None
+
+            def __bool__(self) -> bool:
+                return (
+                    bool(self.subscribed)
+                    or bool(self.unsubscribed)
+                    or bool(self.prev_batch)
+                )
+
+        to_device: ToDeviceExtension | None = None
+        e2ee: E2eeExtension | None = None
+        account_data: AccountDataExtension | None = None
+        receipts: ReceiptsExtension | None = None
+        typing: TypingExtension | None = None
+        thread_subscriptions: ThreadSubscriptionsExtension | None = None
 
         def __bool__(self) -> bool:
             return bool(
@@ -370,11 +402,12 @@ class SlidingSyncResult:
                 or self.account_data
                 or self.receipts
                 or self.typing
+                or self.thread_subscriptions
             )
 
     next_pos: SlidingSyncStreamToken
     lists: Mapping[str, SlidingWindowList]
-    rooms: Dict[str, RoomResult]
+    rooms: dict[str, RoomResult]
     extensions: Extensions
 
     def __bool__(self) -> bool:
@@ -444,7 +477,7 @@ class RoomSyncConfig:
         Args:
             room_params: `SlidingSyncConfig.SlidingSyncList` or `SlidingSyncConfig.RoomSubscription`
         """
-        required_state_map: Dict[str, Set[str]] = {}
+        required_state_map: dict[str, set[str]] = {}
         for (
             state_type,
             state_key,
@@ -696,7 +729,7 @@ class HaveSentRoom(Generic[T]):
     """
 
     status: HaveSentRoomFlag
-    last_token: Optional[T]
+    last_token: T | None
 
     @staticmethod
     def live() -> "HaveSentRoom[T]":

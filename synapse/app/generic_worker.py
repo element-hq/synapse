@@ -21,7 +21,6 @@
 #
 import logging
 import sys
-from typing import Dict, List
 
 from twisted.web.resource import Resource
 
@@ -49,6 +48,7 @@ from synapse.config.server import ListenerConfig, TCPListenerConfig
 from synapse.federation.transport.server import TransportLayerServer
 from synapse.http.server import JsonResource, OptionsResource
 from synapse.logging.context import LoggingContext
+from synapse.logging.opentracing import init_tracer
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
@@ -104,11 +104,14 @@ from synapse.storage.databases.main.stats import StatsStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.databases.main.tags import TagsWorkerStore
 from synapse.storage.databases.main.task_scheduler import TaskSchedulerWorkerStore
+from synapse.storage.databases.main.thread_subscriptions import (
+    ThreadSubscriptionsWorkerStore,
+)
 from synapse.storage.databases.main.transactions import TransactionWorkerStore
 from synapse.storage.databases.main.ui_auth import UIAuthWorkerStore
 from synapse.storage.databases.main.user_directory import UserDirectoryStore
 from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerStore
-from synapse.util import SYNAPSE_VERSION
+from synapse.types import ISynapseReactor
 from synapse.util.httpresourcetree import create_resource_tree
 
 logger = logging.getLogger("synapse.app.generic_worker")
@@ -118,7 +121,6 @@ class GenericWorkerStore(
     # FIXME(https://github.com/matrix-org/synapse/issues/3714): We need to add
     # UserDirectoryStore as we write directly rather than going via the correct worker.
     UserDirectoryStore,
-    StatsStore,
     UIAuthWorkerStore,
     EndToEndRoomKeyStore,
     PresenceStore,
@@ -133,6 +135,7 @@ class GenericWorkerStore(
     KeyStore,
     RoomWorkerStore,
     DirectoryWorkerStore,
+    ThreadSubscriptionsWorkerStore,
     PushRulesWorkerStore,
     ApplicationServiceTransactionWorkerStore,
     ApplicationServiceWorkerStore,
@@ -154,6 +157,7 @@ class GenericWorkerStore(
     StreamWorkerStore,
     EventsWorkerStore,
     RegistrationWorkerStore,
+    StatsStore,
     SearchStore,
     TransactionWorkerStore,
     LockStore,
@@ -177,7 +181,7 @@ class GenericWorkerServer(HomeServer):
 
         # We always include an admin resource that we populate with servlets as needed
         admin_resource = JsonResource(self, canonical_json=False)
-        resources: Dict[str, Resource] = {
+        resources: dict[str, Resource] = {
             # We always include a health resource.
             "/health": HealthResource(),
             "/_synapse/admin": admin_resource,
@@ -273,11 +277,13 @@ class GenericWorkerServer(HomeServer):
                 self._listen_http(listener)
             elif listener.type == "manhole":
                 if isinstance(listener, TCPListenerConfig):
-                    _base.listen_manhole(
-                        listener.bind_addresses,
-                        listener.port,
-                        manhole_settings=self.config.server.manhole_settings,
-                        manhole_globals={"hs": self},
+                    self._listening_services.extend(
+                        _base.listen_manhole(
+                            listener.bind_addresses,
+                            listener.port,
+                            manhole_settings=self.config.server.manhole_settings,
+                            manhole_globals={"hs": self},
+                        )
                     )
                 else:
                     raise ConfigError(
@@ -291,9 +297,11 @@ class GenericWorkerServer(HomeServer):
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
+                        self._metrics_listeners.extend(
+                            _base.listen_metrics(
+                                listener.bind_addresses,
+                                listener.port,
+                            )
                         )
                     else:
                         raise ConfigError(
@@ -306,12 +314,48 @@ class GenericWorkerServer(HomeServer):
         self.get_replication_command_handler().start_replication(self)
 
 
-def start(config_options: List[str]) -> None:
+def load_config(argv_options: list[str]) -> HomeServerConfig:
+    """
+    Parse the commandline and config files (does not generate config)
+
+    Args:
+        argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
+
+    Returns:
+        Config object.
+    """
     try:
-        config = HomeServerConfig.load_config("Synapse worker", config_options)
+        config = HomeServerConfig.load_config("Synapse worker", argv_options)
     except ConfigError as e:
         sys.stderr.write("\n" + str(e) + "\n")
         sys.exit(1)
+
+    return config
+
+
+def create_homeserver(
+    config: HomeServerConfig,
+    reactor: ISynapseReactor | None = None,
+) -> GenericWorkerServer:
+    """
+    Create a homeserver instance for the Synapse worker process.
+
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
+
+    Args:
+        config: The configuration for the homeserver.
+        reactor: Optionally provide a reactor to use. Can be useful in different
+            scenarios that you want control over the reactor, such as tests.
+
+    Returns:
+        A homeserver instance.
+    """
 
     # For backwards compatibility let any of the old app names.
     assert config.worker.worker_app in (
@@ -337,32 +381,93 @@ def start(config_options: List[str]) -> None:
     hs = GenericWorkerServer(
         config.server.server_name,
         config=config,
-        version_string=f"Synapse/{SYNAPSE_VERSION}",
+        reactor=reactor,
     )
 
-    setup_logging(hs, config, use_worker_options=True)
+    return hs
 
-    try:
-        hs.setup()
 
-        # Ensure the replication streamer is always started in case we write to any
-        # streams. Will no-op if no streams can be written to by this worker.
-        hs.get_replication_streamer()
-    except Exception as e:
-        handle_startup_exception(e)
+def setup(hs: GenericWorkerServer) -> None:
+    """
+    Setup a `GenericWorkerServer` (worker) instance.
 
-    register_start(_base.start, hs)
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
 
-    # redirect stdio to the logs, if configured.
-    if not hs.config.logging.no_redirect_stdio:
-        redirect_stdio_to_logs()
+    Args:
+        hs: The homeserver to setup.
+    """
 
-    _base.start_worker_reactor("synapse-generic-worker", config)
+    setup_logging(hs, hs.config, use_worker_options=True)
+
+    # Start the tracer
+    init_tracer(hs)  # noqa
+
+    hs.setup()
+
+    # Ensure the replication streamer is always started in case we write to any
+    # streams. Will no-op if no streams can be written to by this worker.
+    hs.get_replication_streamer()
+
+
+async def start(
+    hs: GenericWorkerServer,
+    *,
+    freeze: bool = True,
+) -> None:
+    """
+    Should be called once the reactor is running.
+
+    Our composable functions (`create_homeserver`, `setup`, `start`) should not exit the
+    Python process (call `exit(...)`) and instead raise exceptions which can be handled
+    by the caller as desired. This doesn't matter for the normal case of one Synapse
+    instance running in the Python process (as we're only affecting ourselves), but is
+    important when we have multiple Synapse homeserver tenants running in the same
+    Python process (c.f. Synapse Pro for small hosts) as we don't want some problem from
+    one tenant stopping the rest of the tenants.
+
+    Args:
+        hs: The homeserver to setup.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+    """
+
+    await _base.start(hs, freeze=freeze)
 
 
 def main() -> None:
-    with LoggingContext("main"):
-        start(sys.argv[1:])
+    homeserver_config = load_config(sys.argv[1:])
+
+    # Create a logging context as soon as possible so we can start associating
+    # everything with this homeserver.
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
+        # Initialize and setup the homeserver
+        hs = create_homeserver(homeserver_config)
+        try:
+            setup(hs)
+        except Exception as e:
+            handle_startup_exception(e)
+
+        # For problems immediately apparent during initialization, we want to log to
+        # stderr in the terminal so that they are obvious and visible to the operator.
+        #
+        # Now that we're past the initialization stage, we can redirect anything printed
+        # to stdio to the logs, if configured.
+        if not homeserver_config.logging.no_redirect_stdio:
+            redirect_stdio_to_logs()
+
+        # Register a callback to be invoked once the reactor is running
+        register_start(hs, start, hs)
+
+        _base.start_worker_reactor("synapse-generic-worker", homeserver_config)
 
 
 if __name__ == "__main__":

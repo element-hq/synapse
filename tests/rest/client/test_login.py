@@ -25,19 +25,14 @@ from typing import (
     BinaryIO,
     Callable,
     Collection,
-    Dict,
-    List,
     Literal,
-    Optional,
-    Tuple,
-    Union,
 )
 from unittest.mock import Mock
 from urllib.parse import urlencode
 
 import pymacaroons
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
@@ -51,8 +46,8 @@ from synapse.rest.client import account, devices, login, logout, profile, regist
 from synapse.rest.client.account import WhoamiRestServlet
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.server import HomeServer
-from synapse.types import JsonDict, create_requester
-from synapse.util import Clock
+from synapse.types import JsonDict, UserID, create_requester
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.handlers.test_oidc import HAS_OIDC
@@ -144,14 +139,11 @@ class TestSpamChecker:
     async def check_login_for_spam(
         self,
         user_id: str,
-        device_id: Optional[str],
-        initial_display_name: Optional[str],
-        request_info: Collection[Tuple[Optional[str], str]],
-        auth_provider_id: Optional[str] = None,
-    ) -> Union[
-        Literal["NOT_SPAM"],
-        Tuple["synapse.module_api.errors.Codes", JsonDict],
-    ]:
+        device_id: str | None,
+        initial_display_name: str | None,
+        request_info: Collection[tuple[str | None, str]],
+        auth_provider_id: str | None = None,
+    ) -> Literal["NOT_SPAM"] | tuple["synapse.module_api.errors.Codes", JsonDict]:
         return "NOT_SPAM"
 
 
@@ -168,14 +160,11 @@ class DenyAllSpamChecker:
     async def check_login_for_spam(
         self,
         user_id: str,
-        device_id: Optional[str],
-        initial_display_name: Optional[str],
-        request_info: Collection[Tuple[Optional[str], str]],
-        auth_provider_id: Optional[str] = None,
-    ) -> Union[
-        Literal["NOT_SPAM"],
-        Tuple["synapse.module_api.errors.Codes", JsonDict],
-    ]:
+        device_id: str | None,
+        initial_display_name: str | None,
+        request_info: Collection[tuple[str | None, str]],
+        auth_provider_id: str | None = None,
+    ) -> Literal["NOT_SPAM"] | tuple["synapse.module_api.errors.Codes", JsonDict]:
         # Return an odd set of values to ensure that they get correctly passed
         # to the client.
         return Codes.LIMIT_EXCEEDED, {"extra": "value"}
@@ -633,7 +622,7 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
     ]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
 
         config["public_baseurl"] = PUBLIC_BASEURL
@@ -678,7 +667,7 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.login_sso_redirect_url_builder = LoginSSORedirectURIBuilder(hs.config)
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         d = super().create_resource_dict()
         d.update(build_synapse_client_resource_tree(self.hs))
         return d
@@ -730,7 +719,7 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         p.close()
 
         # there should be a link for each href
-        returned_idps: List[str] = []
+        returned_idps: list[str] = []
         for link in p.links:
             path, query = link.split("?", 1)
             self.assertEqual(path, "pick_idp")
@@ -891,7 +880,7 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         # ... and should have set a cookie including the redirect url
         cookie_headers = channel.headers.getRawHeaders("Set-Cookie")
         assert cookie_headers
-        cookies: Dict[str, str] = {}
+        cookies: dict[str, str] = {}
         for h in cookie_headers:
             key, value = h.split(";")[0].split("=", maxsplit=1)
             cookies[key] = value
@@ -939,39 +928,32 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         self.assertEqual(chan.code, 200, chan.result)
         self.assertEqual(chan.json_body["user_id"], "@user1:test")
 
-    def test_multi_sso_redirect_to_unknown(self) -> None:
-        """An unknown IdP should cause a 404"""
+    def test_multi_sso_redirect_unknown_idp(self) -> None:
+        """An unknown IdP should cause a 400 bad request error"""
         channel = self.make_request(
             "GET",
             "/_synapse/client/pick_idp?redirectUrl=http://x&idp=xyz",
         )
-        self.assertEqual(channel.code, 302, channel.result)
-        location_headers = channel.headers.getRawHeaders("Location")
-        assert location_headers
-        sso_login_redirect_uri = location_headers[0]
+        self.assertEqual(channel.code, 400, channel.result)
 
-        # it should redirect us to the standard login SSO redirect flow
-        self.assertEqual(
-            sso_login_redirect_uri,
-            self.login_sso_redirect_url_builder.build_login_sso_redirect_uri(
-                idp_id="xyz", client_redirect_url="http://x"
-            ),
-        )
+    def test_multi_sso_redirect_unknown_idp_as_url(self) -> None:
+        """
+        An unknown IdP that looks like a URL should cause a 400 bad request error (to
+        avoid open redirects).
 
-        # follow the redirect
+        Ideally, we'd have another test for a known IdP with a URL as the `idp_id`, but
+        we can't configure that in our tests because the config validation on
+        `oidc_providers` only allows a subset of characters. If we could configure
+        `oidc_providers` with a URL as the `idp_id`, it should still be URL-encoded
+        properly to avoid open redirections. We do have `test_url_as_idp_id_is_escaped`
+        in the URL building tests to cover this case but is only a unit test vs
+        something at the REST layer here that covers things end-to-end.
+        """
         channel = self.make_request(
             "GET",
-            # We have to make this relative to be compatible with `make_request(...)`
-            get_relative_uri_from_absolute_uri(sso_login_redirect_uri),
-            # We have to set the Host header to match the `public_baseurl` to avoid
-            # the extra redirect in the `SsoRedirectServlet` in order for the
-            # cookies to be visible.
-            custom_headers=[
-                ("Host", SYNAPSE_SERVER_PUBLIC_HOSTNAME),
-            ],
+            "/_synapse/client/pick_idp?redirectUrl=something&idp=https://element.io/",
         )
-
-        self.assertEqual(channel.code, 404, channel.result)
+        self.assertEqual(channel.code, 400, channel.result)
 
     def test_client_idp_redirect_to_unknown(self) -> None:
         """If the client tries to pick an unknown IdP, return a 404"""
@@ -994,7 +976,7 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         # it should redirect us to the auth page of the OIDC server
         self.assertEqual(oidc_uri_path, fake_oidc_server.authorization_endpoint)
 
-    def _make_sso_redirect_request(self, idp_prov: Optional[str] = None) -> FakeChannel:
+    def _make_sso_redirect_request(self, idp_prov: str | None = None) -> FakeChannel:
         """Send a request to /_matrix/client/r0/login/sso/redirect
 
         ... possibly specifying an IDP provider
@@ -1186,7 +1168,7 @@ class JWTTestCase(unittest.HomeserverTestCase):
         "algorithm": jwt_algorithm,
     }
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
 
         # If jwt_config has been defined (eg via @override_config), don't replace it.
@@ -1195,7 +1177,7 @@ class JWTTestCase(unittest.HomeserverTestCase):
 
         return config
 
-    def jwt_encode(self, payload: Dict[str, Any], secret: str = jwt_secret) -> str:
+    def jwt_encode(self, payload: dict[str, Any], secret: str = jwt_secret) -> str:
         header = {"alg": self.jwt_algorithm}
         result: bytes = jwt.encode(header, payload, secret)
         return result.decode("ascii")
@@ -1433,7 +1415,7 @@ class JWTPubKeyTestCase(unittest.HomeserverTestCase):
         ]
     )
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["jwt_config"] = {
             "enabled": True,
@@ -1442,7 +1424,7 @@ class JWTPubKeyTestCase(unittest.HomeserverTestCase):
         }
         return config
 
-    def jwt_encode(self, payload: Dict[str, Any], secret: str = jwt_privatekey) -> str:
+    def jwt_encode(self, payload: dict[str, Any], secret: str = jwt_privatekey) -> str:
         header = {"alg": "RS256"}
         if secret.startswith("-----BEGIN RSA PRIVATE KEY-----"):
             secret = JsonWebKey.import_key(secret, {"kty": "RSA"})
@@ -1484,7 +1466,7 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
         self.service = ApplicationService(
             id="unique_identifier",
             token="some_token",
-            sender="@asbot:example.com",
+            sender=UserID.from_string("@asbot:example.com"),
             namespaces={
                 ApplicationService.NS_USERS: [
                     {"regex": r"@as_user.*", "exclusive": False}
@@ -1496,7 +1478,7 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
         self.another_service = ApplicationService(
             id="another__identifier",
             token="another_token",
-            sender="@as2bot:example.com",
+            sender=UserID.from_string("@as2bot:example.com"),
             namespaces={
                 ApplicationService.NS_USERS: [
                     {"regex": r"@as2_user.*", "exclusive": False}
@@ -1505,9 +1487,23 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
                 ApplicationService.NS_ALIASES: [],
             },
         )
+        self.msc4190_service = ApplicationService(
+            id="third__identifier",
+            token="third_token",
+            sender=UserID.from_string("@as3bot:example.com"),
+            namespaces={
+                ApplicationService.NS_USERS: [
+                    {"regex": r"@as3_user.*", "exclusive": False}
+                ],
+                ApplicationService.NS_ROOMS: [],
+                ApplicationService.NS_ALIASES: [],
+            },
+            msc4190_device_management=True,
+        )
 
         self.hs.get_datastores().main.services_cache.append(self.service)
         self.hs.get_datastores().main.services_cache.append(self.another_service)
+        self.hs.get_datastores().main.services_cache.append(self.msc4190_service)
         return self.hs
 
     def test_login_appservice_user(self) -> None:
@@ -1524,13 +1520,37 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 200, msg=channel.result)
 
+    def test_login_appservice_msc4190_fail(self) -> None:
+        """Test that an appservice user can use /login"""
+        self.register_appservice_user(
+            "as3_user_alice", self.msc4190_service.token, inhibit_login=True
+        )
+
+        params = {
+            "type": login.LoginRestServlet.APPSERVICE_TYPE,
+            "identifier": {"type": "m.id.user", "user": "as3_user_alice"},
+        }
+        channel = self.make_request(
+            b"POST", LOGIN_URL, params, access_token=self.msc4190_service.token
+        )
+
+        self.assertEqual(channel.code, 400, msg=channel.result)
+        self.assertEqual(
+            channel.json_body.get("errcode"),
+            Codes.APPSERVICE_LOGIN_UNSUPPORTED,
+            channel.json_body,
+        )
+
     def test_login_appservice_user_bot(self) -> None:
         """Test that the appservice bot can use /login"""
         self.register_appservice_user(AS_USER, self.service.token)
 
         params = {
             "type": login.LoginRestServlet.APPSERVICE_TYPE,
-            "identifier": {"type": "m.id.user", "user": self.service.sender},
+            "identifier": {
+                "type": "m.id.user",
+                "user": self.service.sender.to_string(),
+            },
         }
         channel = self.make_request(
             b"POST", LOGIN_URL, params, access_token=self.service.token
@@ -1599,7 +1619,7 @@ class UsernamePickerTestCase(HomeserverTestCase):
         )
         return hs
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = PUBLIC_BASEURL
 
@@ -1618,7 +1638,7 @@ class UsernamePickerTestCase(HomeserverTestCase):
         config["sso"] = {"client_whitelist": ["https://x"]}
         return config
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         d = super().create_resource_dict()
         d.update(build_synapse_client_resource_tree(self.hs))
         return d
@@ -1629,7 +1649,7 @@ class UsernamePickerTestCase(HomeserverTestCase):
         displayname: str,
         email: str,
         picture: str,
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         # do the start of the login flow
         channel, _ = self.helper.auth_via_oidc(
             fake_oidc_server,
@@ -1650,7 +1670,7 @@ class UsernamePickerTestCase(HomeserverTestCase):
         self.assertEqual(picker_url, "/_synapse/client/pick_username/account_details")
 
         # ... with a username_mapping_session cookie
-        cookies: Dict[str, str] = {}
+        cookies: dict[str, str] = {}
         channel.extract_cookies(cookies)
         self.assertIn("username_mapping_session", cookies)
         session_id = cookies["username_mapping_session"]
@@ -1860,8 +1880,8 @@ class UsernamePickerTestCase(HomeserverTestCase):
 async def mock_get_file(
     url: str,
     output_stream: BinaryIO,
-    max_size: Optional[int] = None,
-    headers: Optional[RawHeaders] = None,
-    is_allowed_content_type: Optional[Callable[[str], bool]] = None,
-) -> Tuple[int, Dict[bytes, List[bytes]], str, int]:
+    max_size: int | None = None,
+    headers: RawHeaders | None = None,
+    is_allowed_content_type: Callable[[str], bool] | None = None,
+) -> tuple[int, dict[bytes, list[bytes]], str, int]:
     return 0, {b"Content-Type": [b"image/png"]}, "", 200
