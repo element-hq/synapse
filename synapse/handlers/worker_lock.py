@@ -184,9 +184,7 @@ class WorkerLocksHandler:
             locks: Collection[WaitingLock | WaitingMultiLock],
         ) -> None:
             for lock in locks:
-                deferred = lock.deferred
-                if not deferred.called:
-                    deferred.callback(None)
+                lock.release_lock()
 
         self._clock.call_later(
             0,
@@ -214,6 +212,12 @@ class WaitingLock:
     _lock_span: "opentracing.Scope" = attr.Factory(
         lambda: start_active_span("WaitingLock.lock")
     )
+
+    def release_lock(self) -> None:
+        """Release the lock (by resolving the deferred)"""
+        if not self.deferred.called:
+            with PreserveLoggingContext():
+                self.deferred.callback(None)
 
     async def __aenter__(self) -> None:
         self._lock_span.__enter__()
@@ -297,6 +301,12 @@ class WaitingMultiLock:
     _lock_span: "opentracing.Scope" = attr.Factory(
         lambda: start_active_span("WaitingLock.lock")
     )
+
+    def release_lock(self) -> None:
+        """Release the lock (by resolving the deferred)"""
+        if not self.deferred.called:
+            with PreserveLoggingContext():
+                self.deferred.callback(None)
 
     async def __aenter__(self) -> None:
         self._lock_span.__enter__()
