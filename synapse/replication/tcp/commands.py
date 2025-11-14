@@ -505,6 +505,17 @@ class NewActiveTaskCommand(_SimpleCommand):
     NAME = "NEW_ACTIVE_TASK"
 
 
+class CancelTaskCommand(_SimpleCommand):
+    """Sent to inform instance handling background tasks that a task has been cancelled and should be terminated.
+
+    Format::
+
+        CANCEL_TASK "<task_id>"
+    """
+
+    NAME = "CANCEL_TASK"
+
+
 _COMMANDS: tuple[type[Command], ...] = (
     ServerCommand,
     RdataCommand,
@@ -520,6 +531,7 @@ _COMMANDS: tuple[type[Command], ...] = (
     ClearUserSyncsCommand,
     LockReleasedCommand,
     NewActiveTaskCommand,
+    CancelTaskCommand,
 )
 
 # Map of command name to command type.

@@ -35,6 +35,7 @@ from twisted.internet.protocol import ReconnectingClientFactory
 
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.replication.tcp.commands import (
+    CancelTaskCommand,
     ClearUserSyncsCommand,
     Command,
     FederationAckCommand,
@@ -269,6 +270,14 @@ class ReplicationCommandHandler:
             for stream_name in self._streams
         }
 
+        self._global_command_queue = BackgroundQueue[
+            tuple[CancelTaskCommand, IReplicationConnection]
+        ](
+            hs,
+            "process-replication-data",
+            self._process_global_command,
+        )
+
         # For each connection, the incoming stream names that have received a POSITION
         # from that connection.
         self._streams_by_connection: dict[IReplicationConnection, set[str]] = {}
@@ -375,6 +384,14 @@ class ReplicationCommandHandler:
         else:
             # This shouldn't be possible
             raise Exception("Unrecognised command %s in stream queue", cmd.NAME)
+
+    async def _process_global_command(
+        self, item: tuple[CancelTaskCommand, IReplicationConnection]
+    ) -> None:
+        cmd, conn = item
+        if isinstance(cmd, CancelTaskCommand):
+            if self._task_scheduler:
+                await self._task_scheduler.on_cancel_task(cmd.data)
 
     def start_replication(self, hs: "HomeServer") -> None:
         """Helper method to start replication."""
@@ -746,9 +763,15 @@ class ReplicationCommandHandler:
     def on_NEW_ACTIVE_TASK(
         self, conn: IReplicationConnection, cmd: NewActiveTaskCommand
     ) -> None:
-        """Called when get a new NEW_ACTIVE_TASK command."""
+        """Called when we get a new NEW_ACTIVE_TASK command."""
         if self._task_scheduler:
             self._task_scheduler.on_new_task(cmd.data)
+
+    async def on_CANCEL_TASK(
+        self, conn: IReplicationConnection, cmd: CancelTaskCommand
+    ) -> None:
+        """Called when we get a new CANCEL_TASK command."""
+        self._global_command_queue.add((cmd, conn))
 
     def new_connection(self, connection: IReplicationConnection) -> None:
         """Called when we have a new connection."""
@@ -871,6 +894,10 @@ class ReplicationCommandHandler:
     def send_new_active_task(self, task_id: str) -> None:
         """Called when a new task has been scheduled for immediate launch and is ACTIVE."""
         self.send_command(NewActiveTaskCommand(task_id))
+
+    def send_cancel_task(self, task_id: str) -> None:
+        """Called when a scheduled task has been cancelled annd should be terminated."""
+        self.send_command(CancelTaskCommand(task_id))
 
 
 UpdateToken = TypeVar("UpdateToken")
