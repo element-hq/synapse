@@ -45,7 +45,7 @@
     # Output a development shell for x86_64/aarch64 Linux/Darwin (MacOS).
     systems.url = "github:nix-systems/default";
     # A development environment manager built on Nix. See https://devenv.sh.
-    devenv.url = "github:cachix/devenv/v0.6.3";
+    devenv.url = "github:cachix/devenv/v1.10";
     # Rust toolchain.
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
@@ -82,7 +82,7 @@
                   #
                   # NOTE: We currently need to set the Rust version unnecessarily high
                   # in order to work around https://github.com/matrix-org/synapse/issues/15939
-                  (rust-bin.stable."1.82.0".default.override {
+                  (rust-bin.stable."1.88.0".default.override {
                     # Additionally install the "rust-src" extension to allow diving into the
                     # Rust source code in an IDE (rust-analyzer will also make use of it).
                     extensions = [ "rust-src" ];
@@ -117,6 +117,9 @@
                   # For releasing Synapse
                   debian-devscripts # (`dch` for manipulating the Debian changelog)
                   libnotify # (the release script uses `notify-send` to tell you when CI jobs are done)
+
+                  # For building psychopg2 from source, if needed
+                  postgresql.pg_config
                 ];
 
                 # Install Python and manage a virtualenv with Poetry.
@@ -139,6 +142,9 @@
                 # force compiling those binaries locally instead.
                 env.POETRY_INSTALLER_NO_BINARY = "ruff";
 
+                # Workaround to make cargo fetch git repositories with the git CLI
+                env.CARGO_NET_GIT_FETCH_WITH_CLI = "true";
+
                 # Install dependencies for the additional programming languages
                 # involved with Synapse development.
                 #
@@ -152,6 +158,8 @@
                 # Postgres is needed to run Synapse with postgres support and
                 # to run certain unit tests that require postgres.
                 services.postgres.enable = true;
+                services.postgres.port = 28743; # Use a non-standard port to avoid conflicts
+                services.postgres.package = pkgs.postgresql_17; # The default in nixpkgs stable
 
                 # On the first invocation of `devenv up`, create a database for
                 # Synapse to store data in.
@@ -174,7 +182,9 @@
                 #  * ensures a directory containing two additional homeserver config files exists;
                 #    one to configure using the development environment's PostgreSQL as the
                 #    database backend and another for enabling Redis support.
-                process.before = ''
+                process.manager.before = ''
+                  # Ensure the venv is activated explicitly, in order not to confuse poetry
+                  . .venv/bin/activate 
                   python -m synapse.app.homeserver -c homeserver.yaml --generate-config --server-name=synapse.dev --report-stats=no
                   mkdir -p homeserver-config-overrides.d
                   cat > homeserver-config-overrides.d/database.yaml << EOF
@@ -250,7 +260,10 @@
                 # When LD_LIBRARY_PATH is set, system tools will attempt to use the development environment's
                 # libraries. Which, when built against a different glibc version lead, to "version 'GLIBC_X.YY'
                 # not found" errors.
+                #
+                # Additionally, activate the python venv explicitly in order to avoid poetry getting confused
                 enterShell = ''
+                  . .venv/bin/activate
                   unset LD_LIBRARY_PATH
                 '';
               }
