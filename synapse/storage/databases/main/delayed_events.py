@@ -337,9 +337,8 @@ class DelayedEventsStore(SQLBaseStore):
                 DELETE FROM delayed_events
                 WHERE user_localpart = ?
                     AND finalised_ts IS NOT NULL
-                    ORDER BY finalised_ts
-                    LIMIT ?
-                )
+                ORDER BY finalised_ts
+                LIMIT ?
                 """,
                 (
                     user_localpart,
