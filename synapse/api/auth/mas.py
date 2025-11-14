@@ -154,7 +154,7 @@ class MasDelegatedAuth(BaseAuth):
                 password=self._config.endpoint.password,
                 host=self._config.endpoint.host or "",
                 port=self._config.endpoint.port,
-                path=(self._config.endpoint.path or "").strip('/')
+                path=(self._config.endpoint.path or "").strip("/")
                 + "/.well-known/openid-configuration",
                 query=None,
                 fragment=None,
@@ -170,7 +170,7 @@ class MasDelegatedAuth(BaseAuth):
                 password=self._config.endpoint.password,
                 host=self._config.endpoint.host or "",
                 port=self._config.endpoint.port,
-                path=(self._config.endpoint.path or "").strip('/')
+                path=(self._config.endpoint.path or "").strip("/")
                 + "/oauth2/introspect",
                 query=None,
                 fragment=None,
