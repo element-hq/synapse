@@ -1195,8 +1195,6 @@ def setup_test_homeserver(
 
             dropped = False
 
-            db_engine = create_engine(hs.database.config)
-
             # Drop the test database
             db_conn = db_engine.module.connect(
                 dbname=POSTGRES_BASE_DB,
@@ -1285,7 +1283,7 @@ def start_test_homeserver(
     *,
     hs: HomeServer,
     cleanup_func: Callable[[Callable[[], Optional["Deferred[None]"]]], None],
-    reactor: ISynapseReactor | None = None,
+    reactor: ISynapseReactor,
 ) -> None:
     """
     Start a homeserver for testing.
