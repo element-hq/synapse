@@ -1074,10 +1074,10 @@ def setup_test_homeserver(
     If no datastore is supplied, one is created and given to the homeserver.
 
     Args:
-        cleanup_func : The function used to register a cleanup routine for
-                       after the test. If the function returns a Deferred, the
-                       test case will wait until the Deferred has fired before
-                       proceeding to the next cleanup function.
+        cleanup_func: The function used to register a cleanup routine for
+            after the test. If the function returns a Deferred, the
+            test case will wait until the Deferred has fired before
+            proceeding to the next cleanup function.
         server_name: Homeserver name
         config: Homeserver config
         reactor: Twisted reactor
@@ -1190,69 +1190,12 @@ def setup_test_homeserver(
         cur.close()
         db_conn.close()
 
-    hs = homeserver_to_use(
-        server_name,
-        config=config,
-        reactor=reactor,
-    )
-
-    # Capture the `hs` as a `weakref` here to ensure there is no scenario where uncalled
-    # cleanup functions result in holding the `hs` in memory.
-    cleanup_hs_ref = weakref.ref(hs)
-
-    def shutdown_hs_on_cleanup() -> "Deferred[None]":
-        cleanup_hs = cleanup_hs_ref()
-        deferred: "Deferred[None]" = defer.succeed(None)
-        if cleanup_hs is not None:
-            deferred = defer.ensureDeferred(cleanup_hs.shutdown())
-        return deferred
-
-    # Register the cleanup hook for the homeserver.
-    # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
-    # strange behaviours.
-    cleanup_func(shutdown_hs_on_cleanup)
-
-    # Install @cache_in_self attributes
-    for key, val in extra_homeserver_attributes.items():
-        setattr(hs, "_" + key, val)
-
-    # Mock TLS
-    hs.tls_server_context_factory = Mock()
-
-    # Patch `make_pool` before initialising the database, to make database transactions
-    # synchronous for testing.
-    with patch("synapse.storage.database.make_pool", side_effect=make_fake_db_pool):
-        hs.setup()
-
-    # Register background tasks required by this server. This must be done
-    # somewhat manually due to the background tasks not being registered
-    # unless handlers are instantiated.
-    #
-    # Since, we don't have to worry about `daemonize` (forking the process) in tests, we
-    # can just start the background tasks straight away after `hs.setup`. (compare this
-    # with where we call `hs.start_background_tasks()` outside of the test environment).
-    if hs.config.worker.run_background_tasks:
-        hs.start_background_tasks()
-
-    # Since we've changed the databases to run DB transactions on the same
-    # thread, we need to stop the event fetcher hogging that one thread.
-    hs.get_datastores().main.USE_DEDICATED_DB_THREADS_FOR_EVENT_FETCHING = False
-
-    if USE_POSTGRES_FOR_TESTS:
-        # Capture the `database_pool` as a `weakref` here to ensure there is no scenario where uncalled
-        # cleanup functions result in holding the `hs` in memory.
-        database_pool = weakref.ref(hs.get_datastores().databases[0])
-
-        # We need to do cleanup on PostgreSQL
         def cleanup() -> None:
             import psycopg2
 
-            # Close all the db pools
-            db_pool = database_pool()
-            if db_pool is not None:
-                db_pool._db_pool.close()
-
             dropped = False
+
+            db_engine = create_engine(hs.database.config)
 
             # Drop the test database
             db_conn = db_engine.module.connect(
@@ -1296,6 +1239,96 @@ def setup_test_homeserver(
             # Register the cleanup hook
             cleanup_func(cleanup)
 
+    hs = homeserver_to_use(
+        server_name,
+        config=config,
+        reactor=reactor,
+    )
+
+    # Capture the `hs` as a `weakref` here to ensure there is no scenario where uncalled
+    # cleanup functions result in holding the `hs` in memory.
+    cleanup_hs_ref = weakref.ref(hs)
+
+    def shutdown_hs_on_cleanup() -> "Deferred[None]":
+        cleanup_hs = cleanup_hs_ref()
+        deferred: "Deferred[None]" = defer.succeed(None)
+        if cleanup_hs is not None:
+            deferred = defer.ensureDeferred(cleanup_hs.shutdown())
+        return deferred
+
+    # Register the cleanup hook for the homeserver.
+    # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
+    # strange behaviours.
+    cleanup_func(shutdown_hs_on_cleanup)
+
+    # Install @cache_in_self attributes
+    for key, val in extra_homeserver_attributes.items():
+        setattr(hs, "_" + key, val)
+
+    # Mock TLS
+    hs.tls_server_context_factory = Mock()
+
+    # Patch `make_pool` before initialising the database, to make database transactions
+    # synchronous for testing.
+    with patch("synapse.storage.database.make_pool", side_effect=make_fake_db_pool):
+        hs.setup()
+
+    # Ideally, setup/start would be separated but since this is historically used
+    # throughout tests, we keep the existing behavior for now. We probably just need to
+    # rename this function.
+    start_test_homeserver(hs=hs, cleanup_func=cleanup_func, reactor=reactor)
+
+    return hs
+
+
+def start_test_homeserver(
+    *,
+    hs: HomeServer,
+    cleanup_func: Callable[[Callable[[], Optional["Deferred[None]"]]], None],
+    reactor: ISynapseReactor | None = None,
+) -> None:
+    """
+    Start a homeserver for testing.
+
+    Args:
+        hs: The homeserver to start.
+        cleanup_func: The function used to register a cleanup routine for
+            after the test. If the function returns a Deferred, the
+            test case will wait until the Deferred has fired before
+            proceeding to the next cleanup function.
+        reactor: Twisted reactor
+    """
+
+    # Register background tasks required by this server. This must be done
+    # somewhat manually due to the background tasks not being registered
+    # unless handlers are instantiated.
+    #
+    # Since, we don't have to worry about `daemonize` (forking the process) in tests, we
+    # can just start the background tasks straight away after `hs.setup`. (compare this
+    # with where we call `hs.start_background_tasks()` outside of the test environment).
+    if hs.config.worker.run_background_tasks:
+        hs.start_background_tasks()
+
+    # Since we've changed the databases to run DB transactions on the same
+    # thread, we need to stop the event fetcher hogging that one thread.
+    hs.get_datastores().main.USE_DEDICATED_DB_THREADS_FOR_EVENT_FETCHING = False
+
+    if USE_POSTGRES_FOR_TESTS:
+        # Capture the `database_pool` as a `weakref` here to ensure there is no scenario where uncalled
+        # cleanup functions result in holding the `hs` in memory.
+        database_pool = weakref.ref(hs.get_datastores().databases[0])
+
+        # We need to do cleanup on PostgreSQL
+        def cleanup() -> None:
+            # Close all the db pools
+            db_pool = database_pool()
+            if db_pool is not None:
+                db_pool._db_pool.close()
+
+        if not LEAVE_DB:
+            # Register the cleanup hook
+            cleanup_func(cleanup)
+
     # bcrypt is far too slow to be doing in unit tests
     # Need to let the HS build an auth handler and then mess with it
     # because AuthHandler's constructor requires the HS, so we can't make one
@@ -1330,5 +1363,3 @@ def setup_test_homeserver(
     load_legacy_third_party_event_rules(hs)
     load_legacy_presence_router(hs)
     load_legacy_password_auth_providers(hs)
-
-    return hs
