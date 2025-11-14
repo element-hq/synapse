@@ -17,4 +17,4 @@ ALTER TABLE delayed_events ADD COLUMN finalised_event_id TEXT;
 ALTER TABLE delayed_events ADD COLUMN finalised_ts BIGINT;
 
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (9301, 'delayed_events_finalised_ts', '{}');
+  (9302, 'delayed_events_finalised_ts', '{}');
