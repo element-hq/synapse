@@ -392,10 +392,8 @@ build-backend = "poetry.core.masonry.api"
 #
 # We skip:
 #  - free-threaded cpython builds: these are not currently supported.
-#  - cp38: Python 3.8 is end-of-life.
-#  - cp39: Python 3.9 is end-of-life.
 #  - i686: We don't support 32-bit platforms.
-skip = "cp3??t-* cp38-* cp39-* *i686*"
+skip = "cp3??t-* *i686*"
 # Enable non-default builds. See the list of available options:
 # https://cibuildwheel.pypa.io/en/stable/options#enable
 #
