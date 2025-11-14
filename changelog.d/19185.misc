@@ -1,0 +1,1 @@
+Update in-tree nix flake to make it work again, bump required dependencies and remove conflicts with pre-existing postgres on host (fixes developing under NixOS). Contributed by Emma [it/its] @ Rory&.
