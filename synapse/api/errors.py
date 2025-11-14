@@ -856,6 +856,12 @@ class HttpResponseException(CodeMessageException):
         return ProxiedRequestError(self.code, errmsg, errcode, j)
 
 
+class HomeServerNotSetupException(Exception):
+    """
+    Raised when an operation is attempted on the HomeServer before setup() has been called.
+    """
+
+
 class ShadowBanError(Exception):
     """
     Raised when a shadow-banned user attempts to perform an action.

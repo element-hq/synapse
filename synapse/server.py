@@ -54,6 +54,7 @@ from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.auth_blocking import AuthBlocking
+from synapse.api.errors import HomeServerNotSetupException
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
 from synapse.app._base import unregister_sighups
@@ -399,7 +400,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         """
         if self._is_shutdown:
             raise Exception(
-                f"Cannot start background process. HomeServer has been shutdown {len(self._background_processes)} {len(self.get_clock()._looping_calls)} {len(self.get_clock()._call_id_to_delayed_call)}"
+                "Cannot start background process. HomeServer has been shutdown"
             )
 
         # Ignore linter error as this is the one location this should be called.
@@ -466,7 +467,11 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # TODO: Cleanup replication pieces
 
-        self.get_keyring().shutdown()
+        try:
+            self.get_keyring().shutdown()
+        except HomeServerNotSetupException:
+            # If the homeserver wasn't fully setup, keyring won't exist
+            pass
 
         # Cleanup metrics associated with the homeserver
         for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
@@ -478,8 +483,12 @@ class HomeServer(metaclass=abc.ABCMeta):
             self.config.server.server_name
         )
 
-        for db in self.get_datastores().databases:
-            db.stop_background_updates()
+        try:
+            for db in self.get_datastores().databases:
+                db.stop_background_updates()
+        except HomeServerNotSetupException:
+            # If the homeserver wasn't fully setup, the datastores won't exist
+            pass
 
         if self.should_send_federation():
             try:
@@ -513,8 +522,12 @@ class HomeServer(metaclass=abc.ABCMeta):
                 pass
         self._background_processes.clear()
 
-        for db in self.get_datastores().databases:
-            db._db_pool.close()
+        try:
+            for db in self.get_datastores().databases:
+                db._db_pool.close()
+        except HomeServerNotSetupException:
+            # If the homeserver wasn't fully setup, the datastores won't exist
+            pass
 
     def register_async_shutdown_handler(
         self,
@@ -677,7 +690,9 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     def get_datastores(self) -> Databases:
         if not self.datastores:
-            raise Exception("HomeServer.setup must be called before getting datastores")
+            raise HomeServerNotSetupException(
+                "HomeServer.setup must be called before getting datastores"
+            )
 
         return self.datastores
 
