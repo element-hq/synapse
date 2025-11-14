@@ -436,7 +436,7 @@ class DelayedEventsStore(SQLBaseStore):
                     finalised_ts
                 FROM delayed_events
                 {sql_where}
-                ORDER BY finalised_ts
+                ORDER BY finalised_ts DESC
                 """,
                 sql_args,
             )
