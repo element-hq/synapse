@@ -1,0 +1,1 @@
+Restore printing `sentinel` for the log record `request` when no logcontext is active.

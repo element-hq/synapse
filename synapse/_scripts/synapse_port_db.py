@@ -108,6 +108,7 @@ logger = logging.getLogger("synapse_port_db")
 BOOLEAN_COLUMNS = {
     "access_tokens": ["used"],
     "account_validity": ["email_sent"],
+    "delayed_events": ["is_processed"],
     "device_lists_changes_in_room": ["converted_to_destinations"],
     "device_lists_outbound_pokes": ["sent"],
     "devices": ["hidden"],
