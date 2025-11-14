@@ -457,22 +457,14 @@ class DelayedEventsStore(SQLBaseStore):
                     },
                     "outcome": "cancel" if row[8] is None else "send",
                     "reason": (
-                        "finalised_error"
+                        "error"
                         if row[7] is not None
                         else "action"
                         if row[9] < row[5]
                         else "delay"
                     ),
-                    **(
-                        {"finalised_error": db_to_json(row[7])}
-                        if row[7] is not None
-                        else {}
-                    ),
-                    **(
-                        {"finalised_event_id": str(row[8])}
-                        if row[8] is not None
-                        else {}
-                    ),
+                    **({"error": db_to_json(row[7])} if row[7] is not None else {}),
+                    **({"event_id": str(row[8])} if row[8] is not None else {}),
                     "origin_server_ts": Timestamp(row[9]),
                 }
                 for row in txn
