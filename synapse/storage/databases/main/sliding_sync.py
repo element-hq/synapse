@@ -14,7 +14,7 @@
 
 
 import logging
-from typing import TYPE_CHECKING, Mapping, cast
+from typing import TYPE_CHECKING, AbstractSet, Mapping, cast
 
 import attr
 
@@ -26,6 +26,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.engines import PostgresEngine
 from synapse.types import MultiWriterStreamToken, RoomStreamToken
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoom,
@@ -349,6 +350,16 @@ class SlidingSyncStore(SQLBaseStore):
             value_values=values,
         )
 
+        for room_id, user_ids in per_connection_state.room_lazy_membership.items():
+            self._persist_sliding_sync_connection_lazy_members_txn(
+                txn,
+                connection_key,
+                previous_connection_position,
+                connection_position,
+                room_id,
+                user_ids,
+            )
+
         return connection_position
 
     @cached(iterable=True, max_entries=100000)
@@ -405,6 +416,19 @@ class SlidingSyncStore(SQLBaseStore):
             WHERE connection_key = ? AND connection_position != ?
         """
         txn.execute(sql, (connection_key, connection_position))
+
+        # Move any lazy membership entries for this connection position to have
+        # `NULL` connection position, indicating that it applies to all future
+        # positions on this connecetion.
+        self.db_pool.simple_update_txn(
+            txn,
+            table="sliding_sync_connection_lazy_members",
+            keyvalues={
+                "connection_key": connection_key,
+                "connection_position": connection_position,
+            },
+            updatevalues={"connection_position": None},
+        )
 
         # Fetch and create a mapping from required state ID to the actual
         # required state for the connection.
@@ -484,7 +508,99 @@ class SlidingSyncStore(SQLBaseStore):
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             room_configs=room_configs,
+            room_lazy_membership={},
         )
+
+    async def get_sliding_sync_connection_lazy_members(
+        self,
+        connection_position: int,
+        room_id: str,
+        user_ids: AbstractSet[str],
+    ) -> Mapping[str, int]:
+        """Get which user IDs in the room we have previously sent lazy
+        membership for.
+
+        Args:
+            connection_position: The sliding sync connection position.
+            room_id: The room ID to get lazy members for.
+            user_ids: The user IDs to check for lazy membership.
+
+        Returns:
+            The mapping of user IDs to the last seen timestamp for those user
+            IDs.
+        """
+
+        def get_sliding_sync_connection_lazy_members_txn(
+            txn: LoggingTransaction,
+        ) -> Mapping[str, int]:
+            sql = """
+                SELECT user_id, mem.connection_position, last_seen_ts
+                FROM sliding_sync_connection_positions AS pos
+                INNER JOIN sliding_sync_connection_lazy_members AS mem USING (connection_key)
+                WHERE pos.connection_position = ?
+            """
+
+            txn.execute(sql, (connection_position,))
+            return {
+                user_id: last_seen_ts
+                for user_id, db_connection_position, last_seen_ts in txn
+                if db_connection_position == connection_position
+                or db_connection_position is None
+            }
+
+        return await self.db_pool.runInteraction(
+            "sliding_sync_connection_lazy_members",
+            get_sliding_sync_connection_lazy_members_txn,
+        )
+
+    def _persist_sliding_sync_connection_lazy_members_txn(
+        self,
+        txn: LoggingTransaction,
+        connection_key: int,
+        previous_connection_position: int | None,
+        new_connection_position: int,
+        room_id: str,
+        user_ids: Mapping[str, int | None],
+    ) -> None:
+        """Persist that we have sent lazy membership for the given user IDs."""
+
+        now = self.clock.time_msec()
+
+        to_update: list[str] = []
+        for user_id, last_seen_ts in user_ids.items():
+            if last_seen_ts is None:
+                # We've never sent this user before, so we need to record that
+                # we've sent it at the new connection position.
+                to_update.append(user_id)
+            elif last_seen_ts + 60 * 60 * 1000 < now:
+                # We last saw this user over an hour ago, so we update the
+                # timestamp.
+                to_update.append(user_id)
+
+        if not to_update:
+            return
+
+        sql = """
+            INSERT INTO sliding_sync_connection_lazy_members
+            (connection_key, connection_position, room_id, user_id, last_seen_ts)
+            VALUES {value_placeholder}
+            ON CONFLICT (connection_key, room_id, user_id)
+            DO UPDATE SET last_seen_ts = EXCLUDED.last_seen_ts
+            WHERE sliding_sync_connection_lazy_members.connection_position IS NULL
+                OR sliding_sync_connection_lazy_members.connection_position = EXCLUDED.connection_position
+        """
+
+        args = [
+            (connection_key, new_connection_position, room_id, user_id, now)
+            for user_id in to_update
+        ]
+
+        if isinstance(self.database_engine, PostgresEngine):
+            sql = sql.format(value_placeholder="?")
+            txn.execute_values(sql, args, fetch=False)
+        else:
+            sql = sql.format(value_placeholder="(?, ?, ?, ?, ?)")
+            txn.execute_batch(sql, args)
 
 
 @attr.s(auto_attribs=True, frozen=True)
@@ -496,6 +612,8 @@ class PerConnectionStateDB:
     serialized to strings.
 
     When persisting this *only* contains updates to the state.
+
+    The `room_lazy_membership` field is only used when persisting.
     """
 
     rooms: "RoomStatusMap[str]"
@@ -503,6 +621,8 @@ class PerConnectionStateDB:
     account_data: "RoomStatusMap[str]"
 
     room_configs: Mapping[str, "RoomSyncConfig"]
+
+    room_lazy_membership: dict[str, dict[str, int | None]]
 
     @staticmethod
     async def from_state(
@@ -557,6 +677,7 @@ class PerConnectionStateDB:
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             room_configs=per_connection_state.room_configs.maps[0],
+            room_lazy_membership=per_connection_state.room_lazy_membership,
         )
 
     async def to_state(self, store: "DataStore") -> "PerConnectionState":

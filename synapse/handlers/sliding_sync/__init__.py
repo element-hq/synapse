@@ -983,14 +983,10 @@ class SlidingSyncHandler:
         #
         # Calculate the `StateFilter` based on the `required_state` for the room
         required_state_filter = StateFilter.none()
-        # The requested `required_state_map` with the lazy membership expanded and
-        # `$ME` replaced with the user's ID. This allows us to see what membership we've
-        # sent down to the client in the next request.
-        #
-        # Make a copy so we can modify it. Still need to be careful to make a copy of
-        # the state key sets if we want to add/remove from them. We could make a deep
-        # copy but this saves us some work.
-        expanded_required_state_map = dict(room_sync_config.required_state_map)
+
+        # Keep track of which users' state we may need to fetch if lazy-loaded
+        # members is used.
+        required_user_state = set()
         if room_membership_for_user_at_to_token.membership not in (
             Membership.INVITE,
             Membership.KNOCK,
@@ -1082,12 +1078,7 @@ class SlidingSyncHandler:
                             # Make a new set or copy of the state key set so we can
                             # modify it without affecting the original
                             # `required_state_map`
-                            expanded_required_state_map[EventTypes.Member] = (
-                                expanded_required_state_map.get(
-                                    EventTypes.Member, set()
-                                )
-                                | timeline_membership
-                            )
+                            required_user_state.update(timeline_membership)
                         elif state_key == StateValues.ME:
                             num_others += 1
                             required_state_types.append((state_type, user.to_string()))
@@ -1098,12 +1089,7 @@ class SlidingSyncHandler:
                             # Make a new set or copy of the state key set so we can
                             # modify it without affecting the original
                             # `required_state_map`
-                            expanded_required_state_map[EventTypes.Member] = (
-                                expanded_required_state_map.get(
-                                    EventTypes.Member, set()
-                                )
-                                | {user.to_string()}
-                            )
+                            required_user_state.add(user.to_string())
                         else:
                             num_others += 1
                             required_state_types.append((state_type, state_key))
@@ -1151,6 +1137,11 @@ class SlidingSyncHandler:
         # We can return all of the state that was requested if this was the first
         # time we've sent the room down this connection.
         room_state: StateMap[EventBase] = {}
+
+        new_connection_state.room_lazy_membership[room_id] = dict.fromkeys(
+            required_user_state
+        )
+
         if initial:
             room_state = await self.get_current_state_at(
                 room_id=room_id,
@@ -1159,16 +1150,34 @@ class SlidingSyncHandler:
                 to_token=to_token,
             )
         else:
+            assert from_token is not None
             assert from_bound is not None
 
             if prev_room_sync_config is not None:
+                # Fetch which of the needed lazy-loaded members we have already sent.
+                if required_user_state:
+                    previously_returned_user_state = (
+                        await self.store.get_sliding_sync_connection_lazy_members(
+                            connection_position=from_token.connection_position,
+                            room_id=room_id,
+                            user_ids=required_user_state,
+                        )
+                    )
+                    new_connection_state.room_lazy_membership[room_id].update(
+                        previously_returned_user_state
+                    )
+                else:
+                    previously_returned_user_state = {}
+
                 # Check if there are any changes to the required state config
                 # that we need to handle.
                 changed_required_state_map, added_state_filter = (
                     _required_state_changes(
                         user.to_string(),
                         prev_required_state_map=prev_room_sync_config.required_state_map,
-                        request_required_state_map=expanded_required_state_map,
+                        request_required_state_map=room_sync_config.required_state_map,
+                        previously_returned_user_state=previously_returned_user_state.keys(),
+                        required_user_state=required_user_state,
                         state_deltas=room_state_delta_id_map,
                     )
                 )
@@ -1283,7 +1292,7 @@ class SlidingSyncHandler:
             bump_stamp = 0
 
         room_sync_required_state_map_to_persist: Mapping[str, AbstractSet[str]] = (
-            expanded_required_state_map
+            room_sync_config.required_state_map
         )
         if changed_required_state_map:
             room_sync_required_state_map_to_persist = changed_required_state_map
@@ -1478,6 +1487,8 @@ def _required_state_changes(
     *,
     prev_required_state_map: Mapping[str, AbstractSet[str]],
     request_required_state_map: Mapping[str, AbstractSet[str]],
+    previously_returned_user_state: AbstractSet[str],
+    required_user_state: AbstractSet[str],
     state_deltas: StateMap[str],
 ) -> tuple[Mapping[str, AbstractSet[str]] | None, StateFilter]:
     """Calculates the changes between the required state room config from the
@@ -1499,7 +1510,15 @@ def _required_state_changes(
         return.
     """
     if prev_required_state_map == request_required_state_map:
-        # There has been no change. Return immediately.
+        # There has been no change in state, just need to check lazy members.
+        if required_user_state - previously_returned_user_state:
+            # There are some new lazy members we need to fetch.
+            added_types: list[tuple[str, str | None]] = []
+            for user_id in required_user_state - previously_returned_user_state:
+                added_types.append((EventTypes.Member, user_id))
+
+            return None, StateFilter.from_types(added_types)
+
         return None, StateFilter.none()
 
     prev_wildcard = prev_required_state_map.get(StateValues.WILDCARD, set())
@@ -1622,8 +1641,16 @@ def _required_state_changes(
                     # LAZY values should also be ignore for event types that are
                     # not membership.
                     pass
+                elif event_type == EventTypes.Member:
+                    if state_key not in previously_returned_user_state:
+                        # Only add *explicit* members we haven't previously sent
+                        # down.
+                        added.append((event_type, state_key))
                 else:
                     added.append((event_type, state_key))
+
+    for user_id in required_user_state - previously_returned_user_state:
+        added.append((EventTypes.Member, user_id))
 
     added_state_filter = StateFilter.from_types(added)
 

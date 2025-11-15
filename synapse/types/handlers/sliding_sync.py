@@ -895,12 +895,19 @@ class MutablePerConnectionState(PerConnectionState):
 
     room_configs: typing.ChainMap[str, RoomSyncConfig]
 
+    # A map from room ID -> user ID -> timestamp. Indicates that those
+    # memberships have been lazily loaded. I.e. that either a) we sent those
+    # memberships down, or b) we did so previously. The timestamp indicates the
+    # time we previously saw the membership.
+    room_lazy_membership: dict[str, dict[str, int | None]] = attr.Factory(dict)
+
     def has_updates(self) -> bool:
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
             or bool(self.account_data.get_updates())
             or bool(self.get_room_config_updates())
+            or bool(self.room_lazy_membership)
         )
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:
