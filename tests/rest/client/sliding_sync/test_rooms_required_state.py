@@ -836,6 +836,101 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             exact=True,
         )
 
+    def test_lazy_members_limited_sync(self) -> None:
+        """Test that when using lazy loading for room members and a limited sync
+        missing a membership change, we include the membership change next time
+        said user says something.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Send a message from each user to the room so that both memberships are sent down.
+        self.helper.send(room_id1, "1", tok=user1_tok)
+        self.helper.send(room_id1, "2", tok=user2_tok)
+
+        # Make a first sync to establish a position
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Member, StateValues.LAZY],
+                    ],
+                    "timeline_limit": 2,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # We should see both membership events in required_state
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+                state_map[(EventTypes.Member, user2_id)],
+            },
+            exact=True,
+        )
+
+        # User2 changes their display name (causing a membership change)
+        self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user2_id,
+            body={
+                EventContentFields.MEMBERSHIP: Membership.JOIN,
+                EventContentFields.MEMBERSHIP_DISPLAYNAME: "New Name",
+            },
+            tok=user2_tok,
+        )
+
+        # Send a couple of messages to the room to push out the membership change
+        self.helper.send(room_id1, "3", tok=user1_tok)
+        self.helper.send(room_id1, "4", tok=user1_tok)
+
+        # Make an incremental Sliding Sync request
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # The membership change should *not* be included yet as user2 doesn't
+        # have any events in the timeline.
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1].get("required_state", []),
+            set(),
+            exact=True,
+        )
+
+        # Now user2 sends a message to the room
+        self.helper.send(room_id1, "5", tok=user2_tok)
+
+        # Make another incremental Sliding Sync request
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # The membership change should now be included as user2 has an event
+        # in the timeline.
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1].get("required_state", []),
+            {
+                state_map[(EventTypes.Member, user2_id)],
+            },
+            exact=True,
+        )
+
     def test_rooms_required_state_me(self) -> None:
         """
         Test `rooms.required_state` correctly handles $ME.

@@ -4741,16 +4741,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             request_required_state_map=test_parameters.request_required_state_map,
             state_deltas={},
         )
-        changed_required_state_map = state_changes.required_state_map_change
-        added_state_filter = state_changes.added_state_filter
 
         self.assertEqual(
-            changed_required_state_map,
+            state_changes.required_state_map_change,
             test_parameters.expected_without_state_deltas.required_state_map_change,
             "changed_required_state_map does not match (without state_deltas)",
         )
         self.assertEqual(
-            added_state_filter,
+            state_changes.added_state_filter,
             test_parameters.expected_without_state_deltas.added_state_filter,
             "added_state_filter does not match (without state_deltas)",
         )
@@ -4763,16 +4761,13 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             state_deltas=test_parameters.state_deltas,
         )
 
-        changed_required_state_map = state_changes.required_state_map_change
-        added_state_filter = state_changes.added_state_filter
-
         self.assertEqual(
-            changed_required_state_map,
+            state_changes.required_state_map_change,
             test_parameters.expected_with_state_deltas.required_state_map_change,
             "changed_required_state_map does not match (with state_deltas)",
         )
         self.assertEqual(
-            added_state_filter,
+            state_changes.added_state_filter,
             test_parameters.expected_with_state_deltas.added_state_filter,
             "added_state_filter does not match (with state_deltas)",
         )

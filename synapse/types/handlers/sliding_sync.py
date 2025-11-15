@@ -886,6 +886,36 @@ class PerConnectionState:
 
 
 @attr.s(auto_attribs=True)
+class RoomLazyMembershipChanges:
+    """Changes to lazily-loaded room memberships for a given room.
+
+    Attributes:
+        returned: Map from user ID to timestamp for users whose membership we
+            have lazily loaded. The timestamp indicates the time we previously
+            saw the membership if we have sent it down previously, or None if
+            we sent it down for the first time.
+
+            Note: this will include users whose membership we would have sent
+                down but didn't due to us having previously sent them.
+        invalidated: Set of user IDs whose latest membership we have *not* sent
+            down
+    """
+
+    # A map from user ID -> timestamp. Indicates that those memberships have
+    # been lazily loaded. I.e. that either a) we sent those memberships down, or
+    # b) we did so previously. The timestamp indicates the time we previously
+    # saw the membership.
+    returned: Mapping[str, int | None] = attr.Factory(dict)
+
+    # A set of user IDs whose membership change we have *not* sent
+    # down
+    invalidated: AbstractSet[str] = attr.Factory(set)
+
+    def __bool__(self) -> bool:
+        return bool(self.returned or self.invalidated)
+
+
+@attr.s(auto_attribs=True)
 class MutablePerConnectionState(PerConnectionState):
     """A mutable version of `PerConnectionState`"""
 
@@ -895,12 +925,19 @@ class MutablePerConnectionState(PerConnectionState):
 
     room_configs: typing.ChainMap[str, RoomSyncConfig]
 
+    # A map from room ID -> user ID -> timestamp. Indicates that those
+    # memberships have been lazily loaded. I.e. that either a) we sent those
+    # memberships down, or b) we did so previously. The timestamp indicates the
+    # time we previously saw the membership.
+    room_lazy_membership: dict[str, RoomLazyMembershipChanges] = attr.Factory(dict)
+
     def has_updates(self) -> bool:
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
             or bool(self.account_data.get_updates())
             or bool(self.get_room_config_updates())
+            or bool(self.room_lazy_membership)
         )
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:
