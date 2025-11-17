@@ -62,12 +62,14 @@ from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
     MutablePerConnectionState,
     PerConnectionState,
+    RoomLazyMembershipChanges,
     RoomSyncConfig,
     SlidingSyncConfig,
     SlidingSyncResult,
     StateValues,
 )
 from synapse.types.state import StateFilter
+from synapse.util import MutableOverlayMapping
 from synapse.util.async_helpers import concurrently_execute
 from synapse.visibility import filter_events_for_client
 
@@ -1138,8 +1140,8 @@ class SlidingSyncHandler:
         # time we've sent the room down this connection.
         room_state: StateMap[EventBase] = {}
 
-        new_connection_state.room_lazy_membership[room_id] = dict.fromkeys(
-            required_user_state
+        new_connection_state.room_lazy_membership[room_id] = RoomLazyMembershipChanges(
+            added=dict.fromkeys(required_user_state)
         )
 
         if initial:
@@ -1163,11 +1165,31 @@ class SlidingSyncHandler:
                             user_ids=required_user_state,
                         )
                     )
-                    new_connection_state.room_lazy_membership[room_id].update(
+                    new_connection_state.room_lazy_membership[room_id].added.update(
                         previously_returned_user_state
                     )
                 else:
                     previously_returned_user_state = {}
+
+                if limited:
+                    # If the timeline is limited we need to remove any members
+                    # from list of lazy loaded members that have changed but not
+                    # been sent down the timeline.
+                    previously_returned_user_state = MutableOverlayMapping(
+                        previously_returned_user_state
+                    )
+                    for event_type, state_key in room_state_delta_id_map:
+                        if event_type != EventTypes.Member:
+                            continue
+
+                        if state_key not in required_user_state:
+                            previously_returned_user_state.pop(state_key, None)
+                            new_connection_state.room_lazy_membership[
+                                room_id
+                            ].added.pop(state_key, None)
+                            new_connection_state.room_lazy_membership[
+                                room_id
+                            ].removed.add(state_key)
 
                 # Check if there are any changes to the required state config
                 # that we need to handle.

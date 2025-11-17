@@ -33,6 +33,7 @@ from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
     MutablePerConnectionState,
     PerConnectionState,
+    RoomLazyMembershipChanges,
     RoomStatusMap,
     RoomSyncConfig,
 )
@@ -350,15 +351,12 @@ class SlidingSyncStore(SQLBaseStore):
             value_values=values,
         )
 
-        for room_id, user_ids in per_connection_state.room_lazy_membership.items():
-            self._persist_sliding_sync_connection_lazy_members_txn(
-                txn,
-                connection_key,
-                previous_connection_position,
-                connection_position,
-                room_id,
-                user_ids,
-            )
+        self._persist_sliding_sync_connection_lazy_members_txn(
+            txn,
+            connection_key,
+            connection_position,
+            per_connection_state.room_lazy_membership,
+        )
 
         return connection_position
 
@@ -557,50 +555,62 @@ class SlidingSyncStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         connection_key: int,
-        previous_connection_position: int | None,
         new_connection_position: int,
-        room_id: str,
-        user_ids: Mapping[str, int | None],
+        all_changes: dict[str, RoomLazyMembershipChanges],
     ) -> None:
         """Persist that we have sent lazy membership for the given user IDs."""
 
         now = self.clock.time_msec()
 
-        to_update: list[str] = []
-        for user_id, last_seen_ts in user_ids.items():
-            if last_seen_ts is None:
-                # We've never sent this user before, so we need to record that
-                # we've sent it at the new connection position.
-                to_update.append(user_id)
-            elif last_seen_ts + 60 * 60 * 1000 < now:
-                # We last saw this user over an hour ago, so we update the
-                # timestamp.
-                to_update.append(user_id)
+        to_update: list[tuple[str, str]] = []
+        for room_id, room_changes in all_changes.items():
+            for user_id, last_seen_ts in room_changes.added.items():
+                if last_seen_ts is None:
+                    # We've never sent this user before, so we need to record that
+                    # we've sent it at the new connection position.
+                    to_update.append((room_id, user_id))
+                elif last_seen_ts + 60 * 60 * 1000 < now:
+                    # We last saw this user over an hour ago, so we update the
+                    # timestamp.
+                    to_update.append((room_id, user_id))
 
-        if not to_update:
-            return
+        if to_update:
+            sql = """
+                INSERT INTO sliding_sync_connection_lazy_members
+                (connection_key, connection_position, room_id, user_id, last_seen_ts)
+                VALUES {value_placeholder}
+                ON CONFLICT (connection_key, room_id, user_id)
+                DO UPDATE SET last_seen_ts = EXCLUDED.last_seen_ts
+                WHERE sliding_sync_connection_lazy_members.connection_position IS NULL
+                    OR sliding_sync_connection_lazy_members.connection_position = EXCLUDED.connection_position
+            """
 
-        sql = """
-            INSERT INTO sliding_sync_connection_lazy_members
-            (connection_key, connection_position, room_id, user_id, last_seen_ts)
-            VALUES {value_placeholder}
-            ON CONFLICT (connection_key, room_id, user_id)
-            DO UPDATE SET last_seen_ts = EXCLUDED.last_seen_ts
-            WHERE sliding_sync_connection_lazy_members.connection_position IS NULL
-                OR sliding_sync_connection_lazy_members.connection_position = EXCLUDED.connection_position
-        """
+            args = [
+                (connection_key, new_connection_position, room_id, user_id, now)
+                for room_id, user_id in to_update
+            ]
 
-        args = [
-            (connection_key, new_connection_position, room_id, user_id, now)
-            for user_id in to_update
-        ]
+            if isinstance(self.database_engine, PostgresEngine):
+                sql = sql.format(value_placeholder="?")
+                txn.execute_values(sql, args, fetch=False)
+            else:
+                sql = sql.format(value_placeholder="(?, ?, ?, ?, ?)")
+                txn.execute_batch(sql, args)
 
-        if isinstance(self.database_engine, PostgresEngine):
-            sql = sql.format(value_placeholder="?")
-            txn.execute_values(sql, args, fetch=False)
-        else:
-            sql = sql.format(value_placeholder="(?, ?, ?, ?, ?)")
-            txn.execute_batch(sql, args)
+        to_remove: list[tuple[str, str]] = []
+        for room_id, room_changes in all_changes.items():
+            for user_id in room_changes.removed:
+                to_remove.append((room_id, user_id))
+
+        if to_remove:
+            self.db_pool.simple_delete_many_batch_txn(
+                txn,
+                table="sliding_sync_connection_lazy_members",
+                keys=("connection_key", "room_id", "user_id"),
+                values=[
+                    (connection_key, room_id, user_id) for room_id, user_id in to_remove
+                ],
+            )
 
 
 @attr.s(auto_attribs=True, frozen=True)
@@ -622,7 +632,7 @@ class PerConnectionStateDB:
 
     room_configs: Mapping[str, "RoomSyncConfig"]
 
-    room_lazy_membership: dict[str, dict[str, int | None]]
+    room_lazy_membership: dict[str, RoomLazyMembershipChanges]
 
     @staticmethod
     async def from_state(

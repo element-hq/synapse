@@ -886,6 +886,31 @@ class PerConnectionState:
 
 
 @attr.s(auto_attribs=True)
+class RoomLazyMembershipChanges:
+    """Changes to lazily-loaded room memberships for a given room.
+
+    Attributes:
+        added: Map from user ID to timestamp for users whose membership we
+            have lazily loaded.
+        removed: Set of user IDs whose membership change we have *not* sent
+            down
+    """
+
+    # A map from user ID -> timestamp. Indicates that those memberships have
+    # been lazily loaded. I.e. that either a) we sent those memberships down, or
+    # b) we did so previously. The timestamp indicates the time we previously
+    # saw the membership.
+    added: dict[str, int | None] = attr.Factory(dict)
+
+    # A set of user IDs whose membership change we have *not* sent
+    # down
+    removed: set[str] = attr.Factory(set)
+
+    def __bool__(self) -> bool:
+        return bool(self.added or self.removed)
+
+
+@attr.s(auto_attribs=True)
 class MutablePerConnectionState(PerConnectionState):
     """A mutable version of `PerConnectionState`"""
 
@@ -899,7 +924,7 @@ class MutablePerConnectionState(PerConnectionState):
     # memberships have been lazily loaded. I.e. that either a) we sent those
     # memberships down, or b) we did so previously. The timestamp indicates the
     # time we previously saw the membership.
-    room_lazy_membership: dict[str, dict[str, int | None]] = attr.Factory(dict)
+    room_lazy_membership: dict[str, RoomLazyMembershipChanges] = attr.Factory(dict)
 
     def has_updates(self) -> bool:
         return (
