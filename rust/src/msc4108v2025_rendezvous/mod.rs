@@ -247,6 +247,7 @@ impl MSC4108v2025RendezvousHandler {
         })?;
         let mut response = Response::new(response_body.as_bytes());
         *response.status_mut() = StatusCode::OK;
+        prepare_headers(response.headers_mut());
         http_response_to_twisted(twisted_request, response)?;
 
         Ok(())
