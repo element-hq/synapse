@@ -39,7 +39,7 @@ description = "The ultimate Python library in building OAuth and OpenID Connect 
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"oidc\" or extra == \"jwt\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"jwt\" or extra == \"oidc\""
 files = [
     {file = "authlib-1.6.5-py2.py3-none-any.whl", hash = "sha256:3e0e0507807f842b02175507bdee8957a1d5707fd4afb17c32fb43fee90b6e3a"},
     {file = "authlib-1.6.5.tar.gz", hash = "sha256:6aaf9c79b7cc96c900f0b284061691c5d4e61221640a948fe690b556a6d6d10b"},
@@ -454,7 +454,7 @@ description = "XML bomb protection for Python stdlib modules"
 optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 groups = ["main"]
-markers = "extra == \"saml2\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"saml2\""
 files = [
     {file = "defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61"},
     {file = "defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69"},
@@ -479,7 +479,7 @@ description = "XPath 1.0/2.0/3.0/3.1 parsers and selectors for ElementTree and l
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"saml2\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"saml2\""
 files = [
     {file = "elementpath-4.1.5-py3-none-any.whl", hash = "sha256:2ac1a2fb31eb22bbbf817f8cf6752f844513216263f0e3892c8e79782fe4bb55"},
     {file = "elementpath-4.1.5.tar.gz", hash = "sha256:c2d6dc524b29ef751ecfc416b0627668119d8812441c555d7471da41d4bacb8d"},
@@ -529,7 +529,7 @@ description = "Python wrapper for hiredis"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"redis\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"redis\""
 files = [
     {file = "hiredis-3.3.0-cp310-cp310-macosx_10_15_universal2.whl", hash = "sha256:9937d9b69321b393fbace69f55423480f098120bc55a3316e1ca3508c4dbbd6f"},
     {file = "hiredis-3.3.0-cp310-cp310-macosx_10_15_x86_64.whl", hash = "sha256:50351b77f89ba6a22aff430b993653847f36b71d444509036baa0f2d79d1ebf4"},
@@ -852,7 +852,7 @@ description = "Jaeger Python OpenTracing Tracer implementation"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"opentracing\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"opentracing\""
 files = [
     {file = "jaeger-client-4.8.0.tar.gz", hash = "sha256:3157836edab8e2c209bd2d6ae61113db36f7ee399e66b1dcbb715d87ab49bfe0"},
 ]
@@ -990,7 +990,7 @@ description = "A strictly RFC 4510 conforming LDAP V3 pure Python client library
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"matrix-synapse-ldap3\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"matrix-synapse-ldap3\""
 files = [
     {file = "ldap3-2.9.1-py2.py3-none-any.whl", hash = "sha256:5869596fc4948797020d3f03b7939da938778a0f9e2009f7a072ccf92b8e8d70"},
     {file = "ldap3-2.9.1.tar.gz", hash = "sha256:f3e7fc4718e3f09dda568b57100095e0ce58633bcabbed8667ce3f8fbaa4229f"},
@@ -1006,7 +1006,7 @@ description = "Powerful and Pythonic XML processing library combining libxml2/li
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"url-preview\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"url-preview\""
 files = [
     {file = "lxml-6.0.2-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:e77dd455b9a16bbd2a5036a63ddbd479c19572af81b624e79ef422f929eef388"},
     {file = "lxml-6.0.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:5d444858b9f07cefff6455b983aea9a67f7462ba1f6cbe4a21e8bf6791bf2153"},
@@ -1292,7 +1292,7 @@ description = "An LDAP3 auth provider for Synapse"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"matrix-synapse-ldap3\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"matrix-synapse-ldap3\""
 files = [
     {file = "matrix-synapse-ldap3-0.3.0.tar.gz", hash = "sha256:8bb6517173164d4b9cc44f49de411d8cebdb2e705d5dd1ea1f38733c4a009e1d"},
     {file = "matrix_synapse_ldap3-0.3.0-py3-none-any.whl", hash = "sha256:8b4d701f8702551e98cc1d8c20dbed532de5613584c08d0df22de376ba99159d"},
@@ -1534,7 +1534,7 @@ description = "OpenTracing API for Python. See documentation at http://opentraci
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"opentracing\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"opentracing\""
 files = [
     {file = "opentracing-2.4.0.tar.gz", hash = "sha256:a173117e6ef580d55874734d1fa7ecb6f3655160b8b8974a2a1e98e5ec9c840d"},
 ]
@@ -1724,7 +1724,7 @@ description = "psycopg2 - Python-PostgreSQL Database Adapter"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"postgres\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"postgres\""
 files = [
     {file = "psycopg2-2.9.11-cp310-cp310-win_amd64.whl", hash = "sha256:103e857f46bb76908768ead4e2d0ba1d1a130e7b8ed77d3ae91e8b33481813e8"},
     {file = "psycopg2-2.9.11-cp311-cp311-win_amd64.whl", hash = "sha256:210daed32e18f35e3140a1ebe059ac29209dd96468f2f7559aa59f75ee82a5cb"},
@@ -1742,7 +1742,7 @@ description = ".. image:: https://travis-ci.org/chtd/psycopg2cffi.svg?branch=mas
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "platform_python_implementation == \"PyPy\" and (extra == \"postgres\" or extra == \"all\")"
+markers = "platform_python_implementation == \"PyPy\" and (extra == \"all\" or extra == \"postgres\")"
 files = [
     {file = "psycopg2cffi-2.9.0.tar.gz", hash = "sha256:7e272edcd837de3a1d12b62185eb85c45a19feda9e62fa1b120c54f9e8d35c52"},
 ]
@@ -1758,7 +1758,7 @@ description = "A Simple library to enable psycopg2 compatability"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "platform_python_implementation == \"PyPy\" and (extra == \"postgres\" or extra == \"all\")"
+markers = "platform_python_implementation == \"PyPy\" and (extra == \"all\" or extra == \"postgres\")"
 files = [
     {file = "psycopg2cffi-compat-1.1.tar.gz", hash = "sha256:d25e921748475522b33d13420aad5c2831c743227dc1f1f2585e0fdb5c914e05"},
 ]
@@ -2039,7 +2039,7 @@ description = "A development tool to measure, monitor and analyze the memory beh
 optional = true
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "extra == \"cache-memory\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"cache-memory\""
 files = [
     {file = "Pympler-1.0.1-py3-none-any.whl", hash = "sha256:d260dda9ae781e1eab6ea15bacb84015849833ba5555f141d2d9b7b7473b307d"},
     {file = "Pympler-1.0.1.tar.gz", hash = "sha256:993f1a3599ca3f4fcd7160c7545ad06310c9e12f70174ae7ae8d4e25f6c5d3fa"},
@@ -2099,7 +2099,7 @@ description = "Python implementation of SAML Version 2 Standard"
 optional = true
 python-versions = ">=3.9,<4.0"
 groups = ["main"]
-markers = "extra == \"saml2\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"saml2\""
 files = [
     {file = "pysaml2-7.5.0-py3-none-any.whl", hash = "sha256:bc6627cc344476a83c757f440a73fda1369f13b6fda1b4e16bca63ffbabb5318"},
     {file = "pysaml2-7.5.0.tar.gz", hash = "sha256:f36871d4e5ee857c6b85532e942550d2cf90ea4ee943d75eb681044bbc4f54f7"},
@@ -2124,7 +2124,7 @@ description = "Extensions to the standard Python datetime module"
 optional = true
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,>=2.7"
 groups = ["main"]
-markers = "extra == \"saml2\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"saml2\""
 files = [
     {file = "python-dateutil-2.8.2.tar.gz", hash = "sha256:0123cacc1627ae19ddf3c27a5de5bd67ee4586fbdd6440d9748f8abb483d3e86"},
     {file = "python_dateutil-2.8.2-py2.py3-none-any.whl", hash = "sha256:961d03dc3453ebbc59dbdea9e4e11c5651520a876d0f4db161e8674aae935da9"},
@@ -2152,7 +2152,7 @@ description = "World timezone definitions, modern and historical"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"saml2\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"saml2\""
 files = [
     {file = "pytz-2022.7.1-py2.py3-none-any.whl", hash = "sha256:78f4f37d8198e0627c5f1143240bb0206b8691d8d7ac6d78fee88b78733f8c4a"},
     {file = "pytz-2022.7.1.tar.gz", hash = "sha256:01a0681c4b9684a28304615eba55d1ab31ae00bf68ec157ec3708a8182dbbcd0"},
@@ -2489,31 +2489,31 @@ files = [
 
 [[package]]
 name = "ruff"
-version = "0.14.3"
+version = "0.14.5"
 description = "An extremely fast Python linter and code formatter, written in Rust."
 optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
-    {file = "ruff-0.14.3-py3-none-linux_armv6l.whl", hash = "sha256:876b21e6c824f519446715c1342b8e60f97f93264012de9d8d10314f8a79c371"},
-    {file = "ruff-0.14.3-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:b6fd8c79b457bedd2abf2702b9b472147cd860ed7855c73a5247fa55c9117654"},
-    {file = "ruff-0.14.3-py3-none-macosx_11_0_arm64.whl", hash = "sha256:71ff6edca490c308f083156938c0c1a66907151263c4abdcb588602c6e696a14"},
-    {file = "ruff-0.14.3-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:786ee3ce6139772ff9272aaf43296d975c0217ee1b97538a98171bf0d21f87ed"},
-    {file = "ruff-0.14.3-py3-none-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:cd6291d0061811c52b8e392f946889916757610d45d004e41140d81fb6cd5ddc"},
-    {file = "ruff-0.14.3-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:a497ec0c3d2c88561b6d90f9c29f5ae68221ac00d471f306fa21fa4264ce5fcd"},
-    {file = "ruff-0.14.3-py3-none-manylinux_2_17_ppc64.manylinux2014_ppc64.whl", hash = "sha256:e231e1be58fc568950a04fbe6887c8e4b85310e7889727e2b81db205c45059eb"},
-    {file = "ruff-0.14.3-py3-none-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:469e35872a09c0e45fecf48dd960bfbce056b5db2d5e6b50eca329b4f853ae20"},
-    {file = "ruff-0.14.3-py3-none-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:3d6bc90307c469cb9d28b7cfad90aaa600b10d67c6e22026869f585e1e8a2db0"},
-    {file = "ruff-0.14.3-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0e2f8a0bbcffcfd895df39c9a4ecd59bb80dca03dc43f7fb63e647ed176b741e"},
-    {file = "ruff-0.14.3-py3-none-manylinux_2_31_riscv64.whl", hash = "sha256:678fdd7c7d2d94851597c23ee6336d25f9930b460b55f8598e011b57c74fd8c5"},
-    {file = "ruff-0.14.3-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:1ec1ac071e7e37e0221d2f2dbaf90897a988c531a8592a6a5959f0603a1ecf5e"},
-    {file = "ruff-0.14.3-py3-none-musllinux_1_2_armv7l.whl", hash = "sha256:afcdc4b5335ef440d19e7df9e8ae2ad9f749352190e96d481dc501b753f0733e"},
-    {file = "ruff-0.14.3-py3-none-musllinux_1_2_i686.whl", hash = "sha256:7bfc42f81862749a7136267a343990f865e71fe2f99cf8d2958f684d23ce3dfa"},
-    {file = "ruff-0.14.3-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:a65e448cfd7e9c59fae8cf37f9221585d3354febaad9a07f29158af1528e165f"},
-    {file = "ruff-0.14.3-py3-none-win32.whl", hash = "sha256:f3d91857d023ba93e14ed2d462ab62c3428f9bbf2b4fbac50a03ca66d31991f7"},
-    {file = "ruff-0.14.3-py3-none-win_amd64.whl", hash = "sha256:d7b7006ac0756306db212fd37116cce2bd307e1e109375e1c6c106002df0ae5f"},
-    {file = "ruff-0.14.3-py3-none-win_arm64.whl", hash = "sha256:26eb477ede6d399d898791d01961e16b86f02bc2486d0d1a7a9bb2379d055dc1"},
-    {file = "ruff-0.14.3.tar.gz", hash = "sha256:4ff876d2ab2b161b6de0aa1f5bd714e8e9b4033dc122ee006925fbacc4f62153"},
+    {file = "ruff-0.14.5-py3-none-linux_armv6l.whl", hash = "sha256:f3b8248123b586de44a8018bcc9fefe31d23dda57a34e6f0e1e53bd51fd63594"},
+    {file = "ruff-0.14.5-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:f7a75236570318c7a30edd7f5491945f0169de738d945ca8784500b517163a72"},
+    {file = "ruff-0.14.5-py3-none-macosx_11_0_arm64.whl", hash = "sha256:6d146132d1ee115f8802356a2dc9a634dbf58184c51bff21f313e8cd1c74899a"},
+    {file = "ruff-0.14.5-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e2380596653dcd20b057794d55681571a257a42327da8894b93bbd6111aa801f"},
+    {file = "ruff-0.14.5-py3-none-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:2d1fa985a42b1f075a098fa1ab9d472b712bdb17ad87a8ec86e45e7fa6273e68"},
+    {file = "ruff-0.14.5-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:88f0770d42b7fa02bbefddde15d235ca3aa24e2f0137388cc15b2dcbb1f7c7a7"},
+    {file = "ruff-0.14.5-py3-none-manylinux_2_17_ppc64.manylinux2014_ppc64.whl", hash = "sha256:3676cb02b9061fee7294661071c4709fa21419ea9176087cb77e64410926eb78"},
+    {file = "ruff-0.14.5-py3-none-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:b595bedf6bc9cab647c4a173a61acf4f1ac5f2b545203ba82f30fcb10b0318fb"},
+    {file = "ruff-0.14.5-py3-none-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:f55382725ad0bdb2e8ee2babcbbfb16f124f5a59496a2f6a46f1d9d99d93e6e2"},
+    {file = "ruff-0.14.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7497d19dce23976bdaca24345ae131a1d38dcfe1b0850ad8e9e6e4fa321a6e19"},
+    {file = "ruff-0.14.5-py3-none-manylinux_2_31_riscv64.whl", hash = "sha256:410e781f1122d6be4f446981dd479470af86537fb0b8857f27a6e872f65a38e4"},
+    {file = "ruff-0.14.5-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:c01be527ef4c91a6d55e53b337bfe2c0f82af024cc1a33c44792d6844e2331e1"},
+    {file = "ruff-0.14.5-py3-none-musllinux_1_2_armv7l.whl", hash = "sha256:f66e9bb762e68d66e48550b59c74314168ebb46199886c5c5aa0b0fbcc81b151"},
+    {file = "ruff-0.14.5-py3-none-musllinux_1_2_i686.whl", hash = "sha256:d93be8f1fa01022337f1f8f3bcaa7ffee2d0b03f00922c45c2207954f351f465"},
+    {file = "ruff-0.14.5-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:c135d4b681f7401fe0e7312017e41aba9b3160861105726b76cfa14bc25aa367"},
+    {file = "ruff-0.14.5-py3-none-win32.whl", hash = "sha256:c83642e6fccfb6dea8b785eb9f456800dcd6a63f362238af5fc0c83d027dd08b"},
+    {file = "ruff-0.14.5-py3-none-win_amd64.whl", hash = "sha256:9d55d7af7166f143c94eae1db3312f9ea8f95a4defef1979ed516dbb38c27621"},
+    {file = "ruff-0.14.5-py3-none-win_arm64.whl", hash = "sha256:4b700459d4649e2594b31f20a9de33bc7c19976d4746d8d0798ad959621d64a4"},
+    {file = "ruff-0.14.5.tar.gz", hash = "sha256:8d3b48d7d8aad423d3137af7ab6c8b1e38e4de104800f0d596990f6ada1a9fc1"},
 ]
 
 [[package]]
@@ -2556,7 +2556,7 @@ description = "Python client for Sentry (https://sentry.io)"
 optional = true
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "extra == \"sentry\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"sentry\""
 files = [
     {file = "sentry_sdk-2.43.0-py2.py3-none-any.whl", hash = "sha256:4aacafcf1756ef066d359ae35030881917160ba7f6fc3ae11e0e58b09edc2d5d"},
     {file = "sentry_sdk-2.43.0.tar.gz", hash = "sha256:52ed6e251c5d2c084224d73efee56b007ef5c2d408a4a071270e82131d336e20"},
@@ -2749,7 +2749,7 @@ description = "Tornado IOLoop Backed Concurrent Futures"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"opentracing\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"opentracing\""
 files = [
     {file = "threadloop-1.0.2-py2-none-any.whl", hash = "sha256:5c90dbefab6ffbdba26afb4829d2a9df8275d13ac7dc58dccb0e279992679599"},
     {file = "threadloop-1.0.2.tar.gz", hash = "sha256:8b180aac31013de13c2ad5c834819771992d350267bddb854613ae77ef571944"},
@@ -2765,7 +2765,7 @@ description = "Python bindings for the Apache Thrift RPC system"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"opentracing\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"opentracing\""
 files = [
     {file = "thrift-0.16.0.tar.gz", hash = "sha256:2b5b6488fcded21f9d312aa23c9ff6a0195d0f6ae26ddbd5ad9e3e25dfc14408"},
 ]
@@ -2828,7 +2828,7 @@ description = "Tornado is a Python web framework and asynchronous networking lib
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"opentracing\""
 files = [
     {file = "tornado-6.5-cp39-abi3-macosx_10_9_universal2.whl", hash = "sha256:f81067dad2e4443b015368b24e802d0083fecada4f0a4572fdb72fc06e54a9a6"},
     {file = "tornado-6.5-cp39-abi3-macosx_10_9_x86_64.whl", hash = "sha256:9ac1cbe1db860b3cbb251e795c701c41d343f06a96049d6274e7c77559117e41"},
@@ -2962,7 +2962,7 @@ description = "non-blocking redis client for python"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"redis\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"redis\""
 files = [
     {file = "txredisapi-1.4.11-py3-none-any.whl", hash = "sha256:ac64d7a9342b58edca13ef267d4fa7637c1aa63f8595e066801c1e8b56b22d0b"},
     {file = "txredisapi-1.4.11.tar.gz", hash = "sha256:3eb1af99aefdefb59eb877b1dd08861efad60915e30ad5bf3d5bf6c5cedcdbc6"},
@@ -3208,7 +3208,7 @@ description = "An XML Schema validator and decoder"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"saml2\" or extra == \"all\""
+markers = "extra == \"all\" or extra == \"saml2\""
 files = [
     {file = "xmlschema-2.4.0-py3-none-any.whl", hash = "sha256:dc87be0caaa61f42649899189aab2fd8e0d567f2cf548433ba7b79278d231a4a"},
     {file = "xmlschema-2.4.0.tar.gz", hash = "sha256:d74cd0c10866ac609e1ef94a5a69b018ad16e39077bc6393408b40c6babee793"},
@@ -3343,4 +3343,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "fd472001e409dd3a2a9f0af980a5630fa9edb98fc4b73caa68802a3fd0df5d5f"
+content-hash = "4f8d98723236eaf3d13f440dce95ec6cc3c4dc49ba3a0e45bf9cfbb51aca899c"
