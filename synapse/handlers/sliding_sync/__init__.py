@@ -17,6 +17,7 @@ import logging
 from itertools import chain
 from typing import TYPE_CHECKING, AbstractSet, Mapping
 
+import attr
 from prometheus_client import Histogram
 from typing_extensions import assert_never
 
@@ -1190,22 +1191,21 @@ class SlidingSyncHandler:
             if prev_room_sync_config is not None:
                 # Check if there are any changes to the required state config
                 # that we need to handle.
-                changed_required_state_map, added_state_filter = (
-                    _required_state_changes(
-                        user.to_string(),
-                        prev_required_state_map=prev_room_sync_config.required_state_map,
-                        request_required_state_map=expanded_required_state_map,
-                        state_deltas=room_state_delta_id_map,
-                    )
+                changes_return = _required_state_changes(
+                    user.to_string(),
+                    prev_required_state_map=prev_room_sync_config.required_state_map,
+                    request_required_state_map=expanded_required_state_map,
+                    state_deltas=room_state_delta_id_map,
                 )
+                changed_required_state_map = changes_return.required_state_map_change
 
-                if added_state_filter:
+                if changes_return.added_state_filter:
                     # Some state entries got added, so we pull out the current
                     # state for them. If we don't do this we'd only send down new deltas.
                     state_ids = await self.get_current_state_ids_at(
                         room_id=room_id,
                         room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
-                        state_filter=added_state_filter,
+                        state_filter=changes_return.added_state_filter,
                         to_token=to_token,
                     )
                     room_state_delta_id_map.update(state_ids)
@@ -1499,13 +1499,28 @@ class SlidingSyncHandler:
             return None
 
 
+@attr.s(auto_attribs=True)
+class _RequiredStateChangesReturn:
+    """Return type for _required_state_changes.
+
+    Attributes:
+        required_state_map_change: The updated required state map to store in
+            the room config, or None if there is no change.
+        added_state_filter: The state filter to use to fetch any additional
+            current state that needs to be returned to the client.
+    """
+
+    required_state_map_change: Mapping[str, AbstractSet[str]] | None
+    added_state_filter: StateFilter
+
+
 def _required_state_changes(
     user_id: str,
     *,
     prev_required_state_map: Mapping[str, AbstractSet[str]],
     request_required_state_map: Mapping[str, AbstractSet[str]],
     state_deltas: StateMap[str],
-) -> tuple[Mapping[str, AbstractSet[str]] | None, StateFilter]:
+) -> _RequiredStateChangesReturn:
     """Calculates the changes between the required state room config from the
     previous requests compared with the current request.
 
@@ -1518,16 +1533,13 @@ def _required_state_changes(
     This function tries to ensure to handle the case where a state entry is
     added, removed and then added again to the required state. In that case we
     only want to re-send that entry down sync if it has changed.
-
-    Returns:
-        A 2-tuple of updated required state config (or None if there is no update)
-        and the state filter to use to fetch extra current state that we need to
-        return.
     """
     if prev_required_state_map == request_required_state_map:
         # There has been no change. Return immediately.
-        return None, StateFilter.none()
-
+        return _RequiredStateChangesReturn(
+            required_state_map_change=None,
+            added_state_filter=StateFilter.none(),
+        )
     prev_wildcard = prev_required_state_map.get(StateValues.WILDCARD, set())
     request_wildcard = request_required_state_map.get(StateValues.WILDCARD, set())
 
@@ -1536,17 +1548,26 @@ def _required_state_changes(
     # already fetching everything, we don't have to fetch anything now that they've
     # narrowed.
     if StateValues.WILDCARD in prev_wildcard:
-        return request_required_state_map, StateFilter.none()
+        return _RequiredStateChangesReturn(
+            required_state_map_change=request_required_state_map,
+            added_state_filter=StateFilter.none(),
+        )
 
     # If a event type wildcard has been added or removed we don't try and do
     # anything fancy, and instead always update the effective room required
     # state config to match the request.
     if request_wildcard - prev_wildcard:
         # Some keys were added, so we need to fetch everything
-        return request_required_state_map, StateFilter.all()
+        return _RequiredStateChangesReturn(
+            required_state_map_change=request_required_state_map,
+            added_state_filter=StateFilter.all(),
+        )
     if prev_wildcard - request_wildcard:
         # Keys were only removed, so we don't have to fetch everything.
-        return request_required_state_map, StateFilter.none()
+        return _RequiredStateChangesReturn(
+            required_state_map_change=request_required_state_map,
+            added_state_filter=StateFilter.none(),
+        )
 
     # Contains updates to the required state map compared with the previous room
     # config. This has the same format as `RoomSyncConfig.required_state`
@@ -1722,6 +1743,12 @@ def _required_state_changes(
                 # Remove entries with empty state keys.
                 new_required_state_map.pop(event_type, None)
 
-        return new_required_state_map, added_state_filter
+        return _RequiredStateChangesReturn(
+            required_state_map_change=new_required_state_map,
+            added_state_filter=added_state_filter,
+        )
     else:
-        return None, added_state_filter
+        return _RequiredStateChangesReturn(
+            required_state_map_change=None,
+            added_state_filter=added_state_filter,
+        )

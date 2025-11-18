@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import AbstractSet, Mapping
+from typing import AbstractSet
 from unittest.mock import patch
 
 import attr
@@ -38,6 +38,7 @@ from synapse.handlers.sliding_sync import (
     RoomSyncConfig,
     StateValues,
     _required_state_changes,
+    _RequiredStateChangesReturn,
 )
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
@@ -3827,12 +3828,8 @@ class RequiredStateChangesTestParameters:
     previous_required_state_map: dict[str, set[str]]
     request_required_state_map: dict[str, set[str]]
     state_deltas: StateMap[str]
-    expected_with_state_deltas: tuple[
-        Mapping[str, AbstractSet[str]] | None, StateFilter
-    ]
-    expected_without_state_deltas: tuple[
-        Mapping[str, AbstractSet[str]] | None, StateFilter
-    ]
+    expected_with_state_deltas: _RequiredStateChangesReturn
+    expected_without_state_deltas: _RequiredStateChangesReturn
 
 
 class RequiredStateChangesTestCase(unittest.TestCase):
@@ -3848,8 +3845,12 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     request_required_state_map={"type1": {"state_key"}},
                     state_deltas={("type1", "state_key"): "$event_id"},
                     # No changes
-                    expected_with_state_deltas=(None, StateFilter.none()),
-                    expected_without_state_deltas=(None, StateFilter.none()),
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
+                        None, StateFilter.none()
+                    ),
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
+                        None, StateFilter.none()
+                    ),
                 ),
             ),
             (
@@ -3862,14 +3863,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         "type2": {"state_key"},
                     },
                     state_deltas={("type2", "state_key"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # We've added a type so we should persist the changed required state
                         # config.
                         {"type1": {"state_key"}, "type2": {"state_key"}},
                         # We should see the new type added
                         StateFilter.from_types([("type2", "state_key")]),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {"state_key"}, "type2": {"state_key"}},
                         StateFilter.from_types([("type2", "state_key")]),
                     ),
@@ -3885,7 +3886,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         "type2": {"state_key"},
                     },
                     state_deltas={("type2", "state_key"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # We've added a type so we should persist the changed required state
                         # config.
                         {"type1": {"state_key"}, "type2": {"state_key"}},
@@ -3894,7 +3895,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                             [("type1", "state_key"), ("type2", "state_key")]
                         ),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {"state_key"}, "type2": {"state_key"}},
                         StateFilter.from_types(
                             [("type1", "state_key"), ("type2", "state_key")]
@@ -3909,14 +3910,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     previous_required_state_map={"type": {"state_key1"}},
                     request_required_state_map={"type": {"state_key1", "state_key2"}},
                     state_deltas={("type", "state_key2"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # We've added a key so we should persist the changed required state
                         # config.
                         {"type": {"state_key1", "state_key2"}},
                         # We should see the new state_keys added
                         StateFilter.from_types([("type", "state_key2")]),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {"type": {"state_key1", "state_key2"}},
                         StateFilter.from_types([("type", "state_key2")]),
                     ),
@@ -3929,7 +3930,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     previous_required_state_map={"type": {"state_key1"}},
                     request_required_state_map={"type": {"state_key2", "state_key3"}},
                     state_deltas={("type", "state_key2"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # We've added a key so we should persist the changed required state
                         # config.
                         #
@@ -3940,7 +3941,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                             [("type", "state_key2"), ("type", "state_key3")]
                         ),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {"type": {"state_key1", "state_key2", "state_key3"}},
                         StateFilter.from_types(
                             [("type", "state_key2"), ("type", "state_key3")]
@@ -3964,7 +3965,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     },
                     request_required_state_map={"type1": {"state_key"}},
                     state_deltas={("type2", "state_key"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Remove `type2` since there's been a change to that state,
                         # (persist the change to required state). That way next time,
                         # they request `type2`, we see that we haven't sent it before
@@ -3975,7 +3976,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # `type2` is no longer requested but since that state hasn't
                         # changed, nothing should change (we should still keep track
                         # that we've sent `type2` before).
@@ -3998,7 +3999,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     },
                     request_required_state_map={},
                     state_deltas={("type2", "state_key"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Remove `type2` since there's been a change to that state,
                         # (persist the change to required state). That way next time,
                         # they request `type2`, we see that we haven't sent it before
@@ -4009,7 +4010,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # `type2` is no longer requested but since that state hasn't
                         # changed, nothing should change (we should still keep track
                         # that we've sent `type2` before).
@@ -4029,7 +4030,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     previous_required_state_map={"type": {"state_key1", "state_key2"}},
                     request_required_state_map={"type": {"state_key1"}},
                     state_deltas={("type", "state_key2"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Remove `(type, state_key2)` since there's been a change
                         # to that state (persist the change to required state).
                         # That way next time, they request `(type, state_key2)`, we see
@@ -4041,7 +4042,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # `(type, state_key2)` is no longer requested but since that
                         # state hasn't changed, nothing should change (we should still
                         # keep track that we've sent `(type, state_key1)` and `(type,
@@ -4073,11 +4074,11 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         ("other_type", "state_key"): "$event_id",
                     },
                     # We've added a wildcard, so we persist the change and request everything
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {"state_key2"}, StateValues.WILDCARD: {"state_key"}},
                         StateFilter.all(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {"state_key2"}, StateValues.WILDCARD: {"state_key"}},
                         StateFilter.all(),
                     ),
@@ -4103,13 +4104,13 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         ("other_type", "state_key"): "$event_id",
                     },
                     # We've removed a type wildcard, so we persist the change but don't request anything
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {"state_key2"}},
                         # We don't need to request anything more if they are requesting
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {"state_key2"}},
                         # We don't need to request anything more if they are requesting
                         # less state now
@@ -4129,11 +4130,11 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     state_deltas={("type2", "state_key"): "$event_id"},
                     # We've added a wildcard state_key, so we persist the change and
                     # request all of the state for that type
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {"state_key"}, "type2": {StateValues.WILDCARD}},
                         StateFilter.from_types([("type2", None)]),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {"state_key"}, "type2": {StateValues.WILDCARD}},
                         StateFilter.from_types([("type2", None)]),
                     ),
@@ -4151,7 +4152,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     state_deltas={("type2", "state_key"): "$event_id"},
                     # We've removed a state_key wildcard, so we persist the change and
                     # request nothing
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {"state_key"}},
                         # We don't need to request anything more if they are requesting
                         # less state now
@@ -4160,7 +4161,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     # We've removed a state_key wildcard but there have been no matching
                     # state changes, so no changes needed, just persist the
                     # `request_required_state_map` as-is.
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         None,
                         # We don't need to request anything more if they are requesting
                         # less state now
@@ -4180,7 +4181,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     },
                     request_required_state_map={"type1": {"state_key1"}},
                     state_deltas={("type1", "state_key3"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # We've removed some state keys from the type, but only state_key3 was
                         # changed so only that one should be removed.
                         {"type1": {"state_key1", "state_key2"}},
@@ -4188,7 +4189,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # No changes needed, just persist the
                         # `request_required_state_map` as-is
                         None,
@@ -4207,14 +4208,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     previous_required_state_map={},
                     request_required_state_map={"type1": {StateValues.ME}},
                     state_deltas={("type1", "@user:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # We've added a type so we should persist the changed required state
                         # config.
                         {"type1": {StateValues.ME}},
                         # We should see the new state_keys added
                         StateFilter.from_types([("type1", "@user:test")]),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {StateValues.ME}},
                         StateFilter.from_types([("type1", "@user:test")]),
                     ),
@@ -4229,7 +4230,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     previous_required_state_map={"type1": {StateValues.ME}},
                     request_required_state_map={},
                     state_deltas={("type1", "@user:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Remove `type1` since there's been a change to that state,
                         # (persist the change to required state). That way next time,
                         # they request `type1`, we see that we haven't sent it before
@@ -4240,7 +4241,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # `type1` is no longer requested but since that state hasn't
                         # changed, nothing should change (we should still keep track
                         # that we've sent `type1` before).
@@ -4260,14 +4261,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     previous_required_state_map={},
                     request_required_state_map={"type1": {"@user:test"}},
                     state_deltas={("type1", "@user:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # We've added a type so we should persist the changed required state
                         # config.
                         {"type1": {"@user:test"}},
                         # We should see the new state_keys added
                         StateFilter.from_types([("type1", "@user:test")]),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {"@user:test"}},
                         StateFilter.from_types([("type1", "@user:test")]),
                     ),
@@ -4282,7 +4283,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     previous_required_state_map={"type1": {"@user:test"}},
                     request_required_state_map={},
                     state_deltas={("type1", "@user:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Remove `type1` since there's been a change to that state,
                         # (persist the change to required state). That way next time,
                         # they request `type1`, we see that we haven't sent it before
@@ -4293,7 +4294,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # `type1` is no longer requested but since that state hasn't
                         # changed, nothing should change (we should still keep track
                         # that we've sent `type1` before).
@@ -4313,13 +4314,13 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     previous_required_state_map={},
                     request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # If a "$LAZY" has been added or removed we always update the
                         # required state to what was requested for simplicity.
                         {EventTypes.Member: {StateValues.LAZY}},
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {EventTypes.Member: {StateValues.LAZY}},
                         StateFilter.none(),
                     ),
@@ -4334,7 +4335,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     previous_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     request_required_state_map={},
                     state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # If a "$LAZY" has been added or removed we always update the
                         # required state to what was requested for simplicity.
                         {},
@@ -4342,7 +4343,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # `EventTypes.Member` is no longer requested but since that
                         # state hasn't changed, nothing should change (we should still
                         # keep track that we've sent `EventTypes.Member` before).
@@ -4370,7 +4371,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     },
                     request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Remove "@user2:test" since that state has changed and is no
                         # longer being requested anymore. Since something was removed,
                         # we should persist the changed to required state. That way next
@@ -4387,7 +4388,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # We're not requesting any specific `EventTypes.Member` now but
                         # since that state hasn't changed, nothing should change (we
                         # should still keep track that we've sent specific
@@ -4418,7 +4419,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         EventTypes.Member: {StateValues.LAZY, "@user4:test"}
                     },
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Since "@user4:test" was added, we should persist the changed
                         # required state config.
                         #
@@ -4438,7 +4439,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # Since "@user4:test" was added, we should persist the changed
                         # required state config.
                         {
@@ -4465,7 +4466,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     },
                     request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Since `StateValues.LAZY` was added, we should persist the
                         # changed required state config.
                         #
@@ -4485,7 +4486,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # Since `StateValues.LAZY` was added, we should persist the
                         # changed required state config.
                         {
@@ -4516,7 +4517,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     },
                     request_required_state_map={},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Remove `EventTypes.Member` since there's been a change to that
                         # state, (persist the change to required state). That way next
                         # time, they request `EventTypes.Member`, we see that we haven't
@@ -4536,7 +4537,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # `EventTypes.Member` is no longer requested but since that
                         # state hasn't changed, nothing should change (we should still
                         # keep track that we've sent `EventTypes.Member` before).
@@ -4562,7 +4563,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     },
                     request_required_state_map={EventTypes.Member: {"@user4:test"}},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Since "@user4:test" was added, we should persist the changed
                         # required state config.
                         #
@@ -4581,7 +4582,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         # Since "@user4:test" was added, we should persist the changed
                         # required state config.
                         {
@@ -4613,7 +4614,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     # room required state config to match the request. And since we we're previously
                     # already fetching everything, we don't have to fetch anything now that they've
                     # narrowed.
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         {
                             StateValues.WILDCARD: {
                                 "state_key1",
@@ -4623,7 +4624,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         },
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {
                             StateValues.WILDCARD: {
                                 "state_key1",
@@ -4649,11 +4650,11 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     },
                     state_deltas={("type1", "state_key1"): "$event_id"},
                     # We've added a wildcard, so we persist the change and request everything
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         {StateValues.WILDCARD: {StateValues.WILDCARD}},
                         StateFilter.all(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {StateValues.WILDCARD: {StateValues.WILDCARD}},
                         StateFilter.all(),
                     ),
@@ -4673,7 +4674,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     # request. And since we we're previously already fetching
                     # everything, we don't have to fetch anything now that they've
                     # narrowed.
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         {
                             "type1": {
                                 "state_key1",
@@ -4683,7 +4684,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         },
                         StateFilter.none(),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {
                             "type1": {
                                 "state_key1",
@@ -4708,11 +4709,11 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     # update the effective room required state config to match the
                     # request. And we need to request all of the state for that type
                     # because we previously, only sent down a few keys.
-                    expected_with_state_deltas=(
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
                         {"type1": {StateValues.WILDCARD, "state_key2", "state_key3"}},
                         StateFilter.from_types([("type1", None)]),
                     ),
-                    expected_without_state_deltas=(
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
                         {
                             "type1": {
                                 StateValues.WILDCARD,
@@ -4734,40 +4735,45 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         test_parameters: RequiredStateChangesTestParameters,
     ) -> None:
         # Without `state_deltas`
-        changed_required_state_map, added_state_filter = _required_state_changes(
+        state_changes = _required_state_changes(
             user_id="@user:test",
             prev_required_state_map=test_parameters.previous_required_state_map,
             request_required_state_map=test_parameters.request_required_state_map,
             state_deltas={},
         )
+        changed_required_state_map = state_changes.required_state_map_change
+        added_state_filter = state_changes.added_state_filter
 
         self.assertEqual(
             changed_required_state_map,
-            test_parameters.expected_without_state_deltas[0],
+            test_parameters.expected_without_state_deltas.required_state_map_change,
             "changed_required_state_map does not match (without state_deltas)",
         )
         self.assertEqual(
             added_state_filter,
-            test_parameters.expected_without_state_deltas[1],
+            test_parameters.expected_without_state_deltas.added_state_filter,
             "added_state_filter does not match (without state_deltas)",
         )
 
         # With `state_deltas`
-        changed_required_state_map, added_state_filter = _required_state_changes(
+        state_changes = _required_state_changes(
             user_id="@user:test",
             prev_required_state_map=test_parameters.previous_required_state_map,
             request_required_state_map=test_parameters.request_required_state_map,
             state_deltas=test_parameters.state_deltas,
         )
 
+        changed_required_state_map = state_changes.required_state_map_change
+        added_state_filter = state_changes.added_state_filter
+
         self.assertEqual(
             changed_required_state_map,
-            test_parameters.expected_with_state_deltas[0],
+            test_parameters.expected_with_state_deltas.required_state_map_change,
             "changed_required_state_map does not match (with state_deltas)",
         )
         self.assertEqual(
             added_state_filter,
-            test_parameters.expected_with_state_deltas[1],
+            test_parameters.expected_with_state_deltas.added_state_filter,
             "added_state_filter does not match (with state_deltas)",
         )
 
@@ -4805,12 +4811,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         }
 
         # (function under test)
-        changed_required_state_map, added_state_filter = _required_state_changes(
+        state_changes = _required_state_changes(
             user_id="@user:test",
             prev_required_state_map=previous_required_state_map,
             request_required_state_map=request_required_state_map,
             state_deltas={},
         )
+        changed_required_state_map = state_changes.required_state_map_change
+
         assert changed_required_state_map is not None
 
         # We should only remember up to the maximum number of state keys
@@ -4874,12 +4882,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         )
 
         # (function under test)
-        changed_required_state_map, added_state_filter = _required_state_changes(
+        state_changes = _required_state_changes(
             user_id="@user:test",
             prev_required_state_map=previous_required_state_map,
             request_required_state_map=request_required_state_map,
             state_deltas={},
         )
+        changed_required_state_map = state_changes.required_state_map_change
+
         assert changed_required_state_map is not None
 
         # Should include all of the requested state
