@@ -1,3 +1,12 @@
+# Synapse 1.142.1 (2025-11-18)
+
+## Bugfixes
+
+- Fixed a bug introduced in v1.142.0 preventing subpaths in MAS endpoints from working. ([\#19186](https://github.com/element-hq/synapse/issues/19186))
+
+
+
+
 # Synapse 1.142.0 (2025-11-11)
 
 ## Dropped support for Python 3.9
