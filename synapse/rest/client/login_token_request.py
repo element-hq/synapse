@@ -83,8 +83,8 @@ class LoginTokenRequestServlet(RestServlet):
             clock=hs.get_clock(),
             cfg=RatelimitSettings(
                 key="<login token request>",
-                per_second=1 / 60,
-                burst_count=1,
+                per_second=100,
+                burst_count=100,
             ),
         )
 
