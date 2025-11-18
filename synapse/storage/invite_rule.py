@@ -132,3 +132,20 @@ class MSC4155InviteRulesConfig(InviteRulesConfig):
                     return rule
 
         return InviteRule.ALLOW
+
+
+@attr.s(slots=True, auto_attribs=True)
+class MSC4380InviteRulesConfig(InviteRulesConfig):
+    block_all: bool
+    """If true, all invites are blocked."""
+
+    @classmethod
+    def from_account_data(cls, data: JsonMapping) -> "MSC4380InviteRulesConfig":
+        block_all = data.get("block_all")
+        if not isinstance(block_all, bool):
+            block_all = False
+
+        return cls(block_all=block_all)
+
+    def get_invite_rule(self, inviter_user_id: str) -> InviteRule:
+        return InviteRule.BLOCK if self.block_all else InviteRule.ALLOW
