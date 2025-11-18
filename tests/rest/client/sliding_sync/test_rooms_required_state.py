@@ -642,11 +642,6 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         self._assertRequiredStateIncludes(
             response_body["rooms"][room_id1]["required_state"],
             {
-                # This appears because *some* membership in the room changed and the
-                # heroes are recalculated and is thrown in because we have it. But this
-                # is technically optional and not needed because we've already seen user2
-                # in the last sync (and their membership hasn't changed).
-                state_map[(EventTypes.Member, user2_id)],
                 # Appears because there is a message in the timeline from this user
                 state_map[(EventTypes.Member, user4_id)],
                 # Appears because there is a membership event in the timeline from this user

@@ -1151,6 +1151,11 @@ class SlidingSyncHandler:
         # We can return all of the state that was requested if this was the first
         # time we've sent the room down this connection.
         room_state: StateMap[EventBase] = {}
+
+        # Includes the state for the heroes if we need them (may contain other
+        # state as well).
+        hero_membership_state: StateMap[EventBase] = {}
+
         if initial:
             room_state = await self.get_current_state_at(
                 room_id=room_id,
@@ -1158,6 +1163,10 @@ class SlidingSyncHandler:
                 state_filter=state_filter,
                 to_token=to_token,
             )
+
+            # The `room_state` includes the hero membership state if needed.
+            # We'll later filter this down so we don't need to do so here.
+            hero_membership_state = room_state
         else:
             assert from_bound is not None
 
@@ -1191,6 +1200,7 @@ class SlidingSyncHandler:
 
             # If the membership changed and we have to get heroes, get the remaining
             # heroes from the state
+            hero_membership_state = {}
             if hero_user_ids:
                 hero_membership_state = await self.get_current_state_at(
                     room_id=room_id,
@@ -1198,7 +1208,6 @@ class SlidingSyncHandler:
                     state_filter=StateFilter.from_types(hero_room_state),
                     to_token=to_token,
                 )
-                room_state.update(hero_membership_state)
 
         required_room_state: StateMap[EventBase] = {}
         if required_state_filter != StateFilter.none():
@@ -1221,7 +1230,7 @@ class SlidingSyncHandler:
         # Assemble heroes: extract the info from the state we just fetched
         heroes: list[SlidingSyncResult.RoomResult.StrippedHero] = []
         for hero_user_id in hero_user_ids:
-            member_event = room_state.get((EventTypes.Member, hero_user_id))
+            member_event = hero_membership_state.get((EventTypes.Member, hero_user_id))
             if member_event is not None:
                 heroes.append(
                     SlidingSyncResult.RoomResult.StrippedHero(
