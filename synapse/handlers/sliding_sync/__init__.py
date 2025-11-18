@@ -1070,9 +1070,16 @@ class SlidingSyncHandler:
 
                             # Update the required state filter so we pick up the new
                             # membership
-                            for user_id in timeline_membership:
+                            if limited or initial:
+                                for user_id in timeline_membership:
+                                    required_state_types.append(
+                                        (EventTypes.Member, user_id)
+                                    )
+                            else:
+                                # For non-limited timelines we always return all
+                                # membership changes.
                                 required_state_types.append(
-                                    (EventTypes.Member, user_id)
+                                    (EventTypes.Member, None)
                                 )
 
                             # Add an explicit entry for each user in the timeline
@@ -1151,6 +1158,10 @@ class SlidingSyncHandler:
                 state_filter=state_filter,
                 to_token=to_token,
             )
+            hero_membership_state = {
+                (EventTypes.Member, hero_user_id): room_state[(EventTypes.Member, hero_user_id)] for hero_user_id in hero_user_ids
+                if (EventTypes.Member, hero_user_id) in room_state
+            }
         else:
             assert from_token is not None
             assert from_bound is not None
@@ -1222,6 +1233,7 @@ class SlidingSyncHandler:
 
             # If the membership changed and we have to get heroes, get the remaining
             # heroes from the state
+            hero_membership_state = {}
             if hero_user_ids:
                 hero_membership_state = await self.get_current_state_at(
                     room_id=room_id,
@@ -1229,7 +1241,6 @@ class SlidingSyncHandler:
                     state_filter=StateFilter.from_types(hero_room_state),
                     to_token=to_token,
                 )
-                room_state.update(hero_membership_state)
 
         required_room_state: StateMap[EventBase] = {}
         if required_state_filter != StateFilter.none():
@@ -1252,7 +1263,7 @@ class SlidingSyncHandler:
         # Assemble heroes: extract the info from the state we just fetched
         heroes: list[SlidingSyncResult.RoomResult.StrippedHero] = []
         for hero_user_id in hero_user_ids:
-            member_event = room_state.get((EventTypes.Member, hero_user_id))
+            member_event = hero_membership_state.get((EventTypes.Member, hero_user_id))
             if member_event is not None:
                 heroes.append(
                     SlidingSyncResult.RoomResult.StrippedHero(
