@@ -141,8 +141,20 @@ class MediaRepository:
             )
             storage_providers.append(provider)
 
+        # If we have a local media directory, add it as a storage provider
+        if self.primary_base_path:
+            from synapse.media.storage_provider import FileStorageProviderBackend, StorageProviderWrapper
+            backend = FileStorageProviderBackend(hs, self.primary_base_path)
+            local_wrapper = StorageProviderWrapper(
+                backend,
+                store_local=True,
+                store_remote=False,
+                store_synchronous=True,
+            )
+            storage_providers.insert(0, local_wrapper)
+
         self.media_storage: MediaStorage = MediaStorage(
-            self.hs, self.primary_base_path, self.filepaths, storage_providers
+            self.hs, self.filepaths, storage_providers
         )
 
         self.clock.looping_call(
