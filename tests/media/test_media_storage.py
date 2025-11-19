@@ -48,7 +48,10 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import MediaStorage, ReadableFileWrapper
-from synapse.media.storage_provider import FileStorageProviderBackend
+from synapse.media.storage_provider import (
+    FileStorageProviderBackend,
+    StorageProviderWrapper,
+)
 from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
@@ -78,14 +81,22 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         hs.config.media.media_store_path = self.primary_base_path
 
         storage_providers = [
-            FileStorageProviderBackend(hs, self.primary_base_path),
-            FileStorageProviderBackend(hs, self.secondary_base_path),
+            StorageProviderWrapper(
+                FileStorageProviderBackend(hs, self.primary_base_path),
+                store_local=True,
+                store_remote=False,
+                store_synchronous=True,
+            ),
+            StorageProviderWrapper(
+                FileStorageProviderBackend(hs, self.secondary_base_path),
+                store_local=True,
+                store_remote=False,
+                store_synchronous=True,
+            ),
         ]
 
         self.filepaths = MediaFilePaths(self.primary_base_path)
-        self.media_storage = MediaStorage(
-            hs, self.filepaths, storage_providers
-        )
+        self.media_storage = MediaStorage(hs, self.filepaths, storage_providers)
 
     def test_ensure_media_is_in_local_cache(self) -> None:
         media_id = "some_media_id"

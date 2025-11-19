@@ -64,7 +64,10 @@ from synapse.media.media_storage import (
     SHA256TransparentIOReader,
     SHA256TransparentIOWriter,
 )
-from synapse.media.storage_provider import StorageProviderWrapper
+from synapse.media.storage_provider import (
+    FileStorageProviderBackend,
+    StorageProviderWrapper,
+)
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
@@ -143,7 +146,6 @@ class MediaRepository:
 
         # If we have a local media directory, add it as a storage provider
         if self.primary_base_path:
-            from synapse.media.storage_provider import FileStorageProviderBackend, StorageProviderWrapper
             backend = FileStorageProviderBackend(hs, self.primary_base_path)
             local_wrapper = StorageProviderWrapper(
                 backend,

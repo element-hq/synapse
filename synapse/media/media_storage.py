@@ -50,16 +50,16 @@ from twisted.internet.interfaces import IConsumer
 from synapse.api.errors import NotFoundError
 from synapse.logging.context import defer_to_thread, run_in_background
 from synapse.logging.opentracing import start_active_span, trace, trace_with_opname
-from synapse.media._base import ThreadedFileSender
+from synapse.media.storage_provider import FileStorageProviderBackend
 from synapse.util.clock import Clock
 from synapse.util.file_consumer import BackgroundFileConsumer
 
 from ..types import JsonDict
-from ._base import FileInfo, Responder
+from ._base import FileInfo, Responder, ThreadedFileSender
 from .filepath import MediaFilePaths
 
 if TYPE_CHECKING:
-    from synapse.media.storage_provider import StorageProvider
+    from synapse.media.storage_provider import StorageProviderWrapper
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ class MediaStorage:
         self,
         hs: "HomeServer",
         filepaths: MediaFilePaths,
-        storage_providers: Sequence["StorageProvider"],
+        storage_providers: Sequence["StorageProviderWrapper"],
     ):
         self.hs = hs
         self.reactor = hs.get_reactor()
@@ -228,7 +228,7 @@ class MediaStorage:
         path = self._file_info_to_path(file_info)
 
         if self.local_provider:
-            fname = os.path.join(self.local_media_directory, path)
+            fname = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
             dirname = os.path.dirname(fname)
             os.makedirs(dirname, exist_ok=True)
 
@@ -237,11 +237,11 @@ class MediaStorage:
                     with open(fname, "wb") as f:
                         yield f, fname
 
-                with start_active_span("spam checking and writing to other storage providers"):
-                    spam_check = (
-                        await self._spam_checker_module_callbacks.check_media_file_for_spam(
-                            ReadableFileWrapper(self.clock, fname), file_info
-                        )
+                with start_active_span(
+                    "spam checking and writing to other storage providers"
+                ):
+                    spam_check = await self._spam_checker_module_callbacks.check_media_file_for_spam(
+                        ReadableFileWrapper(self.clock, fname), file_info
                     )
                     if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
                         logger.info("Blocking media due to spam checker")
@@ -268,14 +268,14 @@ class MediaStorage:
             # No local provider, write to temp file
             with tempfile.NamedTemporaryFile(delete=False) as f:
                 fname = f.name
-                yield f, fname
+                yield cast(BinaryIO, f), fname
 
             try:
-                with start_active_span("spam checking and writing to storage providers"):
-                    spam_check = (
-                        await self._spam_checker_module_callbacks.check_media_file_for_spam(
-                            ReadableFileWrapper(self.clock, fname), file_info
-                        )
+                with start_active_span(
+                    "spam checking and writing to storage providers"
+                ):
+                    spam_check = await self._spam_checker_module_callbacks.check_media_file_for_spam(
+                        ReadableFileWrapper(self.clock, fname), file_info
                     )
                     if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
                         logger.info("Blocking media due to spam checker")
@@ -302,6 +302,18 @@ class MediaStorage:
         Returns:
             Returns a Responder if the file was found, otherwise None.
         """
+        # URL cache files are stored locally and should not go through storage providers
+        if file_info.url_cache:
+            path = self._file_info_to_path(file_info)
+            if self.local_provider:
+                local_path = os.path.join(self.local_media_directory, path)
+                if os.path.isfile(local_path):
+                    # Import here to avoid circular import
+                    from .media_storage import FileResponder
+
+                    return FileResponder(self.hs, open(local_path, "rb"))
+            return None
+
         paths = [self._file_info_to_path(file_info)]
 
         # fallback for remote thumbnails with no method in the filename
@@ -339,7 +351,7 @@ class MediaStorage:
         """
         path = self._file_info_to_path(file_info)
         if self.local_provider:
-            local_path = os.path.join(self.local_media_directory, path)
+            local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
             if os.path.exists(local_path):
                 return local_path
 
@@ -353,7 +365,10 @@ class MediaStorage:
                     height=file_info.thumbnail.height,
                     content_type=file_info.thumbnail.type,
                 )
-                legacy_local_path = os.path.join(self.local_media_directory, legacy_path)
+                legacy_local_path = os.path.join(
+                    self.local_media_directory,  # type: ignore[arg-type]
+                    legacy_path,
+                )
                 if os.path.exists(legacy_local_path):
                     return legacy_local_path
 
@@ -363,13 +378,13 @@ class MediaStorage:
             for provider in self.storage_providers:
                 if provider is self.local_provider:
                     continue
-                res: Any = await provider.fetch(path, file_info)
-                if res:
-                    with res:
+                remote_res: Any = await provider.fetch(path, file_info)
+                if remote_res:
+                    with remote_res:
                         consumer = BackgroundFileConsumer(
                             open(local_path, "wb"), self.reactor
                         )
-                        await res.write_to_consumer(consumer)
+                        await remote_res.write_to_consumer(consumer)
                         await consumer.wait()
                     return local_path
 
