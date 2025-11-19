@@ -1072,10 +1072,27 @@ class SlidingSyncHandler:
 
                             # Update the required state filter so we pick up the new
                             # membership
-                            for user_id in timeline_membership:
-                                required_state_types.append(
-                                    (EventTypes.Member, user_id)
-                                )
+                            if limited or initial:
+                                # If the timeline is limited, we only need to
+                                # return the membership changes for people in
+                                # the timeline.
+                                for user_id in timeline_membership:
+                                    required_state_types.append(
+                                        (EventTypes.Member, user_id)
+                                    )
+                            else:
+                                # For non-limited timelines we always return all
+                                # membership changes. This is so that clients
+                                # who have fetched the full membership list
+                                # already can continue to maintain it for
+                                # non-limited syncs.
+                                #
+                                # This assumes that for non-limited syncs there
+                                # won't be many membership changes that wouldn't
+                                # have been included already (this can only
+                                # happen if membership state was rolled back due
+                                # to state resolution anyway).
+                                required_state_types.append((EventTypes.Member, None))
 
                             # Add an explicit entry for each user in the timeline
                             #
