@@ -1,5 +1,12 @@
 # synapse 1.143.0rc2 (2025-11-18)
 
+## Dropping support for PostgreSQL 13
+
+In line with our [deprecation policy](https://github.com/element-hq/synapse/blob/develop/docs/deprecation_policy.md), we've dropped
+support for PostgreSQL 13, as it is no longer supported upstream.
+This release of Synapse requires PostgreSQL 14+.
+
+
 ## Internal Changes
 
 - Fixes docker image creation in the release workflow.
@@ -7,12 +14,6 @@
 
 
 # Synapse 1.143.0rc1 (2025-11-18)
-
-## Dropping support for PostgreSQL 13
-
-In line with our [deprecation policy](https://github.com/element-hq/synapse/blob/develop/docs/deprecation_policy.md), we've dropped
-support for PostgreSQL 13, as it is no longer supported upstream.
-This release of Synapse requires PostgreSQL 14+.
 
 ## Features
 
