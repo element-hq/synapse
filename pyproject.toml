@@ -291,13 +291,6 @@ manifest-path = "rust/Cargo.toml"
 module-name = "synapse.synapse_rust"
 
 [tool.poetry]
-name = "matrix-synapse"
-version = "1.143.0rc1"
-description = "Homeserver for the Matrix decentralised comms protocol"
-authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
-license = "AGPL-3.0-or-later OR LicenseRef-Element-Commercial"
-readme = "README.rst"
-repository = "https://github.com/element-hq/synapse"
 packages = [
     { include = "synapse" },
 ]
