@@ -1,3 +1,11 @@
+# synapse 1.143.0rc2 (2025-11-18)
+
+## Internal Changes
+
+- Fixes docker image creation in the release workflow.
+
+
+
 # Synapse 1.143.0rc1 (2025-11-18)
 
 ## Dropping support for PostgreSQL 13
