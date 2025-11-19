@@ -1,4 +1,4 @@
-# synapse 1.143.0rc2 (2025-11-18)
+# Synapse 1.143.0rc2 (2025-11-18)
 
 ## Internal Changes
 
