@@ -81,7 +81,7 @@ main() {
       case "$arg" in
           "-h")
               usage
-              exit 1
+              return 1
               ;;
           "-f"|"--fast")
               skip_docker_build=1
@@ -208,7 +208,7 @@ main() {
 
   if [ -n "$skip_complement_run" ]; then
       echo "Skipping Complement run as requested."
-      exit
+      return 0
   fi
 
   export COMPLEMENT_BASE_IMAGE=complement-synapse
@@ -303,3 +303,9 @@ main() {
 }
 
 main "$@"
+# For any non-zero exit code (indicating some sort of error happened), we want to exit
+# with that code.
+exit_code=$?
+if [ $exit_code -ne 0 ]; then
+    exit $exit_code
+fi
