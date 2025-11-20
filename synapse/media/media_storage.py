@@ -306,7 +306,7 @@ class MediaStorage:
         if file_info.url_cache:
             path = self._file_info_to_path(file_info)
             if self.local_provider:
-                local_path = os.path.join(self.local_media_directory, path)
+                local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
                 if os.path.isfile(local_path):
                     # Import here to avoid circular import
                     from .media_storage import FileResponder
