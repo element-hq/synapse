@@ -235,14 +235,11 @@ main() {
   # scripts can use it.
   export SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES="${test_packages[@]}"
 
-
-
   export COMPLEMENT_BASE_IMAGE=complement-synapse
   if [ -n "$use_editable_synapse" ]; then
       export COMPLEMENT_BASE_IMAGE=complement-synapse-editable
       export COMPLEMENT_HOST_MOUNTS="$editable_mount"
   fi
-
 
   # Enable dirty runs, so tests will reuse the same container where possible.
   # This significantly speeds up tests, but increases the possibility of test pollution.
@@ -252,10 +249,18 @@ main() {
   # (The prefix is stripped off before reaching the container.)
   export COMPLEMENT_SHARE_ENV_PREFIX=PASS_
 
-  extra_test_args=()
+  # * -count=1: Only run tests once, and disable caching for tests.
+  # * -v: Output test logs, even if those tests pass.
+  # * -tags=synapse_blacklist: Enable the `synapse_blacklist` build tag, which is
+  #   necessary for `runtime.Synapse` checks/skips to work in the tests
+  test_args=(
+    -v
+    -tags="synapse_blacklist"
+    -count=1
+  )
 
   # It takes longer than 10m to run the whole suite.
-  extra_test_args+=("-timeout=60m")
+  test_args+=("-timeout=60m")
 
   if [[ -n "$WORKERS" ]]; then
     # Use workers.
@@ -315,15 +320,14 @@ main() {
   fi
 
   # Run the tests!
-  echo "Running complement with ${extra_test_args[@]} $@ ${test_packages[@]}"
+  echo "Running complement with ${test_args[@]} $@ ${test_packages[@]}"
   cd "$COMPLEMENT_DIR"
-  go test -v -tags "synapse_blacklist" -count=1 "${extra_test_args[@]}" "$@" "${test_packages[@]}"
+  go test "${test_args[@]}" "$@" "${test_packages[@]}"
 }
 
-# For any non-zero exit code, we want to exit with that code.
-# exit_code=main "$@"
-# if [ $exit_code -ne 0 ]; then
-#     exit $exit_code
-# fi
-
 main "$@"
+# For any non-zero exit code, we want to exit with that code.
+exit_code=$?
+if [ $exit_code -ne 0 ]; then
+    exit $exit_code
+fi
