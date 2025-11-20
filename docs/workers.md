@@ -285,6 +285,9 @@ information.
     # User directory search requests
     ^/_matrix/client/(r0|v3|unstable)/user_directory/search$
 
+    # Unstable MSC4140 support
+    ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events/.*/restart$
+
 Additionally, the following REST endpoints can be handled for GET requests:
 
     ^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/

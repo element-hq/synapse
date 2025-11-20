@@ -15,6 +15,7 @@
 import logging
 from typing import TYPE_CHECKING
 
+from twisted.internet import defer
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
@@ -80,6 +81,15 @@ class DelayedEventsHandler:
 
         # Guard to ensure we only process event deltas one at a time
         self._event_processing = False
+
+        # Workers don't need to wait for delayed events queued in the DB to be
+        # sent as that will be handled by the main process.
+        #
+        # If a worker attempts to schedule a timer for the next delayed event
+        # while the main process is pulling delayed events from the DB, the two
+        # will not race, as the main process will mark the delayed events as
+        # processed in the DB immediately before sending them.
+        self._initialized_from_db = defer.succeed(None)
 
         if hs.config.worker.worker_app is None:
             self._repl_client = None
@@ -423,7 +433,6 @@ class DelayedEventsHandler:
         Raises:
             NotFoundError: if no matching delayed event could be found.
         """
-        assert self._is_master
         await self._delayed_event_mgmt_ratelimiter.ratelimit(
             None, request.getClientAddress().host
         )

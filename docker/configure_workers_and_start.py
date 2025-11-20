@@ -196,6 +196,7 @@ WORKERS_CONFIG: dict[str, dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$",
+            "^/_matrix/client/unstable/org.matrix.msc4140/delayed_events/.*/restart$",
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
