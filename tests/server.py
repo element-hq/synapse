@@ -81,6 +81,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource
 from twisted.web.server import Request, Site
 
+from synapse.api.constants import MAX_PDU_SIZE
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
@@ -241,7 +242,6 @@ class FakeChannel:
 
     def loseConnection(self) -> None:
         self.unregisterProducer()
-        self.transport.loseConnection()
 
     # Type ignore: mypy doesn't like the fact that producer isn't an IProducer.
     def registerProducer(self, producer: IProducer, streaming: bool) -> None:
@@ -428,7 +428,13 @@ def make_request(
 
     channel = FakeChannel(site, reactor, ip=client_ip)
 
-    req = request(channel, site, our_server_name="test_server")
+    # `max_request_body_size` copied from `synapse/app/_base.py -> max_request_body_size()`
+    req = request(
+        channel,
+        site,
+        our_server_name="test_server",
+        max_request_body_size=200 * MAX_PDU_SIZE,
+    )
     channel.request = req
 
     req.content = BytesIO(content)

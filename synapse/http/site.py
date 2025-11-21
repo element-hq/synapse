@@ -146,17 +146,52 @@ class SynapseRequest(Request):
 
     # Twisted machinery: this method is called by the Channel once the full request has
     # been received, to dispatch the request to a resource.
-    #
-    # We're patching Twisted to bail/abort early when we see someone trying to upload
-    # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
-    # in-memory (specific problem of this specific `Content-Type`). This protects us
-    # from an attacker uploading something bigger than the available RAM and crashing
-    # the server with a `MemoryError`, or carefully block just enough resources to cause
-    # all other requests to fail.
-    #
-    # FIXME: This can be removed once we Twisted releases a fix and we update to a
-    # version that is patched
     def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
+        # In the case of a Content-Length header being present, and it's value being too
+        # large, this will make debugging issues due to overly large requests much
+        # easier. Currently we handle such cases in `handleContentChunk` and abort the
+        # connection without providing a proper HTTP response.
+        #
+        # Attempting to write an HTTP response from within `handleContentChunk` does not
+        # work, so the code here has been added to at least provide a response in the
+        # case of the Content-Length header being present.
+        content_length_headers = self.requestHeaders.getRawHeaders(b"content-length")
+        if content_length_headers is not None:
+            try:
+                content_length = int(content_length_headers[0])
+                if content_length > self._max_request_body_size:
+                    self.method, self.uri = command, path
+                    self.clientproto = version
+                    self.code = HTTPStatus.REQUEST_ENTITY_TOO_LARGE.value
+                    self.code_message = bytes(
+                        HTTPStatus.REQUEST_ENTITY_TOO_LARGE.phrase, "ascii"
+                    )
+                    self.responseHeaders.setRawHeaders(b"content-length", [b"0"])
+
+                    logger.warning(
+                        "Rejecting request from %s because Content-Length %d exceeds maximum size %d: %s %s",
+                        self.client,
+                        content_length,
+                        self._max_request_body_size,
+                        command.decode("ascii", errors="replace"),
+                        path.decode("ascii", errors="replace"),
+                    )
+                    self.write(b"")
+                    self.loseConnection()
+                    return
+            except (ValueError, IndexError):
+                # Invalid Content-Length header, let it proceed
+                pass
+
+        # We're patching Twisted to bail/abort early when we see someone trying to upload
+        # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
+        # in-memory (specific problem of this specific `Content-Type`). This protects us
+        # from an attacker uploading something bigger than the available RAM and crashing
+        # the server with a `MemoryError`, or carefully block just enough resources to cause
+        # all other requests to fail.
+        #
+        # FIXME: This can be removed once we Twisted releases a fix and we update to a
+        # version that is patched
         if command == b"POST":
             ctype = self.requestHeaders.getRawHeaders(b"content-type")
             if ctype and b"multipart/form-data" in ctype[0]:
