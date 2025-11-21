@@ -45,6 +45,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# How often to update the `last_used_ts` column on
+# `sliding_sync_connection_positions` when the client uses a connection
+# position. We don't want to update it on every use to avoid excessive
+# writes, but we want it to be reasonably up-to-date to help with
+# cleaning up old connection positions.
+UPDATE_INTERVAL_LAST_USED_TS_MS = 5 * 60_000
+
+
 class SlidingSyncStore(SQLBaseStore):
     def __init__(
         self,
@@ -384,7 +392,7 @@ class SlidingSyncStore(SQLBaseStore):
         # The `previous_connection_position` is a user-supplied value, so we
         # need to make sure that the one they supplied is actually theirs.
         sql = """
-            SELECT connection_key
+            SELECT connection_key, last_used_ts
             FROM sliding_sync_connection_positions
             INNER JOIN sliding_sync_connections USING (connection_key)
             WHERE
@@ -396,7 +404,20 @@ class SlidingSyncStore(SQLBaseStore):
         if row is None:
             raise SlidingSyncUnknownPosition()
 
-        (connection_key,) = row
+        (connection_key, last_used_ts) = row
+
+        # Update the `last_used_ts` if it's due to be updated. We don't update
+        # every time to avoid excessive writes.
+        now = self.clock.time_msec()
+        if last_used_ts is None or now - last_used_ts > UPDATE_INTERVAL_LAST_USED_TS_MS:
+            self.db_pool.simple_update_txn(
+                txn,
+                table="sliding_sync_connections",
+                keyvalues={
+                    "connection_key": connection_key,
+                },
+                updatevalues={"last_used_ts": now},
+            )
 
         # Now that we have seen the client has received and used the connection
         # position, we can delete all the other connection positions.
@@ -480,6 +501,7 @@ class SlidingSyncStore(SQLBaseStore):
                 logger.warning("Unrecognized sliding sync stream in DB %r", stream)
 
         return PerConnectionStateDB(
+            last_used_ts=last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
@@ -497,6 +519,8 @@ class PerConnectionStateDB:
 
     When persisting this *only* contains updates to the state.
     """
+
+    last_used_ts: int | None
 
     rooms: "RoomStatusMap[str]"
     receipts: "RoomStatusMap[str]"
@@ -553,6 +577,7 @@ class PerConnectionStateDB:
         )
 
         return PerConnectionStateDB(
+            last_used_ts=per_connection_state.last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
@@ -596,6 +621,7 @@ class PerConnectionStateDB:
         }
 
         return PerConnectionState(
+            last_used_ts=self.last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
