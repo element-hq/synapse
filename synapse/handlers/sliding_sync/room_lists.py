@@ -34,6 +34,7 @@ from synapse.api.constants import (
     EventTypes,
     Membership,
 )
+from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.events import StrippedStateEvent
 from synapse.events.utils import parse_stripped_state_event
@@ -76,6 +77,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# Minimum time in milliseconds since the last sync before we consider expiring
+# the connection due to too many rooms to send. This stops from getting into
+# tight loops with clients that request lots of data at once.
+MINIMUM_NOT_USED_AGE_EXPIRY_MS = 60 * 60 * 1000  # 1 hour
+
+# How many rooms with updates we allow before we consider the connection
+# expired due to too many rooms to send.
+NUM_ROOMS_THRESHOLD = 100
 
 # Helper definition for the types that we might return. We do this to avoid
 # copying data between types (which can be expensive for many rooms).
@@ -176,6 +186,7 @@ class SlidingSyncRoomLists:
         self.storage_controllers = hs.get_storage_controllers()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
+        self._clock = hs.get_clock()
 
     async def compute_interested_rooms(
         self,
@@ -863,6 +874,24 @@ class SlidingSyncRoomLists:
                             relevant_room_map.keys(), from_token.room_key
                         )
                     )
+
+                    # Check if we have lots of updates to send, if so then its
+                    # better for us to tell the client to do a full resync
+                    # instead.
+                    #
+                    # We only do this if the last sync was over
+                    # `MINIMUM_NOT_USED_AGE_EXPIRY_MS` to ensure we don't get
+                    # into tight loops with clients that keep requesting large
+                    # sliding sync windows.
+                    if len(rooms_that_have_updates) > NUM_ROOMS_THRESHOLD:
+                        last_sync_ts = previous_connection_state.last_used_ts
+                        if (
+                            last_sync_ts is not None
+                            and (self._clock.time_msec() - last_sync_ts)
+                            > MINIMUM_NOT_USED_AGE_EXPIRY_MS
+                        ):
+                            raise SlidingSyncUnknownPosition()
+
                     rooms_should_send.update(rooms_that_have_updates)
                     relevant_rooms_to_send_map = {
                         room_id: room_sync_config

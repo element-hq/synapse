@@ -210,6 +210,7 @@ class SlidingSyncStore(SQLBaseStore):
                     "effective_device_id": device_id,
                     "conn_id": conn_id,
                     "created_ts": self.clock.time_msec(),
+                    "last_used_ts": self.clock.time_msec(),
                 },
                 returning=("connection_key",),
             )
