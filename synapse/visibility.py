@@ -114,7 +114,7 @@ async def filter_events_for_client(
     # Default case is to *exclude* soft-failed events
     events = []
     found_call_invite = False
-    for event in events:
+    for event in events_before_filtering:
         if event.internal_metadata.is_soft_failed():
             continue
 
