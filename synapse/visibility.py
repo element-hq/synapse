@@ -112,7 +112,17 @@ async def filter_events_for_client(
     # happen within the function.
     events_before_filtering = events.copy()
     # Default case is to *exclude* soft-failed events
-    events = [e for e in events if not e.internal_metadata.is_soft_failed()]
+    events = []
+    found_call_invite = False
+    for event in events:
+        if event.internal_metadata.is_soft_failed():
+            continue
+
+        if event.type == EventTypes.CallInvite and event.is_state():
+            found_call_invite = True
+
+        events.append(event)
+
     client_config = await storage.main.get_admin_client_config_for_user(user_id)
     if filter_send_to_client and await storage.main.is_server_admin(user_id):
         if client_config.return_soft_failed_events:
@@ -140,7 +150,11 @@ async def filter_events_for_client(
                 [event.event_id for event in events],
             )
 
-    types = (_HISTORY_VIS_KEY, (EventTypes.Member, user_id), (EventTypes.JoinRules, ""))
+    types = (_HISTORY_VIS_KEY, (EventTypes.Member, user_id))
+    if found_call_invite:
+        # We need to fetch the room's join rules state to determine
+        # whether to allow call invites in public rooms.
+        types += ((EventTypes.JoinRules, ""),)
 
     # we exclude outliers at this point, and then handle them separately later
     event_id_to_state = await storage.state.get_state_for_events(
