@@ -317,7 +317,7 @@ main() {
   fi
   
   # Run the tests!
-  echo "Running complement with ${test_args[@]} $@ ${test_packages[@]}"
+  echo "Running Complement with ${test_args[@]} $@ ${test_packages[@]}"
   cd "$COMPLEMENT_DIR"
   go test "${test_args[@]}" "$@" "${test_packages[@]}"
 }
