@@ -12,6 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 import logging
+from unittest.mock import patch
 
 from parameterized import parameterized, parameterized_class
 
@@ -19,8 +20,11 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes
+from synapse.api.errors import Codes
+from synapse.handlers.sliding_sync import room_lists
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
+from synapse.storage.databases.main.sliding_sync import CONNECTION_EXPIRY_MS
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -395,3 +399,101 @@ class SlidingSyncConnectionTrackingTestCase(SlidingSyncBase):
         )
         self.assertEqual(response_body["rooms"][room_id1]["limited"], True)
         self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
+
+    @patch("synapse.handlers.sliding_sync.room_lists.NUM_ROOMS_THRESHOLD", new=5)
+    def test_sliding_sync_connection_expires_with_too_much_data(self) -> None:
+        """
+        Test that if we have too much data to send down for incremental sync,
+        we expire the connection and ask the client to do a full resync.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create enough rooms that we can later trigger the too much data case
+        room_ids = []
+        for _ in range(room_lists.NUM_ROOMS_THRESHOLD + 2):
+            room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+            self.helper.join(room_id, user1_id, tok=user1_tok)
+            room_ids.append(room_id)
+
+            # Make sure we don't hit ratelimits
+            self.reactor.advance(60 * 1000)
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1000]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        self.assertIn(room_id, response_body["rooms"])
+
+        # Send a lot of events to cause the connection to expire
+        for room_id in room_ids:
+            self.helper.send(room_id, "msg", tok=user2_tok)
+
+        # If we don't advance the clock then we won't expire the connection.
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Send some more events.
+        for room_id in room_ids:
+            self.helper.send(room_id, "msg", tok=user2_tok)
+
+        # Advance the clock to ensure that the last_used_ts is old enough
+        self.reactor.advance(2 * room_lists.MINIMUM_NOT_USED_AGE_EXPIRY_MS / 1000)
+
+        # This sync should now raise SlidingSyncUnknownPosition
+        channel = self.make_sync_request(sync_body, since=from_token, tok=user1_tok)
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], Codes.UNKNOWN_POS)
+
+    def test_sliding_sync_connection_expires_after_time(self) -> None:
+        """
+        Test that if we don't use a sliding sync connection for a long time,
+        we expire the connection and ask the client to do a full resync.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1000]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # We can keep syncing so long as the interval between requests is less
+        # than CONNECTION_EXPIRY_MS
+        for _ in range(5):
+            self.reactor.advance(0.5 * CONNECTION_EXPIRY_MS / 1000)
+
+            _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # ... but if we wait too long, the connection expires
+        self.reactor.advance(CONNECTION_EXPIRY_MS / 1000)
+
+        # This sync should now raise SlidingSyncUnknownPosition
+        channel = self.make_sync_request(sync_body, since=from_token, tok=user1_tok)
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], Codes.UNKNOWN_POS)
