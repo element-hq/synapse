@@ -20,6 +20,7 @@ import attr
 
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.logging.opentracing import log_kv
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
     DatabasePool,
@@ -53,6 +54,11 @@ logger = logging.getLogger(__name__)
 UPDATE_INTERVAL_LAST_USED_TS_MS = 5 * 60_000
 
 
+# Time in milliseconds the connection hasn't been used before we consider it
+# expired and delete it.
+CONNECTION_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000  # 7 days
+
+
 class SlidingSyncStore(SQLBaseStore):
     def __init__(
         self,
@@ -83,6 +89,12 @@ class SlidingSyncStore(SQLBaseStore):
             columns=("user_id", "event_stream_ordering"),
             replaces_index="sliding_sync_membership_snapshots_user_id",
         )
+
+        if self.hs.config.worker.run_background_tasks:
+            self.clock.looping_call(
+                self.delete_old_sliding_sync_connections,
+                1 * 60 * 60 * 1000,  # every hour
+            )
 
     async def get_latest_bump_stamp_for_room(
         self,
@@ -170,6 +182,11 @@ class SlidingSyncStore(SQLBaseStore):
         if previous_connection_position is not None:
             # The `previous_connection_position` is a user-supplied value, so we
             # need to make sure that the one they supplied is actually theirs.
+            #
+            # We take out a `FOR UPDATE` lock on the row to prevent races with
+            # the connection deletion. If the connection gets deleted underneath
+            # then the query will return no rows and we raise
+            # `SlidingSyncUnknownPosition` exception.
             sql = """
                 SELECT connection_key
                 FROM sliding_sync_connection_positions
@@ -177,6 +194,7 @@ class SlidingSyncStore(SQLBaseStore):
                 WHERE
                     connection_position = ?
                     AND user_id = ? AND effective_device_id = ? AND conn_id = ?
+                FOR UPDATE
             """
             txn.execute(
                 sql, (previous_connection_position, user_id, device_id, conn_id)
@@ -507,6 +525,23 @@ class SlidingSyncStore(SQLBaseStore):
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             room_configs=room_configs,
+        )
+
+    @wrap_as_background_process("delete_old_sliding_sync_connections")
+    async def delete_old_sliding_sync_connections(self) -> None:
+        """Delete sliding sync connections that have not been used for a long time."""
+        cutoff_ts = self.clock.time_msec() - CONNECTION_EXPIRY_MS
+
+        def delete_old_sliding_sync_connections_txn(txn: LoggingTransaction) -> None:
+            sql = """
+                DELETE FROM sliding_sync_connections
+                WHERE last_used_ts IS NOT NULL AND last_used_ts < ?
+            """
+            txn.execute(sql, (cutoff_ts,))
+
+        await self.db_pool.runInteraction(
+            "delete_old_sliding_sync_connections",
+            delete_old_sliding_sync_connections_txn,
         )
 
 
