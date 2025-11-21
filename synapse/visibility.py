@@ -118,7 +118,7 @@ async def filter_events_for_client(
         if event.internal_metadata.is_soft_failed():
             continue
 
-        if event.type == EventTypes.CallInvite and event.is_state():
+        if event.type == EventTypes.CallInvite and not event.is_state():
             found_call_invite = True
 
         events.append(event)
