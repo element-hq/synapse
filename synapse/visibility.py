@@ -195,7 +195,11 @@ async def filter_events_for_client(
 
         # Filter out call invites in public rooms, as this would potentially
         # ring a lot of users.
-        if state_after_event is not None and event.type == EventTypes.CallInvite:
+        if (
+            state_after_event is not None
+            and not event.is_state()
+            and event.type == EventTypes.CallInvite
+        ):
             room_join_rules = state_after_event.get((EventTypes.JoinRules, ""))
             if (
                 room_join_rules is not None
