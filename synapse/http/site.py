@@ -174,7 +174,7 @@ class SynapseRequest(Request):
                         content_length,
                         self._max_request_body_size,
                         command.decode("ascii", errors="replace"),
-                        path.decode("ascii", errors="replace"),
+                        self.get_redacted_uri(),
                     )
                     self.write(b"")
                     self.loseConnection()
