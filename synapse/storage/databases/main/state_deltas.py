@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING
 
 import attr
 
@@ -91,7 +91,8 @@ class StateDeltasStore(SQLBaseStore):
 
         State deltas are grouped by `stream_id`. When hitting the given `limit`
         would return only part of a "group" of state deltas, that entire group
-        is omitted. Thus, this function may return *up to* `limit` state deltas.
+        is omitted. Thus, this function may return *up to* `limit` state deltas,
+        or slightly more when a single group itself exceeds `limit`.
 
         Args:
             prev_stream_id: point to get changes since (exclusive)
@@ -128,72 +129,70 @@ class StateDeltasStore(SQLBaseStore):
         def get_current_state_deltas_txn(
             txn: LoggingTransaction,
         ) -> tuple[int, list[StateDelta]]:
-            # First we group state deltas by `stream_id` and calculate the
-            # stream id that will give us the most amount of state deltas (under
-            # the provided `limit`) without splitting any group up.
-
-            # 1) Figure out which stream_id groups fit within `limit`
-            #    and whether we consumed everything up to max_stream_id.
-            sql_meta = """
-            WITH grouped AS (
+            # First we group state deltas by `stream_id` and calculate which
+            # groups can be returned without exceeding the provided `limit`.
+            sql_grouped = """
                 SELECT stream_id, COUNT(*) AS c
                 FROM current_state_delta_stream
                 WHERE stream_id > ? AND stream_id <= ?
                 GROUP BY stream_id
                 ORDER BY stream_id
                 LIMIT ?
-            ),
-            accum AS (
-                SELECT
-                    stream_id,
-                    c,
-                    SUM(c) OVER (ORDER BY stream_id) AS running
-                FROM grouped
-            ),
-            included AS (
-                SELECT stream_id, running
-                FROM accum
-                WHERE running <= ?
-            )
-            SELECT
-                COALESCE((SELECT SUM(c)        FROM grouped), 0) AS total_rows,
-                COALESCE((SELECT MAX(running)  FROM included), 0) AS included_rows,
-                COALESCE((SELECT MAX(stream_id) FROM included), ?) AS last_included_sid
             """
-            txn.execute(
-                sql_meta, (prev_stream_id, max_stream_id, limit, limit, prev_stream_id)
-            )
-            total_rows, included_rows, last_included_sid = txn.fetchone()  # type: ignore
+            group_limit = limit + 1
+            txn.execute(sql_grouped, (prev_stream_id, max_stream_id, group_limit))
+            grouped_rows = txn.fetchall()
 
-            if total_rows == 0:
+            if not grouped_rows:
                 # Nothing to return in the range; we are up to date through max_stream_id.
                 return max_stream_id, []
 
-            if included_rows == 0:
-                # The first group itself would exceed the limit. Return nothing
-                # and do not advance beyond prev_stream_id.
-                #
-                # TODO: In this case, we should return *more* than the given `limit`.
-                # Otherwise we'll either deadlock the caller (they'll keep calling us
-                # with the same prev_stream_id) or make the caller think there's no
-                # more rows to consume (when there are).
-                #
-                # Set `clipped_stream_id` to that of the group that's too big to fit inside.
-                clipped_stream_id = ? # This isn't currently returned by the above query.
+            included_rows = 0
+            hit_limit = False
+            fetch_upto_stream_id = prev_stream_id
 
-            # If we included every row up to max_stream_id, we can safely report progress to max_stream_id.
-            consumed_all = included_rows == total_rows
-            clipped_stream_id = max_stream_id if consumed_all else last_included_sid
+            for stream_id, count in grouped_rows:
+                if included_rows + count <= limit:
+                    included_rows += count
+                    fetch_upto_stream_id = stream_id
+                else:
+                    # Either we have already included some groups and adding
+                    # this one would exceed the limit, or this is the first
+                    # group and it alone exceeds the limit.
+                    hit_limit = True
+                    if included_rows == 0:
+                        # Return the entire oversized group so that callers make
+                        # progress (even though this may exceed `limit` rows).
+                        fetch_upto_stream_id = stream_id
+                    break
+
+            if included_rows == 0 and not hit_limit:
+                # This should only happen if `limit` was zero, which is guarded
+                # against above.
+                raise AssertionError(
+                    "Failed to return any rows without hitting the limit or the "
+                    "end of the stream. This should not have happened. Please "
+                    "report it as a bug!"
+                )
+
+            caught_up_with_stream = not hit_limit and len(grouped_rows) < group_limit
+
+            # At this point we should have advanced, or bailed out early above.
+            assert fetch_upto_stream_id != prev_stream_id
 
             # 2) Fetch the actual rows for only the included stream_id groups.
             sql_rows = """
-            SELECT stream_id, room_id, type, state_key, event_id, prev_event_id
-            FROM current_state_delta_stream
-            WHERE ? < stream_id AND stream_id <= ?
-            ORDER BY stream_id ASC
+                SELECT stream_id, room_id, type, state_key, event_id, prev_event_id
+                FROM current_state_delta_stream
+                WHERE ? < stream_id AND stream_id <= ?
+                ORDER BY stream_id ASC
             """
-            txn.execute(sql_rows, (prev_stream_id, clipped_stream_id))
+            txn.execute(sql_rows, (prev_stream_id, fetch_upto_stream_id))
             rows = txn.fetchall()
+
+            clipped_stream_id = (
+                max_stream_id if caught_up_with_stream else fetch_upto_stream_id
+            )
 
             return clipped_stream_id, [
                 StateDelta(
