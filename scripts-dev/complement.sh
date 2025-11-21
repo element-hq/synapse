@@ -72,9 +72,10 @@ For help on arguments to 'go test', run 'go help testflag'.
 EOF
 }
 
-# We use a function to wrap the script so that we can use `return` to exit early if
-# needed. This is particularly useful for when the script is sourced to share
-# variables like `SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES`.
+# We use a function to wrap the script logic so that we can use `return` to exit early
+# if needed. This is particularly useful so that this script can be sourced by other
+# scripts without exiting the calling subshell (composable). This allows us to share
+# variables like `SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES` with other scripts.
 #
 # Returns an exit code of 0 on success, or 1 on failure.
 main() {
