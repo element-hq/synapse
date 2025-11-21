@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import Collection, Optional, cast
+from typing import Collection, cast
 from unittest import TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -318,6 +318,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
 
         current_depth = 1
         limit = 100
+
         # Make sure backfill still works
         self.get_success(
             self.hs.get_federation_handler().maybe_backfill(
@@ -485,6 +486,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         # the auth code requires that a signature exists, but doesn't check that
         # signature... go figure.
         join_event.signatures[other_server] = {"x": "y"}
+
         self.get_success(
             self.hs.get_federation_event_handler().on_send_membership_event(
                 other_server, join_event
@@ -687,7 +689,7 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
             return is_partial_state
 
         async def sync_partial_state_room(
-            initial_destination: Optional[str],
+            initial_destination: str | None,
             other_destinations: Collection[str],
             room_id: str,
         ) -> None:
@@ -742,7 +744,7 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
             return is_partial_state
 
         async def sync_partial_state_room(
-            initial_destination: Optional[str],
+            initial_destination: str | None,
             other_destinations: Collection[str],
             room_id: str,
         ) -> None:

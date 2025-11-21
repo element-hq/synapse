@@ -117,6 +117,79 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.143.0
+
+## Dropping support for PostgreSQL 13
+
+In line with our [deprecation policy](deprecation_policy.md), we've dropped
+support for PostgreSQL 13, as it is no longer supported upstream.
+This release of Synapse requires PostgreSQL 14+.
+
+# Upgrading to v1.142.0
+
+## Python 3.10+ is now required
+
+The minimum supported Python version has been increased from v3.9 to v3.10.
+You will need Python 3.10+ to run Synapse v1.142.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+## SQLite 3.40.0+ is now required
+
+The minimum supported SQLite version has been increased from 3.27.0 to 3.40.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+
+# Upgrading to v1.141.0
+
+## Docker images now based on Debian `trixie` with Python 3.13
+
+The Docker images are now based on Debian `trixie` and use Python 3.13. If you
+are using the Docker images as a base image you may need to e.g. adjust the
+paths you mount any additional Python packages at.
+
+# Upgrading to v1.140.0
+
+## Users of `synapse-s3-storage-provider` must update the module to `v1.6.0`
+
+Deployments that make use of the
+[synapse-s3-storage-provider](https://github.com/matrix-org/synapse-s3-storage-provider/)
+module must update it to
+[v1.6.0](https://github.com/matrix-org/synapse-s3-storage-provider/releases/tag/v1.6.0),
+otherwise users will be unable to upload or download media.
+
+# Upgrading to v1.139.0
+
+## `/register` requests from old application service implementations may break when using MAS
+
+Application Services that do not set `inhibit_login=true` when calling `POST
+/_matrix/client/v3/register` will receive the error
+`IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED` in response. This is a
+result of [MSC4190: Device management for application
+services](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) which
+adds new endpoints for application services to create encryption-ready devices
+with other than `/login` or `/register` without `inhibit_login=true`.
+
+If an application service you use starts to fail with the mentioned error,
+ensure it is up to date. If it is, then kindly let the author know that they
+need to update their implementation to call `/register` with
+`inhibit_login=true`.
+
+# Upgrading to v1.138.2
+
+## Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin
+
+Ubuntu 24.10 Oracular Oriole [has been end-of-life since 10 Jul
+2025](https://endoflife.date/ubuntu). This release drops support for Ubuntu
+24.10, and in its place adds support for Ubuntu 25.04 Plucky Puffin.
+
+This notice also applies to the v1.139.0 release.
+
 # Upgrading to v1.136.0
 
 ## Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`

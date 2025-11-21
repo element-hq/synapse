@@ -19,7 +19,6 @@
 #
 #
 from http import HTTPStatus
-from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -259,7 +258,7 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_JSON", channel.json_body)
 
-    def _get_read_receipt(self) -> Optional[JsonDict]:
+    def _get_read_receipt(self) -> JsonDict | None:
         """Syncs and returns the read receipt."""
 
         # Checks if event is a read receipt

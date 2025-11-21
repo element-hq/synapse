@@ -25,16 +25,11 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Generator,
     Iterable,
-    List,
     Literal,
-    Optional,
     Protocol,
     Sequence,
-    Set,
-    Tuple,
     overload,
 )
 
@@ -61,14 +56,14 @@ class StateResolutionStore(Protocol):
     # TestStateResolutionStore in tests.
     def get_events(
         self, event_ids: StrCollection, allow_rejected: bool = False
-    ) -> Awaitable[Dict[str, EventBase]]: ...
+    ) -> Awaitable[dict[str, EventBase]]: ...
 
     def get_auth_chain_difference(
         self,
         room_id: str,
-        state_sets: List[Set[str]],
-        conflicted_state: Optional[Set[str]],
-        additional_backwards_reachable_conflicted_events: Optional[set[str]],
+        state_sets: list[set[str]],
+        conflicted_state: set[str] | None,
+        additional_backwards_reachable_conflicted_events: set[str] | None,
     ) -> Awaitable[StateDifference]: ...
 
 
@@ -88,7 +83,7 @@ async def resolve_events_with_store(
     room_id: str,
     room_version: RoomVersion,
     state_sets: Sequence[StateMap[str]],
-    event_map: Optional[Dict[str, EventBase]],
+    event_map: dict[str, EventBase] | None,
     state_res_store: StateResolutionStore,
 ) -> StateMap[str]:
     """Resolves the state using the v2 state resolution algorithm
@@ -128,7 +123,7 @@ async def resolve_events_with_store(
     logger.debug("%d conflicted state entries", len(conflicted_state))
     logger.debug("Calculating auth chain difference")
 
-    conflicted_set: Optional[Set[str]] = None
+    conflicted_set: set[str] | None = None
     if room_version.state_res == StateResolutionVersions.V2_1:
         # calculate the conflicted subgraph
         conflicted_set = set(itertools.chain.from_iterable(conflicted_state.values()))
@@ -242,7 +237,7 @@ async def resolve_events_with_store(
 async def _get_power_level_for_sender(
     room_id: str,
     event_id: str,
-    event_map: Dict[str, EventBase],
+    event_map: dict[str, EventBase],
     state_res_store: StateResolutionStore,
 ) -> int:
     """Return the power level of the sender of the given event according to
@@ -315,10 +310,10 @@ async def _get_power_level_for_sender(
 async def _get_auth_chain_difference(
     room_id: str,
     state_sets: Sequence[StateMap[str]],
-    unpersisted_events: Dict[str, EventBase],
+    unpersisted_events: dict[str, EventBase],
     state_res_store: StateResolutionStore,
-    conflicted_state: Optional[Set[str]],
-) -> Set[str]:
+    conflicted_state: set[str] | None,
+) -> set[str]:
     """Compare the auth chains of each state set and return the set of events
     that only appear in some, but not all of the auth chains.
 
@@ -356,10 +351,10 @@ async def _get_auth_chain_difference(
     # event IDs if they appear in the `unpersisted_events`. This is the intersection of
     # the event's auth chain with the events in `unpersisted_events` *plus* their
     # auth event IDs.
-    events_to_auth_chain: Dict[str, Set[str]] = {}
+    events_to_auth_chain: dict[str, set[str]] = {}
     # remember the forward links when doing the graph traversal, we'll need it for v2.1 checks
     # This is a map from an event to the set of events that contain it as an auth event.
-    event_to_next_event: Dict[str, Set[str]] = {}
+    event_to_next_event: dict[str, set[str]] = {}
     for event in unpersisted_events.values():
         chain = {event.event_id}
         events_to_auth_chain[event.event_id] = chain
@@ -379,8 +374,8 @@ async def _get_auth_chain_difference(
     #
     # Note: If there are no `unpersisted_events` (which is the common case), we can do a
     # much simpler calculation.
-    additional_backwards_reachable_conflicted_events: Set[str] = set()
-    unpersisted_conflicted_events: Set[str] = set()
+    additional_backwards_reachable_conflicted_events: set[str] = set()
+    unpersisted_conflicted_events: set[str] = set()
     if unpersisted_events:
         # The list of state sets to pass to the store, where each state set is a set
         # of the event ids making up the state. This is similar to `state_sets`,
@@ -388,17 +383,17 @@ async def _get_auth_chain_difference(
         # ((type, state_key)->event_id) mappings; and (b) we have stripped out
         # unpersisted events and replaced them with the persisted events in
         # their auth chain.
-        state_sets_ids: List[Set[str]] = []
+        state_sets_ids: list[set[str]] = []
 
         # For each state set, the unpersisted event IDs reachable (by their auth
         # chain) from the events in that set.
-        unpersisted_set_ids: List[Set[str]] = []
+        unpersisted_set_ids: list[set[str]] = []
 
         for state_set in state_sets:
-            set_ids: Set[str] = set()
+            set_ids: set[str] = set()
             state_sets_ids.append(set_ids)
 
-            unpersisted_ids: Set[str] = set()
+            unpersisted_ids: set[str] = set()
             unpersisted_set_ids.append(unpersisted_ids)
 
             for event_id in state_set.values():
@@ -479,7 +474,7 @@ async def _get_auth_chain_difference(
         # but NOT the backwards conflicted set. This mirrors what the DB layer does but in reverse:
         # we supplied events which are backwards reachable to the DB and now the DB is providing
         # forwards reachable events from the DB.
-        forwards_conflicted_set: Set[str] = set()
+        forwards_conflicted_set: set[str] = set()
         # we include unpersisted conflicted events here to process exclusive unpersisted subgraphs
         search_queue = subgraph_frontier.union(unpersisted_conflicted_events)
         while search_queue:
@@ -490,7 +485,7 @@ async def _get_auth_chain_difference(
 
         # we've already calculated the backwards form as this is the auth chain for each
         # unpersisted conflicted event.
-        backwards_conflicted_set: Set[str] = set()
+        backwards_conflicted_set: set[str] = set()
         for uce in unpersisted_conflicted_events:
             backwards_conflicted_set.update(events_to_auth_chain.get(uce, []))
 
@@ -526,7 +521,7 @@ async def _get_auth_chain_difference(
 
 def _seperate(
     state_sets: Iterable[StateMap[str]],
-) -> Tuple[StateMap[str], StateMap[Set[str]]]:
+) -> tuple[StateMap[str], StateMap[set[str]]]:
     """Return the unconflicted and conflicted state. This is different than in
     the original algorithm, as this defines a key to be conflicted if one of
     the state sets doesn't have that key.
@@ -550,7 +545,7 @@ def _seperate(
             conflicted_state[key] = event_ids
 
     # mypy doesn't understand that discarding None above means that conflicted
-    # state is StateMap[Set[str]], not StateMap[Set[Optional[Str]]].
+    # state is StateMap[set[str]], not StateMap[set[str | None]].
     return unconflicted_state, conflicted_state  # type: ignore[return-value]
 
 
@@ -579,12 +574,12 @@ def _is_power_event(event: EventBase) -> bool:
 
 
 async def _add_event_and_auth_chain_to_graph(
-    graph: Dict[str, Set[str]],
+    graph: dict[str, set[str]],
     room_id: str,
     event_id: str,
-    event_map: Dict[str, EventBase],
+    event_map: dict[str, EventBase],
     state_res_store: StateResolutionStore,
-    full_conflicted_set: Set[str],
+    full_conflicted_set: set[str],
 ) -> None:
     """Helper function for _reverse_topological_power_sort that add the event
     and its auth chain (that is in the auth diff) to the graph
@@ -616,10 +611,10 @@ async def _reverse_topological_power_sort(
     clock: Clock,
     room_id: str,
     event_ids: Iterable[str],
-    event_map: Dict[str, EventBase],
+    event_map: dict[str, EventBase],
     state_res_store: StateResolutionStore,
-    full_conflicted_set: Set[str],
-) -> List[str]:
+    full_conflicted_set: set[str],
+) -> list[str]:
     """Returns a list of the event_ids sorted by reverse topological ordering,
     and then by power level and origin_server_ts
 
@@ -635,7 +630,7 @@ async def _reverse_topological_power_sort(
         The sorted list
     """
 
-    graph: Dict[str, Set[str]] = {}
+    graph: dict[str, set[str]] = {}
     for idx, event_id in enumerate(event_ids, start=1):
         await _add_event_and_auth_chain_to_graph(
             graph, room_id, event_id, event_map, state_res_store, full_conflicted_set
@@ -658,7 +653,7 @@ async def _reverse_topological_power_sort(
         if idx % _AWAIT_AFTER_ITERATIONS == 0:
             await clock.sleep(0)
 
-    def _get_power_order(event_id: str) -> Tuple[int, int, str]:
+    def _get_power_order(event_id: str) -> tuple[int, int, str]:
         ev = event_map[event_id]
         pl = event_to_pl[event_id]
 
@@ -675,9 +670,9 @@ async def _iterative_auth_checks(
     clock: Clock,
     room_id: str,
     room_version: RoomVersion,
-    event_ids: List[str],
+    event_ids: list[str],
     base_state: StateMap[str],
-    event_map: Dict[str, EventBase],
+    event_map: dict[str, EventBase],
     state_res_store: StateResolutionStore,
 ) -> MutableStateMap[str]:
     """Sequentially apply auth checks to each event in given list, updating the
@@ -758,11 +753,11 @@ async def _iterative_auth_checks(
 async def _mainline_sort(
     clock: Clock,
     room_id: str,
-    event_ids: List[str],
-    resolved_power_event_id: Optional[str],
-    event_map: Dict[str, EventBase],
+    event_ids: list[str],
+    resolved_power_event_id: str | None,
+    event_map: dict[str, EventBase],
     state_res_store: StateResolutionStore,
-) -> List[str]:
+) -> list[str]:
     """Returns a sorted list of event_ids sorted by mainline ordering based on
     the given event resolved_power_event_id
 
@@ -829,8 +824,8 @@ async def _mainline_sort(
 async def _get_mainline_depth_for_event(
     clock: Clock,
     event: EventBase,
-    mainline_map: Dict[str, int],
-    event_map: Dict[str, EventBase],
+    mainline_map: dict[str, int],
+    event_map: dict[str, EventBase],
     state_res_store: StateResolutionStore,
 ) -> int:
     """Get the mainline depths for the given event based on the mainline map
@@ -846,7 +841,7 @@ async def _get_mainline_depth_for_event(
     """
 
     room_id = event.room_id
-    tmp_event: Optional[EventBase] = event
+    tmp_event: EventBase | None = event
 
     # We do an iterative search, replacing `event with the power level in its
     # auth events (if any)
@@ -880,7 +875,7 @@ async def _get_mainline_depth_for_event(
 async def _get_event(
     room_id: str,
     event_id: str,
-    event_map: Dict[str, EventBase],
+    event_map: dict[str, EventBase],
     state_res_store: StateResolutionStore,
     allow_none: Literal[False] = False,
 ) -> EventBase: ...
@@ -890,19 +885,19 @@ async def _get_event(
 async def _get_event(
     room_id: str,
     event_id: str,
-    event_map: Dict[str, EventBase],
+    event_map: dict[str, EventBase],
     state_res_store: StateResolutionStore,
     allow_none: Literal[True],
-) -> Optional[EventBase]: ...
+) -> EventBase | None: ...
 
 
 async def _get_event(
     room_id: str,
     event_id: str,
-    event_map: Dict[str, EventBase],
+    event_map: dict[str, EventBase],
     state_res_store: StateResolutionStore,
     allow_none: bool = False,
-) -> Optional[EventBase]:
+) -> EventBase | None:
     """Helper function to look up event in event_map, falling back to looking
     it up in the store
 
@@ -936,7 +931,7 @@ async def _get_event(
 
 
 def lexicographical_topological_sort(
-    graph: Dict[str, Set[str]], key: Callable[[str], Any]
+    graph: dict[str, set[str]], key: Callable[[str], Any]
 ) -> Generator[str, None, None]:
     """Performs a lexicographic reverse topological sort on the graph.
 
@@ -960,7 +955,7 @@ def lexicographical_topological_sort(
     # outgoing edges, c.f.
     # https://en.wikipedia.org/wiki/Topological_sorting#Kahn's_algorithm
     outdegree_map = graph
-    reverse_graph: Dict[str, Set[str]] = {}
+    reverse_graph: dict[str, set[str]] = {}
 
     # Lists of nodes with zero out degree. Is actually a tuple of
     # `(key(node), node)` so that sorting does the right thing

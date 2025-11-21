@@ -1,1 +1,0 @@
-Add an in-memory cache to `_get_e2e_cross_signing_signatures_for_devices` to reduce DB load.

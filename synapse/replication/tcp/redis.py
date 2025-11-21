@@ -21,7 +21,7 @@
 
 import logging
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Generic, List, Optional, Type, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 import attr
 from txredisapi import (
@@ -40,7 +40,6 @@ from synapse.logging.context import PreserveLoggingContext, make_deferred_yielda
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.replication.tcp.commands import (
@@ -73,10 +72,10 @@ class ConstantProperty(Generic[T, V]):
 
     constant: V = attr.ib()
 
-    def __get__(self, obj: Optional[T], objtype: Optional[Type[T]] = None) -> V:
+    def __get__(self, obj: T | None, objtype: type[T] | None = None) -> V:
         return self.constant
 
-    def __set__(self, obj: Optional[T], value: V) -> None:
+    def __set__(self, obj: T | None, value: V) -> None:
         pass
 
 
@@ -109,9 +108,10 @@ class RedisSubscriber(SubscriberProtocol):
     """
 
     server_name: str
+    hs: "HomeServer"
     synapse_handler: "ReplicationCommandHandler"
     synapse_stream_prefix: str
-    synapse_channel_names: List[str]
+    synapse_channel_names: list[str]
     synapse_outbound_redis_connection: ConnectionHandler
 
     def __init__(self, *args: Any, **kwargs: Any):
@@ -119,7 +119,7 @@ class RedisSubscriber(SubscriberProtocol):
 
         # a logcontext which we use for processing incoming commands. We declare it as a
         # background process so that the CPU stats get reported to prometheus.
-        self._logging_context: Optional[BackgroundProcessLoggingContext] = None
+        self._logging_context: BackgroundProcessLoggingContext | None = None
 
     def _get_logging_context(self) -> BackgroundProcessLoggingContext:
         """
@@ -146,9 +146,7 @@ class RedisSubscriber(SubscriberProtocol):
     def connectionMade(self) -> None:
         logger.info("Connected to redis")
         super().connectionMade()
-        run_as_background_process(
-            "subscribe-replication", self.server_name, self._send_subscribe
-        )
+        self.hs.run_as_background_process("subscribe-replication", self._send_subscribe)
 
     async def _send_subscribe(self) -> None:
         # it's important to make sure that we only send the REPLICATE command once we
@@ -223,8 +221,8 @@ class RedisSubscriber(SubscriberProtocol):
         # if so.
 
         if isawaitable(res):
-            run_as_background_process(
-                "replication-" + cmd.get_logcontext_id(), self.server_name, lambda: res
+            self.hs.run_as_background_process(
+                "replication-" + cmd.get_logcontext_id(), lambda: res
             )
 
     def connectionLost(self, reason: Failure) -> None:  # type: ignore[override]
@@ -245,11 +243,17 @@ class RedisSubscriber(SubscriberProtocol):
         Args:
             cmd: The command to send
         """
-        run_as_background_process(
+        self.hs.run_as_background_process(
             "send-cmd",
-            self.server_name,
             self._async_send_command,
             cmd,
+            # We originally started tracing background processes to avoid `There was no
+            # active span` errors but this change meant we started generating 15x the
+            # number of spans than before (this is one of the most heavily called
+            # instances of `run_as_background_process`).
+            #
+            # Since we don't log or tag a tracing span in the downstream
+            # code, we can safely disable this.
             bg_start_span=False,
         )
 
@@ -289,14 +293,14 @@ class SynapseRedisFactory(RedisFactory):
         self,
         hs: "HomeServer",
         uuid: str,
-        dbid: Optional[int],
+        dbid: int | None,
         poolsize: int,
         isLazy: bool = False,
-        handler: Type = ConnectionHandler,
+        handler: type = ConnectionHandler,
         charset: str = "utf-8",
-        password: Optional[str] = None,
+        password: str | None = None,
         replyTimeout: int = 30,
-        convertNumbers: Optional[int] = True,
+        convertNumbers: int | None = True,
     ):
         super().__init__(
             uuid=uuid,
@@ -310,9 +314,8 @@ class SynapseRedisFactory(RedisFactory):
             convertNumbers=convertNumbers,
         )
 
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
+        self.hs = hs  # nb must be called this for @wrap_as_background_process
+        self.server_name = hs.hostname
 
         hs.get_clock().looping_call(self._send_ping, 30 * 1000)
 
@@ -378,7 +381,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
         self,
         hs: "HomeServer",
         outbound_redis_connection: ConnectionHandler,
-        channel_names: List[str],
+        channel_names: list[str],
     ):
         super().__init__(
             hs,
@@ -390,6 +393,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
         )
 
         self.server_name = hs.hostname
+        self.hs = hs
         self.synapse_handler = hs.get_replication_command_handler()
         self.synapse_stream_prefix = hs.hostname
         self.synapse_channel_names = channel_names
@@ -405,6 +409,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
         # the base method does some other things than just instantiating the
         # protocol.
         p.server_name = self.server_name
+        p.hs = self.hs
         p.synapse_handler = self.synapse_handler
         p.synapse_outbound_redis_connection = self.synapse_outbound_redis_connection
         p.synapse_stream_prefix = self.synapse_stream_prefix
@@ -417,9 +422,9 @@ def lazyConnection(
     hs: "HomeServer",
     host: str = "localhost",
     port: int = 6379,
-    dbid: Optional[int] = None,
+    dbid: int | None = None,
     reconnect: bool = True,
-    password: Optional[str] = None,
+    password: str | None = None,
     replyTimeout: int = 30,
 ) -> ConnectionHandler:
     """Creates a connection to Redis that is lazily set up and reconnects if the
@@ -466,9 +471,9 @@ def lazyConnection(
 def lazyUnixConnection(
     hs: "HomeServer",
     path: str = "/tmp/redis.sock",
-    dbid: Optional[int] = None,
+    dbid: int | None = None,
     reconnect: bool = True,
-    password: Optional[str] = None,
+    password: str | None = None,
     replyTimeout: int = 30,
 ) -> ConnectionHandler:
     """Creates a connection to Redis that is lazily set up and reconnects if the

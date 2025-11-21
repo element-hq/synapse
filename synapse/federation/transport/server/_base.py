@@ -24,7 +24,7 @@ import logging
 import re
 import time
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
 
 from synapse.api.errors import Codes, FederationDeniedError, SynapseError
 from synapse.api.urls import FEDERATION_V1_PREFIX
@@ -77,7 +77,7 @@ class Authenticator:
 
     # A method just so we can pass 'self' as the authenticator to the Servlets
     async def authenticate_request(
-        self, request: SynapseRequest, content: Optional[JsonDict]
+        self, request: SynapseRequest, content: JsonDict | None
     ) -> str:
         now = self._clock.time_msec()
         json_request: JsonDict = {
@@ -165,7 +165,7 @@ class Authenticator:
             logger.exception("Error resetting retry timings on %s", origin)
 
 
-def _parse_auth_header(header_bytes: bytes) -> Tuple[str, str, str, Optional[str]]:
+def _parse_auth_header(header_bytes: bytes) -> tuple[str, str, str, str | None]:
     """Parse an X-Matrix auth header
 
     Args:
@@ -185,7 +185,7 @@ def _parse_auth_header(header_bytes: bytes) -> Tuple[str, str, str, Optional[str
             rf"{space_or_tab}*,{space_or_tab}*",
             re.split(r"^X-Matrix +", header_str, maxsplit=1)[1],
         )
-        param_dict: Dict[str, str] = {
+        param_dict: dict[str, str] = {
             k.lower(): v for k, v in [param.split("=", maxsplit=1) for param in params]
         }
 
@@ -252,7 +252,7 @@ class BaseFederationServlet:
                 components as specified in the path match regexp.
 
         Returns:
-            Optional[Tuple[int, object]]: either (response code, response object) to
+            tuple[int, object] | None: either (response code, response object) to
                  return a JSON response, or None if the request has already been handled.
 
         Raises:
@@ -282,14 +282,14 @@ class BaseFederationServlet:
         self.ratelimiter = ratelimiter
         self.server_name = server_name
 
-    def _wrap(self, func: Callable[..., Awaitable[Tuple[int, Any]]]) -> ServletCallback:
+    def _wrap(self, func: Callable[..., Awaitable[tuple[int, Any]]]) -> ServletCallback:
         authenticator = self.authenticator
         ratelimiter = self.ratelimiter
 
         @functools.wraps(func)
         async def new_func(
             request: SynapseRequest, *args: Any, **kwargs: str
-        ) -> Optional[Tuple[int, Any]]:
+        ) -> tuple[int, Any] | None:
             """A callback which can be passed to HttpServer.RegisterPaths
 
             Args:
@@ -309,7 +309,7 @@ class BaseFederationServlet:
 
             try:
                 with start_active_span("authenticate_request"):
-                    origin: Optional[str] = await authenticator.authenticate_request(
+                    origin: str | None = await authenticator.authenticate_request(
                         request, content
                     )
             except NoAuthenticationError:

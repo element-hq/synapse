@@ -66,7 +66,7 @@ jobs:
           install: true
 
       - name: Set up docker layer caching
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /tmp/.buildx-cache
           key: ${{ runner.os }}-buildx-${{ github.sha }}
@@ -101,7 +101,7 @@ jobs:
           echo "ARTIFACT_NAME=${DISTRO#*:}" >> "$GITHUB_OUTPUT"
 
       - name: Upload debs as artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: debs-${{ steps.artifact-name.outputs.ARTIFACT_NAME }}
           path: debs/*
@@ -114,8 +114,8 @@ jobs:
         os:
           - ubuntu-24.04
           - ubuntu-24.04-arm
-          - macos-13 # This uses x86-64
           - macos-14 # This uses arm64
+          - macos-15-intel # This uses x86-64
         # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
         # It is not read by the rest of the workflow.
         is_pr:
@@ -124,7 +124,7 @@ jobs:
         exclude:
           # Don't build macos wheels on PR CI.
           - is_pr: true
-            os: "macos-13"
+            os: "macos-15-intel"
           - is_pr: true
             os: "macos-14"
           # Don't build aarch64 wheels on PR CI.
@@ -141,20 +141,25 @@ jobs:
           python-version: "3.x"
 
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.0.0
+        run: python -m pip install cibuildwheel==3.2.1
 
       - name: Only build a single wheel on PR
         if: startsWith(github.ref, 'refs/pull/')
-        run: echo "CIBW_BUILD="cp39-manylinux_*"" >> $GITHUB_ENV
+        run: echo "CIBW_BUILD="cp310-manylinux_*"" >> $GITHUB_ENV
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
         env:
-          # Skip testing for platforms which various libraries don't have wheels
-          # for, and so need extra build deps.
-          CIBW_TEST_SKIP: pp3*-* *i686* *musl*
+          # The platforms that we build for are determined by the
+          # `tool.cibuildwheel.skip` option in `pyproject.toml`.
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+          # We skip testing wheels for the following platforms in CI:
+          #
+          # pp3*-* (PyPy wheels) broke in CI (TODO: investigate).
+          # musl: (TODO: investigate).
+          CIBW_TEST_SKIP: pp3*-* *musl*
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: Wheel-${{ matrix.os }}
           path: ./wheelhouse/*.whl
@@ -175,7 +180,7 @@ jobs:
       - name: Build sdist
         run: python -m build --sdist
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: Sdist
           path: dist/*.tar.gz
@@ -191,7 +196,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all workflow run artifacts
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
       - name: Build a tarball for the debs
         # We need to merge all the debs uploads into one folder, then compress
         # that.
@@ -200,16 +205,11 @@ jobs:
           mv debs*/* debs/
           tar -cvJf debs.tar.xz debs
       - name: Attach to release
-        # Pinned to work around https://github.com/softprops/action-gh-release/issues/445
-        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v0.1.15
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          files: |
-            Sdist/*
-            Wheel*/*
-            debs.tar.xz
-          # if it's not already published, keep the release as a draft.
-          draft: true
-          # mark it as a prerelease if the tag contains 'rc'.
-          prerelease: ${{ contains(github.ref, 'rc') }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            Sdist/* \
+            Wheel*/* \
+            debs.tar.xz \
+            --repo ${{ github.repository }}

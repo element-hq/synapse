@@ -3,7 +3,7 @@ import time
 from logging import Handler, LogRecord
 from logging.handlers import MemoryHandler
 from threading import Thread
-from typing import Optional, cast
+from typing import cast
 
 from twisted.internet.interfaces import IReactorCore
 
@@ -23,10 +23,10 @@ class PeriodicallyFlushingMemoryHandler(MemoryHandler):
         self,
         capacity: int,
         flushLevel: int = logging.ERROR,
-        target: Optional[Handler] = None,
+        target: Handler | None = None,
         flushOnClose: bool = True,
         period: float = 5.0,
-        reactor: Optional[IReactorCore] = None,
+        reactor: IReactorCore | None = None,
     ) -> None:
         """
         period: the period between automatic flushes

@@ -26,14 +26,8 @@ from typing import (
     Any,
     Callable,
     ContextManager,
-    Dict,
     Generator,
-    List,
-    Optional,
-    Set,
-    Tuple,
     TypeVar,
-    Union,
 )
 from unittest import mock
 from unittest.mock import Mock
@@ -69,8 +63,8 @@ def test_disconnect(
     reactor: MemoryReactorClock,
     channel: FakeChannel,
     expect_cancellation: bool,
-    expected_body: Union[bytes, JsonDict],
-    expected_code: Optional[int] = None,
+    expected_body: bytes | JsonDict,
+    expected_code: int | None = None,
 ) -> None:
     """Disconnects an in-flight request and checks the response.
 
@@ -150,9 +144,9 @@ def make_request_with_cancellation_test(
     site: Site,
     method: str,
     path: str,
-    content: Union[bytes, str, JsonDict] = b"",
+    content: bytes | str | JsonDict = b"",
     *,
-    token: Optional[str] = None,
+    token: str | None = None,
 ) -> FakeChannel:
     """Performs a request repeatedly, disconnecting at successive `await`s, until
     one completes.
@@ -208,7 +202,7 @@ def make_request_with_cancellation_test(
 
     # The set of previously seen `await`s.
     # Each element is a stringified stack trace.
-    seen_awaits: Set[Tuple[str, ...]] = set()
+    seen_awaits: set[tuple[str, ...]] = set()
 
     _log_for_request(
         0, f"Running make_request_with_cancellation_test for {test_name}..."
@@ -337,7 +331,7 @@ class Deferred__await__Patch:
             deferred_patch.unblock_awaits()
     """
 
-    def __init__(self, seen_awaits: Set[Tuple[str, ...]], request_number: int):
+    def __init__(self, seen_awaits: set[tuple[str, ...]], request_number: int):
         """
         Args:
             seen_awaits: The set of stack traces of `await`s that have been previously
@@ -365,10 +359,10 @@ class Deferred__await__Patch:
         # unresolved `Deferred` and return it out of `Deferred.__await__` /
         # `coroutine.send()`. We have to resolve it later, in case the `await`ing
         # coroutine is part of some shared processing, such as `@cached`.
-        self._to_unblock: Dict[Deferred, Union[object, Failure]] = {}
+        self._to_unblock: dict[Deferred, object | Failure] = {}
 
         # The last stack we logged.
-        self._previous_stack: List[inspect.FrameInfo] = []
+        self._previous_stack: list[inspect.FrameInfo] = []
 
     def patch(self) -> ContextManager[Mock]:
         """Returns a context manager which patches `Deferred.__await__`."""
@@ -502,13 +496,13 @@ def _log_for_request(request_number: int, message: str) -> None:
     """Logs a message for an iteration of `make_request_with_cancellation_test`."""
     # We want consistent alignment when logging stack traces, so ensure the logging
     # context has a fixed width name.
-    with LoggingContext(name=f"request-{request_number:<2}"):
+    with LoggingContext(name=f"request-{request_number:<2}", server_name="test_server"):
         logger.info(message)
 
 
 def _log_await_stack(
-    stack: List[inspect.FrameInfo],
-    previous_stack: List[inspect.FrameInfo],
+    stack: list[inspect.FrameInfo],
+    previous_stack: list[inspect.FrameInfo],
     request_number: int,
     note: str,
 ) -> None:
@@ -566,7 +560,7 @@ def _format_stack_frame(frame_info: inspect.FrameInfo) -> str:
     )
 
 
-def _get_stack(skip_frames: int) -> List[inspect.FrameInfo]:
+def _get_stack(skip_frames: int) -> list[inspect.FrameInfo]:
     """Captures the stack for a request.
 
     Skips any twisted frames and stops at `JsonResource.wrapped_async_request_handler`.
@@ -622,6 +616,6 @@ def _get_stack_frame_method_name(frame_info: inspect.FrameInfo) -> str:
     return method_name
 
 
-def _hash_stack(stack: List[inspect.FrameInfo]) -> Tuple[str, ...]:
+def _hash_stack(stack: list[inspect.FrameInfo]) -> tuple[str, ...]:
     """Turns a stack into a hashable value that can be put into a set."""
     return tuple(_format_stack_frame(frame) for frame in stack)

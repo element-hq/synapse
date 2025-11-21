@@ -27,11 +27,12 @@ import os
 import signal
 import sys
 from types import FrameType, TracebackType
-from typing import NoReturn, Optional, Type
+from typing import NoReturn
 
 from synapse.logging.context import (
     LoggingContext,
     PreserveLoggingContext,
+    current_context,
 )
 
 
@@ -118,9 +119,9 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
     # also catch any other uncaught exceptions before we get that far.)
 
     def excepthook(
-        type_: Type[BaseException],
+        type_: type[BaseException],
         value: BaseException,
-        traceback: Optional[TracebackType],
+        traceback: TracebackType | None,
     ) -> None:
         logger.critical("Unhanded exception", exc_info=(type_, value, traceback))
 
@@ -143,15 +144,18 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
         sys.exit(1)
 
     # write a log line on SIGTERM.
-    def sigterm(signum: int, frame: Optional[FrameType]) -> NoReturn:
+    def sigterm(signum: int, frame: FrameType | None) -> NoReturn:
         logger.warning("Caught signal %s. Stopping daemon.", signum)
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, sigterm)
 
+    # Copy the `server_name` from the current logcontext
+    server_name = current_context().server_name
+
     # Cleanup pid file at exit.
     def exit() -> None:
-        with LoggingContext("atexit"):
+        with LoggingContext(name="atexit", server_name=server_name):
             logger.warning("Stopping daemon.")
             os.remove(pid_file)
             sys.exit(0)

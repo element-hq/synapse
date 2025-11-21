@@ -24,10 +24,8 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Generic,
     Iterable,
-    Optional,
     TypeVar,
 )
 
@@ -89,7 +87,7 @@ class ResponseCacheEntry:
     easier to cache Failure results.
     """
 
-    opentracing_span_context: "Optional[opentracing.SpanContext]"
+    opentracing_span_context: "opentracing.SpanContext | None"
     """The opentracing span which generated/is generating the result"""
 
 
@@ -119,7 +117,7 @@ class ResponseCache(Generic[KV]):
             timeout_ms
             enable_logging
         """
-        self._result_cache: Dict[KV, ResponseCacheEntry] = {}
+        self._result_cache: dict[KV, ResponseCacheEntry] = {}
 
         self.clock = clock
         self.timeout_sec = timeout_ms / 1000.0
@@ -151,7 +149,7 @@ class ResponseCache(Generic[KV]):
         """
         return self._result_cache.keys()
 
-    def _get(self, key: KV) -> Optional[ResponseCacheEntry]:
+    def _get(self, key: KV) -> ResponseCacheEntry | None:
         """Look up the given key.
 
         Args:
@@ -172,7 +170,7 @@ class ResponseCache(Generic[KV]):
         self,
         context: ResponseCacheContext[KV],
         deferred: "defer.Deferred[RV]",
-        opentracing_span_context: "Optional[opentracing.SpanContext]",
+        opentracing_span_context: "opentracing.SpanContext | None",
     ) -> ResponseCacheEntry:
         """Set the entry for the given key to the given deferred.
 
@@ -198,7 +196,17 @@ class ResponseCache(Generic[KV]):
             # the should_cache bit, we leave it in the cache for now and schedule
             # its removal later.
             if self.timeout_sec and context.should_cache:
-                self.clock.call_later(self.timeout_sec, self._entry_timeout, key)
+                self.clock.call_later(
+                    self.timeout_sec,
+                    self._entry_timeout,
+                    key,
+                    # We don't need to track these calls since they don't hold any strong
+                    # references which would keep the `HomeServer` in memory after shutdown.
+                    # We don't want to track these because they can get cancelled really
+                    # quickly and thrash the tracking mechanism, ie. during repeated calls
+                    # to /sync.
+                    call_later_cancel_on_shutdown=False,
+                )
             else:
                 # otherwise, remove the result immediately.
                 self.unset(key)
@@ -280,7 +288,7 @@ class ResponseCache(Generic[KV]):
             if cache_context:
                 kwargs["cache_context"] = context
 
-            span_context: Optional[opentracing.SpanContext] = None
+            span_context: opentracing.SpanContext | None = None
 
             async def cb() -> RV:
                 # NB it is important that we do not `await` before setting span_context!

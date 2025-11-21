@@ -21,7 +21,7 @@
 
 import itertools
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Iterable
 
 import attr
 from unpaddedbase64 import decode_base64, encode_base64
@@ -46,13 +46,13 @@ class _SearchResult:
     # The count of results.
     count: int
     # A mapping of event ID to the rank of that event.
-    rank_map: Dict[str, int]
+    rank_map: dict[str, int]
     # A list of the resulting events.
-    allowed_events: List[EventBase]
+    allowed_events: list[EventBase]
     # A map of room ID to results.
-    room_groups: Dict[str, JsonDict]
+    room_groups: dict[str, JsonDict]
     # A set of event IDs to highlight.
-    highlights: Set[str]
+    highlights: set[str]
 
 
 class SearchHandler:
@@ -117,7 +117,7 @@ class SearchHandler:
         return historical_room_ids
 
     async def search(
-        self, requester: Requester, content: JsonDict, batch: Optional[str] = None
+        self, requester: Requester, content: JsonDict, batch: str | None = None
     ) -> JsonDict:
         """Performs a full text search for a user.
 
@@ -226,18 +226,18 @@ class SearchHandler:
     async def _search(
         self,
         requester: Requester,
-        batch_group: Optional[str],
-        batch_group_key: Optional[str],
-        batch_token: Optional[str],
+        batch_group: str | None,
+        batch_group_key: str | None,
+        batch_token: str | None,
         search_term: str,
-        keys: List[str],
+        keys: list[str],
         filter_dict: JsonDict,
         order_by: str,
         include_state: bool,
-        group_keys: List[str],
-        event_context: Optional[bool],
-        before_limit: Optional[int],
-        after_limit: Optional[int],
+        group_keys: list[str],
+        event_context: bool | None,
+        before_limit: int | None,
+        after_limit: int | None,
         include_profile: bool,
     ) -> JsonDict:
         """Performs a full text search for a user.
@@ -286,7 +286,7 @@ class SearchHandler:
         # If doing a subset of all rooms search, check if any of the rooms
         # are from an upgraded room, and search their contents as well
         if search_filter.rooms:
-            historical_room_ids: List[str] = []
+            historical_room_ids: list[str] = []
             for room_id in search_filter.rooms:
                 # Add any previous rooms to the search if they exist
                 ids = await self.get_old_rooms_from_upgraded_room(room_id)
@@ -307,7 +307,7 @@ class SearchHandler:
                 }
             }
 
-        sender_group: Optional[Dict[str, JsonDict]]
+        sender_group: dict[str, JsonDict] | None
 
         if order_by == "rank":
             search_result, sender_group = await self._search_by_rank(
@@ -442,7 +442,7 @@ class SearchHandler:
         search_term: str,
         keys: Iterable[str],
         search_filter: Filter,
-    ) -> Tuple[_SearchResult, Dict[str, JsonDict]]:
+    ) -> tuple[_SearchResult, dict[str, JsonDict]]:
         """
         Performs a full text search for a user ordering by rank.
 
@@ -461,9 +461,9 @@ class SearchHandler:
         """
         rank_map = {}  # event_id -> rank of event
         # Holds result of grouping by room, if applicable
-        room_groups: Dict[str, JsonDict] = {}
+        room_groups: dict[str, JsonDict] = {}
         # Holds result of grouping by sender, if applicable
-        sender_group: Dict[str, JsonDict] = {}
+        sender_group: dict[str, JsonDict] = {}
 
         search_result = await self.store.search_msgs(room_ids, search_term, keys)
 
@@ -517,10 +517,10 @@ class SearchHandler:
         search_term: str,
         keys: Iterable[str],
         search_filter: Filter,
-        batch_group: Optional[str],
-        batch_group_key: Optional[str],
-        batch_token: Optional[str],
-    ) -> Tuple[_SearchResult, Optional[str]]:
+        batch_group: str | None,
+        batch_group_key: str | None,
+        batch_token: str | None,
+    ) -> tuple[_SearchResult, str | None]:
         """
         Performs a full text search for a user ordering by recent.
 
@@ -542,14 +542,14 @@ class SearchHandler:
         """
         rank_map = {}  # event_id -> rank of event
         # Holds result of grouping by room, if applicable
-        room_groups: Dict[str, JsonDict] = {}
+        room_groups: dict[str, JsonDict] = {}
 
         # Holds the next_batch for the entire result set if one of those exists
         global_next_batch = None
 
         highlights = set()
 
-        room_events: List[EventBase] = []
+        room_events: list[EventBase] = []
         i = 0
 
         pagination_token = batch_token
@@ -632,11 +632,11 @@ class SearchHandler:
     async def _calculate_event_contexts(
         self,
         user: UserID,
-        allowed_events: List[EventBase],
+        allowed_events: list[EventBase],
         before_limit: int,
         after_limit: int,
         include_profile: bool,
-    ) -> Dict[str, JsonDict]:
+    ) -> dict[str, JsonDict]:
         """
         Calculates the contextual events for any search results.
 

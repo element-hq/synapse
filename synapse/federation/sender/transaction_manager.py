@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from prometheus_client import Gauge
 
@@ -72,12 +72,18 @@ class TransactionManager:
         # HACK to get unique tx id
         self._next_txn_id = int(self.clock.time_msec())
 
+        self._is_shutdown = False
+
+    def shutdown(self) -> None:
+        self._is_shutdown = True
+        self._transport_layer.shutdown()
+
     @measure_func("_send_new_transaction")
     async def send_new_transaction(
         self,
         destination: str,
-        pdus: List[EventBase],
-        edus: List[Edu],
+        pdus: list[EventBase],
+        edus: list[Edu],
     ) -> None:
         """
         Args:
@@ -85,6 +91,12 @@ class TransactionManager:
             pdus: In-order list of PDUs to send
             edus: List of EDUs to send
         """
+
+        if self._is_shutdown:
+            logger.warning(
+                "TransactionManager has been shutdown, not sending transaction"
+            )
+            return
 
         # Make a transaction-sending opentracing span. This span follows on from
         # all the edus in that transaction. This needs to be done since there is

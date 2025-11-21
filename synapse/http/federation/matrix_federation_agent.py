@@ -19,7 +19,7 @@
 #
 import logging
 import urllib.parse
-from typing import Any, Generator, List, Optional
+from typing import Any, Generator
 from urllib.request import (  # type: ignore[attr-defined]
     proxy_bypass_environment,
 )
@@ -67,6 +67,9 @@ class MatrixFederationAgent:
     Args:
         reactor: twisted reactor to use for underlying requests
 
+        clock: Internal `HomeServer` clock used to track delayed and looping calls.
+            Should be obtained from `hs.get_clock()`.
+
         tls_client_options_factory:
             factory to use for fetching client tls options, or none to disable TLS.
 
@@ -97,18 +100,20 @@ class MatrixFederationAgent:
         *,
         server_name: str,
         reactor: ISynapseReactor,
-        tls_client_options_factory: Optional[FederationPolicyForHTTPS],
+        clock: Clock,
+        tls_client_options_factory: FederationPolicyForHTTPS | None,
         user_agent: bytes,
-        ip_allowlist: Optional[IPSet],
+        ip_allowlist: IPSet | None,
         ip_blocklist: IPSet,
-        proxy_config: Optional[ProxyConfig] = None,
-        _srv_resolver: Optional[SrvResolver] = None,
-        _well_known_resolver: Optional[WellKnownResolver] = None,
+        proxy_config: ProxyConfig | None = None,
+        _srv_resolver: SrvResolver | None = None,
+        _well_known_resolver: WellKnownResolver | None = None,
     ):
         """
         Args:
             server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
             reactor
+            clock: Should be the `hs` clock from `hs.get_clock()`
             tls_client_options_factory
             user_agent
             ip_allowlist
@@ -124,7 +129,6 @@ class MatrixFederationAgent:
         # addresses, to prevent DNS rebinding.
         reactor = BlocklistingReactorWrapper(reactor, ip_allowlist, ip_blocklist)
 
-        self._clock = Clock(reactor)
         self._pool = HTTPConnectionPool(reactor)
         self._pool.retryAutomatically = False
         self._pool.maxPersistentPerHost = 5
@@ -147,6 +151,7 @@ class MatrixFederationAgent:
             _well_known_resolver = WellKnownResolver(
                 server_name=server_name,
                 reactor=reactor,
+                clock=clock,
                 agent=BlocklistingAgentWrapper(
                     ProxyAgent(
                         reactor=reactor,
@@ -167,8 +172,8 @@ class MatrixFederationAgent:
         self,
         method: bytes,
         uri: bytes,
-        headers: Optional[Headers] = None,
-        bodyProducer: Optional[IBodyProducer] = None,
+        headers: Headers | None = None,
+        bodyProducer: IBodyProducer | None = None,
     ) -> Generator[defer.Deferred, Any, IResponse]:
         """
         Args:
@@ -254,9 +259,9 @@ class MatrixHostnameEndpointFactory:
         *,
         reactor: IReactorCore,
         proxy_reactor: IReactorCore,
-        tls_client_options_factory: Optional[FederationPolicyForHTTPS],
-        srv_resolver: Optional[SrvResolver],
-        proxy_config: Optional[ProxyConfig],
+        tls_client_options_factory: FederationPolicyForHTTPS | None,
+        srv_resolver: SrvResolver | None,
+        proxy_config: ProxyConfig | None,
     ):
         self._reactor = reactor
         self._proxy_reactor = proxy_reactor
@@ -305,9 +310,9 @@ class MatrixHostnameEndpoint:
         *,
         reactor: IReactorCore,
         proxy_reactor: IReactorCore,
-        tls_client_options_factory: Optional[FederationPolicyForHTTPS],
+        tls_client_options_factory: FederationPolicyForHTTPS | None,
         srv_resolver: SrvResolver,
-        proxy_config: Optional[ProxyConfig],
+        proxy_config: ProxyConfig | None,
         parsed_uri: URI,
     ):
         self._reactor = reactor
@@ -408,7 +413,7 @@ class MatrixHostnameEndpoint:
         # to try and if that doesn't work then we'll have an exception.
         raise Exception("Failed to resolve server %r" % (self._parsed_uri.netloc,))
 
-    async def _resolve_server(self) -> List[Server]:
+    async def _resolve_server(self) -> list[Server]:
         """Resolves the server name to a list of hosts and ports to attempt to
         connect to.
         """

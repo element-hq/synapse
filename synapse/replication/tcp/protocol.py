@@ -28,7 +28,7 @@ import fcntl
 import logging
 import struct
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Collection, List, Optional
+from typing import TYPE_CHECKING, Any, Collection
 
 from prometheus_client import Counter
 from zope.interface import Interface, implementer
@@ -42,7 +42,6 @@ from synapse.logging.context import PreserveLoggingContext
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
-    run_as_background_process,
 )
 from synapse.replication.tcp.commands import (
     VALID_CLIENT_COMMANDS,
@@ -83,7 +82,7 @@ tcp_outbound_commands_counter = Counter(
 
 # A list of all connected protocols. This allows us to send metrics about the
 # connections.
-connected_connections: "List[BaseReplicationStreamProtocol]" = []
+connected_connections: "list[BaseReplicationStreamProtocol]" = []
 
 
 logger = logging.getLogger(__name__)
@@ -140,16 +139,21 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
     max_line_buffer = 10000
 
     def __init__(
-        self, server_name: str, clock: Clock, handler: "ReplicationCommandHandler"
+        self,
+        hs: "HomeServer",
+        server_name: str,
+        clock: Clock,
+        handler: "ReplicationCommandHandler",
     ):
         self.server_name = server_name
+        self.hs = hs
         self.clock = clock
         self.command_handler = handler
 
         self.last_received_command = self.clock.time_msec()
         self.last_sent_command = 0
         # When we requested the connection be closed
-        self.time_we_closed: Optional[int] = None
+        self.time_we_closed: int | None = None
 
         self.received_ping = False  # Have we received a ping from the other side
 
@@ -159,10 +163,10 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         self.conn_id = random_string(5)  # To dedupe in case of name clashes.
 
         # List of pending commands to send once we've established the connection
-        self.pending_commands: List[Command] = []
+        self.pending_commands: list[Command] = []
 
         # The LoopingCall for sending pings.
-        self._send_ping_loop: Optional[task.LoopingCall] = None
+        self._send_ping_loop: task.LoopingCall | None = None
 
         # a logcontext which we use for processing incoming commands. We declare it as a
         # background process so that the CPU stats get reported to prometheus.
@@ -290,9 +294,8 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
             # if so.
 
             if isawaitable(res):
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "replication-" + cmd.get_logcontext_id(),
-                    self.server_name,
                     lambda: res,
                 )
 
@@ -470,9 +473,13 @@ class ServerReplicationStreamProtocol(BaseReplicationStreamProtocol):
     VALID_OUTBOUND_COMMANDS = VALID_SERVER_COMMANDS
 
     def __init__(
-        self, server_name: str, clock: Clock, handler: "ReplicationCommandHandler"
+        self,
+        hs: "HomeServer",
+        server_name: str,
+        clock: Clock,
+        handler: "ReplicationCommandHandler",
     ):
-        super().__init__(server_name, clock, handler)
+        super().__init__(hs, server_name, clock, handler)
 
         self.server_name = server_name
 
@@ -497,7 +504,7 @@ class ClientReplicationStreamProtocol(BaseReplicationStreamProtocol):
         clock: Clock,
         command_handler: "ReplicationCommandHandler",
     ):
-        super().__init__(server_name, clock, command_handler)
+        super().__init__(hs, server_name, clock, command_handler)
 
         self.client_name = client_name
         self.server_name = server_name

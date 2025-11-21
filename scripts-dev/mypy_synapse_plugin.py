@@ -24,7 +24,7 @@ can crop up, e.g the cache descriptors.
 """
 
 import enum
-from typing import Callable, Mapping, Optional, Tuple, Type, Union
+from typing import Callable, Mapping
 
 import attr
 import mypy.types
@@ -68,16 +68,40 @@ PROMETHEUS_METRIC_MISSING_FROM_LIST_TO_CHECK = ErrorCode(
     category="per-homeserver-tenant-metrics",
 )
 
+PREFER_SYNAPSE_CLOCK_CALL_LATER = ErrorCode(
+    "call-later-not-tracked",
+    "Prefer using `synapse.util.Clock.call_later` instead of `reactor.callLater`",
+    category="synapse-reactor-clock",
+)
+
+PREFER_SYNAPSE_CLOCK_LOOPING_CALL = ErrorCode(
+    "prefer-synapse-clock-looping-call",
+    "Prefer using `synapse.util.Clock.looping_call` instead of `task.LoopingCall`",
+    category="synapse-reactor-clock",
+)
+
 PREFER_SYNAPSE_CLOCK_CALL_WHEN_RUNNING = ErrorCode(
     "prefer-synapse-clock-call-when-running",
-    "`synapse.util.Clock.call_when_running` should be used instead of `reactor.callWhenRunning`",
+    "Prefer using `synapse.util.Clock.call_when_running` instead of `reactor.callWhenRunning`",
     category="synapse-reactor-clock",
 )
 
 PREFER_SYNAPSE_CLOCK_ADD_SYSTEM_EVENT_TRIGGER = ErrorCode(
     "prefer-synapse-clock-add-system-event-trigger",
-    "`synapse.util.Clock.add_system_event_trigger` should be used instead of `reactor.addSystemEventTrigger`",
+    "Prefer using `synapse.util.Clock.add_system_event_trigger` instead of `reactor.addSystemEventTrigger`",
     category="synapse-reactor-clock",
+)
+
+MULTIPLE_INTERNAL_CLOCKS_CREATED = ErrorCode(
+    "multiple-internal-clocks",
+    "Only one instance of `clock.Clock` should be created",
+    category="synapse-reactor-clock",
+)
+
+UNTRACKED_BACKGROUND_PROCESS = ErrorCode(
+    "untracked-background-process",
+    "Prefer using `HomeServer.run_as_background_process` method over the bare `run_as_background_process`",
+    category="synapse-tracked-calls",
 )
 
 
@@ -99,7 +123,7 @@ class ArgLocation:
     """
 
 
-prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]] = {
+prometheus_metric_fullname_to_label_arg_map: Mapping[str, ArgLocation | None] = {
     # `Collector` subclasses:
     "prometheus_client.metrics.MetricWrapperBase": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Counter": ArgLocation("labelnames", 2),
@@ -160,8 +184,8 @@ should be in the source code.
 
 # Unbound at this point because we don't know the mypy version yet.
 # This is set in the `plugin(...)` function below.
-MypyPydanticPluginClass: Type[Plugin]
-MypyZopePluginClass: Type[Plugin]
+MypyPydanticPluginClass: type[Plugin]
+MypyZopePluginClass: type[Plugin]
 
 
 class SynapsePlugin(Plugin):
@@ -187,7 +211,7 @@ class SynapsePlugin(Plugin):
 
     def get_base_class_hook(
         self, fullname: str
-    ) -> Optional[Callable[[ClassDefContext], None]]:
+    ) -> Callable[[ClassDefContext], None] | None:
         def _get_base_class_hook(ctx: ClassDefContext) -> None:
             # Run any `get_base_class_hook` checks from other plugins first.
             #
@@ -208,7 +232,7 @@ class SynapsePlugin(Plugin):
 
     def get_function_signature_hook(
         self, fullname: str
-    ) -> Optional[Callable[[FunctionSigContext], FunctionLike]]:
+    ) -> Callable[[FunctionSigContext], FunctionLike] | None:
         # Strip off the unique identifier for classes that are dynamically created inside
         # functions. ex. `synapse.metrics.jemalloc.JemallocCollector@185` (this is the line
         # number)
@@ -222,11 +246,23 @@ class SynapsePlugin(Plugin):
             # callback, let's just pass it in while we have it.
             return lambda ctx: check_prometheus_metric_instantiation(ctx, fullname)
 
+        if fullname == "twisted.internet.task.LoopingCall":
+            return check_looping_call
+
+        if fullname == "synapse.util.clock.Clock":
+            return check_clock_creation
+
+        if (
+            fullname
+            == "synapse.metrics.background_process_metrics.run_as_background_process"
+        ):
+            return check_background_process
+
         return None
 
     def get_method_signature_hook(
         self, fullname: str
-    ) -> Optional[Callable[[MethodSigContext], CallableType]]:
+    ) -> Callable[[MethodSigContext], CallableType] | None:
         if fullname.startswith(
             (
                 "synapse.util.caches.descriptors.CachedFunction.__call__",
@@ -240,6 +276,13 @@ class SynapsePlugin(Plugin):
             "synapse.util.caches.descriptors._CachedListFunctionDescriptor.__call__",
         ):
             return check_is_cacheable_wrapper
+
+        if fullname in (
+            "twisted.internet.interfaces.IReactorTime.callLater",
+            "synapse.types.ISynapseThreadlessReactor.callLater",
+            "synapse.types.ISynapseReactor.callLater",
+        ):
+            return check_call_later
 
         if fullname in (
             "twisted.internet.interfaces.IReactorCore.callWhenRunning",
@@ -256,6 +299,78 @@ class SynapsePlugin(Plugin):
             return check_add_system_event_trigger
 
         return None
+
+
+def check_clock_creation(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that the only `clock.Clock` instance is the one used by the `HomeServer`.
+    This is so that the `HomeServer` can cancel any tracked delayed or looping calls
+    during server shutdown.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected the only `clock.Clock` instance to be the one used by the `HomeServer`. "
+        "This is so that the `HomeServer` can cancel any tracked delayed or looping calls "
+        "during server shutdown",
+        ctx.context,
+        code=MULTIPLE_INTERNAL_CLOCKS_CREATED,
+    )
+
+    return signature
+
+
+def check_call_later(ctx: MethodSigContext) -> CallableType:
+    """
+    Ensure that the `reactor.callLater` callsites aren't used.
+
+    `synapse.util.Clock.call_later` should always be used instead of `reactor.callLater`.
+    This is because the `synapse.util.Clock` tracks delayed calls in order to cancel any
+    outstanding calls during server shutdown. Delayed calls which are either short lived
+    (<~60s) or frequently called and can be tracked via other means could be candidates for
+    using `synapse.util.Clock.call_later` with `call_later_cancel_on_shutdown` set to
+    `False`. There shouldn't be a need to use `reactor.callLater` outside of tests or the
+    `Clock` class itself. If a need arises, you can use a type ignore comment to disable the
+    check, e.g. `# type: ignore[call-later-not-tracked]`.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected all `reactor.callLater` calls to use `synapse.util.Clock.call_later` "
+        "instead. This is so that long lived calls can be tracked for cancellation during "
+        "server shutdown",
+        ctx.context,
+        code=PREFER_SYNAPSE_CLOCK_CALL_LATER,
+    )
+
+    return signature
+
+
+def check_looping_call(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that the `task.LoopingCall` callsites aren't used.
+
+    `synapse.util.Clock.looping_call` should always be used instead of `task.LoopingCall`.
+    `synapse.util.Clock` tracks looping calls in order to cancel any outstanding calls
+    during server shutdown.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected all `task.LoopingCall` instances to use `synapse.util.Clock.looping_call` "
+        "instead. This is so that long lived calls can be tracked for cancellation during "
+        "server shutdown",
+        ctx.context,
+        code=PREFER_SYNAPSE_CLOCK_LOOPING_CALL,
+    )
+
+    return signature
 
 
 def check_call_when_running(ctx: MethodSigContext) -> CallableType:
@@ -307,6 +422,27 @@ def check_add_system_event_trigger(ctx: MethodSigContext) -> CallableType:
         ),
         ctx.context,
         code=PREFER_SYNAPSE_CLOCK_ADD_SYSTEM_EVENT_TRIGGER,
+    )
+
+    return signature
+
+
+def check_background_process(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that calls to `run_as_background_process` use the `HomeServer` method.
+    This is so that the `HomeServer` can cancel any running background processes during
+    server shutdown.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Prefer using `HomeServer.run_as_background_process` method over the bare "
+        "`run_as_background_process`. This is so that the `HomeServer` can cancel "
+        "any background processes during server shutdown",
+        ctx.context,
+        code=UNTRACKED_BACKGROUND_PROCESS,
     )
 
     return signature
@@ -585,7 +721,7 @@ def check_is_cacheable_wrapper(ctx: MethodSigContext) -> CallableType:
 
 def check_is_cacheable(
     signature: CallableType,
-    ctx: Union[MethodSigContext, FunctionSigContext],
+    ctx: MethodSigContext | FunctionSigContext,
 ) -> None:
     """
     Check if a callable returns a type which can be cached.
@@ -659,7 +795,7 @@ AT_CACHED_MUTABLE_RETURN = ErrorCode(
 
 def is_cacheable(
     rt: mypy.types.Type, signature: CallableType, verbose: bool
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """
     Check if a particular type is cachable.
 
@@ -769,7 +905,7 @@ def is_cacheable(
         return False, f"Don't know how to handle {type(rt).__qualname__} return type"
 
 
-def plugin(version: str) -> Type[SynapsePlugin]:
+def plugin(version: str) -> type[SynapsePlugin]:
     global MypyPydanticPluginClass, MypyZopePluginClass
     # This is the entry point of the plugin, and lets us deal with the fact
     # that the mypy plugin interface is *not* stable by looking at the version

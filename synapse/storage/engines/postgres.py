@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Any, Mapping, NoReturn, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Mapping, NoReturn, cast
 
 import psycopg2.extensions
 
@@ -60,10 +60,10 @@ class PostgresEngine(
         # some degenerate query plan has been created and the client has probably
         # timed out/walked off anyway.
         # This is in milliseconds.
-        self.statement_timeout: Optional[int] = database_config.get(
+        self.statement_timeout: int | None = database_config.get(
             "statement_timeout", 60 * 60 * 1000
         )
-        self._version: Optional[int] = None  # unknown as yet
+        self._version: int | None = None  # unknown as yet
 
         self.isolation_level_map: Mapping[int, int] = {
             IsolationLevel.READ_COMMITTED: psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED,
@@ -79,11 +79,11 @@ class PostgresEngine(
     def single_threaded(self) -> bool:
         return False
 
-    def get_db_locale(self, txn: Cursor) -> Tuple[str, str]:
+    def get_db_locale(self, txn: Cursor) -> tuple[str, str]:
         txn.execute(
             "SELECT datcollate, datctype FROM pg_database WHERE datname = current_database()"
         )
-        collation, ctype = cast(Tuple[str, str], txn.fetchone())
+        collation, ctype = cast(tuple[str, str], txn.fetchone())
         return collation, ctype
 
     def check_database(
@@ -99,8 +99,8 @@ class PostgresEngine(
         allow_unsafe_locale = self.config.get("allow_unsafe_locale", False)
 
         # Are we on a supported PostgreSQL version?
-        if not allow_outdated_version and self._version < 130000:
-            raise RuntimeError("Synapse requires PostgreSQL 13 or above.")
+        if not allow_outdated_version and self._version < 140000:
+            raise RuntimeError("Synapse requires PostgreSQL 14 or above.")
 
         with db_conn.cursor() as txn:
             txn.execute("SHOW SERVER_ENCODING")
@@ -193,11 +193,6 @@ class PostgresEngine(
         """Do we support using `a = ANY(?)` and passing a list"""
         return True
 
-    @property
-    def supports_returning(self) -> bool:
-        """Do we support the `RETURNING` clause in insert/update/delete?"""
-        return True
-
     def is_deadlock(self, error: Exception) -> bool:
         if isinstance(error, psycopg2.DatabaseError):
             # https://www.postgresql.org/docs/current/static/errcodes-appendix.html
@@ -239,7 +234,7 @@ class PostgresEngine(
         return conn.set_session(autocommit=autocommit)
 
     def attempt_to_set_isolation_level(
-        self, conn: psycopg2.extensions.connection, isolation_level: Optional[int]
+        self, conn: psycopg2.extensions.connection, isolation_level: int | None
     ) -> None:
         if isolation_level is None:
             isolation_level = self.default_isolation_level

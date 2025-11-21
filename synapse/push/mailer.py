@@ -21,7 +21,7 @@
 
 import logging
 import urllib.parse
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, TypeVar
+from typing import TYPE_CHECKING, Iterable, TypeVar
 
 import bleach
 import jinja2
@@ -287,7 +287,7 @@ class Mailer:
 
         notif_events = await self.store.get_events([pa.event_id for pa in push_actions])
 
-        notifs_by_room: Dict[str, List[EmailPushAction]] = {}
+        notifs_by_room: dict[str, list[EmailPushAction]] = {}
         for pa in push_actions:
             notifs_by_room.setdefault(pa.room_id, []).append(pa)
 
@@ -317,7 +317,7 @@ class Mailer:
         # actually sort our so-called rooms_in_order list, most recent room first
         rooms_in_order.sort(key=lambda r: -(notifs_by_room[r][-1].received_ts or 0))
 
-        rooms: List[RoomVars] = []
+        rooms: list[RoomVars] = []
 
         for r in rooms_in_order:
             roomvars = await self._get_room_vars(
@@ -372,7 +372,7 @@ class Mailer:
         email_address: str,
         subject: str,
         extra_template_vars: TemplateVars,
-        unsubscribe_link: Optional[str] = None,
+        unsubscribe_link: str | None = None,
     ) -> None:
         """Send an email with the given information and template text"""
         template_vars: TemplateVars = {
@@ -417,7 +417,7 @@ class Mailer:
         room_id: str,
         user_id: str,
         notifs: Iterable[EmailPushAction],
-        notif_events: Dict[str, EventBase],
+        notif_events: dict[str, EventBase],
         room_state_ids: StateMap[str],
     ) -> RoomVars:
         """
@@ -486,7 +486,7 @@ class Mailer:
     async def _get_room_avatar(
         self,
         room_state_ids: StateMap[str],
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Retrieve the avatar url for this room---if it exists.
 
@@ -553,7 +553,7 @@ class Mailer:
 
     async def _get_message_vars(
         self, notif: EmailPushAction, event: EventBase, room_state_ids: StateMap[str]
-    ) -> Optional[MessageVars]:
+    ) -> MessageVars | None:
         """
         Generate the variables for a single event, if possible.
 
@@ -573,7 +573,7 @@ class Mailer:
         type_state_key = ("m.room.member", event.sender)
         sender_state_event_id = room_state_ids.get(type_state_key)
         if sender_state_event_id:
-            sender_state_event: Optional[EventBase] = await self.store.get_event(
+            sender_state_event: EventBase | None = await self.store.get_event(
                 sender_state_event_id
             )
         else:
@@ -585,9 +585,7 @@ class Mailer:
 
         if sender_state_event:
             sender_name = name_from_member_event(sender_state_event)
-            sender_avatar_url: Optional[str] = sender_state_event.content.get(
-                "avatar_url"
-            )
+            sender_avatar_url: str | None = sender_state_event.content.get("avatar_url")
         else:
             # No state could be found, fallback to the MXID.
             sender_name = event.sender
@@ -665,9 +663,9 @@ class Mailer:
     async def _make_summary_text_single_room(
         self,
         room_id: str,
-        notifs: List[EmailPushAction],
+        notifs: list[EmailPushAction],
         room_state_ids: StateMap[str],
-        notif_events: Dict[str, EventBase],
+        notif_events: dict[str, EventBase],
         user_id: str,
     ) -> str:
         """
@@ -781,9 +779,9 @@ class Mailer:
 
     async def _make_summary_text(
         self,
-        notifs_by_room: Dict[str, List[EmailPushAction]],
-        room_state_ids: Dict[str, StateMap[str]],
-        notif_events: Dict[str, EventBase],
+        notifs_by_room: dict[str, list[EmailPushAction]],
+        room_state_ids: dict[str, StateMap[str]],
+        notif_events: dict[str, EventBase],
         reason: EmailReason,
     ) -> str:
         """
@@ -814,9 +812,9 @@ class Mailer:
     async def _make_summary_text_from_member_events(
         self,
         room_id: str,
-        notifs: List[EmailPushAction],
+        notifs: list[EmailPushAction],
         room_state_ids: StateMap[str],
-        notif_events: Dict[str, EventBase],
+        notif_events: dict[str, EventBase],
     ) -> str:
         """
         Make a summary text for the email when only a single room has notifications.
@@ -995,7 +993,7 @@ def safe_text(raw_text: str) -> Markup:
     )
 
 
-def deduped_ordered_list(it: Iterable[T]) -> List[T]:
+def deduped_ordered_list(it: Iterable[T]) -> list[T]:
     seen = set()
     ret = []
     for item in it:

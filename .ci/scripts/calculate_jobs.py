@@ -35,49 +35,58 @@ IS_PR = os.environ["GITHUB_REF"].startswith("refs/pull/")
 
 # First calculate the various trial jobs.
 #
-# For PRs, we only run each type of test with the oldest Python version supported (which
-# is Python 3.9 right now)
+# For PRs, we only run each type of test with the oldest and newest Python
+# version that's supported. The oldest version ensures we don't accidentally
+# introduce syntax or code that's too new, and the newest ensures we don't use
+# code that's been dropped in the latest supported Python version.
 
 trial_sqlite_tests = [
     {
-        "python-version": "3.9",
+        "python-version": "3.10",
         "database": "sqlite",
         "extras": "all",
-    }
+    },
+    {
+        "python-version": "3.14",
+        "database": "sqlite",
+        "extras": "all",
+    },
 ]
 
 if not IS_PR:
+    # Otherwise, check all supported Python versions.
+    #
+    # Avoiding running all of these versions on every PR saves on CI time.
     trial_sqlite_tests.extend(
         {
             "python-version": version,
             "database": "sqlite",
             "extras": "all",
         }
-        for version in ("3.10", "3.11", "3.12", "3.13")
+        for version in ("3.11", "3.12", "3.13")
     )
 
+# Only test postgres against the earliest and latest Python versions that we
+# support in order to save on CI time.
 trial_postgres_tests = [
     {
-        "python-version": "3.9",
+        "python-version": "3.10",
         "database": "postgres",
-        "postgres-version": "13",
+        "postgres-version": "14",
         "extras": "all",
-    }
+    },
+    {
+        "python-version": "3.14",
+        "database": "postgres",
+        "postgres-version": "17",
+        "extras": "all",
+    },
 ]
 
-if not IS_PR:
-    trial_postgres_tests.append(
-        {
-            "python-version": "3.13",
-            "database": "postgres",
-            "postgres-version": "17",
-            "extras": "all",
-        }
-    )
-
+# Ensure that Synapse passes unit tests even with no extra dependencies installed.
 trial_no_extra_tests = [
     {
-        "python-version": "3.9",
+        "python-version": "3.10",
         "database": "sqlite",
         "extras": "",
     }
@@ -99,24 +108,24 @@ set_output("trial_test_matrix", test_matrix)
 
 # First calculate the various sytest jobs.
 #
-# For each type of test we only run on bullseye on PRs
+# For each type of test we only run on bookworm on PRs
 
 
 sytest_tests = [
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "bookworm",
     },
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "bookworm",
         "postgres": "postgres",
     },
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "bookworm",
         "postgres": "multi-postgres",
         "workers": "workers",
     },
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "bookworm",
         "postgres": "multi-postgres",
         "workers": "workers",
         "reactor": "asyncio",
@@ -127,11 +136,11 @@ if not IS_PR:
     sytest_tests.extend(
         [
             {
-                "sytest-tag": "bullseye",
+                "sytest-tag": "bookworm",
                 "reactor": "asyncio",
             },
             {
-                "sytest-tag": "bullseye",
+                "sytest-tag": "bookworm",
                 "postgres": "postgres",
                 "reactor": "asyncio",
             },
