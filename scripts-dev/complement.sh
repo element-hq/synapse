@@ -212,7 +212,7 @@ main() {
   
     echo "Docker images built."
   else
-    echo "Skipping docker image build as requested."
+    echo "Skipping Docker image build as requested."
   fi
 
   test_packages=(
