@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.142.0"
+version = "1.143.0rc2"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -328,7 +328,7 @@ generate-setup-file = true
 # failing on new releases. Keeping lower bounds loose here means that dependabot
 # can bump versions without having to update the content-hash in the lockfile.
 # This helps prevents merge conflicts when running a batch of dependabot updates.
-ruff = "0.14.3"
+ruff = "0.14.5"
 
 # Typechecking
 lxml-stubs = ">=0.4.0"

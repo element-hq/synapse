@@ -450,7 +450,8 @@ async def start(
     await _base.start(hs, freeze=freeze)
 
     # TODO: Feels like this should be moved somewhere else.
-    hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
+    for db in hs.get_datastores().databases:
+        db.updates.start_doing_background_updates()
 
 
 def start_reactor(

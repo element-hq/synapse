@@ -813,7 +813,8 @@ def timeout_deferred(
         # will have errbacked new_d, but in case it hasn't, errback it now.
 
         if not new_d.called:
-            new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
+            with PreserveLoggingContext():
+                new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
 
     # We don't track these calls since they are short.
     delayed_call = clock.call_later(
@@ -840,11 +841,13 @@ def timeout_deferred(
 
     def success_cb(val: _T) -> None:
         if not new_d.called:
-            new_d.callback(val)
+            with PreserveLoggingContext():
+                new_d.callback(val)
 
     def failure_cb(val: Failure) -> None:
         if not new_d.called:
-            new_d.errback(val)
+            with PreserveLoggingContext():
+                new_d.errback(val)
 
     deferred.addCallbacks(success_cb, failure_cb)
 
@@ -946,7 +949,8 @@ def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
         # propagating. we then `unpause` it once the wrapped deferred completes, to
         # propagate the exception.
         new_deferred.pause()
-        new_deferred.errback(Failure(CancelledError()))
+        with PreserveLoggingContext():
+            new_deferred.errback(Failure(CancelledError()))
 
         deferred.addBoth(lambda _: new_deferred.unpause())
 
@@ -978,15 +982,6 @@ class AwakenableSleeper:
         """Sleep for the given number of milliseconds, or return if the given
         `name` is explicitly woken up.
         """
-
-        # Create a deferred that gets called in N seconds
-        sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
-        call = self._clock.call_later(
-            delay_ms / 1000,
-            sleep_deferred.callback,
-            None,
-        )
-
         # Create a deferred that will get called if `wake` is called with
         # the same `name`.
         stream_set = self._streams.setdefault(name, set())
@@ -996,13 +991,14 @@ class AwakenableSleeper:
         try:
             # Wait for either the delay or for `wake` to be called.
             await make_deferred_yieldable(
-                defer.DeferredList(
-                    [sleep_deferred, notify_deferred],
-                    fireOnOneCallback=True,
-                    fireOnOneErrback=True,
-                    consumeErrors=True,
+                timeout_deferred(
+                    deferred=stop_cancellation(notify_deferred),
+                    timeout=delay_ms / 1000,
+                    clock=self._clock,
                 )
             )
+        except defer.TimeoutError:
+            pass
         finally:
             # Clean up the state
             curr_stream_set = self._streams.get(name)
@@ -1010,10 +1006,6 @@ class AwakenableSleeper:
                 curr_stream_set.discard(notify_deferred)
                 if len(curr_stream_set) == 0:
                     self._streams.pop(name)
-
-            # Cancel the sleep if we were woken up
-            if call.active():
-                call.cancel()
 
 
 class DeferredEvent:

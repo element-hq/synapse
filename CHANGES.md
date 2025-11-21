@@ -1,3 +1,83 @@
+# Synapse 1.143.0rc2 (2025-11-18)
+
+## Internal Changes
+
+- Fixes docker image creation in the release workflow.
+
+
+
+# Synapse 1.143.0rc1 (2025-11-18)
+
+## Dropping support for PostgreSQL 13
+
+In line with our [deprecation policy](https://github.com/element-hq/synapse/blob/develop/docs/deprecation_policy.md), we've dropped
+support for PostgreSQL 13, as it is no longer supported upstream.
+This release of Synapse requires PostgreSQL 14+.
+
+## Features
+
+- Support multiple config files in `register_new_matrix_user`. ([\#18784](https://github.com/element-hq/synapse/issues/18784))
+- Remove authentication from `POST /_matrix/client/v1/delayed_events`, and allow calling this endpoint with the update action to take (`send`/`cancel`/`restart`) in the request path instead of the body. ([\#19152](https://github.com/element-hq/synapse/issues/19152))
+
+## Bugfixes
+
+- Fixed a longstanding bug where background updates were only run on the `main` database. ([\#19181](https://github.com/element-hq/synapse/issues/19181))
+- Fixed a bug introduced in v1.142.0 preventing subpaths in MAS endpoints from working. ([\#19186](https://github.com/element-hq/synapse/issues/19186))
+- Fix the SQLite-to-PostgreSQL migration script to correctly migrate a boolean column in the `delayed_events` table. ([\#19155](https://github.com/element-hq/synapse/issues/19155))
+
+## Improved Documentation
+
+- Improve documentation around streams, particularly ID generators and adding new streams. ([\#18943](https://github.com/element-hq/synapse/issues/18943))
+
+## Deprecations and Removals
+
+- Remove support for PostgreSQL 13. ([\#19170](https://github.com/element-hq/synapse/issues/19170))
+
+## Internal Changes
+
+- Provide additional servers with federation room directory results. ([\#18970](https://github.com/element-hq/synapse/issues/18970))
+- Add a shortcut return when there are no events to purge. ([\#19093](https://github.com/element-hq/synapse/issues/19093))
+- Write union types as `X | Y` where possible, as per PEP 604, added in Python 3.10. ([\#19111](https://github.com/element-hq/synapse/issues/19111))
+- Reduce cardinality of `synapse_storage_events_persisted_events_sep_total` metric by removing `origin_entity` label. This also separates out events sent by local application services by changing the `origin_type` for such events to `application_service`. The `type` field also only tracks common event types, and anything else is bucketed under `*other*`. ([\#19133](https://github.com/element-hq/synapse/issues/19133), [\#19168](https://github.com/element-hq/synapse/issues/19168))
+- Run trial tests on Python 3.14 for PRs. ([\#19135](https://github.com/element-hq/synapse/issues/19135))
+- Update `pyproject.toml` project metadata to be compatible with standard Python packaging tooling. ([\#19137](https://github.com/element-hq/synapse/issues/19137))
+- Minor speed up of processing of inbound replication. ([\#19138](https://github.com/element-hq/synapse/issues/19138), [\#19145](https://github.com/element-hq/synapse/issues/19145), [\#19146](https://github.com/element-hq/synapse/issues/19146))
+- Ignore recent Python language refactors from git blame (`.git-blame-ignore-revs`). ([\#19150](https://github.com/element-hq/synapse/issues/19150))
+- Bump lower bounds of dependencies `parameterized` to `0.9.0` and `idna` to `3.3` as those are the first to advertise support for Python 3.10. ([\#19167](https://github.com/element-hq/synapse/issues/19167))
+- Point out which event caused the exception when checking [MSC4293](https://github.com/matrix-org/matrix-spec-proposals/pull/4293) redactions. ([\#19169](https://github.com/element-hq/synapse/issues/19169))
+- Restore printing `sentinel` for the log record `request` when no logcontext is active. ([\#19172](https://github.com/element-hq/synapse/issues/19172))
+- Add debug logs to track `Clock` utilities. ([\#19173](https://github.com/element-hq/synapse/issues/19173))
+- Remove explicit python version skips in `cibuildwheel` config as it's no longer required after [#19137](https://github.com/element-hq/synapse/pull/19137). ([\#19177](https://github.com/element-hq/synapse/issues/19177))
+- Fix potential lost logcontext when `PerDestinationQueue.shutdown(...)` is called. ([\#19178](https://github.com/element-hq/synapse/issues/19178))
+- Fix bad deferred logcontext handling across the codebase. ([\#19180](https://github.com/element-hq/synapse/issues/19180))
+
+
+
+### Updates to locked dependencies
+
+* Bump bytes from 1.10.1 to 1.11.0. ([\#19193](https://github.com/element-hq/synapse/issues/19193))
+* Bump click from 8.1.8 to 8.3.1. ([\#19195](https://github.com/element-hq/synapse/issues/19195))
+* Bump cryptography from 43.0.3 to 45.0.7. ([\#19159](https://github.com/element-hq/synapse/issues/19159))
+* Bump docker/metadata-action from 5.8.0 to 5.9.0. ([\#19161](https://github.com/element-hq/synapse/issues/19161))
+* Bump pydantic from 2.12.3 to 2.12.4. ([\#19158](https://github.com/element-hq/synapse/issues/19158))
+* Bump pyo3-log from 0.13.1 to 0.13.2. ([\#19156](https://github.com/element-hq/synapse/issues/19156))
+* Bump ruff from 0.14.3 to 0.14.5. ([\#19196](https://github.com/element-hq/synapse/issues/19196))
+* Bump sentry-sdk from 2.34.1 to 2.43.0. ([\#19157](https://github.com/element-hq/synapse/issues/19157))
+* Bump sentry-sdk from 2.43.0 to 2.44.0. ([\#19197](https://github.com/element-hq/synapse/issues/19197))
+* Bump tomli from 2.2.1 to 2.3.0. ([\#19194](https://github.com/element-hq/synapse/issues/19194))
+* Bump types-netaddr from 1.3.0.20240530 to 1.3.0.20251108. ([\#19160](https://github.com/element-hq/synapse/issues/19160))
+
+
+
+# Synapse 1.142.1 (2025-11-18)
+
+## Bugfixes
+
+- Fixed a bug introduced in v1.142.0 preventing subpaths in MAS endpoints from working. ([\#19186](https://github.com/element-hq/synapse/issues/19186))
+
+
+
+
 # Synapse 1.142.0 (2025-11-11)
 
 ## Dropped support for Python 3.9

@@ -1,1 +1,0 @@
-Let the SQLite-to-PostgreSQL migration script correctly migrate a boolean column in the `delayed_events` table.
