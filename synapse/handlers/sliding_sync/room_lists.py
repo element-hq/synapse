@@ -857,8 +857,9 @@ class SlidingSyncRoomLists:
 
                     # We only need to check for new events since any state changes
                     # will also come down as new events.
-                    rooms_that_have_updates = (
-                        self.store.get_rooms_that_might_have_updates(
+
+                    rooms_that_have_updates = await (
+                        self.store.get_rooms_that_have_updates_since_sliding_sync_table(
                             relevant_room_map.keys(), from_token.room_key
                         )
                     )
