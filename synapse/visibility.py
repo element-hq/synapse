@@ -150,11 +150,11 @@ async def filter_events_for_client(
                 [event.event_id for event in events],
             )
 
-    types = (_HISTORY_VIS_KEY, (EventTypes.Member, user_id))
+    types = [_HISTORY_VIS_KEY, (EventTypes.Member, user_id)]
     if found_call_invite:
         # We need to fetch the room's join rules state to determine
         # whether to allow call invites in public rooms.
-        types += ((EventTypes.JoinRules, ""),)
+        types.append((EventTypes.JoinRules, ""))
 
     # we exclude outliers at this point, and then handle them separately later
     event_id_to_state = await storage.state.get_state_for_events(
