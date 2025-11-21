@@ -206,8 +206,8 @@ class SynapseRequest(Request):
                 logger.warning(
                     "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
                     self.client,
-                    command,
-                    path,
+                    command.decode("ascii", errors="replace"),
+                    self.get_redacted_uri(),
                 )
                 self.write(b"")
                 self.loseConnection()
