@@ -32,14 +32,14 @@ use crate::push::utils::{glob_to_regex, GlobMatchType};
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let child_module = PyModule::new_bound(py, "acl")?;
+    let child_module = PyModule::new(py, "acl")?;
     child_module.add_class::<ServerAclEvaluator>()?;
 
     m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import acl` work.
-    py.import_bound("sys")?
+    py.import("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.acl", child_module)?;
 

@@ -20,9 +20,10 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from http import HTTPStatus
+from typing import TYPE_CHECKING
 
-from synapse.api.errors import AuthError
+from synapse.api.errors import AuthError, Codes, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_json_object_from_request
 from synapse.http.site import SynapseRequest
@@ -34,6 +35,8 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+MAX_TAG_LENGTH = 255
 
 
 class TagListServlet(RestServlet):
@@ -53,7 +56,7 @@ class TagListServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot get tags for other users.")
@@ -78,13 +81,30 @@ class TagServlet(RestServlet):
         super().__init__()
         self.auth = hs.get_auth()
         self.handler = hs.get_account_data_handler()
+        self.room_member_handler = hs.get_room_member_handler()
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, room_id: str, tag: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot add tags for other users.")
+
+        # check if the tag exceeds the length allowed by the matrix-specification
+        # as defined in: https://spec.matrix.org/v1.15/client-server-api/#events-14
+        if len(tag.encode("utf-8")) > MAX_TAG_LENGTH:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "tag parameter's length is over 255 bytes",
+                errcode=Codes.INVALID_PARAM,
+            )
+
+        # Check if the user has any membership in the room and raise error if not.
+        # Although it's not harmful for users to tag random rooms, it's just superfluous
+        # data we don't need to track or allow.
+        await self.room_member_handler.check_for_any_membership_in_room(
+            user_id=user_id, room_id=room_id
+        )
 
         body = parse_json_object_from_request(request)
 
@@ -94,7 +114,7 @@ class TagServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str, room_id: str, tag: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot add tags for other users.")

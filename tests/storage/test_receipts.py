@@ -19,14 +19,14 @@
 #
 #
 
-from typing import Collection, Optional
+from typing import Collection
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import ReceiptTypes
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.test_utils.event_injection import create_event
 from tests.unittest import HomeserverTestCase
@@ -101,8 +101,8 @@ class ReceiptTestCase(HomeserverTestCase):
         )
 
     def get_last_unthreaded_receipt(
-        self, receipt_types: Collection[str], room_id: Optional[str] = None
-    ) -> Optional[str]:
+        self, receipt_types: Collection[str], room_id: str | None = None
+    ) -> str | None:
         """
         Fetch the event ID for the latest unthreaded receipt in the test room for the test user.
 

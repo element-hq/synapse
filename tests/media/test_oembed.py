@@ -20,15 +20,16 @@
 #
 
 import json
+from typing import Any
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.media.oembed import OEmbedProvider, OEmbedResult
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -52,6 +53,7 @@ class OEmbedTests(HomeserverTestCase):
 
     def test_version(self) -> None:
         """Accept versions that are similar to 1.0 as a string or int (or missing)."""
+        version: Any
         for version in ("1.0", 1.0, 1):
             result = self.parse_response({"version": version})
             # An empty Open Graph response is an error, ensure the URL is included.
@@ -69,6 +71,7 @@ class OEmbedTests(HomeserverTestCase):
 
     def test_cache_age(self) -> None:
         """Ensure a cache-age is parsed properly."""
+        cache_age: Any
         # Correct-ish cache ages are allowed.
         for cache_age in ("1", 1.0, 1):
             result = self.parse_response({"cache_age": cache_age})

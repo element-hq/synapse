@@ -1,0 +1,19 @@
+--
+-- This file is licensed under the Affero General Public License (AGPL) version 3.
+--
+-- Copyright (C) 2024 New Vector, Ltd
+--
+-- This program is free software: you can redistribute it and/or modify
+-- it under the terms of the GNU Affero General Public License as
+-- published by the Free Software Foundation, either version 3 of the
+-- License, or (at your option) any later version.
+--
+-- See the GNU Affero General Public License for more details:
+-- <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+-- Until Synapse 1.119, Synapse used to issue one-time-keys in a random order, leading to the possibility
+-- that it could still have old OTKs that the client has dropped.
+--
+-- We create a scheduled task which will drop old OTKs, to flush them out.
+INSERT INTO scheduled_tasks(id, action, status, timestamp)
+    VALUES ('delete_old_otks_task', 'delete_old_otks', 'scheduled', extract(epoch from current_timestamp) * 1000);

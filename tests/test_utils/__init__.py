@@ -23,11 +23,12 @@
 Utilities for running the unit tests
 """
 
+import base64
 import json
 import sys
 import warnings
 from binascii import unhexlify
-from typing import TYPE_CHECKING, Awaitable, Callable, Tuple, TypeVar
+from typing import TYPE_CHECKING, Awaitable, Callable, TypeVar
 
 import attr
 import zope.interface
@@ -101,7 +102,7 @@ class FakeResponse:  # type: ignore[misc]
     attribute, and didn't support deliverBody until recently.
     """
 
-    version: Tuple[bytes, int, int] = (b"HTTP", 1, 1)
+    version: tuple[bytes, int, int] = (b"HTTP", 1, 1)
 
     # HTTP response code
     code: int = 200
@@ -138,3 +139,23 @@ SMALL_PNG = unhexlify(
     b"0000001f15c4890000000a49444154789c63000100000500010d"
     b"0a2db40000000049454e44ae426082"
 )
+# The SHA256 hexdigest for the above bytes.
+SMALL_PNG_SHA256 = "ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a"
+
+# A small CMYK-encoded JPEG image used in some tests.
+#
+# Generated with:
+# img = PIL.Image.new('CMYK', (1, 1), (0, 0, 0, 0))
+# img.save('minimal_cmyk.jpg', 'JPEG')
+#
+# Resolution: 1x1, MIME type: image/jpeg, Extension: jpeg, Size: 4 KiB
+SMALL_CMYK_JPEG = base64.b64decode("""
+/9j/7gAOQWRvYmUAZAAAAAAA/9sAQwAIBgYHBgUIBwcHCQkICgwUDQwLCww
+ZEhMPFB0aHx4dGhwcICQuJyAiLCMcHCg3KSwwMTQ0NB8nOT04MjwuMzQy/8
+AAFAgAAQABBEMRAE0RAFkRAEsRAP/EAB8AAAEFAQEBAQEBAAAAAAAAAAABA
+gMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNR
+YQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkN
+ERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlp
+eYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5
+ebn6Onq8fLz9PX29/j5+v/aAA4EQwBNAFkASwAAPwD3+vf69/r3+v/Z
+""")

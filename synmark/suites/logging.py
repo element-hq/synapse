@@ -22,7 +22,6 @@ import logging
 import logging.config
 import warnings
 from io import StringIO
-from typing import Optional
 from unittest.mock import Mock
 
 from pyperf import perf_counter
@@ -33,11 +32,11 @@ from twisted.internet.protocol import ServerFactory
 from twisted.logger import LogBeginner, LogPublisher
 from twisted.protocols.basic import LineOnlyReceiver
 
-from synapse.config.logger import _setup_stdlib_logging
+from synapse.config.logger import _setup_stdlib_logging, one_time_logging_setup
 from synapse.logging import RemoteHandler
 from synapse.synapse_rust import reset_logging_config
 from synapse.types import ISynapseReactor
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 
 class LineCounter(LineOnlyReceiver):
@@ -58,7 +57,7 @@ class LineCounter(LineOnlyReceiver):
 class Factory(ServerFactory):
     protocol = LineCounter
     wait_for: int
-    on_done: Optional[Deferred]
+    on_done: Deferred | None
 
 
 async def main(reactor: ISynapseReactor, loops: int) -> float:
@@ -86,7 +85,9 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
     hs_config = Config()
 
     # To be able to sleep.
-    clock = Clock(reactor)
+    # Ignore linter error here since we are running outside of the context of a
+    # Synapse `HomeServer`.
+    clock = Clock(reactor, server_name=hs_config.server.server_name)  # type: ignore[multiple-internal-clocks]
 
     errors = StringIO()
     publisher = LogPublisher()
@@ -113,10 +114,10 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
     }
 
     logger = logging.getLogger("synapse")
+    one_time_logging_setup(logBeginner=beginner)
     _setup_stdlib_logging(
         hs_config,  # type: ignore[arg-type]
         None,
-        logBeginner=beginner,
     )
 
     # Force a new logging config without having to load it from a file.

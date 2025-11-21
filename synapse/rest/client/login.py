@@ -26,14 +26,8 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Union,
+    TypedDict,
 )
-
-from typing_extensions import TypedDict
 
 from synapse.api.constants import ApprovalNoticeMedium
 from synapse.api.errors import (
@@ -43,6 +37,7 @@ from synapse.api.errors import (
     NotApprovedError,
     SynapseError,
     UserDeactivatedError,
+    UserLockedError,
 )
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.api.urls import CLIENT_API_PREFIX
@@ -70,12 +65,12 @@ logger = logging.getLogger(__name__)
 
 class LoginResponse(TypedDict, total=False):
     user_id: str
-    access_token: Optional[str]
+    access_token: str | None
     home_server: str
-    expires_in_ms: Optional[int]
-    refresh_token: Optional[str]
-    device_id: Optional[str]
-    well_known: Optional[Dict[str, Any]]
+    expires_in_ms: int | None
+    refresh_token: str | None
+    device_id: str | None
+    well_known: dict[str, Any] | None
 
 
 class LoginRestServlet(RestServlet):
@@ -142,8 +137,8 @@ class LoginRestServlet(RestServlet):
         # counters are initialised for the auth_provider_ids.
         _load_sso_handlers(hs)
 
-    def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        flows: List[JsonDict] = []
+    def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        flows: list[JsonDict] = []
         if self.jwt_enabled:
             flows.append({"type": LoginRestServlet.JWT_TYPE})
 
@@ -178,7 +173,7 @@ class LoginRestServlet(RestServlet):
         # fall back to the fallback API if they don't understand one of the
         # login flow types returned.
         if support_login_token_flow:
-            tokenTypeFlow: Dict[str, Any] = {"type": LoginRestServlet.TOKEN_TYPE}
+            tokenTypeFlow: dict[str, Any] = {"type": LoginRestServlet.TOKEN_TYPE}
             # If the login token flow is enabled advertise the get_login_token flag.
             if self._get_login_token_enabled:
                 tokenTypeFlow["get_login_token"] = True
@@ -190,7 +185,7 @@ class LoginRestServlet(RestServlet):
 
         return 200, {"flows": flows}
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, LoginResponse]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, LoginResponse]:
         login_submission = parse_json_object_from_request(request)
 
         # Check to see if the client requested a refresh token.
@@ -214,6 +209,13 @@ class LoginRestServlet(RestServlet):
                 if appservice is None:
                     raise InvalidClientTokenError(
                         "This login method is only valid for application services"
+                    )
+
+                if appservice.msc4190_device_management:
+                    raise SynapseError(
+                        400,
+                        "This appservice has MSC4190 enabled, so appservice login cannot be used.",
+                        errcode=Codes.APPSERVICE_LOGIN_UNSUPPORTED,
                     )
 
                 if appservice.is_rate_limited():
@@ -314,7 +316,9 @@ class LoginRestServlet(RestServlet):
             should_issue_refresh_token=should_issue_refresh_token,
             # The user represented by an appservice's configured sender_localpart
             # is not actually created in Synapse.
-            should_check_deactivated=qualified_user_id != appservice.sender,
+            should_check_deactivated_or_locked=(
+                qualified_user_id != appservice.sender.to_string()
+            ),
             request_info=request_info,
         )
 
@@ -361,13 +365,14 @@ class LoginRestServlet(RestServlet):
         self,
         user_id: str,
         login_submission: JsonDict,
-        callback: Optional[Callable[[LoginResponse], Awaitable[None]]] = None,
+        callback: Callable[[LoginResponse], Awaitable[None]] | None = None,
         create_non_existent_users: bool = False,
+        default_display_name: str | None = None,
         ratelimit: bool = True,
-        auth_provider_id: Optional[str] = None,
+        auth_provider_id: str | None = None,
         should_issue_refresh_token: bool = False,
-        auth_provider_session_id: Optional[str] = None,
-        should_check_deactivated: bool = True,
+        auth_provider_session_id: str | None = None,
+        should_check_deactivated_or_locked: bool = True,
         *,
         request_info: RequestInfo,
     ) -> LoginResponse:
@@ -389,8 +394,8 @@ class LoginRestServlet(RestServlet):
             should_issue_refresh_token: True if this login should issue
                 a refresh token alongside the access token.
             auth_provider_session_id: The session ID got during login from the SSO IdP.
-            should_check_deactivated: True if the user should be checked for
-                deactivation status before logging in.
+            should_check_deactivated_or_locked: True if the user should be checked for
+                deactivation or locked status before logging in.
 
                 This exists purely for appservice's configured sender_localpart
                 which doesn't have an associated user in the database.
@@ -410,15 +415,19 @@ class LoginRestServlet(RestServlet):
             canonical_uid = await self.auth_handler.check_user_exists(user_id)
             if not canonical_uid:
                 canonical_uid = await self.registration_handler.register_user(
-                    localpart=UserID.from_string(user_id).localpart
+                    localpart=UserID.from_string(user_id).localpart,
+                    default_display_name=default_display_name,
                 )
             user_id = canonical_uid
 
-        # If the account has been deactivated, do not proceed with the login.
-        if should_check_deactivated:
+        # If the account has been deactivated or locked, do not proceed with the login.
+        if should_check_deactivated_or_locked:
             deactivated = await self._main_store.get_user_deactivated_status(user_id)
             if deactivated:
                 raise UserDeactivatedError("This account has been deactivated")
+            locked = await self._main_store.get_user_locked_status(user_id)
+            if locked:
+                raise UserLockedError()
 
         device_id = login_submission.get("device_id")
 
@@ -546,11 +555,14 @@ class LoginRestServlet(RestServlet):
         Returns:
             The body of the JSON response.
         """
-        user_id = self.hs.get_jwt_handler().validate_login(login_submission)
+        user_id, default_display_name = self.hs.get_jwt_handler().validate_login(
+            login_submission
+        )
         return await self._complete_login(
             user_id,
             login_submission,
             create_non_existent_users=True,
+            default_display_name=default_display_name,
             should_issue_refresh_token=should_issue_refresh_token,
             request_info=request_info,
         )
@@ -585,7 +597,7 @@ class RefreshTokenServlet(RestServlet):
         )
         self.refresh_token_lifetime = hs.config.registration.refresh_token_lifetime
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         refresh_submission = parse_json_object_from_request(request)
 
         assert_params_in_dict(refresh_submission, ["refresh_token"])
@@ -609,7 +621,7 @@ class RefreshTokenServlet(RestServlet):
             token, access_valid_until_ms, refresh_valid_until_ms
         )
 
-        response: Dict[str, Union[str, int]] = {
+        response: dict[str, str | int] = {
             "access_token": access_token,
             "refresh_token": refresh_token,
         }
@@ -638,9 +650,7 @@ class SsoRedirectServlet(RestServlet):
         self._sso_handler = hs.get_sso_handler()
         self._public_baseurl = hs.config.server.public_baseurl
 
-    async def on_GET(
-        self, request: SynapseRequest, idp_id: Optional[str] = None
-    ) -> None:
+    async def on_GET(self, request: SynapseRequest, idp_id: str | None = None) -> None:
         if not self._public_baseurl:
             raise SynapseError(400, "SSO requires a valid public_baseurl")
 
@@ -667,7 +677,7 @@ class SsoRedirectServlet(RestServlet):
             finish_request(request)
             return
 
-        args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+        args: dict[bytes, list[bytes]] = request.args  # type: ignore
         client_redirect_url = parse_bytes_from_args(args, "redirectUrl", required=True)
         sso_url = await self._sso_handler.handle_redirect_request(
             request,
@@ -705,7 +715,7 @@ class CasTicketServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
         return
 
     LoginRestServlet(hs).register(http_server)

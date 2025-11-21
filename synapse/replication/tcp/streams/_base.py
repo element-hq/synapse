@@ -26,9 +26,6 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    List,
-    Optional,
-    Tuple,
     TypeVar,
 )
 
@@ -56,7 +53,7 @@ Token = int
 # parsing with Stream.parse_row (which turns it into a `ROW_TYPE`). Normally it's
 # just a row from a database query, though this is dependent on the stream in question.
 #
-StreamRow = TypeVar("StreamRow", bound=Tuple)
+StreamRow = TypeVar("StreamRow", bound=tuple)
 
 # The type returned by the update_function of a stream, as well as get_updates(),
 # get_updates_since, etc.
@@ -66,7 +63,7 @@ StreamRow = TypeVar("StreamRow", bound=Tuple)
 #   * `new_last_token` is the new position in stream.
 #   * `limited` is whether there are more updates to fetch.
 #
-StreamUpdateResult = Tuple[List[Tuple[Token, StreamRow]], Token, bool]
+StreamUpdateResult = tuple[list[tuple[Token, StreamRow]], Token, bool]
 
 # The type of an update_function for a stream
 #
@@ -287,9 +284,9 @@ class BackfillStream(Stream):
         event_id: str
         room_id: str
         type: str
-        state_key: Optional[str]
-        redacts: Optional[str]
-        relates_to: Optional[str]
+        state_key: str | None
+        redacts: str | None
+        relates_to: str | None
 
     NAME = "backfill"
     ROW_TYPE = BackfillStreamRow
@@ -400,7 +397,7 @@ class TypingStream(Stream):
         room_id: str
 
         # All the users that are 'typing' right now in the specified room.
-        user_ids: List[str]
+        user_ids: list[str]
 
     NAME = "typing"
     ROW_TYPE = TypingStreamRow
@@ -410,7 +407,7 @@ class TypingStream(Stream):
             # On the writer, query the typing handler
             typing_writer_handler = hs.get_typing_writer_handler()
             update_function: Callable[
-                [str, int, int, int], Awaitable[Tuple[List[Tuple[int, Any]], int, bool]]
+                [str, int, int, int], Awaitable[tuple[list[tuple[int, Any]], int, bool]]
             ] = typing_writer_handler.get_all_typing_updates
             self.current_token_function = typing_writer_handler.get_current_token
         else:
@@ -437,7 +434,7 @@ class ReceiptsStream(_StreamFromIdGen):
         receipt_type: str
         user_id: str
         event_id: str
-        thread_id: Optional[str]
+        thread_id: str | None
         data: dict
 
     NAME = "receipts"
@@ -512,7 +509,7 @@ class CachesStream(Stream):
         """
 
         cache_func: str
-        keys: Optional[List[Any]]
+        keys: list[Any] | None
         invalidation_ts: int
 
     NAME = "caches"
@@ -641,7 +638,7 @@ class AccountDataStream(_StreamFromIdGen):
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class AccountDataStreamRow:
         user_id: str
-        room_id: Optional[str]
+        room_id: str | None
         data_type: str
 
     NAME = "account_data"
@@ -723,3 +720,46 @@ class AccountDataStream(_StreamFromIdGen):
             heapq.merge(room_rows, global_rows, tag_rows, key=lambda row: row[0])
         )
         return updates, to_token, limited
+
+
+class ThreadSubscriptionsStream(_StreamFromIdGen):
+    """A thread subscription was changed."""
+
+    @attr.s(slots=True, auto_attribs=True)
+    class ThreadSubscriptionsStreamRow:
+        """Stream to inform workers about changes to thread subscriptions."""
+
+        user_id: str
+        room_id: str
+        event_id: str  # The event ID of the thread root
+
+    NAME = "thread_subscriptions"
+    ROW_TYPE = ThreadSubscriptionsStreamRow
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        super().__init__(
+            hs.get_instance_name(),
+            self._update_function,
+            self.store._thread_subscriptions_id_gen,
+        )
+
+    async def _update_function(
+        self, instance_name: str, from_token: int, to_token: int, limit: int
+    ) -> StreamUpdateResult:
+        updates = await self.store.get_updated_thread_subscriptions(
+            from_id=from_token, to_id=to_token, limit=limit
+        )
+        rows = [
+            (
+                stream_id,
+                # These are the args to `ThreadSubscriptionsStreamRow`
+                (user_id, room_id, event_id),
+            )
+            for stream_id, user_id, room_id, event_id in updates
+        ]
+
+        if not rows:
+            return [], to_token, False
+
+        return rows, rows[-1][0], len(updates) == limit

@@ -79,17 +79,17 @@ phonenumbers = [
 We can see this pinned version inside the docker image for that release:
 
 ```
-$ docker pull vectorim/synapse:v1.97.0
+$ docker pull matrixdotorg/synapse:latest
 ...
-$ docker run --entrypoint pip vectorim/synapse:v1.97.0 show phonenumbers
+$ docker run --entrypoint pip matrixdotorg/synapse:latest show phonenumbers
 Name: phonenumbers
-Version: 8.12.44
+Version: 9.0.15
 Summary: Python version of Google's common library for parsing, formatting, storing and validating international phone numbers.
 Home-page: https://github.com/daviddrysdale/python-phonenumbers
 Author: David Drysdale
 Author-email: dmd@lurklurk.org
 License: Apache License 2.0
-Location: /usr/local/lib/python3.9/site-packages
+Location: /usr/local/lib/python3.12/site-packages
 Requires:
 Required-by: matrix-synapse
 ```
@@ -150,6 +150,25 @@ $ poetry shell
 $ poetry install --extras all
 ```
 
+If you want to go even further and remove the Poetry caches:
+
+```shell
+# Find your Poetry cache directory
+# Docs: https://github.com/python-poetry/poetry/blob/main/docs/configuration.md#cache-directory
+$ poetry config cache-dir
+
+# Remove packages from all cached repositories
+$ poetry cache clear --all .
+
+# Go completely nuclear and clear out everything Poetry cache related
+# including the wheel artifacts which is not covered by the above command
+# (see https://github.com/python-poetry/poetry/issues/10304)
+#
+# This is necessary in order to rebuild or fetch new wheels.
+$ rm -rf $(poetry config cache-dir)
+```
+
+
 ## ...run a command in the `poetry` virtualenv?
 
 Use `poetry run cmd args` when you need the python virtualenv context.
@@ -187,7 +206,7 @@ useful.
 ## ...add a new dependency?
 
 Either:
-- manually update `pyproject.toml`; then `poetry lock --no-update`; or else
+- manually update `pyproject.toml`; then `poetry lock`; or else
 - `poetry add packagename`. See `poetry add --help`; note the `--dev`,
   `--extras` and `--optional` flags in particular.
 
@@ -202,12 +221,12 @@ poetry remove packagename
 ```
 
 ought to do the trick. Alternatively, manually update `pyproject.toml` and
-`poetry lock --no-update`. Include the updated `pyproject.toml` and `poetry.lock`
+`poetry lock`. Include the updated `pyproject.toml` and `poetry.lock`
 files in your commit.
 
 ## ...update the version range for an existing dependency?
 
-Best done by manually editing `pyproject.toml`, then `poetry lock --no-update`.
+Best done by manually editing `pyproject.toml`, then `poetry lock`.
 Include the updated `pyproject.toml` and `poetry.lock` in your commit.
 
 ## ...update a dependency in the locked environment?
@@ -233,7 +252,7 @@ poetry add packagename==1.2.3
 
 # Get poetry to recompute the content-hash of pyproject.toml without changing
 # the locked package versions.
-poetry lock --no-update
+poetry lock
 ```
 
 Either way, include the updated `poetry.lock` file in your commit.

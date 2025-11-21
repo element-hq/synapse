@@ -18,18 +18,17 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -96,7 +95,7 @@ class FederationTestCase(unittest.HomeserverTestCase):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
-        # unkown order_by
+        # unknown order_by
         channel = self.make_request(
             "GET",
             self.url + "?order_by=bar",
@@ -272,9 +271,9 @@ class FederationTestCase(unittest.HomeserverTestCase):
         """Testing order list with parameter `order_by`"""
 
         def _order_test(
-            expected_destination_list: List[str],
-            order_by: Optional[str],
-            dir: Optional[str] = None,
+            expected_destination_list: list[str],
+            order_by: str | None,
+            dir: str | None = None,
         ) -> None:
             """Request the list of destinations in a certain order.
             Assert that order is what we expect
@@ -366,7 +365,7 @@ class FederationTestCase(unittest.HomeserverTestCase):
         """Test that searching for a destination works correctly"""
 
         def _search_test(
-            expected_destination: Optional[str],
+            expected_destination: str | None,
             search_term: str,
         ) -> None:
             """Search for a destination and check that the returned destinationis a match
@@ -484,10 +483,10 @@ class FederationTestCase(unittest.HomeserverTestCase):
     def _create_destination(
         self,
         destination: str,
-        failure_ts: Optional[int] = None,
+        failure_ts: int | None = None,
         retry_last_ts: int = 0,
         retry_interval: int = 0,
-        last_successful_stream_ordering: Optional[int] = None,
+        last_successful_stream_ordering: int | None = None,
     ) -> None:
         """Create one specific destination
 
@@ -521,7 +520,7 @@ class FederationTestCase(unittest.HomeserverTestCase):
             dest = f"sub{i}.example.com"
             self._create_destination(dest, 50, 50, 50, 100)
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that the expected destination attributes are present in content
 
         Args:
@@ -819,8 +818,8 @@ class DestinationMembershipTestCase(unittest.HomeserverTestCase):
     def _create_destination_rooms(
         self,
         number_rooms: int,
-        destination: Optional[str] = None,
-    ) -> List[str]:
+        destination: str | None = None,
+    ) -> list[str]:
         """
         Create the given number of rooms. The given `destination` homeserver will
         be recorded as a participant.
@@ -853,7 +852,7 @@ class DestinationMembershipTestCase(unittest.HomeserverTestCase):
 
         return room_ids
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that the expected room attributes are present in content
 
         Args:

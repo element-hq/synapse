@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -48,7 +48,7 @@ class ReplicationRemovePusherRestServlet(ReplicationEndpoint):
 
     """
 
-    NAME = "add_user_account_data"
+    NAME = "remove_pusher"
     PATH_ARGS = ("user_id",)
     CACHE = False
 
@@ -68,7 +68,7 @@ class ReplicationRemovePusherRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         app_id = content["app_id"]
         pushkey = content["pushkey"]
 
@@ -110,7 +110,7 @@ class ReplicationCopyPusherRestServlet(ReplicationEndpoint):
         user_id: str,
         old_room_id: str,
         new_room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self._store.copy_push_rules_from_room_to_room_for_user(
             old_room_id, new_room_id, user_id
         )
@@ -118,6 +118,39 @@ class ReplicationCopyPusherRestServlet(ReplicationEndpoint):
         return 200, {}
 
 
+class ReplicationDeleteAllPushersForUserRestServlet(ReplicationEndpoint):
+    """Deletes all pushers for a user.
+
+    Request format:
+
+        POST /_synapse/replication/delete_all_pushers_for_user/:user_id
+
+        {}
+
+    """
+
+    NAME = "delete_all_pushers_for_user"
+    PATH_ARGS = ("user_id",)
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self._store = hs.get_datastores().main
+
+    @staticmethod
+    async def _serialize_payload(user_id: str) -> JsonDict:  # type: ignore[override]
+        return {}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, user_id: str
+    ) -> tuple[int, JsonDict]:
+        await self._store.delete_all_pushers_for_user(user_id)
+
+        return 200, {}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationRemovePusherRestServlet(hs).register(http_server)
     ReplicationCopyPusherRestServlet(hs).register(http_server)
+    ReplicationDeleteAllPushersForUserRestServlet(hs).register(http_server)

@@ -29,12 +29,7 @@ from typing import (
     TYPE_CHECKING,
     Awaitable,
     BinaryIO,
-    Dict,
     Generator,
-    List,
-    Optional,
-    Tuple,
-    Type,
 )
 
 import attr
@@ -50,12 +45,13 @@ from synapse.api.errors import Codes, cs_error
 from synapse.http.server import finish_request, respond_with_json
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import (
+    PreserveLoggingContext,
     defer_to_threadpool,
     make_deferred_yieldable,
     run_in_background,
 )
-from synapse.util import Clock
 from synapse.util.async_helpers import DeferredEvent
+from synapse.util.clock import Clock
 from synapse.util.stringutils import is_ascii
 
 if TYPE_CHECKING:
@@ -118,6 +114,9 @@ DEFAULT_MAX_TIMEOUT_MS = 20_000
 # Maximum allowed timeout_ms for download and thumbnail requests
 MAXIMUM_ALLOWED_MAX_TIMEOUT_MS = 60_000
 
+# The ETag header value to use for immutable media. This can be anything.
+_IMMUTABLE_ETAG = "1"
+
 
 def respond_404(request: SynapseRequest) -> None:
     assert request.path is not None
@@ -134,8 +133,8 @@ async def respond_with_file(
     request: SynapseRequest,
     media_type: str,
     file_path: str,
-    file_size: Optional[int] = None,
-    upload_name: Optional[str] = None,
+    file_size: int | None = None,
+    upload_name: str | None = None,
 ) -> None:
     logger.debug("Responding with %r", file_path)
 
@@ -157,8 +156,8 @@ async def respond_with_file(
 def add_file_headers(
     request: Request,
     media_type: str,
-    file_size: Optional[int],
-    upload_name: Optional[str],
+    file_size: int | None,
+    upload_name: str | None,
 ) -> None:
     """Adds the correct response headers in preparation for responding with the
     media.
@@ -224,12 +223,7 @@ def add_file_headers(
 
     request.setHeader(b"Content-Disposition", disposition.encode("ascii"))
 
-    # cache for at least a day.
-    # XXX: we might want to turn this off for data we don't want to
-    # recommend caching as it's sensitive or private - or at least
-    # select private. don't bother setting Expires as all our
-    # clients are smart enough to be happy with Cache-Control
-    request.setHeader(b"Cache-Control", b"public,max-age=86400,s-maxage=86400")
+    _add_cache_headers(request)
 
     if file_size is not None:
         request.setHeader(b"Content-Length", b"%d" % (file_size,))
@@ -238,6 +232,26 @@ def add_file_headers(
     # should help to prevent things in the media repo from showing up in web
     # search results.
     request.setHeader(b"X-Robots-Tag", "noindex, nofollow, noarchive, noimageindex")
+
+
+def _add_cache_headers(request: Request) -> None:
+    """Adds the appropriate cache headers to the response"""
+
+    # Cache on the client for at least a day.
+    #
+    # We set this to "public,s-maxage=0,proxy-revalidate" to allow CDNs to cache
+    # the media, so long as they "revalidate" the media on every request. By
+    # revalidate, we mean send the request to Synapse with a `If-None-Match`
+    # header, to which Synapse can either respond with a 304 if the user is
+    # authenticated/authorized, or a 401/403 if they're not.
+    request.setHeader(
+        b"Cache-Control", b"public,max-age=86400,s-maxage=0,proxy-revalidate"
+    )
+
+    # Set an ETag header to allow requesters to use it in requests to check if
+    # the cache is still valid. Since media is immutable (though may be
+    # deleted), we just set this to a constant.
+    request.setHeader(b"ETag", _IMMUTABLE_ETAG)
 
 
 # separators as defined in RFC2616. SP and HT are handled separately.
@@ -287,10 +301,10 @@ def _can_encode_filename_as_token(x: str) -> bool:
 async def respond_with_multipart_responder(
     clock: Clock,
     request: SynapseRequest,
-    responder: "Optional[Responder]",
+    responder: "Responder | None",
     media_type: str,
-    media_length: Optional[int],
-    upload_name: Optional[str],
+    media_length: int | None,
+    upload_name: str | None,
 ) -> None:
     """
     Responds to requests originating from the federation media `/download` endpoint by
@@ -336,13 +350,15 @@ async def respond_with_multipart_responder(
 
         from synapse.media.media_storage import MultipartFileConsumer
 
+        _add_cache_headers(request)
+
         # note that currently the json_object is just {}, this will change when linked media
         # is implemented
         multipart_consumer = MultipartFileConsumer(
             clock,
             request,
             media_type,
-            {},
+            {},  # Note: if we change this we need to change the returned ETag.
             disposition,
             media_length,
         )
@@ -360,12 +376,13 @@ async def respond_with_multipart_responder(
 
         try:
             await responder.write_to_consumer(multipart_consumer)
+        except ConsumerRequestedStopError as e:
+            logger.debug("Failed to write to consumer: %s %s", type(e), e)
+            # Unregister the producer, if it has one, so Twisted doesn't complain
+            if request.producer:
+                request.unregisterProducer()
         except Exception as e:
-            # The majority of the time this will be due to the client having gone
-            # away. Unfortunately, Twisted simply throws a generic exception at us
-            # in that case.
             logger.warning("Failed to write to consumer: %s %s", type(e), e)
-
             # Unregister the producer, if it has one, so Twisted doesn't complain
             if request.producer:
                 request.unregisterProducer()
@@ -375,10 +392,10 @@ async def respond_with_multipart_responder(
 
 async def respond_with_responder(
     request: SynapseRequest,
-    responder: "Optional[Responder]",
+    responder: "Responder | None",
     media_type: str,
-    file_size: Optional[int],
-    upload_name: Optional[str] = None,
+    file_size: int | None,
+    upload_name: str | None = None,
 ) -> None:
     """Responds to the request with given responder. If responder is None then
     returns 404.
@@ -406,17 +423,58 @@ async def respond_with_responder(
         add_file_headers(request, media_type, file_size, upload_name)
         try:
             await responder.write_to_consumer(request)
+        except ConsumerRequestedStopError as e:
+            logger.debug("Failed to write to consumer: %s %s", type(e), e)
+            # Unregister the producer, if it has one, so Twisted doesn't complain
+            if request.producer:
+                request.unregisterProducer()
         except Exception as e:
-            # The majority of the time this will be due to the client having gone
-            # away. Unfortunately, Twisted simply throws a generic exception at us
-            # in that case.
             logger.warning("Failed to write to consumer: %s %s", type(e), e)
-
             # Unregister the producer, if it has one, so Twisted doesn't complain
             if request.producer:
                 request.unregisterProducer()
 
     finish_request(request)
+
+
+def respond_with_304(request: SynapseRequest) -> None:
+    request.setResponseCode(304)
+
+    # could alternatively use request.notifyFinish() and flip a flag when
+    # the Deferred fires, but since the flag is RIGHT THERE it seems like
+    # a waste.
+    if request._disconnected:
+        logger.warning(
+            "Not sending response to request %s, already disconnected.", request
+        )
+        return None
+
+    _add_cache_headers(request)
+
+    request.finish()
+
+
+def check_for_cached_entry_and_respond(request: SynapseRequest) -> bool:
+    """Check if the request has a conditional header that allows us to return a
+    304 Not Modified response, and if it does, return a 304 response.
+
+    This handles clients and intermediary proxies caching media.
+    This method assumes that the user has already been
+    authorised to request the media.
+
+    Returns True if we have responded."""
+
+    # We've checked the user has access to the media, so we now check if it
+    # is a "conditional request" and we can just return a `304 Not Modified`
+    # response. Since media is immutable (though may be deleted), we just
+    # check this is the expected constant.
+    etag = request.getHeader("If-None-Match")
+    if etag == _IMMUTABLE_ETAG:
+        # Return a `304 Not modified`.
+        respond_with_304(request)
+        return True
+
+    return False
 
 
 class Responder(ABC):
@@ -443,9 +501,9 @@ class Responder(ABC):
 
     def __exit__(  # noqa: B027
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         pass
 
@@ -468,47 +526,47 @@ class FileInfo:
     """Details about a requested/uploaded file."""
 
     # The server name where the media originated from, or None if local.
-    server_name: Optional[str]
+    server_name: str | None
     # The local ID of the file. For local files this is the same as the media_id
     file_id: str
     # If the file is for the url preview cache
     url_cache: bool = False
     # Whether the file is a thumbnail or not.
-    thumbnail: Optional[ThumbnailInfo] = None
+    thumbnail: ThumbnailInfo | None = None
 
     # The below properties exist to maintain compatibility with third-party modules.
     @property
-    def thumbnail_width(self) -> Optional[int]:
+    def thumbnail_width(self) -> int | None:
         if not self.thumbnail:
             return None
         return self.thumbnail.width
 
     @property
-    def thumbnail_height(self) -> Optional[int]:
+    def thumbnail_height(self) -> int | None:
         if not self.thumbnail:
             return None
         return self.thumbnail.height
 
     @property
-    def thumbnail_method(self) -> Optional[str]:
+    def thumbnail_method(self) -> str | None:
         if not self.thumbnail:
             return None
         return self.thumbnail.method
 
     @property
-    def thumbnail_type(self) -> Optional[str]:
+    def thumbnail_type(self) -> str | None:
         if not self.thumbnail:
             return None
         return self.thumbnail.type
 
     @property
-    def thumbnail_length(self) -> Optional[int]:
+    def thumbnail_length(self) -> int | None:
         if not self.thumbnail:
             return None
         return self.thumbnail.length
 
 
-def get_filename_from_headers(headers: Dict[bytes, List[bytes]]) -> Optional[str]:
+def get_filename_from_headers(headers: dict[bytes, list[bytes]]) -> str | None:
     """
     Get the filename of the downloaded file by inspecting the
     Content-Disposition HTTP header.
@@ -556,7 +614,7 @@ def get_filename_from_headers(headers: Dict[bytes, List[bytes]]) -> Optional[str
     return upload_name
 
 
-def _parse_header(line: bytes) -> Tuple[bytes, Dict[bytes, bytes]]:
+def _parse_header(line: bytes) -> tuple[bytes, dict[bytes, bytes]]:
     """Parse a Content-type like header.
 
     Cargo-culted from `cgi`, but works on bytes rather than strings.
@@ -614,6 +672,10 @@ def _parseparam(s: bytes) -> Generator[bytes, None, None]:
         s = s[end:]
 
 
+class ConsumerRequestedStopError(Exception):
+    """A consumer asked us to stop producing"""
+
+
 @implementer(interfaces.IPushProducer)
 class ThreadedFileSender:
     """
@@ -638,15 +700,16 @@ class ThreadedFileSender:
 
     def __init__(self, hs: "HomeServer") -> None:
         self.reactor = hs.get_reactor()
+        self.clock = hs.get_clock()
         self.thread_pool = hs.get_media_sender_thread_pool()
 
-        self.file: Optional[BinaryIO] = None
+        self.file: BinaryIO | None = None
         self.deferred: "Deferred[None]" = Deferred()
-        self.consumer: Optional[interfaces.IConsumer] = None
+        self.consumer: interfaces.IConsumer | None = None
 
         # Signals if the thread should keep reading/sending data. Set means
         # continue, clear means pause.
-        self.wakeup_event = DeferredEvent(self.reactor)
+        self.wakeup_event = DeferredEvent(self.clock)
 
         # Signals if the thread should terminate, e.g. because the consumer has
         # gone away.
@@ -691,7 +754,10 @@ class ThreadedFileSender:
         self.wakeup_event.set()
 
         if not self.deferred.called:
-            self.deferred.errback(Exception("Consumer asked us to stop producing"))
+            with PreserveLoggingContext():
+                self.deferred.errback(
+                    ConsumerRequestedStopError("Consumer asked us to stop producing")
+                )
 
     async def start_read_loop(self) -> None:
         """This is the loop that drives reading/writing"""
@@ -745,7 +811,8 @@ class ThreadedFileSender:
             self.consumer = None
 
         if not self.deferred.called:
-            self.deferred.errback(failure)
+            with PreserveLoggingContext():
+                self.deferred.errback(failure)
 
     def _finish(self) -> None:
         """Called when we have finished writing (either on success or
@@ -759,4 +826,5 @@ class ThreadedFileSender:
             self.consumer = None
 
         if not self.deferred.called:
-            self.deferred.callback(None)
+            with PreserveLoggingContext():
+                self.deferred.callback(None)

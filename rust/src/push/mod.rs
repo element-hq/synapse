@@ -65,8 +65,8 @@ use anyhow::{Context, Error};
 use log::warn;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyList, PyLong, PyString};
-use pythonize::{depythonize_bound, pythonize};
+use pyo3::types::{PyBool, PyInt, PyList, PyString};
+use pythonize::{depythonize, pythonize, PythonizeError};
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -79,7 +79,7 @@ pub mod utils;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let child_module = PyModule::new_bound(py, "push")?;
+    let child_module = PyModule::new(py, "push")?;
     child_module.add_class::<PushRule>()?;
     child_module.add_class::<PushRules>()?;
     child_module.add_class::<FilteredPushRules>()?;
@@ -90,7 +90,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import push` work.
-    py.import_bound("sys")?
+    py.import("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.push", child_module)?;
 
@@ -182,12 +182,16 @@ pub enum Action {
     Unknown(Value),
 }
 
-impl IntoPy<PyObject> for Action {
-    fn into_py(self, py: Python<'_>) -> PyObject {
+impl<'py> IntoPyObject<'py> for Action {
+    type Target = PyAny;
+    type Output = Bound<'py, Self::Target>;
+    type Error = PythonizeError;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         // When we pass the `Action` struct to Python we want it to be converted
         // to a dict. We use `pythonize`, which converts the struct using the
         // `serde` serialization.
-        pythonize(py, &self).expect("valid action")
+        pythonize(py, &self)
     }
 }
 
@@ -270,13 +274,13 @@ pub enum SimpleJsonValue {
 }
 
 impl<'source> FromPyObject<'source> for SimpleJsonValue {
-    fn extract(ob: &'source PyAny) -> PyResult<Self> {
+    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
         if let Ok(s) = ob.downcast::<PyString>() {
             Ok(SimpleJsonValue::Str(Cow::Owned(s.to_string())))
         // A bool *is* an int, ensure we try bool first.
         } else if let Ok(b) = ob.downcast::<PyBool>() {
             Ok(SimpleJsonValue::Bool(b.extract()?))
-        } else if let Ok(i) = ob.downcast::<PyLong>() {
+        } else if let Ok(i) = ob.downcast::<PyInt>() {
             Ok(SimpleJsonValue::Int(i.extract()?))
         } else if ob.is_none() {
             Ok(SimpleJsonValue::Null)
@@ -298,15 +302,19 @@ pub enum JsonValue {
 }
 
 impl<'source> FromPyObject<'source> for JsonValue {
-    fn extract(ob: &'source PyAny) -> PyResult<Self> {
+    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
         if let Ok(l) = ob.downcast::<PyList>() {
-            match l.iter().map(SimpleJsonValue::extract).collect() {
+            match l
+                .iter()
+                .map(|it| SimpleJsonValue::extract_bound(&it))
+                .collect()
+            {
                 Ok(a) => Ok(JsonValue::Array(a)),
                 Err(e) => Err(PyTypeError::new_err(format!(
                     "Can't convert to JsonValue::Array: {e}"
                 ))),
             }
-        } else if let Ok(v) = SimpleJsonValue::extract(ob) {
+        } else if let Ok(v) = SimpleJsonValue::extract_bound(ob) {
             Ok(JsonValue::Value(v))
         } else {
             Err(PyTypeError::new_err(format!(
@@ -361,17 +369,25 @@ pub enum KnownCondition {
     RoomVersionSupports {
         feature: Cow<'static, str>,
     },
+    #[serde(rename = "io.element.msc4306.thread_subscription")]
+    Msc4306ThreadSubscription {
+        subscribed: bool,
+    },
 }
 
-impl IntoPy<PyObject> for Condition {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        pythonize(py, &self).expect("valid condition")
+impl<'source> IntoPyObject<'source> for Condition {
+    type Target = PyAny;
+    type Output = Bound<'source, Self::Target>;
+    type Error = PythonizeError;
+
+    fn into_pyobject(self, py: Python<'source>) -> Result<Self::Output, Self::Error> {
+        pythonize(py, &self)
     }
 }
 
 impl<'source> FromPyObject<'source> for Condition {
     fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
-        Ok(depythonize_bound(ob.clone())?)
+        Ok(depythonize(ob)?)
     }
 }
 
@@ -511,6 +527,7 @@ impl PushRules {
             .chain(base_rules::BASE_APPEND_OVERRIDE_RULES.iter())
             .chain(self.content.iter())
             .chain(base_rules::BASE_APPEND_CONTENT_RULES.iter())
+            .chain(base_rules::BASE_APPEND_POSTCONTENT_RULES.iter())
             .chain(self.room.iter())
             .chain(self.sender.iter())
             .chain(self.underride.iter())
@@ -534,11 +551,14 @@ pub struct FilteredPushRules {
     msc3381_polls_enabled: bool,
     msc3664_enabled: bool,
     msc4028_push_encrypted_events: bool,
+    msc4210_enabled: bool,
+    msc4306_enabled: bool,
 }
 
 #[pymethods]
 impl FilteredPushRules {
     #[new]
+    #[allow(clippy::too_many_arguments)]
     pub fn py_new(
         push_rules: PushRules,
         enabled_map: BTreeMap<String, bool>,
@@ -546,6 +566,8 @@ impl FilteredPushRules {
         msc3381_polls_enabled: bool,
         msc3664_enabled: bool,
         msc4028_push_encrypted_events: bool,
+        msc4210_enabled: bool,
+        msc4306_enabled: bool,
     ) -> Self {
         Self {
             push_rules,
@@ -554,6 +576,8 @@ impl FilteredPushRules {
             msc3381_polls_enabled,
             msc3664_enabled,
             msc4028_push_encrypted_events,
+            msc4210_enabled,
+            msc4306_enabled,
         }
     }
 
@@ -593,6 +617,18 @@ impl FilteredPushRules {
                 if !self.msc4028_push_encrypted_events
                     && rule.rule_id == "global/override/.org.matrix.msc4028.encrypted_event"
                 {
+                    return false;
+                }
+
+                if self.msc4210_enabled
+                    && (rule.rule_id == "global/override/.m.rule.contains_display_name"
+                        || rule.rule_id == "global/content/.m.rule.contains_user_name"
+                        || rule.rule_id == "global/override/.m.rule.roomnotif")
+                {
+                    return false;
+                }
+
+                if !self.msc4306_enabled && rule.rule_id.contains("/.io.element.msc4306.rule.") {
                     return false;
                 }
 

@@ -24,24 +24,16 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Awaitable,
-    Deque,
-    Dict,
     Iterable,
     Iterator,
-    List,
-    Optional,
-    Set,
-    Tuple,
     TypeVar,
-    Union,
 )
 
 from prometheus_client import Counter
 
 from twisted.internet.protocol import ReconnectingClientFactory
 
-from synapse.metrics import LaterGauge
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.replication.tcp.commands import (
     ClearUserSyncsCommand,
     Command,
@@ -72,6 +64,11 @@ from synapse.replication.tcp.streams import (
     ToDeviceStream,
     TypingStream,
 )
+from synapse.replication.tcp.streams._base import (
+    DeviceListsStream,
+    ThreadSubscriptionsStream,
+)
+from synapse.util.background_queue import BackgroundQueue
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -81,19 +78,42 @@ logger = logging.getLogger(__name__)
 
 # number of updates received for each RDATA stream
 inbound_rdata_count = Counter(
-    "synapse_replication_tcp_protocol_inbound_rdata_count", "", ["stream_name"]
+    "synapse_replication_tcp_protocol_inbound_rdata_count",
+    "",
+    labelnames=["stream_name", SERVER_NAME_LABEL],
 )
-user_sync_counter = Counter("synapse_replication_tcp_resource_user_sync", "")
-federation_ack_counter = Counter("synapse_replication_tcp_resource_federation_ack", "")
-remove_pusher_counter = Counter("synapse_replication_tcp_resource_remove_pusher", "")
+user_sync_counter = Counter(
+    "synapse_replication_tcp_resource_user_sync", "", labelnames=[SERVER_NAME_LABEL]
+)
+federation_ack_counter = Counter(
+    "synapse_replication_tcp_resource_federation_ack",
+    "",
+    labelnames=[SERVER_NAME_LABEL],
+)
+# FIXME: Unused metric, remove if not needed.
+remove_pusher_counter = Counter(
+    "synapse_replication_tcp_resource_remove_pusher", "", labelnames=[SERVER_NAME_LABEL]
+)
 
-user_ip_cache_counter = Counter("synapse_replication_tcp_resource_user_ip_cache", "")
+user_ip_cache_counter = Counter(
+    "synapse_replication_tcp_resource_user_ip_cache", "", labelnames=[SERVER_NAME_LABEL]
+)
+
+tcp_resource_total_connections_gauge = LaterGauge(
+    name="synapse_replication_tcp_resource_total_connections",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+tcp_command_queue_gauge = LaterGauge(
+    name="synapse_replication_tcp_command_queue",
+    desc="Number of inbound RDATA/POSITION commands queued for processing",
+    labelnames=["stream_name", SERVER_NAME_LABEL],
+)
 
 
 # the type of the entries in _command_queues_by_stream
-_StreamCommandQueue = Deque[
-    Tuple[Union[RdataCommand, PositionCommand], IReplicationConnection]
-]
+_StreamCommandQueueItem = tuple[RdataCommand | PositionCommand, IReplicationConnection]
 
 
 class ReplicationCommandHandler:
@@ -102,6 +122,8 @@ class ReplicationCommandHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
+        self.hs = hs
         self._replication_data_handler = hs.get_replication_data_handler()
         self._presence_handler = hs.get_presence_handler()
         self._store = hs.get_datastores().main
@@ -111,18 +133,18 @@ class ReplicationCommandHandler:
         self._instance_name = hs.get_instance_name()
 
         # Additional Redis channel suffixes to subscribe to.
-        self._channels_to_subscribe_to: List[str] = []
+        self._channels_to_subscribe_to: list[str] = []
 
         self._is_presence_writer = (
             hs.get_instance_name() in hs.config.worker.writers.presence
         )
 
-        self._streams: Dict[str, Stream] = {
+        self._streams: dict[str, Stream] = {
             stream.NAME: stream(hs) for stream in STREAMS_MAP.values()
         }
 
         # List of streams that this instance is the source of
-        self._streams_to_replicate: List[Stream] = []
+        self._streams_to_replicate: list[Stream] = []
 
         for stream in self._streams.values():
             if hs.config.redis.redis_enabled and stream.NAME == CachesStream.NAME:
@@ -185,6 +207,21 @@ class ReplicationCommandHandler:
 
                 continue
 
+            if isinstance(stream, ThreadSubscriptionsStream):
+                if (
+                    hs.get_instance_name()
+                    in hs.config.worker.writers.thread_subscriptions
+                ):
+                    self._streams_to_replicate.append(stream)
+
+                continue
+
+            if isinstance(stream, DeviceListsStream):
+                if hs.get_instance_name() in hs.config.worker.writers.device_lists:
+                    self._streams_to_replicate.append(stream)
+
+                continue
+
             # Only add any other streams if we're on master.
             if hs.config.worker.worker_app is not None:
                 continue
@@ -201,44 +238,45 @@ class ReplicationCommandHandler:
 
         # Map of stream name to batched updates. See RdataCommand for info on
         # how batching works.
-        self._pending_batches: Dict[str, List[Any]] = {}
+        self._pending_batches: dict[str, list[Any]] = {}
 
         # The factory used to create connections.
-        self._factory: Optional[ReconnectingClientFactory] = None
+        self._factory: ReconnectingClientFactory | None = None
 
         # The currently connected connections. (The list of places we need to send
         # outgoing replication commands to.)
-        self._connections: List[IReplicationConnection] = []
+        self._connections: list[IReplicationConnection] = []
 
-        LaterGauge(
-            "synapse_replication_tcp_resource_total_connections",
-            "",
-            [],
-            lambda: len(self._connections),
+        tcp_resource_total_connections_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self._connections)},
         )
 
         # When POSITION or RDATA commands arrive, we stick them in a queue and process
         # them in order in a separate background process.
 
         # the streams which are currently being processed by _unsafe_process_queue
-        self._processing_streams: Set[str] = set()
+        self._processing_streams: set[str] = set()
 
         # for each stream, a queue of commands that are awaiting processing, and the
         # connection that they arrived on.
         self._command_queues_by_stream = {
-            stream_name: _StreamCommandQueue() for stream_name in self._streams
+            stream_name: BackgroundQueue[_StreamCommandQueueItem](
+                hs,
+                "process-replication-data",
+                self._unsafe_process_item,
+            )
+            for stream_name in self._streams
         }
 
         # For each connection, the incoming stream names that have received a POSITION
         # from that connection.
-        self._streams_by_connection: Dict[IReplicationConnection, Set[str]] = {}
+        self._streams_by_connection: dict[IReplicationConnection, set[str]] = {}
 
-        LaterGauge(
-            "synapse_replication_tcp_command_queue",
-            "Number of inbound RDATA/POSITION commands queued for processing",
-            ["stream_name"],
-            lambda: {
-                (stream_name,): len(queue)
+        tcp_command_queue_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (stream_name, self.server_name): len(queue)
                 for stream_name, queue in self._command_queues_by_stream.items()
             },
         )
@@ -299,7 +337,7 @@ class ReplicationCommandHandler:
             self._channels_to_subscribe_to.append(channel_name)
 
     def _add_command_to_stream_queue(
-        self, conn: IReplicationConnection, cmd: Union[RdataCommand, PositionCommand]
+        self, conn: IReplicationConnection, cmd: RdataCommand | PositionCommand
     ) -> None:
         """Queue the given received command for processing
 
@@ -312,40 +350,21 @@ class ReplicationCommandHandler:
             logger.error("Got %s for unknown stream: %s", cmd.NAME, stream_name)
             return
 
-        queue.append((cmd, conn))
+        queue.add((cmd, conn))
 
-        # if we're already processing this stream, there's nothing more to do:
-        # the new entry on the queue will get picked up in due course
-        if stream_name in self._processing_streams:
-            return
+    async def _unsafe_process_item(self, item: _StreamCommandQueueItem) -> None:
+        """Process a single command from the stream queue.
 
-        # fire off a background process to start processing the queue.
-        run_as_background_process(
-            "process-replication-data", self._unsafe_process_queue, stream_name
-        )
-
-    async def _unsafe_process_queue(self, stream_name: str) -> None:
-        """Processes the command queue for the given stream, until it is empty
-
-        Does not check if there is already a thread processing the queue, hence "unsafe"
+        This should only be called one at a time per stream, and is called from
+        the stream's BackgroundQueue.
         """
-        assert stream_name not in self._processing_streams
-
-        self._processing_streams.add(stream_name)
-        try:
-            queue = self._command_queues_by_stream.get(stream_name)
-            while queue:
-                cmd, conn = queue.popleft()
-                try:
-                    await self._process_command(cmd, conn, stream_name)
-                except Exception:
-                    logger.exception("Failed to handle command %s", cmd)
-        finally:
-            self._processing_streams.discard(stream_name)
+        cmd, conn = item
+        stream_name = cmd.stream_name
+        await self._process_command(cmd, conn, stream_name)
 
     async def _process_command(
         self,
-        cmd: Union[PositionCommand, RdataCommand],
+        cmd: PositionCommand | RdataCommand,
         conn: IReplicationConnection,
         stream_name: str,
     ) -> None:
@@ -407,11 +426,11 @@ class ReplicationCommandHandler:
                 bindAddress=None,
             )
 
-    def get_streams(self) -> Dict[str, Stream]:
+    def get_streams(self) -> dict[str, Stream]:
         """Get a map from stream name to all streams."""
         return self._streams
 
-    def get_streams_to_replicate(self) -> List[Stream]:
+    def get_streams_to_replicate(self) -> list[Stream]:
         """Get a list of streams that this instances replicates."""
         return self._streams_to_replicate
 
@@ -436,8 +455,8 @@ class ReplicationCommandHandler:
 
     def on_USER_SYNC(
         self, conn: IReplicationConnection, cmd: UserSyncCommand
-    ) -> Optional[Awaitable[None]]:
-        user_sync_counter.inc()
+    ) -> Awaitable[None] | None:
+        user_sync_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         if self._is_presence_writer:
             return self._presence_handler.update_external_syncs_row(
@@ -452,7 +471,7 @@ class ReplicationCommandHandler:
 
     def on_CLEAR_USER_SYNC(
         self, conn: IReplicationConnection, cmd: ClearUserSyncsCommand
-    ) -> Optional[Awaitable[None]]:
+    ) -> Awaitable[None] | None:
         if self._is_presence_writer:
             return self._presence_handler.update_external_syncs_clear(cmd.instance_id)
         else:
@@ -461,15 +480,15 @@ class ReplicationCommandHandler:
     def on_FEDERATION_ACK(
         self, conn: IReplicationConnection, cmd: FederationAckCommand
     ) -> None:
-        federation_ack_counter.inc()
+        federation_ack_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         if self._federation_sender:
             self._federation_sender.federation_ack(cmd.instance_name, cmd.token)
 
     def on_USER_IP(
         self, conn: IReplicationConnection, cmd: UserIpCommand
-    ) -> Optional[Awaitable[None]]:
-        user_ip_cache_counter.inc()
+    ) -> Awaitable[None] | None:
+        user_ip_cache_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         if self._is_master or self._should_insert_client_ips:
             # We make a point of only returning an awaitable if there's actually
@@ -509,7 +528,9 @@ class ReplicationCommandHandler:
             return
 
         stream_name = cmd.stream_name
-        inbound_rdata_count.labels(stream_name).inc()
+        inbound_rdata_count.labels(
+            stream_name=stream_name, **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
         # We put the received command into a queue here for two reasons:
         #   1. so we don't try and concurrently handle multiple rows for the
@@ -727,7 +748,7 @@ class ReplicationCommandHandler:
     ) -> None:
         """Called when get a new NEW_ACTIVE_TASK command."""
         if self._task_scheduler:
-            self._task_scheduler.launch_task_by_id(cmd.data)
+            self._task_scheduler.on_new_task(cmd.data)
 
     def new_connection(self, connection: IReplicationConnection) -> None:
         """Called when we have a new connection."""
@@ -808,7 +829,7 @@ class ReplicationCommandHandler:
         self,
         instance_id: str,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         is_syncing: bool,
         last_sync_ms: int,
     ) -> None:
@@ -823,7 +844,7 @@ class ReplicationCommandHandler:
         access_token: str,
         ip: str,
         user_agent: str,
-        device_id: Optional[str],
+        device_id: str | None,
         last_seen: int,
     ) -> None:
         """Tell the master that the user made a request."""
@@ -833,7 +854,7 @@ class ReplicationCommandHandler:
     def send_remote_server_up(self, server: str) -> None:
         self.send_command(RemoteServerUpCommand(server))
 
-    def stream_update(self, stream_name: str, token: Optional[int], data: Any) -> None:
+    def stream_update(self, stream_name: str, token: int | None, data: Any) -> None:
         """Called when a new update is available to stream to Redis subscribers.
 
         We need to check if the client is interested in the stream or not
@@ -857,8 +878,8 @@ UpdateRow = TypeVar("UpdateRow")
 
 
 def _batch_updates(
-    updates: Iterable[Tuple[UpdateToken, UpdateRow]],
-) -> Iterator[Tuple[UpdateToken, List[UpdateRow]]]:
+    updates: Iterable[tuple[UpdateToken, UpdateRow]],
+) -> Iterator[tuple[UpdateToken, list[UpdateRow]]]:
     """Collect stream updates with the same token together
 
     Given a series of updates returned by Stream.get_updates_since(), collects

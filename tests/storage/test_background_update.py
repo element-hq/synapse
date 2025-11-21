@@ -19,13 +19,13 @@
 #
 #
 import logging
-from typing import List, Tuple, cast
+from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import yaml
 
 from twisted.internet.defer import Deferred, ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.storage.background_updates import (
@@ -37,7 +37,7 @@ from synapse.storage.background_updates import (
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -535,7 +535,7 @@ class BackgroundUpdateValidateConstraintTestCase(unittest.HomeserverTestCase):
 
         # Check the correct values are in the new table.
         rows = cast(
-            List[Tuple[int, int]],
+            list[tuple[int, int]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     table="test_constraint",
@@ -652,7 +652,7 @@ class BackgroundUpdateValidateConstraintTestCase(unittest.HomeserverTestCase):
 
         # Check the correct values are in the new table.
         rows = cast(
-            List[Tuple[int, int]],
+            list[tuple[int, int]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     table="test_constraint",

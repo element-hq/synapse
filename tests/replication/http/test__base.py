@@ -20,7 +20,6 @@
 #
 
 from http import HTTPStatus
-from typing import Tuple
 
 from twisted.web.server import Request
 
@@ -46,13 +45,13 @@ class CancellableReplicationEndpoint(ReplicationEndpoint):
         self.clock = hs.get_clock()
 
     @staticmethod
-    async def _serialize_payload() -> JsonDict:
+    async def _serialize_payload(**kwargs: ReplicationEndpoint) -> JsonDict:
         return {}
 
     @cancellable
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self.clock.sleep(1.0)
         return HTTPStatus.OK, {"result": True}
 
@@ -68,12 +67,12 @@ class UncancellableReplicationEndpoint(ReplicationEndpoint):
         self.clock = hs.get_clock()
 
     @staticmethod
-    async def _serialize_payload() -> JsonDict:
+    async def _serialize_payload(**kwargs: ReplicationEndpoint) -> JsonDict:
         return {}
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self.clock.sleep(1.0)
         return HTTPStatus.OK, {"result": True}
 

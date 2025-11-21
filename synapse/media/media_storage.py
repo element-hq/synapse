@@ -19,6 +19,7 @@
 #
 #
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -33,12 +34,7 @@ from typing import (
     AsyncIterator,
     BinaryIO,
     Callable,
-    List,
-    Optional,
     Sequence,
-    Tuple,
-    Type,
-    Union,
     cast,
 )
 from uuid import uuid4
@@ -54,7 +50,7 @@ from synapse.api.errors import NotFoundError
 from synapse.logging.context import defer_to_thread, run_in_background
 from synapse.logging.opentracing import start_active_span, trace, trace_with_opname
 from synapse.media._base import ThreadedFileSender
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.file_consumer import BackgroundFileConsumer
 
 from ..types import JsonDict
@@ -68,6 +64,88 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CRLF = b"\r\n"
+
+
+class SHA256TransparentIOWriter:
+    """Will generate a SHA256 hash from a source stream transparently.
+
+    Args:
+        source: Source stream.
+    """
+
+    def __init__(self, source: BinaryIO):
+        self._hash = hashlib.sha256()
+        self._source = source
+
+    def write(self, buffer: bytes | bytearray) -> int:
+        """Wrapper for source.write()
+
+        Args:
+            buffer
+
+        Returns:
+            the value of source.write()
+        """
+        res = self._source.write(buffer)
+        self._hash.update(buffer)
+        return res
+
+    def hexdigest(self) -> str:
+        """The digest of the written or read value.
+
+        Returns:
+            The digest in hex formaat.
+        """
+        return self._hash.hexdigest()
+
+    def wrap(self) -> BinaryIO:
+        # This class implements a subset the IO interface and passes through everything else via __getattr__
+        return cast(BinaryIO, self)
+
+    # Passthrough any other calls
+    def __getattr__(self, attr_name: str) -> Any:
+        return getattr(self._source, attr_name)
+
+
+class SHA256TransparentIOReader:
+    """Will generate a SHA256 hash from a source stream transparently.
+
+    Args:
+        source: Source IO stream.
+    """
+
+    def __init__(self, source: IO):
+        self._hash = hashlib.sha256()
+        self._source = source
+
+    def read(self, n: int = -1) -> bytes:
+        """Wrapper for source.read()
+
+        Args:
+            n
+
+        Returns:
+            the value of source.read()
+        """
+        bytes = self._source.read(n)
+        self._hash.update(bytes)
+        return bytes
+
+    def hexdigest(self) -> str:
+        """The digest of the written or read value.
+
+        Returns:
+            The digest in hex formaat.
+        """
+        return self._hash.hexdigest()
+
+    def wrap(self) -> IO:
+        # This class implements a subset the IO interface and passes through everything else via __getattr__
+        return cast(IO, self)
+
+    # Passthrough any other calls
+    def __getattr__(self, attr_name: str) -> Any:
+        return getattr(self._source, attr_name)
 
 
 class MediaStorage:
@@ -107,7 +185,6 @@ class MediaStorage:
         Returns:
             the file path written to in the primary media store
         """
-
         async with self.store_into_file(file_info) as (f, fname):
             # Write to the main media repository
             await self.write_to_file(source, f)
@@ -123,7 +200,7 @@ class MediaStorage:
     @contextlib.asynccontextmanager
     async def store_into_file(
         self, file_info: FileInfo
-    ) -> AsyncIterator[Tuple[BinaryIO, str]]:
+    ) -> AsyncIterator[tuple[BinaryIO, str]]:
         """Async Context manager used to get a file like object to write into, as
         described by file_info.
 
@@ -181,7 +258,7 @@ class MediaStorage:
 
             raise e from None
 
-    async def fetch_media(self, file_info: FileInfo) -> Optional[Responder]:
+    async def fetch_media(self, file_info: FileInfo) -> Responder | None:
         """Attempts to fetch media described by file_info from the local cache
         and configured storage providers.
 
@@ -341,9 +418,9 @@ class FileResponder(Responder):
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         self.open_file.close()
 
@@ -397,7 +474,7 @@ class MultipartFileConsumer:
         file_content_type: str,
         json_object: JsonDict,
         disposition: str,
-        content_length: Optional[int],
+        content_length: int | None,
     ) -> None:
         self.clock = clock
         self.wrapped_consumer = wrapped_consumer
@@ -409,8 +486,8 @@ class MultipartFileConsumer:
 
         # The producer that registered with us, and if it's a push or pull
         # producer.
-        self.producer: Optional["interfaces.IProducer"] = None
-        self.streaming: Optional[bool] = None
+        self.producer: "interfaces.IProducer" | None = None
+        self.streaming: bool | None = None
 
         # Whether the wrapped consumer has asked us to pause.
         self.paused = False
@@ -539,7 +616,7 @@ class MultipartFileConsumer:
             # repeatedly calling  `resumeProducing` in a loop.
             run_in_background(self._resumeProducingRepeatedly)
 
-    def content_length(self) -> Optional[int]:
+    def content_length(self) -> int | None:
         """
         Calculate the content length of the multipart response
         in bytes.
@@ -592,7 +669,7 @@ class Header:
         self,
         name: bytes,
         value: Any,
-        params: Optional[List[Tuple[Any, Any]]] = None,
+        params: list[tuple[Any, Any]] | None = None,
     ):
         self.name = name
         self.value = value
@@ -614,7 +691,7 @@ class Header:
             return h.read()
 
 
-def escape(value: Union[str, bytes]) -> str:
+def escape(value: str | bytes) -> str:
     """
     This function prevents header values from corrupting the request,
     a newline in the file name parameter makes form-data request unreadable

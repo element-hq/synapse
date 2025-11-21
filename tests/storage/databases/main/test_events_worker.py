@@ -20,12 +20,12 @@
 #
 import json
 from contextlib import contextmanager
-from typing import Generator, List, Tuple
+from typing import Generator
 from unittest import mock
 
 from twisted.enterprise.adbapi import ConnectionPool
 from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.room_versions import EventFormatVersions, RoomVersions
 from synapse.events import make_event_from_dict
@@ -38,8 +38,8 @@ from synapse.storage.databases.main.events_worker import (
     EventsWorkerStore,
 )
 from synapse.storage.types import Connection
-from synapse.util import Clock
 from synapse.util.async_helpers import yieldable_gather_results
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils.event_injection import create_event, inject_event
@@ -60,7 +60,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
         self.token = self.login(self.user, "pass")
         self.room_id = self.helper.create_room_as(self.user, tok=self.token)
 
-        self.event_ids: List[str] = []
+        self.event_ids: list[str] = []
         for i in range(3):
             event = self.get_success(
                 inject_event(
@@ -76,7 +76,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
             self.event_ids.append(event.event_id)
 
     def test_simple(self) -> None:
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             res = self.get_success(
                 self.store.have_seen_events(
                     self.room_id, [self.event_ids[0], "eventdoesnotexist"]
@@ -88,7 +88,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
             self.assertEqual(ctx.get_resource_usage().db_txn_count, 1)
 
         # a second lookup of the same events should cause no queries
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             res = self.get_success(
                 self.store.have_seen_events(
                     self.room_id, [self.event_ids[0], "eventdoesnotexist"]
@@ -113,7 +113,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             # First, check `have_seen_event` for an event we have not seen yet
             # to prime the cache with a `false` value.
             res = self.get_success(
@@ -135,7 +135,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             # Check `have_seen_event` again and we should see the updated fact
             # that we have now seen the event after persisting it.
             res = self.get_success(
@@ -166,7 +166,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
         res = self.store._get_event_cache.get_local((event.event_id,))
         self.assertEqual(res, None, "Event was cached when it should not have been.")
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             # Persist the event which should invalidate then prefill the
             # `_get_event_cache` so we don't return stale values.
             # Side Note: Apparently, persisting an event isn't a transaction in the
@@ -200,7 +200,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
         Test to make sure that all events associated with the given `(room_id,)`
         are invalidated in the `have_seen_event` cache.
         """
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             # Prime the cache with some values
             res = self.get_success(
                 self.store.have_seen_events(self.room_id, self.event_ids)
@@ -213,7 +213,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
         # Clear the cache with any events associated with the `room_id`
         self.store.have_seen_event.invalidate((self.room_id,))
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             res = self.get_success(
                 self.store.have_seen_events(self.room_id, self.event_ids)
             )
@@ -249,7 +249,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
     def test_simple(self) -> None:
         """Test that we cache events that we pull from the DB."""
 
-        with LoggingContext("test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             self.get_success(self.store.get_event(self.event_id))
 
             # We should have fetched the event from the DB
@@ -263,7 +263,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
         # Reset the event cache
         self.store._get_event_cache.clear()
 
-        with LoggingContext("test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             # We keep hold of the event event though we never use it.
             event = self.get_success(self.store.get_event(self.event_id))  # noqa: F841
 
@@ -273,7 +273,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
         # Reset the event cache
         self.store._get_event_cache.clear()
 
-        with LoggingContext("test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             self.get_success(self.store.get_event(self.event_id))
 
             # Since the event is still in memory we shouldn't have fetched it
@@ -285,7 +285,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
         out once.
         """
 
-        with LoggingContext("test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             d = yieldable_gather_results(
                 self.store.get_event, [self.event_id, self.event_id]
             )
@@ -293,6 +293,53 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
 
             # We should have fetched the event from the DB
             self.assertEqual(ctx.get_resource_usage().evt_db_fetch_count, 1)
+
+
+class GetEventsTestCase(unittest.HomeserverTestCase):
+    """Test `get_events(...)`/`get_events_as_list(...)`"""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store: EventsWorkerStore = hs.get_datastores().main
+
+    def test_get_lots_of_messages(self) -> None:
+        """Sanity check that `get_events(...)`/`get_events_as_list(...)` works"""
+        num_events = 100
+
+        user_id = self.register_user("user", "pass")
+        user_tok = self.login(user_id, "pass")
+
+        room_id = self.helper.create_room_as(user_id, tok=user_tok)
+
+        event_ids: set[str] = set()
+        for i in range(num_events):
+            event = self.get_success(
+                inject_event(
+                    self.hs,
+                    room_id=room_id,
+                    type="m.room.message",
+                    sender=user_id,
+                    content={
+                        "body": f"foo{i}",
+                        "msgtype": "m.text",
+                    },
+                )
+            )
+            event_ids.add(event.event_id)
+
+        # Sanity check that we actually created the events
+        self.assertEqual(len(event_ids), num_events)
+
+        # This is the function under test
+        fetched_event_map = self.get_success(self.store.get_events(event_ids))
+
+        # Sanity check that we got the events back
+        self.assertIncludes(fetched_event_map.keys(), event_ids, exact=True)
 
 
 class DatabaseOutageTestCase(unittest.HomeserverTestCase):
@@ -324,7 +371,7 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        self.event_ids: List[str] = []
+        self.event_ids: list[str] = []
         for idx in range(1, 21):  # Stream ordering starts at 1.
             event_json = {
                 "type": f"test {idx}",
@@ -402,24 +449,29 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
 
     def test_recovery(self) -> None:
         """Test that event fetchers recover after a database outage."""
-        with self._outage():
-            # Kick off a bunch of event fetches but do not pump the reactor
-            event_deferreds = []
-            for event_id in self.event_ids:
-                event_deferreds.append(ensureDeferred(self.store.get_event(event_id)))
+        with self.assertLogs(
+            "synapse.metrics.background_process_metrics", level="ERROR"
+        ):
+            with self._outage():
+                # Kick off a bunch of event fetches but do not pump the reactor
+                event_deferreds = []
+                for event_id in self.event_ids:
+                    event_deferreds.append(
+                        ensureDeferred(self.store.get_event(event_id))
+                    )
 
-            # We should have maxed out on event fetcher threads
-            self.assertEqual(self.store._event_fetch_ongoing, EVENT_QUEUE_THREADS)
+                # We should have maxed out on event fetcher threads
+                self.assertEqual(self.store._event_fetch_ongoing, EVENT_QUEUE_THREADS)
 
-            # All the event fetchers will fail
-            self.pump()
-            self.assertEqual(self.store._event_fetch_ongoing, 0)
+                # All the event fetchers will fail
+                self.pump()
+                self.assertEqual(self.store._event_fetch_ongoing, 0)
 
-            for event_deferred in event_deferreds:
-                failure = self.get_failure(event_deferred, Exception)
-                self.assertEqual(
-                    str(failure.value), "Could not connect to the database."
-                )
+                for event_deferred in event_deferreds:
+                    failure = self.get_failure(event_deferred, Exception)
+                    self.assertEqual(
+                        str(failure.value), "Could not connect to the database."
+                    )
 
         # This next event fetch should succeed
         self.get_success(self.store.get_event(self.event_ids[0]))
@@ -452,7 +504,7 @@ class GetEventCancellationTestCase(unittest.HomeserverTestCase):
     def blocking_get_event_calls(
         self,
     ) -> Generator[
-        Tuple["Deferred[None]", "Deferred[None]", "Deferred[None]"], None, None
+        tuple["Deferred[None]", "Deferred[None]", "Deferred[None]"], None, None
     ]:
         """Starts two concurrent `get_event` calls for the same event.
 
@@ -479,8 +531,8 @@ class GetEventCancellationTestCase(unittest.HomeserverTestCase):
             "runWithConnection",
             new=runWithConnection,
         ):
-            ctx1 = LoggingContext("get_event1")
-            ctx2 = LoggingContext("get_event2")
+            ctx1 = LoggingContext(name="get_event1", server_name=self.hs.hostname)
+            ctx2 = LoggingContext(name="get_event2", server_name=self.hs.hostname)
 
             async def get_event(ctx: LoggingContext) -> None:
                 with ctx:

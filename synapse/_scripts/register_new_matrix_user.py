@@ -26,10 +26,11 @@ import hashlib
 import hmac
 import logging
 import sys
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Iterable, TextIO
 
 import requests
 import yaml
+from typing_extensions import Never
 
 _CONFLICTING_SHARED_SECRET_OPTS_ERROR = """\
 Conflicting options 'registration_shared_secret' and 'registration_shared_secret_path'
@@ -38,6 +39,10 @@ are both defined in config file.
 
 _NO_SHARED_SECRET_OPTS_ERROR = """\
 No 'registration_shared_secret' or 'registration_shared_secret_path' defined in config.
+"""
+
+_EMPTY_SHARED_SECRET_PATH_OPTS_ERROR = """\
+The secret given via `registration_shared_secret_path` must not be empty.
 """
 
 _DEFAULT_SERVER_URL = "http://localhost:8008"
@@ -49,7 +54,7 @@ def request_registration(
     server_location: str,
     shared_secret: str,
     admin: bool = False,
-    user_type: Optional[str] = None,
+    user_type: str | None = None,
     _print: Callable[[str], None] = print,
     exit: Callable[[int], None] = sys.exit,
     exists_ok: bool = False,
@@ -118,13 +123,13 @@ def register_new_user(
     password: str,
     server_location: str,
     shared_secret: str,
-    admin: Optional[bool],
-    user_type: Optional[str],
+    admin: bool | None,
+    user_type: str | None,
     exists_ok: bool = False,
 ) -> None:
     if not user:
         try:
-            default_user: Optional[str] = getpass.getuser()
+            default_user: str | None = getpass.getuser()
         except Exception:
             default_user = None
 
@@ -168,6 +173,12 @@ def register_new_user(
         user_type,
         exists_ok=exists_ok,
     )
+
+
+def bail(err_msg: str) -> Never:
+    """Prints the given message to stderr and exits."""
+    print(err_msg, file=sys.stderr)
+    sys.exit(1)
 
 
 def main() -> None:
@@ -233,6 +244,7 @@ def main() -> None:
     group.add_argument(
         "-c",
         "--config",
+        action="append",
         type=argparse.FileType("r"),
         help="Path to server config file. Used to read in shared secret.",
     )
@@ -251,9 +263,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    config: Optional[Dict[str, Any]] = None
+    config: dict[str, Any] | None = None
     if "config" in args and args.config:
-        config = yaml.safe_load(args.config)
+        config = _read_config_files(args.config)
 
     if args.shared_secret:
         secret = args.shared_secret
@@ -262,15 +274,20 @@ def main() -> None:
         assert config is not None
 
         secret = config.get("registration_shared_secret")
+        if not isinstance(secret, (str, type(None))):
+            bail("registration_shared_secret is not a string.")
         secret_file = config.get("registration_shared_secret_path")
-        if secret_file:
-            if secret:
-                print(_CONFLICTING_SHARED_SECRET_OPTS_ERROR, file=sys.stderr)
-                sys.exit(1)
+        if not isinstance(secret_file, (str, type(None))):
+            bail("registration_shared_secret_path is not a string.")
+
+        if not secret and not secret_file:
+            bail(_NO_SHARED_SECRET_OPTS_ERROR)
+        elif secret and secret_file:
+            bail(_CONFLICTING_SHARED_SECRET_OPTS_ERROR)
+        elif not secret and secret_file:
             secret = _read_file(secret_file, "registration_shared_secret_path").strip()
-        if not secret:
-            print(_NO_SHARED_SECRET_OPTS_ERROR, file=sys.stderr)
-            sys.exit(1)
+            if not secret:
+                bail(_EMPTY_SHARED_SECRET_PATH_OPTS_ERROR)
 
     if args.password_file:
         password = _read_file(args.password_file, "password-file").strip()
@@ -310,6 +327,33 @@ def main() -> None:
     )
 
 
+# Adapted from synapse.config._base.
+def _read_config_files(config_files: Iterable[TextIO]) -> dict[str, Any]:
+    """Read the config files and shallowly merge them into a dict.
+
+    Successive configurations are shallowly merged into ones provided earlier,
+    i.e., entirely replacing top-level sections of the configuration.
+
+    Args:
+        config_files: A list of the config files to read
+
+    Returns:
+        The configuration dictionary.
+    """
+    specified_config = {}
+    for config_file in config_files:
+        yaml_config = yaml.safe_load(config_file)
+
+        if not isinstance(yaml_config, dict):
+            err = "File %r is empty or doesn't parse into a key-value map. IGNORING."
+            print(err % (config_file,))
+            continue
+
+        specified_config.update(yaml_config)
+
+    return specified_config
+
+
 def _read_file(file_path: Any, config_path: str) -> str:
     """Check the given file exists, and read it into a string
 
@@ -334,7 +378,7 @@ def _read_file(file_path: Any, config_path: str) -> str:
         sys.exit(1)
 
 
-def _find_client_listener(config: Dict[str, Any]) -> Optional[str]:
+def _find_client_listener(config: dict[str, Any]) -> str | None:
     # try to find a listener in the config. Returns a host:port pair
     for listener in config.get("listeners", []):
         if listener.get("type") != "http" or listener.get("tls", False):

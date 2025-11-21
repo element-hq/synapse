@@ -20,14 +20,20 @@
 #
 #
 
-from collections import OrderedDict
-from typing import Hashable, Optional, Tuple
+from typing import TYPE_CHECKING, Hashable, Optional
 
 from synapse.api.errors import LimitExceededError
 from synapse.config.ratelimiting import RatelimitSettings
 from synapse.storage.databases.main import DataStore
 from synapse.types import Requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
+from synapse.util.wheel_timer import WheelTimer
+
+if TYPE_CHECKING:
+    # To avoid circular imports:
+    from synapse.module_api.callbacks.ratelimit_callbacks import (
+        RatelimitModuleApiCallbacks,
+    )
 
 
 class Ratelimiter:
@@ -73,23 +79,30 @@ class Ratelimiter:
         store: DataStore,
         clock: Clock,
         cfg: RatelimitSettings,
+        ratelimit_callbacks: Optional["RatelimitModuleApiCallbacks"] = None,
     ):
         self.clock = clock
         self.rate_hz = cfg.per_second
         self.burst_count = cfg.burst_count
         self.store = store
         self._limiter_name = cfg.key
+        self._ratelimit_callbacks = ratelimit_callbacks
 
-        # An ordered dictionary representing the token buckets tracked by this rate
+        # A dictionary representing the token buckets tracked by this rate
         # limiter. Each entry maps a key of arbitrary type to a tuple representing:
         #   * The number of tokens currently in the bucket,
         #   * The time point when the bucket was last completely empty, and
         #   * The rate_hz (leak rate) of this particular bucket.
-        self.actions: OrderedDict[Hashable, Tuple[float, float, float]] = OrderedDict()
+        self.actions: dict[Hashable, tuple[int, float, float]] = {}
 
-    def _get_key(
-        self, requester: Optional[Requester], key: Optional[Hashable]
-    ) -> Hashable:
+        # Records when actions should potentially be pruned. Note that we don't
+        # need to be accurate here, as this is just a cleanup job of `actions`
+        # and doesn't affect correctness.
+        self._timer: WheelTimer[Hashable] = WheelTimer()
+
+        self.clock.looping_call(self._prune_message_counts, 15 * 1000)
+
+    def _get_key(self, requester: Requester | None, key: Hashable | None) -> Hashable:
         """Use the requester's MXID as a fallback key if no key is provided."""
         if key is None:
             if not requester:
@@ -100,20 +113,20 @@ class Ratelimiter:
 
     def _get_action_counts(
         self, key: Hashable, time_now_s: float
-    ) -> Tuple[float, float, float]:
+    ) -> tuple[int, float, float]:
         """Retrieve the action counts, with a fallback representing an empty bucket."""
-        return self.actions.get(key, (0.0, time_now_s, 0.0))
+        return self.actions.get(key, (0, time_now_s, self.rate_hz))
 
     async def can_do_action(
         self,
-        requester: Optional[Requester],
-        key: Optional[Hashable] = None,
-        rate_hz: Optional[float] = None,
-        burst_count: Optional[int] = None,
+        requester: Requester | None,
+        key: Hashable | None = None,
+        rate_hz: float | None = None,
+        burst_count: int | None = None,
         update: bool = True,
         n_actions: int = 1,
-        _time_now_s: Optional[float] = None,
-    ) -> Tuple[bool, float]:
+        _time_now_s: float | None = None,
+    ) -> tuple[bool, float]:
         """Can the entity (e.g. user or IP address) perform the action?
 
         Checks if the user has ratelimiting disabled in the database by looking
@@ -164,13 +177,24 @@ class Ratelimiter:
             if override and not override.messages_per_second:
                 return True, -1.0
 
+        if requester and self._ratelimit_callbacks:
+            # Check if the user has a custom rate limit for this specific limiter
+            # as returned by the module API.
+            module_override = (
+                await self._ratelimit_callbacks.get_ratelimit_override_for_user(
+                    requester.user.to_string(),
+                    self._limiter_name,
+                )
+            )
+
+            if module_override:
+                rate_hz = module_override.per_second
+                burst_count = module_override.burst_count
+
         # Override default values if set
         time_now_s = _time_now_s if _time_now_s is not None else self.clock.time()
         rate_hz = rate_hz if rate_hz is not None else self.rate_hz
         burst_count = burst_count if burst_count is not None else self.burst_count
-
-        # Remove any expired entries
-        self._prune_message_counts(time_now_s)
 
         # Check if there is an existing count entry for this key
         action_count, time_start, _ = self._get_action_counts(key, time_now_s)
@@ -197,8 +221,11 @@ class Ratelimiter:
             allowed = True
             action_count = action_count + n_actions
 
-        if update:
-            self.actions[key] = (action_count, time_start, rate_hz)
+        # Only record the action if we're allowed to perform it.
+        if allowed and update:
+            self._record_action_inner(
+                key, action_count, time_start, rate_hz, time_now_s
+            )
 
         if rate_hz > 0:
             # Find out when the count of existing actions expires
@@ -218,10 +245,10 @@ class Ratelimiter:
 
     def record_action(
         self,
-        requester: Optional[Requester],
-        key: Optional[Hashable] = None,
+        requester: Requester | None,
+        key: Hashable | None = None,
         n_actions: int = 1,
-        _time_now_s: Optional[float] = None,
+        _time_now_s: float | None = None,
     ) -> None:
         """Record that an action(s) took place, even if they violate the rate limit.
 
@@ -244,37 +271,73 @@ class Ratelimiter:
         key = self._get_key(requester, key)
         time_now_s = _time_now_s if _time_now_s is not None else self.clock.time()
         action_count, time_start, rate_hz = self._get_action_counts(key, time_now_s)
-        self.actions[key] = (action_count + n_actions, time_start, rate_hz)
+        self._record_action_inner(
+            key, action_count + n_actions, time_start, rate_hz, time_now_s
+        )
 
-    def _prune_message_counts(self, time_now_s: float) -> None:
+    def _record_action_inner(
+        self,
+        key: Hashable,
+        action_count: int,
+        time_start: float,
+        rate_hz: float,
+        time_now_s: float,
+    ) -> None:
+        """Helper to atomically update the action count for a given key."""
+        prune_time_s = time_start + action_count / rate_hz
+
+        # If the prune time is in the past, we can just remove the entry rather
+        # than inserting and immediately pruning.
+        if prune_time_s <= time_now_s:
+            self.actions.pop(key, None)
+            return
+
+        self.actions[key] = (action_count, time_start, rate_hz)
+
+        # We need to make sure that we only call prune *after* the entry
+        # expires, otherwise the scheduled prune may not actually prune it. This
+        # is just a cleanup job, so it doesn't matter if entries aren't pruned
+        # immediately after they expire. Hence we schedule the prune a little
+        # after the entry is due to expire.
+        prune_time_s += 0.1
+
+        self._timer.insert(int(time_now_s * 1000), key, int(prune_time_s * 1000))
+
+    def _prune_message_counts(self) -> None:
         """Remove message count entries that have not exceeded their defined
         rate_hz limit
-
-        Args:
-            time_now_s: The current time
         """
-        # We create a copy of the key list here as the dictionary is modified during
-        # the loop
-        for key in list(self.actions.keys()):
-            action_count, time_start, rate_hz = self.actions[key]
+        time_now_s = self.clock.time()
+
+        # Pull out all the keys that *might* need pruning. We still need to
+        # verify they haven't since been updated.
+        to_prune = self._timer.fetch(int(time_now_s * 1000))
+
+        for key in to_prune:
+            value = self.actions.get(key)
+            if value is None:
+                continue
+
+            action_count, time_start, rate_hz = value
 
             # Rate limit = "seconds since we started limiting this action" * rate_hz
             # If this limit has not been exceeded, wipe our record of this action
             time_delta = time_now_s - time_start
             if action_count - time_delta * rate_hz > 0:
                 continue
-            else:
-                del self.actions[key]
+
+            del self.actions[key]
 
     async def ratelimit(
         self,
-        requester: Optional[Requester],
-        key: Optional[Hashable] = None,
-        rate_hz: Optional[float] = None,
-        burst_count: Optional[int] = None,
+        requester: Requester | None,
+        key: Hashable | None = None,
+        rate_hz: float | None = None,
+        burst_count: int | None = None,
         update: bool = True,
         n_actions: int = 1,
-        _time_now_s: Optional[float] = None,
+        _time_now_s: float | None = None,
+        pause: float | None = 0.5,
     ) -> None:
         """Checks if an action can be performed. If not, raises a LimitExceededError
 
@@ -298,6 +361,8 @@ class Ratelimiter:
                 at all.
             _time_now_s: The current time. Optional, defaults to the current time according
                 to self.clock. Only used by tests.
+            pause: Time in seconds to pause when an action is being limited. Defaults to 0.5
+                to stop clients from "tight-looping" on retrying their request.
 
         Raises:
             LimitExceededError: If an action could not be performed, along with the time in
@@ -316,13 +381,10 @@ class Ratelimiter:
         )
 
         if not allowed:
-            # We pause for a bit here to stop clients from "tight-looping" on
-            # retrying their request.
-            await self.clock.sleep(0.5)
-
             raise LimitExceededError(
                 limiter_name=self._limiter_name,
                 retry_after_ms=int(1000 * (time_allowed - time_now_s)),
+                pause=pause,
             )
 
 
@@ -332,7 +394,7 @@ class RequestRatelimiter:
         store: DataStore,
         clock: Clock,
         rc_message: RatelimitSettings,
-        rc_admin_redaction: Optional[RatelimitSettings],
+        rc_admin_redaction: RatelimitSettings | None,
     ):
         self.store = store
         self.clock = clock
@@ -348,7 +410,7 @@ class RequestRatelimiter:
         # Check whether ratelimiting room admin message redaction is enabled
         # by the presence of rate limits in the config
         if rc_admin_redaction:
-            self.admin_redaction_ratelimiter: Optional[Ratelimiter] = Ratelimiter(
+            self.admin_redaction_ratelimiter: Ratelimiter | None = Ratelimiter(
                 store=self.store,
                 clock=self.clock,
                 cfg=rc_admin_redaction,

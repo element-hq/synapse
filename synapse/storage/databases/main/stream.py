@@ -47,21 +47,16 @@ from typing import (
     AbstractSet,
     Any,
     Collection,
-    Dict,
     Iterable,
-    List,
+    Literal,
     Mapping,
-    Optional,
     Protocol,
-    Set,
-    Tuple,
     cast,
     overload,
 )
 
 import attr
-from immutabledict import immutabledict
-from typing_extensions import Literal, assert_never
+from typing_extensions import assert_never
 
 from twisted.internet import defer
 
@@ -79,6 +74,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
+from synapse.storage.roommember import RoomsForUserStateReset
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import PersistedEventPosition, RoomStreamToken, StrCollection
 from synapse.util.caches.descriptors import cached, cachedList
@@ -105,24 +101,24 @@ class PaginateFunction(Protocol):
         *,
         room_id: str,
         from_key: RoomStreamToken,
-        to_key: Optional[RoomStreamToken] = None,
+        to_key: RoomStreamToken | None = None,
         direction: Direction = Direction.BACKWARDS,
         limit: int = 0,
-    ) -> Tuple[List[EventBase], RoomStreamToken, bool]: ...
+    ) -> tuple[list[EventBase], RoomStreamToken, bool]: ...
 
 
 # Used as return values for pagination APIs
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class _EventDictReturn:
     event_id: str
-    topological_ordering: Optional[int]
+    topological_ordering: int | None
     stream_ordering: int
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class _EventsAround:
-    events_before: List[EventBase]
-    events_after: List[EventBase]
+    events_before: list[EventBase]
+    events_after: list[EventBase]
     start: RoomStreamToken
     end: RoomStreamToken
 
@@ -142,22 +138,22 @@ class CurrentStateDeltaMembership:
 
     room_id: str
     # Event
-    event_id: Optional[str]
+    event_id: str | None
     event_pos: PersistedEventPosition
     membership: str
-    sender: Optional[str]
+    sender: str | None
     # Prev event
-    prev_event_id: Optional[str]
-    prev_event_pos: Optional[PersistedEventPosition]
-    prev_membership: Optional[str]
-    prev_sender: Optional[str]
+    prev_event_id: str | None
+    prev_event_pos: PersistedEventPosition | None
+    prev_membership: str | None
+    prev_sender: str | None
 
 
 def generate_pagination_where_clause(
     direction: Direction,
-    column_names: Tuple[str, str],
-    from_token: Optional[Tuple[Optional[int], int]],
-    to_token: Optional[Tuple[Optional[int], int]],
+    column_names: tuple[str, str],
+    from_token: tuple[int | None, int] | None,
+    to_token: tuple[int | None, int] | None,
     engine: BaseDatabaseEngine,
 ) -> str:
     """Creates an SQL expression to bound the columns by the pagination
@@ -221,11 +217,9 @@ def generate_pagination_where_clause(
 
 def generate_pagination_bounds(
     direction: Direction,
-    from_token: Optional[RoomStreamToken],
-    to_token: Optional[RoomStreamToken],
-) -> Tuple[
-    str, Optional[Tuple[Optional[int], int]], Optional[Tuple[Optional[int], int]]
-]:
+    from_token: RoomStreamToken | None,
+    to_token: RoomStreamToken | None,
+) -> tuple[str, tuple[int | None, int] | None, tuple[int | None, int] | None]:
     """
     Generate a start and end point for this page of events.
 
@@ -260,7 +254,7 @@ def generate_pagination_bounds(
     # by fetching all events between the min stream token and the maximum
     # stream token (as returned by `RoomStreamToken.get_max_stream_pos`) and
     # then filtering the results.
-    from_bound: Optional[Tuple[Optional[int], int]] = None
+    from_bound: tuple[int | None, int] | None = None
     if from_token:
         if from_token.topological is not None:
             from_bound = from_token.as_historical_tuple()
@@ -275,7 +269,7 @@ def generate_pagination_bounds(
                 from_token.stream,
             )
 
-    to_bound: Optional[Tuple[Optional[int], int]] = None
+    to_bound: tuple[int | None, int] | None = None
     if to_token:
         if to_token.topological is not None:
             to_bound = to_token.as_historical_tuple()
@@ -294,7 +288,7 @@ def generate_pagination_bounds(
 
 
 def generate_next_token(
-    direction: Direction, last_topo_ordering: Optional[int], last_stream_ordering: int
+    direction: Direction, last_topo_ordering: int | None, last_stream_ordering: int
 ) -> RoomStreamToken:
     """
     Generate the next room stream token based on the currently returned data.
@@ -319,8 +313,8 @@ def generate_next_token(
 
 def _make_generic_sql_bound(
     bound: str,
-    column_names: Tuple[str, str],
-    values: Tuple[Optional[int], int],
+    column_names: tuple[str, str],
+    values: tuple[int | None, int],
     engine: BaseDatabaseEngine,
 ) -> str:
     """Create an SQL expression that bounds the given column names by the
@@ -384,9 +378,9 @@ def _make_generic_sql_bound(
 
 
 def _filter_results(
-    lower_token: Optional[RoomStreamToken],
-    upper_token: Optional[RoomStreamToken],
-    instance_name: Optional[str],
+    lower_token: RoomStreamToken | None,
+    upper_token: RoomStreamToken | None,
+    instance_name: str | None,
     topological_ordering: int,
     stream_ordering: int,
 ) -> bool:
@@ -439,9 +433,9 @@ def _filter_results(
 
 
 def _filter_results_by_stream(
-    lower_token: Optional[RoomStreamToken],
-    upper_token: Optional[RoomStreamToken],
-    instance_name: Optional[str],
+    lower_token: RoomStreamToken | None,
+    upper_token: RoomStreamToken | None,
+    instance_name: str | None,
     stream_ordering: int,
 ) -> bool:
     """
@@ -451,6 +445,8 @@ def _filter_results_by_stream(
     Returns True if the event persisted by the given instance at the given
     stream_ordering falls between the two tokens (taking a None
     token to mean unbounded).
+
+    The token range is defined by > `lower_token` and <= `upper_token`.
 
     Used to filter results from fetching events in the DB against the given
     tokens. This is necessary to handle the case where the tokens include
@@ -481,7 +477,7 @@ def _filter_results_by_stream(
     return True
 
 
-def filter_to_clause(event_filter: Optional[Filter]) -> Tuple[str, List[str]]:
+def filter_to_clause(event_filter: Filter | None) -> tuple[str, list[str]]:
     # NB: This may create SQL clauses that don't optimise well (and we don't
     # have indices on all possible clauses). E.g. it may create
     # "room_id == X AND room_id != X", which postgres doesn't optimise.
@@ -613,12 +609,15 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             max_value=events_max,
         )
         self._events_stream_cache = StreamChangeCache(
-            "EventsRoomStreamChangeCache",
-            min_event_val,
+            name="EventsRoomStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_event_val,
             prefilled_cache=event_cache_prefill,
         )
         self._membership_stream_cache = StreamChangeCache(
-            "MembershipStreamChangeCache", events_max
+            name="MembershipStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=events_max,
         )
 
         self._stream_order_on_start = self.get_room_max_stream_ordering()
@@ -650,23 +649,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         component.
         """
 
-        min_pos = self._stream_id_gen.get_current_token()
-
-        positions = {}
-        if isinstance(self._stream_id_gen, MultiWriterIdGenerator):
-            # The `min_pos` is the minimum position that we know all instances
-            # have finished persisting to, so we only care about instances whose
-            # positions are ahead of that. (Instance positions can be behind the
-            # min position as there are times we can work out that the minimum
-            # position is ahead of the naive minimum across all current
-            # positions. See MultiWriterIdGenerator for details)
-            positions = {
-                i: p
-                for i, p in self._stream_id_gen.get_positions().items()
-                if p > min_pos
-            }
-
-        return RoomStreamToken(stream=min_pos, instance_map=immutabledict(positions))
+        return RoomStreamToken.from_generator(self._stream_id_gen)
 
     def get_events_stream_id_generator(self) -> MultiWriterIdGenerator:
         return self._stream_id_gen
@@ -676,10 +659,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         *,
         room_ids: Collection[str],
         from_key: RoomStreamToken,
-        to_key: Optional[RoomStreamToken] = None,
+        to_key: RoomStreamToken | None = None,
         direction: Direction = Direction.BACKWARDS,
         limit: int = 0,
-    ) -> Dict[str, Tuple[List[EventBase], RoomStreamToken, bool]]:
+    ) -> dict[str, tuple[list[EventBase], RoomStreamToken, bool]]:
         """Get new room events in stream ordering since `from_key`.
 
         Args:
@@ -740,7 +723,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     def get_rooms_that_changed(
         self, room_ids: Collection[str], from_key: RoomStreamToken
-    ) -> Set[str]:
+    ) -> set[str]:
         """Given a list of rooms and a token, return rooms where there may have
         been changes.
         """
@@ -751,15 +734,57 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if self._events_stream_cache.has_entity_changed(room_id, from_id)
         }
 
+    async def get_rooms_that_have_updates_since_sliding_sync_table(
+        self,
+        room_ids: StrCollection,
+        from_key: RoomStreamToken,
+    ) -> StrCollection:
+        """Return the rooms that probably have had updates since the given
+        token (changes that are > `from_key`)."""
+        # If the stream change cache is valid for the stream token, we can just
+        # use the result of that.
+        if from_key.stream >= self._events_stream_cache.get_earliest_known_position():
+            return self._events_stream_cache.get_entities_changed(
+                room_ids, from_key.stream
+            )
+
+        def get_rooms_that_have_updates_since_sliding_sync_table_txn(
+            txn: LoggingTransaction,
+        ) -> StrCollection:
+            sql = """
+                SELECT room_id
+                FROM sliding_sync_joined_rooms
+                WHERE {clause}
+                    AND event_stream_ordering > ?
+            """
+
+            results: set[str] = set()
+            for batch in batch_iter(room_ids, 1000):
+                clause, args = make_in_list_sql_clause(
+                    self.database_engine, "room_id", batch
+                )
+
+                args.append(from_key.stream)
+                txn.execute(sql.format(clause=clause), args)
+
+                results.update(row[0] for row in txn)
+
+            return results
+
+        return await self.db_pool.runInteraction(
+            "get_rooms_that_have_updates_since_sliding_sync_table",
+            get_rooms_that_have_updates_since_sliding_sync_table_txn,
+        )
+
     async def paginate_room_events_by_stream_ordering(
         self,
         *,
         room_id: str,
         from_key: RoomStreamToken,
-        to_key: Optional[RoomStreamToken] = None,
+        to_key: RoomStreamToken | None = None,
         direction: Direction = Direction.BACKWARDS,
         limit: int = 0,
-    ) -> Tuple[List[EventBase], RoomStreamToken, bool]:
+    ) -> tuple[list[EventBase], RoomStreamToken, bool]:
         """
         Paginate events by `stream_ordering` in the room from the `from_key` in the
         given `direction` to the `to_key` or `limit`.
@@ -844,7 +869,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             engine=self.database_engine,
         )
 
-        def f(txn: LoggingTransaction) -> Tuple[List[_EventDictReturn], bool]:
+        def f(txn: LoggingTransaction) -> tuple[list[_EventDictReturn], bool]:
             sql = f"""
                 SELECT event_id, instance_name, stream_ordering
                 FROM events
@@ -908,8 +933,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         user_id: str,
         from_key: RoomStreamToken,
         to_key: RoomStreamToken,
-        excluded_room_ids: Optional[List[str]] = None,
-    ) -> List[CurrentStateDeltaMembership]:
+        excluded_room_ids: list[str] | None = None,
+    ) -> list[CurrentStateDeltaMembership]:
         """
         Fetch membership events (and the previous event that was replaced by that one)
         for a given user.
@@ -948,6 +973,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             available in the `current_state_delta_stream` table. To actually check for a
             state reset, you need to check if a membership still exists in the room.
         """
+
+        assert from_key.topological is None
+        assert to_key.topological is None
+
         # Start by ruling out cases where a DB query is not necessary.
         if from_key == to_key:
             return []
@@ -959,13 +988,13 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if not has_changed:
                 return []
 
-        def f(txn: LoggingTransaction) -> List[CurrentStateDeltaMembership]:
+        def f(txn: LoggingTransaction) -> list[CurrentStateDeltaMembership]:
             # To handle tokens with a non-empty instance_map we fetch more
             # results than necessary and then filter down
             min_from_id = from_key.stream
             max_to_id = to_key.get_max_stream_pos()
 
-            args: List[Any] = [min_from_id, max_to_id, EventTypes.Member, user_id]
+            args: list[Any] = [min_from_id, max_to_id, EventTypes.Member, user_id]
 
             # TODO: It would be good to assert that the `from_token`/`to_token` is >=
             # the first row in `current_state_delta_stream` for the rooms we're
@@ -1008,7 +1037,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
             txn.execute(sql, args)
 
-            membership_changes: List[CurrentStateDeltaMembership] = []
+            membership_changes: list[CurrentStateDeltaMembership] = []
             for (
                 room_id,
                 event_id,
@@ -1093,14 +1122,211 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if membership_change.room_id not in room_ids_to_exclude
         ]
 
+    @trace
+    async def get_sliding_sync_membership_changes(
+        self,
+        user_id: str,
+        from_key: RoomStreamToken,
+        to_key: RoomStreamToken,
+        excluded_room_ids: AbstractSet[str] | None = None,
+    ) -> dict[str, RoomsForUserStateReset]:
+        """
+        Fetch membership events that result in a meaningful membership change for a
+        given user.
+
+        A meaningful membership changes is one where the `membership` value actually
+        changes. This means memberships changes from `join` to `join` (like a display
+        name change) will be filtered out since they result in no meaningful change.
+
+        Note: This function only works with "live" tokens with `stream_ordering` only.
+
+        We're looking for membership changes in the token range (> `from_key` and <=
+        `to_key`).
+
+        Args:
+            user_id: The user ID to fetch membership events for.
+            from_key: The point in the stream to sync from (fetching events > this point).
+            to_key: The token to fetch rooms up to (fetching events <= this point).
+            excluded_room_ids: Optional list of room IDs to exclude from the results.
+
+        Returns:
+            All meaningful membership changes to the current state in the token range.
+            Events are sorted by `stream_ordering` ascending.
+
+            `event_id`/`sender` can be `None` when the server leaves a room (meaning
+            everyone locally left) or a state reset which removed the person from the
+            room. We can't tell the difference between the two cases with what's
+            available in the `current_state_delta_stream` table. To actually check for a
+            state reset, you need to check if a membership still exists in the room.
+        """
+
+        assert from_key.topological is None
+        assert to_key.topological is None
+
+        # Start by ruling out cases where a DB query is not necessary.
+        if from_key == to_key:
+            return {}
+
+        if from_key:
+            has_changed = self._membership_stream_cache.has_entity_changed(
+                user_id, int(from_key.stream)
+            )
+            if not has_changed:
+                return {}
+
+        room_ids_to_exclude: AbstractSet[str] = set()
+        if excluded_room_ids is not None:
+            room_ids_to_exclude = excluded_room_ids
+
+        def f(txn: LoggingTransaction) -> dict[str, RoomsForUserStateReset]:
+            # To handle tokens with a non-empty instance_map we fetch more
+            # results than necessary and then filter down
+            min_from_id = from_key.stream
+            max_to_id = to_key.get_max_stream_pos()
+
+            # This query looks at membership changes in
+            # `sliding_sync_membership_snapshots` which will not include users
+            # that were state reset out of rooms; so we need to look for that
+            # case in `current_state_delta_stream`.
+            sql = """
+                SELECT
+                    room_id,
+                    membership_event_id,
+                    event_instance_name,
+                    event_stream_ordering,
+                    membership,
+                    sender,
+                    prev_membership,
+                    room_version
+                FROM
+                (
+                    SELECT
+                        s.room_id,
+                        s.membership_event_id,
+                        s.event_instance_name,
+                        s.event_stream_ordering,
+                        s.membership,
+                        s.sender,
+                        m_prev.membership AS prev_membership
+                    FROM sliding_sync_membership_snapshots as s
+                        LEFT JOIN event_edges AS e ON e.event_id = s.membership_event_id
+                        LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = e.prev_event_id
+                    WHERE s.user_id = ?
+
+                    UNION ALL
+
+                    SELECT
+                        s.room_id,
+                        e.event_id,
+                        s.instance_name,
+                        s.stream_id,
+                        m.membership,
+                        e.sender,
+                        m_prev.membership AS prev_membership
+                    FROM current_state_delta_stream AS s
+                        LEFT JOIN events AS e ON e.event_id = s.event_id
+                        LEFT JOIN room_memberships AS m ON m.event_id = s.event_id
+                        LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = s.prev_event_id
+                    WHERE
+                        s.type = ?
+                        AND s.state_key = ?
+                ) AS c
+                INNER JOIN rooms USING (room_id)
+                WHERE event_stream_ordering > ? AND event_stream_ordering <= ?
+                ORDER BY event_stream_ordering ASC
+            """
+
+            txn.execute(
+                sql,
+                (user_id, EventTypes.Member, user_id, min_from_id, max_to_id),
+            )
+
+            membership_changes: dict[str, RoomsForUserStateReset] = {}
+            for (
+                room_id,
+                membership_event_id,
+                event_instance_name,
+                event_stream_ordering,
+                membership,
+                sender,
+                prev_membership,
+                room_version_id,
+            ) in txn:
+                assert room_id is not None
+                assert event_stream_ordering is not None
+
+                if room_id in room_ids_to_exclude:
+                    continue
+
+                if _filter_results_by_stream(
+                    from_key,
+                    to_key,
+                    event_instance_name,
+                    event_stream_ordering,
+                ):
+                    # When the server leaves a room, it will insert new rows into the
+                    # `current_state_delta_stream` table with `event_id = null` for all
+                    # current state. This means we might already have a row for the
+                    # leave event and then another for the same leave where the
+                    # `event_id=null` but the `prev_event_id` is pointing back at the
+                    # earlier leave event. We don't want to report the leave, if we
+                    # already have a leave event.
+                    if (
+                        membership_event_id is None
+                        and prev_membership == Membership.LEAVE
+                    ):
+                        continue
+
+                    if membership_event_id is None and room_id in membership_changes:
+                        # SUSPICIOUS: if we join a room and get state reset out of it
+                        # in the same queried window,
+                        # won't this ignore the 'state reset out of it' part?
+                        continue
+
+                    # When `s.event_id = null`, we won't be able to get respective
+                    # `room_membership` but can assume the user has left the room
+                    # because this only happens when the server leaves a room
+                    # (meaning everyone locally left) or a state reset which removed
+                    # the person from the room.
+                    membership = (
+                        membership if membership is not None else Membership.LEAVE
+                    )
+
+                    if membership == prev_membership:
+                        # If `membership` and `prev_membership` are the same then this
+                        # is not a meaningful change so we can skip it.
+                        # An example of this happening is when the user changes their display name.
+                        continue
+
+                    membership_change = RoomsForUserStateReset(
+                        room_id=room_id,
+                        sender=sender,
+                        membership=membership,
+                        event_id=membership_event_id,
+                        event_pos=PersistedEventPosition(
+                            event_instance_name, event_stream_ordering
+                        ),
+                        room_version_id=room_version_id,
+                    )
+
+                    membership_changes[room_id] = membership_change
+
+            return membership_changes
+
+        membership_changes = await self.db_pool.runInteraction(
+            "get_sliding_sync_membership_changes", f
+        )
+
+        return membership_changes
+
     @cancellable
     async def get_membership_changes_for_user(
         self,
         user_id: str,
         from_key: RoomStreamToken,
         to_key: RoomStreamToken,
-        excluded_rooms: Optional[List[str]] = None,
-    ) -> List[EventBase]:
+        excluded_rooms: list[str] | None = None,
+    ) -> list[EventBase]:
         """Fetch membership events for a given user.
 
         All such events whose stream ordering `s` lies in the range
@@ -1118,13 +1344,13 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if not has_changed:
                 return []
 
-        def f(txn: LoggingTransaction) -> List[_EventDictReturn]:
+        def f(txn: LoggingTransaction) -> list[_EventDictReturn]:
             # To handle tokens with a non-empty instance_map we fetch more
             # results than necessary and then filter down
             min_from_id = from_key.stream
             max_to_id = to_key.get_max_stream_pos()
 
-            args: List[Any] = [user_id, min_from_id, max_to_id]
+            args: list[Any] = [user_id, min_from_id, max_to_id]
 
             ignore_room_clause = ""
             if excluded_rooms is not None and len(excluded_rooms) > 0:
@@ -1170,7 +1396,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     async def get_recent_events_for_room(
         self, room_id: str, limit: int, end_token: RoomStreamToken
-    ) -> Tuple[List[EventBase], RoomStreamToken]:
+    ) -> tuple[list[EventBase], RoomStreamToken]:
         """Get the most recent events in the room in topological ordering.
 
         Args:
@@ -1195,7 +1421,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     async def get_recent_event_ids_for_room(
         self, room_id: str, limit: int, end_token: RoomStreamToken
-    ) -> Tuple[List[_EventDictReturn], RoomStreamToken]:
+    ) -> tuple[list[_EventDictReturn], RoomStreamToken]:
         """Get the most recent events in the room in topological ordering.
 
         Args:
@@ -1226,7 +1452,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     async def get_room_event_before_stream_ordering(
         self, room_id: str, stream_ordering: int
-    ) -> Optional[Tuple[int, int, str]]:
+    ) -> tuple[int, int, str] | None:
         """Gets details of the first event in a room at or before a stream ordering
 
         Args:
@@ -1237,7 +1463,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             A tuple of (stream ordering, topological ordering, event_id)
         """
 
-        def _f(txn: LoggingTransaction) -> Optional[Tuple[int, int, str]]:
+        def _f(txn: LoggingTransaction) -> tuple[int, int, str] | None:
             sql = """
                 SELECT stream_ordering, topological_ordering, event_id
                 FROM events
@@ -1250,7 +1476,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 LIMIT 1
             """
             txn.execute(sql, (room_id, stream_ordering))
-            return cast(Optional[Tuple[int, int, str]], txn.fetchone())
+            return cast(tuple[int, int, str] | None, txn.fetchone())
 
         return await self.db_pool.runInteraction(
             "get_room_event_before_stream_ordering", _f
@@ -1260,7 +1486,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         self,
         room_id: str,
         end_token: RoomStreamToken,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Returns the ID of the last event in a room at or before a stream ordering
 
         Args:
@@ -1285,8 +1511,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
     async def get_last_event_pos_in_room(
         self,
         room_id: str,
-        event_types: Optional[StrCollection] = None,
-    ) -> Optional[Tuple[str, PersistedEventPosition]]:
+        event_types: StrCollection | None = None,
+    ) -> tuple[str, PersistedEventPosition] | None:
         """
         Returns the ID and event position of the last event in a room.
 
@@ -1303,9 +1529,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def _get_last_event_pos_in_room_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Tuple[str, PersistedEventPosition]]:
+        ) -> tuple[str, PersistedEventPosition] | None:
             event_type_clause = ""
-            event_type_args: List[str] = []
+            event_type_args: list[str] = []
             if event_types is not None and len(event_types) > 0:
                 event_type_clause, event_type_args = make_in_list_sql_clause(
                     txn.database_engine, "type", event_types
@@ -1329,7 +1555,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 [room_id] + event_type_args,
             )
 
-            row = cast(Optional[Tuple[str, int, str]], txn.fetchone())
+            row = cast(tuple[str, int, str] | None, txn.fetchone())
             if row is not None:
                 event_id, stream_ordering, instance_name = row
 
@@ -1351,8 +1577,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         self,
         room_id: str,
         end_token: RoomStreamToken,
-        event_types: Optional[StrCollection] = None,
-    ) -> Optional[Tuple[str, PersistedEventPosition]]:
+        event_types: StrCollection | None = None,
+    ) -> tuple[str, PersistedEventPosition] | None:
         """
         Returns the ID and event position of the last event in a room at or before a
         stream ordering.
@@ -1369,7 +1595,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def get_last_event_pos_in_room_before_stream_ordering_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Tuple[str, PersistedEventPosition]]:
+        ) -> tuple[str, PersistedEventPosition] | None:
             # We're looking for the closest event at or before the token. We need to
             # handle the fact that the stream token can be a vector clock (with an
             # `instance_map`) and events can be persisted on different instances
@@ -1383,7 +1609,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             max_stream = end_token.get_max_stream_pos()
 
             event_type_clause = ""
-            event_type_args: List[str] = []
+            event_type_args: list[str] = []
             if event_types is not None and len(event_types) > 0:
                 event_type_clause, event_type_args = make_in_list_sql_clause(
                     txn.database_engine, "type", event_types
@@ -1459,7 +1685,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         self,
         room_ids: StrCollection,
         end_token: RoomStreamToken,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Bulk fetch the stream position of the latest events in the given
         rooms
         """
@@ -1472,8 +1698,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         # Check that the stream position for the rooms are from before the
         # minimum position of the token. If not then we need to fetch more
         # rows.
-        results: Dict[str, int] = {}
-        recheck_rooms: Set[str] = set()
+        results: dict[str, int] = {}
+        recheck_rooms: set[str] = set()
         min_token = end_token.stream
         for room_id, stream in uncapped_results.items():
             if stream is None:
@@ -1506,7 +1732,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
     @cachedList(cached_method_name="_get_max_event_pos", list_name="room_ids")
     async def _bulk_get_max_event_pos(
         self, room_ids: StrCollection
-    ) -> Mapping[str, Optional[int]]:
+    ) -> Mapping[str, int | None]:
         """Fetch the max position of a persisted event in the room."""
 
         # We need to be careful not to return positions ahead of the current
@@ -1514,11 +1740,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         now_token = self.get_room_max_token()
         max_pos = now_token.get_max_stream_pos()
 
-        results: Dict[str, int] = {}
+        results: dict[str, int] = {}
 
         # First, we check for the rooms in the stream change cache to see if we
         # can just use the latest position from it.
-        missing_room_ids: Set[str] = set()
+        missing_room_ids: set[str] = set()
         for room_id in room_ids:
             stream_pos = self._events_stream_cache.get_max_pos_of_last_change(room_id)
             if stream_pos is not None:
@@ -1537,7 +1763,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def bulk_get_max_event_pos_fallback_txn(
             txn: LoggingTransaction, batched_room_ids: StrCollection
-        ) -> Dict[str, int]:
+        ) -> dict[str, int]:
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "room_id", batched_room_ids
             )
@@ -1562,7 +1788,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         # the joins and sub-queries.
         def bulk_get_max_event_pos_from_sliding_sync_tables_txn(
             txn: LoggingTransaction, batched_room_ids: StrCollection
-        ) -> Dict[str, int]:
+        ) -> dict[str, int]:
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "room_id", batched_room_ids
             )
@@ -1575,7 +1801,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             txn.execute(sql, args)
             return {row[0]: row[1] for row in txn}
 
-        recheck_rooms: Set[str] = set()
+        recheck_rooms: set[str] = set()
         for batched in batch_iter(room_ids, 1000):
             if await self.have_finished_sliding_sync_background_jobs():
                 batch_results = await self.db_pool.runInteraction(
@@ -1631,14 +1857,14 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         txn: LoggingTransaction,
         event_id: str,
         allow_none: bool = False,
-    ) -> Optional[int]: ...
+    ) -> int | None: ...
 
     def get_stream_id_for_event_txn(
         self,
         txn: LoggingTransaction,
         event_id: str,
         allow_none: bool = False,
-    ) -> Optional[int]:
+    ) -> int | None:
         # Type ignore: we pass keyvalues a Dict[str, str]; the function wants
         # Dict[str, Any]. I think mypy is unhappy because Dict is invariant?
         return self.db_pool.simple_select_one_onecol_txn(  # type: ignore[call-overload]
@@ -1741,7 +1967,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         event_id: str,
         before_limit: int,
         after_limit: int,
-        event_filter: Optional[Filter] = None,
+        event_filter: Filter | None = None,
     ) -> _EventsAround:
         """Retrieve events and pagination tokens around a given event in a
         room.
@@ -1779,7 +2005,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         event_id: str,
         before_limit: int,
         after_limit: int,
-        event_filter: Optional[Filter],
+        event_filter: Filter | None,
     ) -> dict:
         """Retrieves event_ids and pagination tokens around a given event in a
         room.
@@ -1795,15 +2021,14 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             dict
         """
 
-        stream_ordering, topological_ordering = cast(
-            Tuple[int, int],
-            self.db_pool.simple_select_one_txn(
-                txn,
-                "events",
-                keyvalues={"event_id": event_id, "room_id": room_id},
-                retcols=["stream_ordering", "topological_ordering"],
-            ),
+        row = self.db_pool.simple_select_one_txn(
+            txn,
+            "events",
+            keyvalues={"event_id": event_id, "room_id": room_id},
+            retcols=("stream_ordering", "topological_ordering"),
         )
+        stream_ordering = int(row[0])
+        topological_ordering = int(row[1])
 
         # Paginating backwards includes the event at the token, but paginating
         # forward doesn't.
@@ -1845,7 +2070,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         from_id: int,
         current_id: int,
         limit: int,
-    ) -> Tuple[int, Dict[str, Optional[int]]]:
+    ) -> tuple[int, dict[str, int | None]]:
         """Get all new events
 
         Returns all event ids with from_id < stream_ordering <= current_id.
@@ -1866,7 +2091,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def get_all_new_event_ids_stream_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[int, Dict[str, Optional[int]]]:
+        ) -> tuple[int, dict[str, int | None]]:
             sql = (
                 "SELECT e.stream_ordering, e.event_id, e.received_ts"
                 " FROM events AS e"
@@ -1883,7 +2108,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if len(rows) == limit:
                 upper_bound = rows[-1][0]
 
-            event_to_received_ts: Dict[str, Optional[int]] = {
+            event_to_received_ts: dict[str, int | None] = {
                 row[1]: row[2] for row in rows
             }
             return upper_bound, event_to_received_ts
@@ -1962,7 +2187,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         """
         txn.execute(sql)
         min_positions = dict(
-            cast(Iterable[Tuple[str, int]], txn)
+            cast(Iterable[tuple[str, int]], txn)
         )  # Map from type -> min position
 
         # Ensure we do actually have some values here
@@ -1993,11 +2218,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         txn: LoggingTransaction,
         room_id: str,
         from_token: RoomStreamToken,
-        to_token: Optional[RoomStreamToken] = None,
+        to_token: RoomStreamToken | None = None,
         direction: Direction = Direction.BACKWARDS,
         limit: int = 0,
-        event_filter: Optional[Filter] = None,
-    ) -> Tuple[List[_EventDictReturn], RoomStreamToken, bool]:
+        event_filter: Filter | None = None,
+    ) -> tuple[list[_EventDictReturn], RoomStreamToken, bool]:
         """Returns list of events before or after a given token.
 
         Args:
@@ -2037,7 +2262,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             # Token selection matches what we do below if there are no rows
             return [], to_token if to_token else from_token, False
 
-        args: List[Any] = [room_id]
+        args: list[Any] = [room_id]
 
         order, from_bound, to_bound = generate_pagination_bounds(
             direction, from_token, to_token
@@ -2167,11 +2392,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         *,
         room_id: str,
         from_key: RoomStreamToken,
-        to_key: Optional[RoomStreamToken] = None,
+        to_key: RoomStreamToken | None = None,
         direction: Direction = Direction.BACKWARDS,
         limit: int = 0,
-        event_filter: Optional[Filter] = None,
-    ) -> Tuple[List[EventBase], RoomStreamToken, bool]:
+        event_filter: Filter | None = None,
+    ) -> tuple[list[EventBase], RoomStreamToken, bool]:
         """
         Paginate events by `topological_ordering` (tie-break with `stream_ordering`) in
         the room from the `from_key` in the given `direction` to the `to_key` or
@@ -2297,9 +2522,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
     async def get_timeline_gaps(
         self,
         room_id: str,
-        from_token: Optional[RoomStreamToken],
+        from_token: RoomStreamToken | None,
         to_token: RoomStreamToken,
-    ) -> Optional[RoomStreamToken]:
+    ) -> RoomStreamToken | None:
         """Check if there is a gap, and return a token that marks the position
         of the gap in the stream.
         """

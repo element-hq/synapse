@@ -21,15 +21,22 @@
 
 from typing import Any
 
-from synapse.config._base import Config
+from synapse.config._base import Config, ConfigError, read_file
 from synapse.types import JsonDict
 from synapse.util.check_dependencies import check_requirements
+
+CONFLICTING_PASSWORD_OPTS_ERROR = """\
+You have configured both `redis.password` and `redis.password_path`.
+These are mutually incompatible.
+"""
 
 
 class RedisConfig(Config):
     section = "redis"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         redis_config = config.get("redis") or {}
         self.redis_enabled = redis_config.get("enabled", False)
 
@@ -43,6 +50,22 @@ class RedisConfig(Config):
         self.redis_path = redis_config.get("path", None)
         self.redis_dbid = redis_config.get("dbid", None)
         self.redis_password = redis_config.get("password")
+        if self.redis_password and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("redis", "password"),
+            )
+        redis_password_path = redis_config.get("password_path")
+        if redis_password_path:
+            if self.redis_password:
+                raise ConfigError(CONFLICTING_PASSWORD_OPTS_ERROR)
+            self.redis_password = read_file(
+                redis_password_path,
+                (
+                    "redis",
+                    "password_path",
+                ),
+            ).strip()
 
         self.redis_use_tls = redis_config.get("use_tls", False)
         self.redis_certificate = redis_config.get("certificate_file", None)

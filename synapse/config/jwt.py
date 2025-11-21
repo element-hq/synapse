@@ -38,6 +38,7 @@ class JWTConfig(Config):
             self.jwt_algorithm = jwt_config["algorithm"]
 
             self.jwt_subject_claim = jwt_config.get("subject_claim", "sub")
+            self.jwt_display_name_claim = jwt_config.get("display_name_claim")
 
             # The issuer and audiences are optional, if provided, it is asserted
             # that the claims exist on the JWT.
@@ -49,5 +50,6 @@ class JWTConfig(Config):
             self.jwt_secret = None
             self.jwt_algorithm = None
             self.jwt_subject_claim = None
+            self.jwt_display_name_claim = None
             self.jwt_issuer = None
             self.jwt_audiences = None

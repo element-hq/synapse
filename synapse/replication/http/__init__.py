@@ -1,7 +1,7 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 from synapse.http.server import JsonResource
 from synapse.replication.http import (
     account_data,
+    deactivate_account,
     delayed_events,
     devices,
     federation,
@@ -31,7 +32,6 @@ from synapse.replication.http import (
     presence,
     push,
     register,
-    send_event,
     send_events,
     state,
     streams,
@@ -50,7 +50,6 @@ class ReplicationRestResource(JsonResource):
         self.register_servlets(hs)
 
     def register_servlets(self, hs: "HomeServer") -> None:
-        send_event.register_servlets(hs, self)
         send_events.register_servlets(hs, self)
         federation.register_servlets(hs, self)
         presence.register_servlets(hs, self)
@@ -59,10 +58,11 @@ class ReplicationRestResource(JsonResource):
         account_data.register_servlets(hs, self)
         push.register_servlets(hs, self)
         state.register_servlets(hs, self)
+        devices.register_servlets(hs, self)
 
         # The following can't currently be instantiated on workers.
         if hs.config.worker.worker_app is None:
             login.register_servlets(hs, self)
             register.register_servlets(hs, self)
-            devices.register_servlets(hs, self)
             delayed_events.register_servlets(hs, self)
+            deactivate_account.register_servlets(hs, self)

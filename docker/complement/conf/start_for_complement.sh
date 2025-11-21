@@ -5,12 +5,12 @@
 set -e
 
 echo "Complement Synapse launcher"
-echo "  Args: $@"
+echo "  Args: $*"
 echo "  Env: SYNAPSE_COMPLEMENT_DATABASE=$SYNAPSE_COMPLEMENT_DATABASE SYNAPSE_COMPLEMENT_USE_WORKERS=$SYNAPSE_COMPLEMENT_USE_WORKERS SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR=$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR"
 
 function log {
-    d=$(date +"%Y-%m-%d %H:%M:%S,%3N")
-    echo "$d $@"
+    d=$(printf '%(%Y-%m-%d %H:%M:%S)T,%.3s\n' ${EPOCHREALTIME/./ })
+    echo "$d $*"
 }
 
 # Set the server name of the homeserver
@@ -54,7 +54,6 @@ if [[ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]]; then
     export SYNAPSE_WORKER_TYPES="\
       event_persister:2, \
       background_worker, \
-      frontend_proxy, \
       event_creator, \
       user_dir, \
       media_repository, \
@@ -65,6 +64,7 @@ if [[ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]]; then
       client_reader, \
       appservice, \
       pusher, \
+      device_lists:2, \
       stream_writers=account_data+presence+receipts+to_device+typing"
 
   fi
@@ -103,12 +103,11 @@ fi
 # Note that both the key and certificate are in PEM format (not DER).
 
 # First generate a configuration file to set up a Subject Alternative Name.
-cat > /conf/server.tls.conf <<EOF
+echo "\
 .include /etc/ssl/openssl.cnf
 
 [SAN]
-subjectAltName=DNS:${SERVER_NAME}
-EOF
+subjectAltName=DNS:${SERVER_NAME}" > /conf/server.tls.conf
 
 # Generate an RSA key
 openssl genrsa -out /conf/server.tls.key 2048
@@ -123,12 +122,12 @@ openssl x509 -req -in /conf/server.tls.csr \
   -out /conf/server.tls.crt -extfile /conf/server.tls.conf -extensions SAN
 
 # Assert that we have a Subject Alternative Name in the certificate.
-# (grep will exit with 1 here if there isn't a SAN in the certificate.)
-openssl x509 -in /conf/server.tls.crt -noout -text | grep DNS:
+# (the test will exit with 1 here if there isn't a SAN in the certificate.)
+[[ $(openssl x509 -in /conf/server.tls.crt -noout -text) == *DNS:* ]]
 
 export SYNAPSE_TLS_CERT=/conf/server.tls.crt
 export SYNAPSE_TLS_KEY=/conf/server.tls.key
 
 # Run the script that writes the necessary config files and starts supervisord, which in turn
 # starts everything else
-exec /configure_workers_and_start.py
+exec /configure_workers_and_start.py "$@"

@@ -20,17 +20,17 @@
 #
 import logging
 import os
-from typing import Any, Optional, Tuple
+from typing import Any
 
 from twisted.internet.protocol import Factory
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.http import HTTPChannel
 from twisted.web.server import Request
 
 from synapse.rest import admin
 from synapse.rest.client import login, media
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.http import (
     TestServerTLSConnectionFactory,
@@ -40,10 +40,11 @@ from tests.http import (
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import FakeChannel, FakeTransport, make_request
 from tests.test_utils import SMALL_PNG
+from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
 
-test_server_connection_factory: Optional[TestServerTLSConnectionFactory] = None
+test_server_connection_factory: TestServerTLSConnectionFactory | None = None
 
 
 class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
@@ -66,7 +67,7 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         return conf
 
     def make_worker_hs(
-        self, worker_app: str, extra_config: Optional[dict] = None, **kwargs: Any
+        self, worker_app: str, extra_config: dict | None = None, **kwargs: Any
     ) -> HomeServer:
         worker_hs = super().make_worker_hs(worker_app, extra_config, **kwargs)
         # Force the media paths onto the replication resource.
@@ -77,7 +78,7 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
     def _get_media_req(
         self, hs: HomeServer, target: str, media_id: str
-    ) -> Tuple[FakeChannel, Request]:
+    ) -> tuple[FakeChannel, Request]:
         """Request some remote media from the given HS by calling the download
         API.
 
@@ -148,6 +149,7 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
         return channel, request
 
+    @override_config({"enable_authenticated_media": False})
     def test_basic(self) -> None:
         """Test basic fetching of remote media from a single worker."""
         hs1 = self.make_worker_hs("synapse.app.generic_worker")
@@ -164,6 +166,7 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.result["body"], b"Hello!")
 
+    @override_config({"enable_authenticated_media": False})
     def test_download_simple_file_race(self) -> None:
         """Test that fetching remote media from two different processes at the
         same time works.
@@ -203,6 +206,7 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         # We expect only one new file to have been persisted.
         self.assertEqual(start_count + 1, self._count_remote_media())
 
+    @override_config({"enable_authenticated_media": False})
     def test_download_image_race(self) -> None:
         """Test that fetching remote *images* from two different processes at
         the same time works.
@@ -278,7 +282,7 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         return conf
 
     def make_worker_hs(
-        self, worker_app: str, extra_config: Optional[dict] = None, **kwargs: Any
+        self, worker_app: str, extra_config: dict | None = None, **kwargs: Any
     ) -> HomeServer:
         worker_hs = super().make_worker_hs(worker_app, extra_config, **kwargs)
         # Force the media paths onto the replication resource.
@@ -289,7 +293,7 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
     def _get_media_req(
         self, hs: HomeServer, target: str, media_id: str
-    ) -> Tuple[FakeChannel, Request]:
+    ) -> tuple[FakeChannel, Request]:
         """Request some remote media from the given HS by calling the download
         API.
 

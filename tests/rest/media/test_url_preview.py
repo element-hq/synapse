@@ -22,26 +22,27 @@ import base64
 import json
 import os
 import re
-from typing import Any, Dict, Optional, Sequence, Tuple, Type
+from typing import Any, Sequence
 from urllib.parse import quote, urlencode
 
 from twisted.internet._resolver import HostResolution
 from twisted.internet.address import IPv4Address, IPv6Address
 from twisted.internet.error import DNSLookupError
 from twisted.internet.interfaces import IAddress, IResolutionReceiver
-from twisted.test.proto_helpers import AccumulatingProtocol, MemoryReactor
+from twisted.internet.testing import AccumulatingProtocol, MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
 from tests import unittest
 from tests.server import FakeTransport
 from tests.test_utils import SMALL_PNG
+from tests.unittest import override_config
 
 try:
     import lxml
@@ -126,7 +127,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         assert self.media_repo.url_previewer is not None
         self.url_previewer = self.media_repo.url_previewer
 
-        self.lookups: Dict[str, Any] = {}
+        self.lookups: dict[str, Any] = {}
 
         class Resolver:
             def resolveHostName(
@@ -134,7 +135,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
                 resolutionReceiver: IResolutionReceiver,
                 hostName: str,
                 portNumber: int = 0,
-                addressTypes: Optional[Sequence[Type[IAddress]]] = None,
+                addressTypes: Sequence[type[IAddress]] | None = None,
                 transportSemantics: str = "TCP",
             ) -> IResolutionReceiver:
                 resolution = HostResolution(hostName)
@@ -149,7 +150,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         self.reactor.nameResolver = Resolver()  # type: ignore[assignment]
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         """Create a resource tree for the test server
 
         A resource tree is a mapping from path to twisted.web.resource.
@@ -877,7 +878,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         data = base64.b64encode(SMALL_PNG)
 
         end_content = (
-            b"<html><head>" b'<img src="data:image/png;base64,%s" />' b"</head></html>"
+            b'<html><head><img src="data:image/png;base64,%s" /></head></html>'
         ) % (data,)
 
         channel = self.make_request(
@@ -1226,7 +1227,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertEqual(body["og:title"], "Test")
         self.assertNotIn("og:image", body)
 
-    def _download_image(self) -> Tuple[str, str]:
+    def _download_image(self) -> tuple[str, str]:
         """Downloads an image into the URL cache.
         Returns:
             A (host, media_id) tuple representing the MXC URI of the image.
@@ -1259,6 +1260,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertIsNone(_port)
         return host, media_id
 
+    @override_config({"enable_authenticated_media": False})
     def test_storage_providers_exclude_files(self) -> None:
         """Test that files are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
@@ -1301,6 +1303,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             "URL cache file was unexpectedly retrieved from a storage provider",
         )
 
+    @override_config({"enable_authenticated_media": False})
     def test_storage_providers_exclude_thumbnails(self) -> None:
         """Test that thumbnails are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()

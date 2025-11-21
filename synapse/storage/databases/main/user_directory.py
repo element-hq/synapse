@@ -26,27 +26,15 @@ from typing import (
     TYPE_CHECKING,
     Collection,
     Iterable,
-    List,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
+    TypedDict,
     cast,
 )
 
 import attr
 
-try:
-    # Figure out if ICU support is available for searching users.
-    import icu
-
-    USE_ICU = True
-except ModuleNotFoundError:
-    USE_ICU = False
-
-from typing_extensions import TypedDict
-
 from synapse.api.errors import StoreError
+from synapse.synapse_rust import segmenter as icu
 from synapse.util.stringutils import non_null_str_or_none
 
 if TYPE_CHECKING:
@@ -83,8 +71,8 @@ class _UserDirProfile:
     user_id: str
 
     # If the display name or avatar URL are unexpected types, replace with None
-    display_name: Optional[str] = attr.ib(default=None, converter=non_null_str_or_none)
-    avatar_url: Optional[str] = attr.ib(default=None, converter=non_null_str_or_none)
+    display_name: str | None = attr.ib(default=None, converter=non_null_str_or_none)
+    avatar_url: str | None = attr.ib(default=None, converter=non_null_str_or_none)
 
 
 class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
@@ -217,7 +205,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
         def _get_next_batch(
             txn: LoggingTransaction,
-        ) -> Optional[Sequence[Tuple[str, int]]]:
+        ) -> Sequence[tuple[str, int]] | None:
             # Only fetch 250 rooms, so we don't fetch too many at once, even
             # if those 250 rooms have less than batch_size state events.
             sql = """
@@ -226,7 +214,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
                 LIMIT 250
             """ % (TEMP_TABLE + "_rooms",)
             txn.execute(sql)
-            rooms_to_work_on = cast(List[Tuple[str, int]], txn.fetchall())
+            rooms_to_work_on = cast(list[tuple[str, int]], txn.fetchall())
 
             if not rooms_to_work_on:
                 return None
@@ -253,8 +241,9 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             return 1
 
         logger.debug(
-            "Processing the next %d rooms of %d remaining"
-            % (len(rooms_to_work_on), progress["remaining"])
+            "Processing the next %d rooms of %d remaining",
+            len(rooms_to_work_on),
+            progress["remaining"],
         )
 
         processed_event_count = 0
@@ -362,28 +351,20 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
         def _populate_user_directory_process_users_txn(
             txn: LoggingTransaction,
-        ) -> Optional[int]:
-            if self.database_engine.supports_returning:
-                # Note: we use an ORDER BY in the SELECT to force usage of an
-                # index. Otherwise, postgres does a sequential scan that is
-                # surprisingly slow (I think due to the fact it will read/skip
-                # over lots of already deleted rows).
-                sql = f"""
-                    DELETE FROM {TEMP_TABLE + "_users"}
-                    WHERE user_id IN (
-                        SELECT user_id FROM {TEMP_TABLE + "_users"} ORDER BY user_id LIMIT ?
-                    )
-                    RETURNING user_id
-                """
-                txn.execute(sql, (batch_size,))
-                user_result = cast(List[Tuple[str]], txn.fetchall())
-            else:
-                sql = "SELECT user_id FROM %s ORDER BY user_id LIMIT %s" % (
-                    TEMP_TABLE + "_users",
-                    str(batch_size),
+        ) -> int | None:
+            # Note: we use an ORDER BY in the SELECT to force usage of an
+            # index. Otherwise, postgres does a sequential scan that is
+            # surprisingly slow (I think due to the fact it will read/skip
+            # over lots of already deleted rows).
+            sql = f"""
+                DELETE FROM {TEMP_TABLE + "_users"}
+                WHERE user_id IN (
+                    SELECT user_id FROM {TEMP_TABLE + "_users"} ORDER BY user_id LIMIT ?
                 )
-                txn.execute(sql)
-                user_result = cast(List[Tuple[str]], txn.fetchall())
+                RETURNING user_id
+            """
+            txn.execute(sql, (batch_size,))
+            user_result = cast(list[tuple[str]], txn.fetchall())
 
             if not user_result:
                 return None
@@ -415,7 +396,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
             # Next fetch their profiles. Note that not all users have profiles.
             profile_rows = cast(
-                List[Tuple[str, Optional[str], Optional[str]]],
+                list[tuple[str, str | None, str | None]],
                 self.db_pool.simple_select_many_txn(
                     txn,
                     table="profiles",
@@ -441,17 +422,6 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
             # Actually insert the users with their profiles into the directory.
             self._update_profiles_in_user_dir_txn(txn, profiles_to_insert)
-
-            # We've finished processing the users. Delete it from the table, if
-            # we haven't already.
-            if not self.database_engine.supports_returning:
-                self.db_pool.simple_delete_many_txn(
-                    txn,
-                    table=TEMP_TABLE + "_users",
-                    column="user_id",
-                    values=users_to_work_on,
-                    keyvalues={},
-                )
 
             # Update the remaining counter.
             progress["remaining"] -= len(users_to_work_on)
@@ -521,7 +491,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
         ]
 
         rows = cast(
-            List[Tuple[str, Optional[str]]],
+            list[tuple[str, str | None]],
             self.db_pool.simple_select_many_txn(
                 txn,
                 table="users",
@@ -583,9 +553,9 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             retry_counter: number of failures in refreshing the profile so far. Used for
                 exponential backoff calculations.
         """
-        assert not self.hs.is_mine_id(
-            user_id
-        ), "Can't mark a local user as a stale remote user."
+        assert not self.hs.is_mine_id(user_id), (
+            "Can't mark a local user as a stale remote user."
+        )
 
         server_name = UserID.from_string(user_id).domain
 
@@ -615,7 +585,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
     async def get_remote_servers_with_profiles_to_refresh(
         self, now_ts: int, limit: int
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Get a list of up to `limit` server names which have users whose
         locally-cached profiles we believe to be stale
@@ -624,7 +594,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
         def _get_remote_servers_with_refreshable_profiles_txn(
             txn: LoggingTransaction,
-        ) -> List[str]:
+        ) -> list[str]:
             sql = """
                 SELECT user_server_name
                 FROM user_directory_stale_remote_users
@@ -643,7 +613,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
     async def get_remote_users_to_refresh_on_server(
         self, server_name: str, now_ts: int, limit: int
-    ) -> List[Tuple[str, int, int]]:
+    ) -> list[tuple[str, int, int]]:
         """
         Get a list of up to `limit` user IDs from the server `server_name`
         whose locally-cached profiles we believe to be stale
@@ -658,7 +628,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
         def _get_remote_users_to_refresh_on_server_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[str, int, int]]:
+        ) -> list[tuple[str, int, int]]:
             sql = """
                 SELECT user_id, retry_counter, next_try_at_ts
                 FROM user_directory_stale_remote_users
@@ -667,7 +637,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
                 LIMIT ?
             """
             txn.execute(sql, (server_name, now_ts, limit))
-            return cast(List[Tuple[str, int, int]], txn.fetchall())
+            return cast(list[tuple[str, int, int]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_remote_users_to_refresh_on_server",
@@ -675,7 +645,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
         )
 
     async def update_profile_in_user_dir(
-        self, user_id: str, display_name: Optional[str], avatar_url: Optional[str]
+        self, user_id: str, display_name: str | None, avatar_url: str | None
     ) -> None:
         """
         Update or add a user's profile in the user directory.
@@ -778,7 +748,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             raise Exception("Unrecognized database engine")
 
     async def add_users_who_share_private_room(
-        self, room_id: str, user_id_tuples: Iterable[Tuple[str, str]]
+        self, room_id: str, user_id_tuples: Iterable[tuple[str, str]]
     ) -> None:
         """Insert entries into the users_who_share_private_rooms table. The first
         user should be a local user.
@@ -841,7 +811,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
     async def _get_user_in_directory(
         self, user_id: str
-    ) -> Optional[Tuple[Optional[str], Optional[str]]]:
+    ) -> tuple[str | None, str | None] | None:
         """
         Fetch the user information in the user directory.
 
@@ -850,7 +820,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             avatar URL (both of which may be None).
         """
         return cast(
-            Optional[Tuple[Optional[str], Optional[str]]],
+            tuple[str | None, str | None] | None,
             await self.db_pool.simple_select_one(
                 table="user_directory",
                 keyvalues={"user_id": user_id},
@@ -860,7 +830,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             ),
         )
 
-    async def update_user_directory_stream_pos(self, stream_id: Optional[int]) -> None:
+    async def update_user_directory_stream_pos(self, stream_id: int | None) -> None:
         await self.db_pool.simple_update_one(
             table="user_directory_stream_pos",
             keyvalues={},
@@ -871,7 +841,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
 class SearchResult(TypedDict):
     limited: bool
-    results: List[UserProfile]
+    results: list[UserProfile]
 
 
 class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
@@ -918,7 +888,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             "remove_from_user_dir", _remove_from_user_dir_txn
         )
 
-    async def get_users_in_dir_due_to_room(self, room_id: str) -> Set[str]:
+    async def get_users_in_dir_due_to_room(self, room_id: str) -> set[str]:
         """Get all user_ids that are in the room directory because they're
         in the given room_id
         """
@@ -972,7 +942,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             "remove_user_who_share_room", _remove_user_who_share_room_txn
         )
 
-    async def get_user_dir_rooms_user_is_in(self, user_id: str) -> List[str]:
+    async def get_user_dir_rooms_user_is_in(self, user_id: str) -> list[str]:
         """
         Returns the rooms that a user is in.
 
@@ -1000,7 +970,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
         users.update(rows)
         return list(users)
 
-    async def get_user_directory_stream_pos(self) -> Optional[int]:
+    async def get_user_directory_stream_pos(self) -> int | None:
         """
         Get the stream ID of the user directory stream.
 
@@ -1038,11 +1008,11 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 }
         """
 
+        join_args: tuple[str, ...] = (user_id,)
+
         if self.hs.config.userdirectory.user_directory_search_all_users:
-            join_args = (user_id,)
             where_clause = "user_id != ?"
         else:
-            join_args = (user_id,)
             where_clause = """
                 (
                     EXISTS (select 1 from users_in_public_rooms WHERE user_id = t.user_id)
@@ -1056,10 +1026,18 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
         if not show_locked_users:
             where_clause += " AND (u.locked IS NULL OR u.locked = FALSE)"
 
+        # Adjust the JOIN type based on the exclude_remote_users flag (the users
+        # table only contains local users so an inner join is a good way to
+        # to exclude remote users)
+        if self.hs.config.userdirectory.user_directory_exclude_remote_users:
+            join_type = "JOIN"
+        else:
+            join_type = "LEFT JOIN"
+
         # We allow manipulating the ranking algorithm by injecting statements
         # based on config options.
         additional_ordering_statements = []
-        ordering_arguments: Tuple[str, ...] = ()
+        ordering_arguments: tuple[str, ...] = ()
 
         if isinstance(self.database_engine, PostgresEngine):
             full_query, exact_query, prefix_query = _parse_query_postgres(search_term)
@@ -1087,7 +1065,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 SELECT d.user_id AS user_id, display_name, avatar_url
                 FROM matching_users as t
                 INNER JOIN user_directory AS d USING (user_id)
-                LEFT JOIN users AS u ON t.user_id = u.name
+                %(join_type)s users AS u ON t.user_id = u.name
                 WHERE
                     %(where_clause)s
                 ORDER BY
@@ -1116,6 +1094,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             """ % {
                 "where_clause": where_clause,
                 "order_case_statements": " ".join(additional_ordering_statements),
+                "join_type": join_type,
             }
             args = (
                 (full_query,)
@@ -1143,7 +1122,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 SELECT d.user_id AS user_id, display_name, avatar_url
                 FROM user_directory_search as t
                 INNER JOIN user_directory AS d USING (user_id)
-                LEFT JOIN users AS u ON t.user_id = u.name
+                %(join_type)s users AS u ON t.user_id = u.name
                 WHERE
                     %(where_clause)s
                     AND value MATCH ?
@@ -1156,6 +1135,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             """ % {
                 "where_clause": where_clause,
                 "order_statements": " ".join(additional_ordering_statements),
+                "join_type": join_type,
             }
             args = join_args + (search_query,) + ordering_arguments + (limit + 1,)
         else:
@@ -1163,7 +1143,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             raise Exception("Unrecognized database engine")
 
         results = cast(
-            List[Tuple[str, Optional[str], Optional[str]]],
+            list[tuple[str, str | None, str | None]],
             await self.db_pool.execute("search_user_dir", sql, *args),
         )
 
@@ -1215,7 +1195,7 @@ def _filter_text_for_index(text: str) -> str:
 
 def _parse_query_sqlite(search_term: str) -> str:
     """Takes a plain unicode string from the user and converts it into a form
-    that can be passed to database.
+    that can be passed to the database.
     We use this so that we can add prefix matching, which isn't something
     that is supported by default.
 
@@ -1229,16 +1209,22 @@ def _parse_query_sqlite(search_term: str) -> str:
     return " & ".join("(%s* OR %s)" % (result, result) for result in results)
 
 
-def _parse_query_postgres(search_term: str) -> Tuple[str, str, str]:
+def _parse_query_postgres(search_term: str) -> tuple[str, str, str]:
     """Takes a plain unicode string from the user and converts it into a form
-    that can be passed to database.
+    that can be passed to the database.
     We use this so that we can add prefix matching, which isn't something
     that is supported by default.
     """
     search_term = _filter_text_for_index(search_term)
 
     escaped_words = []
-    for word in _parse_words(search_term):
+    for index, word in enumerate(_parse_words(search_term)):
+        if index >= 10:
+            # We limit how many terms we include, as otherwise it can use
+            # excessive database time if people accidentally search for large
+            # strings.
+            break
+
         # Postgres tsvector and tsquery quoting rules:
         # words potentially containing punctuation should be quoted
         # and then existing quotes and backslashes should be doubled
@@ -1254,13 +1240,8 @@ def _parse_query_postgres(search_term: str) -> Tuple[str, str, str]:
     return both, exact, prefix
 
 
-def _parse_words(search_term: str) -> List[str]:
-    """Split the provided search string into a list of its words.
-
-    If support for ICU (International Components for Unicode) is available, use it.
-    Otherwise, fall back to using a regex to detect word boundaries. This latter
-    solution works well enough for most latin-based languages, but doesn't work as well
-    with other languages.
+def _parse_words(search_term: str) -> list[str]:
+    """Split the provided search string into a list of its words using ICU.
 
     Args:
         search_term: The search string.
@@ -1268,21 +1249,10 @@ def _parse_words(search_term: str) -> List[str]:
     Returns:
         A list of the words in the search string.
     """
-    if USE_ICU:
-        return _parse_words_with_icu(search_term)
-
-    return _parse_words_with_regex(search_term)
+    return _parse_words_with_icu(search_term)
 
 
-def _parse_words_with_regex(search_term: str) -> List[str]:
-    """
-    Break down search term into words, when we don't have ICU available.
-    See: `_parse_words`
-    """
-    return re.findall(r"([\w-]+)", search_term, re.UNICODE)
-
-
-def _parse_words_with_icu(search_term: str) -> List[str]:
+def _parse_words_with_icu(search_term: str) -> list[str]:
     """Break down the provided search string into its individual words using ICU
     (International Components for Unicode).
 
@@ -1293,28 +1263,19 @@ def _parse_words_with_icu(search_term: str) -> List[str]:
         A list of the words in the search string.
     """
     results = []
-    breaker = icu.BreakIterator.createWordInstance(icu.Locale.getDefault())
-    breaker.setText(search_term)
-    i = 0
-    while True:
-        j = breaker.nextBoundary()
-        if j < 0:
-            break
-
+    for part in icu.parse_words(search_term):
         # We want to make sure that we split on `@` and `:` specifically, as
         # they occur in user IDs.
-        for result in re.split(r"[@:]+", search_term[i:j]):
+        for result in re.split(r"[@:]+", part):
             results.append(result.strip())
 
-        i = j
-
-    # libicu will break up words that have punctuation in them, but to handle
+    # icu will break up words that have punctuation in them, but to handle
     # cases where user IDs have '-', '.' and '_' in them we want to *not* break
     # those into words and instead allow the DB to tokenise them how it wants.
     #
     # In particular, user-71 in postgres gets tokenised to "user, -71", and this
     # will not match a query for "user, 71".
-    new_results: List[str] = []
+    new_results: list[str] = []
     i = 0
     while i < len(results):
         curr = results[i]

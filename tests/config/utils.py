@@ -24,7 +24,6 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
-from typing import List
 
 from synapse.config.homeserver import HomeServerConfig
 
@@ -51,16 +50,17 @@ class ConfigFileTestCase(unittest.TestCase):
                 ],
             )
 
-    def generate_config_and_remove_lines_containing(self, needle: str) -> None:
+    def generate_config_and_remove_lines_containing(self, needles: list[str]) -> None:
         self.generate_config()
 
         with open(self.config_file) as f:
             contents = f.readlines()
-        contents = [line for line in contents if needle not in line]
+        for needle in needles:
+            contents = [line for line in contents if needle not in line]
         with open(self.config_file, "w") as f:
             f.write("".join(contents))
 
-    def add_lines_to_config(self, lines: List[str]) -> None:
+    def add_lines_to_config(self, lines: list[str]) -> None:
         with open(self.config_file, "a") as f:
             for line in lines:
                 f.write(line + "\n")

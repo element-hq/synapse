@@ -29,8 +29,13 @@ from typing import Final
 # the max size of a (canonical-json-encoded) event
 MAX_PDU_SIZE = 65536
 
-# the "depth" field on events is limited to 2**63 - 1
-MAX_DEPTH = 2**63 - 1
+# Max/min size of ints in canonical JSON
+CANONICALJSON_MAX_INT = (2**53) - 1
+CANONICALJSON_MIN_INT = -CANONICALJSON_MAX_INT
+
+# the "depth" field on events is limited to the same as what
+# canonicaljson accepts
+MAX_DEPTH = CANONICALJSON_MAX_INT
 
 # the maximum length for a room alias is 255 characters
 MAX_ALIAS_LENGTH = 255
@@ -40,6 +45,9 @@ MAX_USERID_LENGTH = 255
 
 # Constant value used for the pseudo-thread which is the main timeline.
 MAIN_TIMELINE: Final = "main"
+
+# MAX_INT + 1, so it always trumps any PL in canonical JSON.
+CREATOR_POWER_LEVEL = 2**53
 
 
 class Membership:
@@ -180,12 +188,18 @@ ServerNoticeLimitReached: Final = "m.server_notice.usage_limit_reached"
 
 class UserTypes:
     """Allows for user type specific behaviour. With the benefit of hindsight
-    'admin' and 'guest' users should also be UserTypes. Normal users are type None
+    'admin' and 'guest' users should also be UserTypes. Extra user types can be
+    added in the configuration. Normal users are type None or one of the extra
+    user types (if configured).
     """
 
     SUPPORT: Final = "support"
     BOT: Final = "bot"
-    ALL_USER_TYPES: Final = (SUPPORT, BOT)
+    ALL_BUILTIN_USER_TYPES: Final = (SUPPORT, BOT)
+    """
+    The user types that are built-in to Synapse. Extra user types can be
+    added in the configuration.
+    """
 
 
 class RelationTypes:
@@ -224,6 +238,8 @@ class EventContentFields:
     #
     # This is deprecated in MSC2175.
     ROOM_CREATOR: Final = "creator"
+    # MSC4289
+    ADDITIONAL_CREATORS: Final = "additional_creators"
 
     # The version of the room for `m.room.create` events.
     ROOM_VERSION: Final = "room_version"
@@ -231,6 +247,8 @@ class EventContentFields:
     ROOM_NAME: Final = "name"
 
     MEMBERSHIP: Final = "membership"
+    MEMBERSHIP_DISPLAYNAME: Final = "displayname"
+    MEMBERSHIP_AVATAR_URL: Final = "avatar_url"
 
     # Used in m.room.guest_access events.
     GUEST_ACCESS: Final = "guest_access"
@@ -249,12 +267,24 @@ class EventContentFields:
 
     TOMBSTONE_SUCCESSOR_ROOM: Final = "replacement_room"
 
+    # Used in m.room.topic events.
+    TOPIC: Final = "topic"
+    M_TOPIC: Final = "m.topic"
+    M_TEXT: Final = "m.text"
+
 
 class EventUnsignedContentFields:
     """Fields found inside the 'unsigned' data on events"""
 
     # Requesting user's membership, per MSC4115
     MEMBERSHIP: Final = "membership"
+
+
+class MTextFields:
+    """Fields found inside m.text content blocks."""
+
+    BODY: Final = "body"
+    MIMETYPE: Final = "mimetype"
 
 
 class RoomTypes:
@@ -273,6 +303,13 @@ class AccountDataTypes:
     IGNORED_USER_LIST: Final = "m.ignored_user_list"
     TAG: Final = "m.tag"
     PUSH_RULES: Final = "m.push_rules"
+    # MSC4155: Invite filtering
+    MSC4155_INVITE_PERMISSION_CONFIG: Final = (
+        "org.matrix.msc4155.invite_permission_config"
+    )
+    # Synapse-specific behaviour. See "Client-Server API Extensions" documentation
+    # in Admin API for more information.
+    SYNAPSE_ADMIN_CLIENT_CONFIG: Final = "io.element.synapse.admin_client_config"
 
 
 class HistoryVisibility:
@@ -318,3 +355,8 @@ class ApprovalNoticeMedium:
 class Direction(enum.Enum):
     BACKWARDS = "b"
     FORWARDS = "f"
+
+
+class ProfileFields:
+    DISPLAYNAME: Final = "displayname"
+    AVATAR_URL: Final = "avatar_url"

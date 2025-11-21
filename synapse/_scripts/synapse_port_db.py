@@ -33,36 +33,32 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Generator,
     Iterable,
-    List,
     NoReturn,
     Optional,
-    Set,
-    Tuple,
-    Type,
+    TypedDict,
     TypeVar,
     cast,
 )
 
 import yaml
-from typing_extensions import TypedDict
 
 from twisted.internet import defer, reactor as reactor_
 
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.logging.context import (
-    LoggingContext,
     make_deferred_yieldable,
     run_in_background,
 )
-from synapse.notifier import ReplicationNotifier
+from synapse.server import HomeServer
+from synapse.storage import DataStore
 from synapse.storage.database import DatabasePool, LoggingTransaction, make_conn
 from synapse.storage.databases.main import FilteringWorkerStore
 from synapse.storage.databases.main.account_data import AccountDataWorkerStore
 from synapse.storage.databases.main.client_ips import ClientIpBackgroundUpdateStore
+from synapse.storage.databases.main.delayed_events import DelayedEventsStore
 from synapse.storage.databases.main.deviceinbox import DeviceInboxBackgroundUpdateStore
 from synapse.storage.databases.main.devices import DeviceBackgroundUpdateStore
 from synapse.storage.databases.main.e2e_room_keys import EndToEndRoomKeyBackgroundStore
@@ -88,6 +84,7 @@ from synapse.storage.databases.main.relations import RelationsWorkerStore
 from synapse.storage.databases.main.room import RoomBackgroundUpdateStore
 from synapse.storage.databases.main.roommember import RoomMemberBackgroundUpdateStore
 from synapse.storage.databases.main.search import SearchBackgroundUpdateStore
+from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
 from synapse.storage.databases.main.state import MainStateBackgroundUpdateStore
 from synapse.storage.databases.main.stats import StatsStore
 from synapse.storage.databases.main.user_directory import (
@@ -97,7 +94,6 @@ from synapse.storage.databases.state.bg_updates import StateBackgroundUpdateStor
 from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor
-from synapse.util import SYNAPSE_VERSION, Clock
 
 # Cast safety: Twisted does some naughty magic which replaces the
 # twisted.internet.reactor module with a Reactor instance at runtime.
@@ -112,6 +108,7 @@ logger = logging.getLogger("synapse_port_db")
 BOOLEAN_COLUMNS = {
     "access_tokens": ["used"],
     "account_validity": ["email_sent"],
+    "delayed_events": ["is_processed"],
     "device_lists_changes_in_room": ["converted_to_destinations"],
     "device_lists_outbound_pokes": ["sent"],
     "devices": ["hidden"],
@@ -127,6 +124,7 @@ BOOLEAN_COLUMNS = {
     "pushers": ["enabled"],
     "redactions": ["have_censored"],
     "remote_media_cache": ["authenticated"],
+    "room_memberships": ["participant"],
     "room_stats_state": ["is_federatable"],
     "rooms": ["is_public", "has_auth_chain_index"],
     "sliding_sync_joined_rooms": ["is_encrypted"],
@@ -134,6 +132,7 @@ BOOLEAN_COLUMNS = {
         "has_known_state",
         "is_encrypted",
     ],
+    "thread_subscriptions": ["subscribed", "automatic"],
     "users": ["shadow_banned", "approved", "locked", "suspended"],
     "un_partial_stated_event_stream": ["rejection_status_changed"],
     "users_who_share_rooms": ["share_private"],
@@ -188,6 +187,16 @@ APPEND_ONLY_TABLES = [
     "users",
 ]
 
+# These tables declare their id column with "PRIMARY KEY AUTOINCREMENT" on sqlite side
+# and with "PRIMARY KEY GENERATED ALWAYS AS IDENTITY" on postgres side. This creates an
+# implicit sequence that needs its value to be migrated separately. Additionally,
+# inserting on postgres side needs to use the "OVERRIDING SYSTEM VALUE" modifier.
+AUTOINCREMENT_TABLES = {
+    "sliding_sync_connections",
+    "sliding_sync_connection_positions",
+    "sliding_sync_connection_required_state",
+    "state_groups_pending_deletion",
+}
 
 IGNORED_TABLES = {
     # We don't port these tables, as they're a faff and we can regenerate
@@ -215,16 +224,25 @@ IGNORED_TABLES = {
 }
 
 
+# These background updates will not be applied upon creation of the postgres database.
+IGNORED_BACKGROUND_UPDATES = {
+    # Reapplying this background update to the postgres database is unnecessary after
+    # already having waited for the SQLite database to complete all running background
+    # updates.
+    "mark_unreferenced_state_groups_for_deletion_bg_update",
+}
+
+
 # Error returned by the run function. Used at the top-level part of the script to
 # handle errors and return codes.
-end_error: Optional[str] = None
+end_error: str | None = None
 # The exec_info for the error, if any. If error is defined but not exec_info the script
 # will show only the error message without the stacktrace, if exec_info is defined but
 # not the error then the script will show nothing outside of what's printed in the run
 # function. If both are defined, the script will print both the error and the stacktrace.
-end_error_exec_info: Optional[
-    Tuple[Type[BaseException], BaseException, TracebackType]
-] = None
+end_error_exec_info: tuple[type[BaseException], BaseException, TracebackType] | None = (
+    None
+)
 
 R = TypeVar("R")
 
@@ -255,23 +273,31 @@ class Store(
     ReceiptsBackgroundUpdateStore,
     RelationsWorkerStore,
     EventFederationWorkerStore,
+    SlidingSyncStore,
+    DelayedEventsStore,
 ):
     def execute(self, f: Callable[..., R], *args: Any, **kwargs: Any) -> Awaitable[R]:
         return self.db_pool.runInteraction(f.__name__, f, *args, **kwargs)
 
-    def execute_sql(self, sql: str, *args: object) -> Awaitable[List[Tuple]]:
-        def r(txn: LoggingTransaction) -> List[Tuple]:
+    def execute_sql(self, sql: str, *args: object) -> Awaitable[list[tuple]]:
+        def r(txn: LoggingTransaction) -> list[tuple]:
             txn.execute(sql, args)
             return txn.fetchall()
 
         return self.db_pool.runInteraction("execute_sql", r)
 
     def insert_many_txn(
-        self, txn: LoggingTransaction, table: str, headers: List[str], rows: List[Tuple]
+        self,
+        txn: LoggingTransaction,
+        table: str,
+        headers: list[str],
+        rows: list[tuple],
+        override_system_value: bool = False,
     ) -> None:
-        sql = "INSERT INTO %s (%s) VALUES (%s)" % (
+        sql = "INSERT INTO %s (%s) %s VALUES (%s)" % (
             table,
             ", ".join(k for k in headers),
+            "OVERRIDING SYSTEM VALUE" if override_system_value else "",
             ", ".join("%s" for _ in headers),
         )
 
@@ -288,43 +314,31 @@ class Store(
         )
 
 
-class MockHomeserver:
+class MockHomeserver(HomeServer):
+    DATASTORE_CLASS = DataStore
+
     def __init__(self, config: HomeServerConfig):
-        self.clock = Clock(reactor)
-        self.config = config
-        self.hostname = config.server.server_name
-        self.version_string = SYNAPSE_VERSION
-
-    def get_clock(self) -> Clock:
-        return self.clock
-
-    def get_reactor(self) -> ISynapseReactor:
-        return reactor
-
-    def get_instance_name(self) -> str:
-        return "master"
-
-    def should_send_federation(self) -> bool:
-        return False
-
-    def get_replication_notifier(self) -> ReplicationNotifier:
-        return ReplicationNotifier()
+        super().__init__(
+            hostname=config.server.server_name,
+            config=config,
+            reactor=reactor,
+        )
 
 
 class Porter:
     def __init__(
         self,
-        sqlite_config: Dict[str, Any],
+        sqlite_config: dict[str, Any],
         progress: "Progress",
         batch_size: int,
-        hs_config: HomeServerConfig,
+        hs: HomeServer,
     ):
         self.sqlite_config = sqlite_config
         self.progress = progress
         self.batch_size = batch_size
-        self.hs_config = hs_config
+        self.hs = hs
 
-    async def setup_table(self, table: str) -> Tuple[str, int, int, int, int]:
+    async def setup_table(self, table: str) -> tuple[str, int, int, int, int]:
         if table in APPEND_ONLY_TABLES:
             # It's safe to just carry on inserting.
             row = await self.postgres_store.db_pool.simple_select_one(
@@ -387,10 +401,10 @@ class Porter:
 
         return table, already_ported, total_to_port, forward_chunk, backward_chunk
 
-    async def get_table_constraints(self) -> Dict[str, Set[str]]:
+    async def get_table_constraints(self) -> dict[str, set[str]]:
         """Returns a map of tables that have foreign key constraints to tables they depend on."""
 
-        def _get_constraints(txn: LoggingTransaction) -> Dict[str, Set[str]]:
+        def _get_constraints(txn: LoggingTransaction) -> dict[str, set[str]]:
             # We can pull the information about foreign key constraints out from
             # the postgres schema tables.
             sql = """
@@ -406,7 +420,7 @@ class Porter:
             """
             txn.execute(sql)
 
-            results: Dict[str, Set[str]] = {}
+            results: dict[str, set[str]] = {}
             for table, foreign_table in txn:
                 results.setdefault(table, set()).add(foreign_table)
             return results
@@ -474,7 +488,7 @@ class Porter:
 
             def r(
                 txn: LoggingTransaction,
-            ) -> Tuple[Optional[List[str]], List[Tuple], List[Tuple]]:
+            ) -> tuple[list[str] | None, list[tuple], list[tuple]]:
                 forward_rows = []
                 backward_rows = []
                 if do_forward[0]:
@@ -491,7 +505,7 @@ class Porter:
 
                 if forward_rows or backward_rows:
                     assert txn.description is not None
-                    headers: Optional[List[str]] = [
+                    headers: list[str] | None = [
                         column[0] for column in txn.description
                     ]
                 else:
@@ -515,7 +529,13 @@ class Porter:
 
                 def insert(txn: LoggingTransaction) -> None:
                     assert headers is not None
-                    self.postgres_store.insert_many_txn(txn, table, headers[1:], rows)
+                    self.postgres_store.insert_many_txn(
+                        txn,
+                        table,
+                        headers[1:],
+                        rows,
+                        override_system_value=table in AUTOINCREMENT_TABLES,
+                    )
 
                     self.postgres_store.db_pool.simple_update_one_txn(
                         txn,
@@ -552,7 +572,7 @@ class Porter:
 
         while True:
 
-            def r(txn: LoggingTransaction) -> Tuple[List[str], List[Tuple]]:
+            def r(txn: LoggingTransaction) -> tuple[list[str], list[tuple]]:
                 txn.execute(select, (forward_chunk, self.batch_size))
                 rows = txn.fetchall()
                 assert txn.description is not None
@@ -636,15 +656,28 @@ class Porter:
 
         engine = create_engine(db_config.config)
 
-        hs = MockHomeserver(self.hs_config)
+        server_name = self.hs.hostname
 
-        with make_conn(db_config, engine, "portdb") as db_conn:
+        with make_conn(
+            db_config=db_config,
+            engine=engine,
+            default_txn_name="portdb",
+            server_name=server_name,
+        ) as db_conn:
             engine.check_database(
                 db_conn, allow_outdated_version=allow_outdated_version
             )
-            prepare_database(db_conn, engine, config=self.hs_config)
+            prepare_database(db_conn, engine, config=self.hs.config)
             # Type safety: ignore that we're using Mock homeservers here.
-            store = Store(DatabasePool(hs, db_config, engine), db_conn, hs)  # type: ignore[arg-type]
+            store = Store(
+                DatabasePool(
+                    self.hs,
+                    db_config,
+                    engine,
+                ),
+                db_conn,
+                self.hs,
+            )
             db_conn.commit()
 
         return store
@@ -684,6 +717,20 @@ class Porter:
         (autovacuum_setting,) = row
         # 0 means off. 1 means full. 2 means incremental.
         return autovacuum_setting != 0
+
+    async def remove_ignored_background_updates_from_database(self) -> None:
+        def _remove_delete_unreferenced_state_groups_bg_updates(
+            txn: LoggingTransaction,
+        ) -> None:
+            txn.execute(
+                "DELETE FROM background_updates WHERE update_name = ANY(?)",
+                (list(IGNORED_BACKGROUND_UPDATES),),
+            )
+
+        await self.postgres_store.db_pool.runInteraction(
+            "remove_delete_unreferenced_state_groups_bg_updates",
+            _remove_delete_unreferenced_state_groups_bg_updates,
+        )
 
     async def run(self) -> None:
         """Ports the SQLite database to a PostgreSQL database.
@@ -727,8 +774,10 @@ class Porter:
                 return
 
             self.postgres_store = self.build_db_store(
-                self.hs_config.database.get_single_database()
+                self.hs.config.database.get_single_database()
             )
+
+            await self.remove_ignored_background_updates_from_database()
 
             await self.run_background_updates_on_postgres()
 
@@ -851,6 +900,19 @@ class Porter:
                 ],
             )
 
+            await self._setup_autoincrement_sequence(
+                "sliding_sync_connection_positions", "connection_position"
+            )
+            await self._setup_autoincrement_sequence(
+                "sliding_sync_connection_required_state", "required_state_id"
+            )
+            await self._setup_autoincrement_sequence(
+                "sliding_sync_connections", "connection_key"
+            )
+            await self._setup_autoincrement_sequence(
+                "state_groups_pending_deletion", "sequence_number"
+            )
+
             # Step 3. Get tables.
             self.progress.set_state("Fetching tables")
             sqlite_tables = await self.sqlite_store.db_pool.simple_select_onecol(
@@ -892,7 +954,7 @@ class Porter:
             self.progress.set_state("Copying to postgres")
 
             constraints = await self.get_table_constraints()
-            tables_ported = set()  # type: Set[str]
+            tables_ported = set()  # type: set[str]
 
             while tables_to_port_info_map:
                 # Pulls out all tables that are still to be ported and which
@@ -931,8 +993,8 @@ class Porter:
             reactor.stop()
 
     def _convert_rows(
-        self, table: str, headers: List[str], rows: List[Tuple]
-    ) -> List[Tuple]:
+        self, table: str, headers: list[str], rows: list[tuple]
+    ) -> list[tuple]:
         bool_col_names = BOOLEAN_COLUMNS.get(table, [])
 
         bool_cols = [i for i, h in enumerate(headers) if h in bool_col_names]
@@ -966,7 +1028,7 @@ class Porter:
 
         return outrows
 
-    async def _setup_sent_transactions(self) -> Tuple[int, int, int]:
+    async def _setup_sent_transactions(self) -> tuple[int, int, int]:
         # Only save things from the last day
         yesterday = int(time.time() * 1000) - 86400000
 
@@ -978,7 +1040,7 @@ class Porter:
             ")"
         )
 
-        def r(txn: LoggingTransaction) -> Tuple[List[str], List[Tuple]]:
+        def r(txn: LoggingTransaction) -> tuple[list[str], list[tuple]]:
             txn.execute(select)
             rows = txn.fetchall()
             assert txn.description is not None
@@ -1032,7 +1094,7 @@ class Porter:
 
         def get_sent_table_size(txn: LoggingTransaction) -> int:
             txn.execute(
-                "SELECT count(*) FROM sent_transactions" " WHERE ts >= ?", (yesterday,)
+                "SELECT count(*) FROM sent_transactions WHERE ts >= ?", (yesterday,)
             )
             result = txn.fetchone()
             assert result is not None
@@ -1048,14 +1110,14 @@ class Porter:
         self, table: str, forward_chunk: int, backward_chunk: int
     ) -> int:
         frows = cast(
-            List[Tuple[int]],
+            list[tuple[int]],
             await self.sqlite_store.execute_sql(
                 "SELECT count(*) FROM %s WHERE rowid >= ?" % (table,), forward_chunk
             ),
         )
 
         brows = cast(
-            List[Tuple[int]],
+            list[tuple[int]],
             await self.sqlite_store.execute_sql(
                 "SELECT count(*) FROM %s WHERE rowid <= ?" % (table,), backward_chunk
             ),
@@ -1072,7 +1134,7 @@ class Porter:
 
     async def _get_total_count_to_port(
         self, table: str, forward_chunk: int, backward_chunk: int
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         remaining, done = await make_deferred_yieldable(
             defer.gatherResults(
                 [
@@ -1093,9 +1155,7 @@ class Porter:
         return done, remaining + done
 
     async def _setup_state_group_id_seq(self) -> None:
-        curr_id: Optional[
-            int
-        ] = await self.sqlite_store.db_pool.simple_select_one_onecol(
+        curr_id: int | None = await self.sqlite_store.db_pool.simple_select_one_onecol(
             table="state_groups", keyvalues={}, retcol="MAX(id)", allow_none=True
         )
 
@@ -1157,7 +1217,7 @@ class Porter:
     async def _setup_sequence(
         self,
         sequence_name: str,
-        stream_id_tables: Iterable[Tuple[str, str]],
+        stream_id_tables: Iterable[tuple[str, str]],
     ) -> None:
         """Set a sequence to the correct value."""
         current_stream_ids = []
@@ -1183,10 +1243,53 @@ class Porter:
             "_setup_%s" % (sequence_name,), r
         )
 
+    async def _setup_autoincrement_sequence(
+        self,
+        sqlite_table_name: str,
+        sqlite_id_column_name: str,
+    ) -> None:
+        """Set a sequence to the correct value. Use where id column was declared with PRIMARY KEY AUTOINCREMENT."""
+        seq_name = await self._pg_get_serial_sequence(
+            sqlite_table_name, sqlite_id_column_name
+        )
+        if seq_name is None:
+            raise Exception(
+                "implicit sequence not found for table " + sqlite_table_name
+            )
+
+        seq_value = await self.sqlite_store.db_pool.simple_select_one_onecol(
+            table="sqlite_sequence",
+            keyvalues={"name": sqlite_table_name},
+            retcol="seq",
+            allow_none=True,
+        )
+        if seq_value is None:
+            return
+
+        def r(txn: LoggingTransaction) -> None:
+            sql = "ALTER SEQUENCE %s RESTART WITH" % (seq_name,)
+            txn.execute(sql + " %s", (seq_value + 1,))
+
+        await self.postgres_store.db_pool.runInteraction("_setup_%s" % (seq_name,), r)
+
+    async def _pg_get_serial_sequence(self, table: str, column: str) -> str | None:
+        """Returns the name of the postgres sequence associated with a column, or NULL."""
+
+        def r(txn: LoggingTransaction) -> str | None:
+            txn.execute("SELECT pg_get_serial_sequence('%s', '%s')" % (table, column))
+            result = txn.fetchone()
+            if not result:
+                return None
+            return result[0]
+
+        return await self.postgres_store.db_pool.runInteraction(
+            "_pg_get_serial_sequence", r
+        )
+
     async def _setup_auth_chain_sequence(self) -> None:
-        curr_chain_id: Optional[
-            int
-        ] = await self.sqlite_store.db_pool.simple_select_one_onecol(
+        curr_chain_id: (
+            int | None
+        ) = await self.sqlite_store.db_pool.simple_select_one_onecol(
             table="event_auth_chains",
             keyvalues={},
             retcol="MAX(chain_id)",
@@ -1224,7 +1327,7 @@ class Progress:
     """Used to report progress of the port"""
 
     def __init__(self) -> None:
-        self.tables: Dict[str, TableProgress] = {}
+        self.tables: dict[str, TableProgress] = {}
 
         self.start_time = int(time.time())
 
@@ -1458,6 +1561,8 @@ def main() -> None:
     config = HomeServerConfig()
     config.parse_config_dict(hs_config, "", "")
 
+    hs = MockHomeserver(config)
+
     def start(stdscr: Optional["curses.window"] = None) -> None:
         progress: Progress
         if stdscr:
@@ -1469,15 +1574,14 @@ def main() -> None:
             sqlite_config=sqlite_config,
             progress=progress,
             batch_size=args.batch_size,
-            hs_config=config,
+            hs=hs,
         )
 
         @defer.inlineCallbacks
         def run() -> Generator["defer.Deferred[Any]", Any, None]:
-            with LoggingContext("synapse_port_db_run"):
-                yield defer.ensureDeferred(porter.run())
+            yield defer.ensureDeferred(porter.run())
 
-        reactor.callWhenRunning(run)
+        hs.get_clock().call_when_running(run)
 
         reactor.run()
 

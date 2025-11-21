@@ -22,7 +22,7 @@
 from collections import Counter
 from unittest.mock import Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.storage
@@ -31,7 +31,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

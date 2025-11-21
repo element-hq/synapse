@@ -25,11 +25,13 @@ import logging
 import os.path
 import urllib.parse
 from textwrap import indent
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Iterable, TypedDict
+from urllib.request import getproxies_environment
 
 import attr
 import yaml
 from netaddr import AddrFormatError, IPNetwork, IPSet
+from typing_extensions import TypeGuard
 
 from twisted.conch.ssh.keys import Key
 
@@ -41,7 +43,22 @@ from synapse.util.stringutils import parse_and_validate_server_name
 from ._base import Config, ConfigError
 from ._util import validate_config
 
-logger = logging.Logger(__name__)
+logger = logging.getLogger(__name__)
+
+
+# Directly from the mypy docs:
+# https://typing.python.org/en/latest/spec/narrowing.html#typeguard
+def is_str_list(val: Any, allow_empty: bool) -> TypeGuard[list[str]]:
+    """
+    Type-narrow a value to a list of strings (compatible with mypy).
+    """
+    if not isinstance(val, list):
+        return False
+
+    if len(val) == 0:
+        return allow_empty
+    return all(isinstance(x, str) for x in val)
+
 
 DIRECT_TCP_ERROR = """
 Using direct TCP replication for workers is no longer supported.
@@ -78,9 +95,9 @@ def _6to4(network: IPNetwork) -> IPNetwork:
 
 
 def generate_ip_set(
-    ip_addresses: Optional[Iterable[str]],
-    extra_addresses: Optional[Iterable[str]] = None,
-    config_path: Optional[StrSequence] = None,
+    ip_addresses: Iterable[str] | None,
+    extra_addresses: Iterable[str] | None = None,
+    config_path: StrSequence | None = None,
 ) -> IPSet:
     """
     Generate an IPSet from a list of IP addresses or CIDRs.
@@ -196,7 +213,7 @@ KNOWN_RESOURCES = {
 
 @attr.s(frozen=True)
 class HttpResourceConfig:
-    names: List[str] = attr.ib(
+    names: list[str] = attr.ib(
         factory=list,
         validator=attr.validators.deep_iterable(attr.validators.in_(KNOWN_RESOURCES)),
     )
@@ -211,13 +228,10 @@ class HttpListenerConfig:
     """Object describing the http-specific parts of the config of a listener"""
 
     x_forwarded: bool = False
-    resources: List[HttpResourceConfig] = attr.Factory(list)
-    additional_resources: Dict[str, dict] = attr.Factory(dict)
-    tag: Optional[str] = None
-    request_id_header: Optional[str] = None
-    # If true, the listener will return CORS response headers compatible with MSC3886:
-    # https://github.com/matrix-org/matrix-spec-proposals/pull/3886
-    experimental_cors_msc3886: bool = False
+    resources: list[HttpResourceConfig] = attr.Factory(list)
+    additional_resources: dict[str, dict] = attr.Factory(dict)
+    tag: str | None = None
+    request_id_header: str | None = None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -225,12 +239,12 @@ class TCPListenerConfig:
     """Object describing the configuration of a single TCP listener."""
 
     port: int = attr.ib(validator=attr.validators.instance_of(int))
-    bind_addresses: List[str] = attr.ib(validator=attr.validators.instance_of(List))
+    bind_addresses: list[str] = attr.ib(validator=attr.validators.instance_of(list))
     type: str = attr.ib(validator=attr.validators.in_(KNOWN_LISTENER_TYPES))
     tls: bool = False
 
     # http_options is only populated if type=http
-    http_options: Optional[HttpListenerConfig] = None
+    http_options: HttpListenerConfig | None = None
 
     def get_site_tag(self) -> str:
         """Retrieves http_options.tag if it exists, otherwise the port number."""
@@ -255,7 +269,7 @@ class UnixListenerConfig:
     type: str = attr.ib(validator=attr.validators.in_(KNOWN_LISTENER_TYPES))
 
     # http_options is only populated if type=http
-    http_options: Optional[HttpListenerConfig] = None
+    http_options: HttpListenerConfig | None = None
 
     def get_site_tag(self) -> str:
         return "unix"
@@ -265,7 +279,7 @@ class UnixListenerConfig:
         return False
 
 
-ListenerConfig = Union[TCPListenerConfig, UnixListenerConfig]
+ListenerConfig = TCPListenerConfig | UnixListenerConfig
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -274,14 +288,14 @@ class ManholeConfig:
 
     username: str = attr.ib(validator=attr.validators.instance_of(str))
     password: str = attr.ib(validator=attr.validators.instance_of(str))
-    priv_key: Optional[Key]
-    pub_key: Optional[Key]
+    priv_key: Key | None
+    pub_key: Key | None
 
 
 @attr.s(frozen=True)
 class LimitRemoteRoomsConfig:
     enabled: bool = attr.ib(validator=attr.validators.instance_of(bool), default=False)
-    complexity: Union[float, int] = attr.ib(
+    complexity: float | int = attr.ib(
         validator=attr.validators.instance_of((float, int)),  # noqa
         default=1.0,
     )
@@ -291,6 +305,102 @@ class LimitRemoteRoomsConfig:
     )
     admins_can_join: bool = attr.ib(
         validator=attr.validators.instance_of(bool), default=False
+    )
+
+
+class ProxyConfigDictionary(TypedDict):
+    """
+    Dictionary of proxy settings suitable for interacting with `urllib.request` API's
+    """
+
+    http: str | None
+    """
+    Proxy server to use for HTTP requests.
+    """
+    https: str | None
+    """
+    Proxy server to use for HTTPS requests.
+    """
+    no: str
+    """
+    Comma-separated list of hosts, IP addresses, or IP ranges in CIDR format which
+    should not use the proxy.
+
+    Empty string means no hosts should be excluded from the proxy.
+    """
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class ProxyConfig:
+    """
+    Synapse configuration for HTTP proxy settings.
+    """
+
+    http_proxy: str | None
+    """
+    Proxy server to use for HTTP requests.
+    """
+    https_proxy: str | None
+    """
+    Proxy server to use for HTTPS requests.
+    """
+    no_proxy_hosts: list[str] | None
+    """
+    List of hosts, IP addresses, or IP ranges in CIDR format which should not use the
+    proxy. Synapse will directly connect to these hosts.
+    """
+
+    def get_proxies_dictionary(self) -> ProxyConfigDictionary:
+        """
+        Returns a dictionary of proxy settings suitable for interacting with
+        `urllib.request` API's (e.g. `urllib.request.proxy_bypass_environment`)
+
+        The keys are `"http"`, `"https"`, and `"no"`.
+        """
+        return ProxyConfigDictionary(
+            http=self.http_proxy,
+            https=self.https_proxy,
+            no=",".join(self.no_proxy_hosts) if self.no_proxy_hosts else "",
+        )
+
+
+def parse_proxy_config(config: JsonDict) -> ProxyConfig:
+    """
+    Figure out forward proxy config for outgoing HTTP requests.
+
+    Prefer values from the given config over the environment variables (`http_proxy`,
+    `https_proxy`, `no_proxy`, not case-sensitive).
+
+    Args:
+        config: The top-level homeserver configuration dictionary.
+    """
+    proxies_from_env = getproxies_environment()
+    http_proxy = config.get("http_proxy", proxies_from_env.get("http"))
+    if http_proxy is not None and not isinstance(http_proxy, str):
+        raise ConfigError("'http_proxy' must be a string", ("http_proxy",))
+
+    https_proxy = config.get("https_proxy", proxies_from_env.get("https"))
+    if https_proxy is not None and not isinstance(https_proxy, str):
+        raise ConfigError("'https_proxy' must be a string", ("https_proxy",))
+
+    # List of hosts which should not use the proxy. Synapse will directly connect to
+    # these hosts.
+    no_proxy_hosts = config.get("no_proxy_hosts")
+    # The `no_proxy` environment variable should be a comma-separated list of hosts,
+    # IP addresses, or IP ranges in CIDR format
+    no_proxy_from_env = proxies_from_env.get("no")
+    if no_proxy_hosts is None and no_proxy_from_env is not None:
+        no_proxy_hosts = no_proxy_from_env.split(",")
+
+    if no_proxy_hosts is not None and not is_str_list(no_proxy_hosts, allow_empty=True):
+        raise ConfigError(
+            "'no_proxy_hosts' must be a list of strings", ("no_proxy_hosts",)
+        )
+
+    return ProxyConfig(
+        http_proxy=http_proxy,
+        https_proxy=https_proxy,
+        no_proxy_hosts=no_proxy_hosts,
     )
 
 
@@ -335,8 +445,14 @@ class ServerConfig(Config):
             logger.info("Using default public_baseurl %s", public_baseurl)
         else:
             self.serve_client_wellknown = True
+            # Ensure that public_baseurl ends with a trailing slash
             if public_baseurl[-1] != "/":
                 public_baseurl += "/"
+
+        # Scrutinize user-provided config
+        if not isinstance(public_baseurl, str):
+            raise ConfigError("Must be a string", ("public_baseurl",))
+
         self.public_baseurl = public_baseurl
 
         # check that public_baseurl is valid
@@ -491,7 +607,7 @@ class ServerConfig(Config):
         # before redacting them.
         redaction_retention_period = config.get("redaction_retention_period", "7d")
         if redaction_retention_period is not None:
-            self.redaction_retention_period: Optional[int] = self.parse_duration(
+            self.redaction_retention_period: int | None = self.parse_duration(
                 redaction_retention_period
             )
         else:
@@ -502,7 +618,7 @@ class ServerConfig(Config):
             "forgotten_room_retention_period", None
         )
         if forgotten_room_retention_period is not None:
-            self.forgotten_room_retention_period: Optional[int] = self.parse_duration(
+            self.forgotten_room_retention_period: int | None = self.parse_duration(
                 forgotten_room_retention_period
             )
         else:
@@ -511,7 +627,7 @@ class ServerConfig(Config):
         # How long to keep entries in the `users_ips` table.
         user_ips_max_age = config.get("user_ips_max_age", "28d")
         if user_ips_max_age is not None:
-            self.user_ips_max_age: Optional[int] = self.parse_duration(user_ips_max_age)
+            self.user_ips_max_age: int | None = self.parse_duration(user_ips_max_age)
         else:
             self.user_ips_max_age = None
 
@@ -715,6 +831,17 @@ class ServerConfig(Config):
                 )
             )
 
+        # Figure out forward proxy config for outgoing HTTP requests.
+        #
+        # Prefer values from the file config over the environment variables
+        self.proxy_config = parse_proxy_config(config)
+        logger.debug(
+            "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
+            self.proxy_config.http_proxy,
+            self.proxy_config.https_proxy,
+            self.proxy_config.no_proxy_hosts,
+        )
+
         self.cleanup_extremities_with_dummy_events = config.get(
             "cleanup_extremities_with_dummy_events", True
         )
@@ -737,11 +864,11 @@ class ServerConfig(Config):
         )
 
         # Whitelist of domain names that given next_link parameters must have
-        next_link_domain_whitelist: Optional[List[str]] = config.get(
+        next_link_domain_whitelist: list[str] | None = config.get(
             "next_link_domain_whitelist"
         )
 
-        self.next_link_domain_whitelist: Optional[Set[str]] = None
+        self.next_link_domain_whitelist: set[str] | None = None
         if next_link_domain_whitelist is not None:
             if not isinstance(next_link_domain_whitelist, list):
                 raise ConfigError("'next_link_domain_whitelist' must be a list")
@@ -753,7 +880,7 @@ class ServerConfig(Config):
         if not isinstance(templates_config, dict):
             raise ConfigError("The 'templates' section must be a dictionary")
 
-        self.custom_template_directory: Optional[str] = templates_config.get(
+        self.custom_template_directory: str | None = templates_config.get(
             "custom_template_directory"
         )
         if self.custom_template_directory is not None and not isinstance(
@@ -765,16 +892,16 @@ class ServerConfig(Config):
             config.get("use_account_validity_in_account_status") or False
         )
 
-        self.rooms_to_exclude_from_sync: List[str] = (
+        self.rooms_to_exclude_from_sync: list[str] = (
             config.get("exclude_rooms_from_sync") or []
         )
 
-        delete_stale_devices_after: Optional[str] = (
+        delete_stale_devices_after: str | None = (
             config.get("delete_stale_devices_after") or None
         )
 
         if delete_stale_devices_after is not None:
-            self.delete_stale_devices_after: Optional[int] = self.parse_duration(
+            self.delete_stale_devices_after: int | None = self.parse_duration(
                 delete_stale_devices_after
             )
         else:
@@ -783,7 +910,7 @@ class ServerConfig(Config):
         # The maximum allowed delay duration for delayed events (MSC4140).
         max_event_delay_duration = config.get("max_event_delay_duration")
         if max_event_delay_duration is not None:
-            self.max_event_delay_ms: Optional[int] = self.parse_duration(
+            self.max_event_delay_ms: int | None = self.parse_duration(
                 max_event_delay_duration
             )
             if self.max_event_delay_ms <= 0:
@@ -800,7 +927,7 @@ class ServerConfig(Config):
         data_dir_path: str,
         server_name: str,
         open_private_ports: bool,
-        listeners: Optional[List[dict]],
+        listeners: list[dict] | None,
         **kwargs: Any,
     ) -> str:
         _, bind_port = parse_and_validate_server_name(server_name)
@@ -901,7 +1028,7 @@ class ServerConfig(Config):
             help="Turn on the twisted telnet manhole service on the given port.",
         )
 
-    def read_gc_intervals(self, durations: Any) -> Optional[Tuple[float, float, float]]:
+    def read_gc_intervals(self, durations: Any) -> tuple[float, float, float] | None:
         """Reads the three durations for the GC min interval option, returning seconds."""
         if durations is None:
             return None
@@ -921,7 +1048,7 @@ class ServerConfig(Config):
 
 
 def is_threepid_reserved(
-    reserved_threepids: List[JsonDict], threepid: JsonDict
+    reserved_threepids: list[JsonDict], threepid: JsonDict
 ) -> bool:
     """Check the threepid against the reserved threepid config
     Args:
@@ -939,8 +1066,8 @@ def is_threepid_reserved(
 
 
 def read_gc_thresholds(
-    thresholds: Optional[List[Any]],
-) -> Optional[Tuple[int, int, int]]:
+    thresholds: list[Any] | None,
+) -> tuple[int, int, int] | None:
     """Reads the three integer thresholds for garbage collection. Ensures that
     the thresholds are integers if thresholds are supplied.
     """
@@ -1004,7 +1131,6 @@ def parse_listener_def(num: int, listener: Any) -> ListenerConfig:
             additional_resources=listener.get("additional_resources", {}),
             tag=listener.get("tag"),
             request_id_header=listener.get("request_id_header"),
-            experimental_cors_msc3886=listener.get("experimental_cors_msc3886", False),
         )
 
     if socket_path:

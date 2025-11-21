@@ -21,17 +21,17 @@
 import logging
 import random
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional
 
 from synapse.api.errors import CodeMessageException
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage import DataStore
 from synapse.types import StrCollection
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 if TYPE_CHECKING:
     from synapse.notifier import Notifier
     from synapse.replication.tcp.handler import ReplicationCommandHandler
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,10 @@ class NotRetryingDestination(Exception):
 
 
 async def get_retry_limiter(
+    *,
     destination: str,
+    our_server_name: str,
+    hs: "HomeServer",
     clock: Clock,
     store: DataStore,
     ignore_backoff: bool = False,
@@ -74,6 +77,7 @@ async def get_retry_limiter(
 
     Args:
         destination: name of homeserver
+        our_server_name: Our homeserver name (used to label metrics) (`hs.hostname`)
         clock: timing source
         store: datastore
         ignore_backoff: true to ignore the historical backoff data and
@@ -82,7 +86,12 @@ async def get_retry_limiter(
     Example usage:
 
         try:
-            limiter = await get_retry_limiter(destination, clock, store)
+            limiter = await get_retry_limiter(
+                destination=destination,
+                our_server_name=self.server_name,
+                clock=clock,
+                store=store,
+            )
             with limiter:
                 response = await do_request()
         except NotRetryingDestination:
@@ -114,11 +123,13 @@ async def get_retry_limiter(
     backoff_on_failure = not ignore_backoff
 
     return RetryDestinationLimiter(
-        destination,
-        clock,
-        store,
-        failure_ts,
-        retry_interval,
+        destination=destination,
+        our_server_name=our_server_name,
+        hs=hs,
+        clock=clock,
+        store=store,
+        failure_ts=failure_ts,
+        retry_interval=retry_interval,
         backoff_on_failure=backoff_on_failure,
         **kwargs,
     )
@@ -151,10 +162,13 @@ async def filter_destinations_by_retry_limiter(
 class RetryDestinationLimiter:
     def __init__(
         self,
+        *,
         destination: str,
+        our_server_name: str,
+        hs: "HomeServer",
         clock: Clock,
         store: DataStore,
-        failure_ts: Optional[int],
+        failure_ts: int | None,
         retry_interval: int,
         backoff_on_404: bool = False,
         backoff_on_failure: bool = True,
@@ -169,6 +183,8 @@ class RetryDestinationLimiter:
 
         Args:
             destination
+            our_server_name: Our homeserver name (used to label metrics) (`hs.hostname`)
+            hs: The homeserver instance
             clock
             store
             failure_ts: when this destination started failing (in ms since
@@ -184,6 +200,8 @@ class RetryDestinationLimiter:
             backoff_on_all_error_codes: Whether we should back off on any
                 error code.
         """
+        self.our_server_name = our_server_name
+        self.hs = hs
         self.clock = clock
         self.store = store
         self.destination = destination
@@ -212,9 +230,9 @@ class RetryDestinationLimiter:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         success = exc_type is None
         valid_err_code = False
@@ -318,4 +336,4 @@ class RetryDestinationLimiter:
                 logger.exception("Failed to store destination_retry_timings")
 
         # we deliberately do this in the background.
-        run_as_background_process("store_retry_timings", store_retry_timings)
+        self.hs.run_as_background_process("store_retry_timings", store_retry_timings)

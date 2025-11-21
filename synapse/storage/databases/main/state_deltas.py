@@ -20,17 +20,25 @@
 #
 
 import logging
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 import attr
 
 from synapse.logging.opentracing import trace
 from synapse.storage._base import SQLBaseStore
-from synapse.storage.database import LoggingTransaction, make_in_list_sql_clause
+from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
+    LoggingTransaction,
+    make_in_list_sql_clause,
+)
 from synapse.storage.databases.main.stream import _filter_results_by_stream
 from synapse.types import RoomStreamToken, StrCollection
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.iterutils import batch_iter
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +50,10 @@ class StateDelta:
     event_type: str
     state_key: str
 
-    event_id: Optional[str]
+    event_id: str | None
     """new event_id for this state key. None if the state has been deleted."""
 
-    prev_event_id: Optional[str]
+    prev_event_id: str | None
     """previous event_id for this state key. None if it's new state."""
 
 
@@ -54,9 +62,24 @@ class StateDeltasStore(SQLBaseStore):
     # attribute. TODO: can we get static analysis to enforce this?
     _curr_state_delta_stream_cache: StreamChangeCache
 
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="current_state_delta_stream_room_index",
+            index_name="current_state_delta_stream_room_idx",
+            table="current_state_delta_stream",
+            columns=("room_id", "stream_id"),
+        )
+
     async def get_partial_current_state_deltas(
         self, prev_stream_id: int, max_stream_id: int
-    ) -> Tuple[int, List[StateDelta]]:
+    ) -> tuple[int, list[StateDelta]]:
         """Fetch a list of room state changes since the given stream id
 
         This may be the partial state if we're lazy joining the room.
@@ -71,13 +94,15 @@ class StateDeltasStore(SQLBaseStore):
                 - the stream id which these results go up to
                 - list of current_state_delta_stream rows. If it is empty, we are
                   up to date.
+
+            A maximum of 100 rows will be returned.
         """
         prev_stream_id = int(prev_stream_id)
 
         # check we're not going backwards
-        assert (
-            prev_stream_id <= max_stream_id
-        ), f"New stream id {max_stream_id} is smaller than prev stream id {prev_stream_id}"
+        assert prev_stream_id <= max_stream_id, (
+            f"New stream id {max_stream_id} is smaller than prev stream id {prev_stream_id}"
+        )
 
         if not self._curr_state_delta_stream_cache.has_any_entity_changed(
             prev_stream_id
@@ -89,7 +114,7 @@ class StateDeltasStore(SQLBaseStore):
 
         def get_current_state_deltas_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[int, List[StateDelta]]:
+        ) -> tuple[int, list[StateDelta]]:
             # First we calculate the max stream id that will give us less than
             # N results.
             # We arbitrarily limit to 100 stream_id entries to ensure we don't
@@ -166,9 +191,9 @@ class StateDeltasStore(SQLBaseStore):
         txn: LoggingTransaction,
         room_id: str,
         *,
-        from_token: Optional[RoomStreamToken],
-        to_token: Optional[RoomStreamToken],
-    ) -> List[StateDelta]:
+        from_token: RoomStreamToken | None,
+        to_token: RoomStreamToken | None,
+    ) -> list[StateDelta]:
         """
         Get the state deltas between two tokens.
 
@@ -212,14 +237,21 @@ class StateDeltasStore(SQLBaseStore):
         self,
         room_id: str,
         *,
-        from_token: Optional[RoomStreamToken],
-        to_token: Optional[RoomStreamToken],
-    ) -> List[StateDelta]:
+        from_token: RoomStreamToken | None,
+        to_token: RoomStreamToken | None,
+    ) -> list[StateDelta]:
         """
         Get the state deltas between two tokens.
 
         (> `from_token` and <= `to_token`)
         """
+        # We can bail early if the `from_token` is after the `to_token`
+        if (
+            to_token is not None
+            and from_token is not None
+            and to_token.is_before_or_eq(from_token)
+        ):
+            return []
 
         if (
             from_token is not None
@@ -243,7 +275,7 @@ class StateDeltasStore(SQLBaseStore):
         room_ids: StrCollection,
         from_token: RoomStreamToken,
         to_token: RoomStreamToken,
-    ) -> List[StateDelta]:
+    ) -> list[StateDelta]:
         """Get the state deltas between two tokens for the set of rooms."""
 
         room_ids = self._curr_state_delta_stream_cache.get_entities_changed(
@@ -255,7 +287,7 @@ class StateDeltasStore(SQLBaseStore):
         def get_current_state_deltas_for_rooms_txn(
             txn: LoggingTransaction,
             room_ids: StrCollection,
-        ) -> List[StateDelta]:
+        ) -> list[StateDelta]:
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "room_id", room_ids
             )

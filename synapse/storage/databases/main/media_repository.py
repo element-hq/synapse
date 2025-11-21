@@ -19,15 +19,12 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import logging
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Collection,
     Iterable,
-    List,
-    Optional,
-    Tuple,
-    Union,
     cast,
 )
 
@@ -51,20 +48,23 @@ BG_UPDATE_REMOVE_MEDIA_REPO_INDEX_WITHOUT_METHOD_2 = (
     "media_repository_drop_index_wo_method_2"
 )
 
+logger = logging.getLogger(__name__)
+
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class LocalMedia:
     media_id: str
     media_type: str
-    media_length: Optional[int]
+    media_length: int | None
     upload_name: str
     created_ts: int
-    url_cache: Optional[str]
+    url_cache: str | None
     last_access_ts: int
-    quarantined_by: Optional[str]
+    quarantined_by: str | None
     safe_from_quarantine: bool
-    user_id: Optional[str]
-    authenticated: Optional[bool]
+    user_id: str | None
+    authenticated: bool | None
+    sha256: str | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -73,19 +73,20 @@ class RemoteMedia:
     media_id: str
     media_type: str
     media_length: int
-    upload_name: Optional[str]
+    upload_name: str | None
     filesystem_id: str
     created_ts: int
     last_access_ts: int
-    quarantined_by: Optional[str]
-    authenticated: Optional[bool]
+    quarantined_by: str | None
+    authenticated: bool | None
+    sha256: str | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class UrlCache:
     response_code: int
     expires_ts: int
-    og: Union[str, bytes]
+    og: str | bytes
 
 
 class MediaSortOrder(Enum):
@@ -154,13 +155,33 @@ class MediaRepositoryBackgroundUpdateStore(SQLBaseStore):
             unique=True,
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="local_media_repository_sha256_idx",
+            index_name="local_media_repository_sha256",
+            table="local_media_repository",
+            where_clause="sha256 IS NOT NULL",
+            columns=[
+                "sha256",
+            ],
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="remote_media_cache_sha256_idx",
+            index_name="remote_media_cache_sha256",
+            table="remote_media_cache",
+            where_clause="sha256 IS NOT NULL",
+            columns=[
+                "sha256",
+            ],
+        )
+
         self.db_pool.updates.register_background_update_handler(
             BG_UPDATE_REMOVE_MEDIA_REPO_INDEX_WITHOUT_METHOD_2,
             self._drop_media_index_without_method,
         )
 
         if hs.config.media.can_load_media_repo:
-            self.unused_expiration_time: Optional[int] = (
+            self.unused_expiration_time: int | None = (
                 hs.config.media.unused_expiration_time
             )
         else:
@@ -201,7 +222,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         super().__init__(database, db_conn, hs)
         self.server_name: str = hs.hostname
 
-    async def get_local_media(self, media_id: str) -> Optional[LocalMedia]:
+    async def get_local_media(self, media_id: str) -> LocalMedia | None:
         """Get the metadata for a local piece of media
 
         Returns:
@@ -221,6 +242,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "safe_from_quarantine",
                 "user_id",
                 "authenticated",
+                "sha256",
             ),
             allow_none=True,
             desc="get_local_media",
@@ -239,6 +261,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             safe_from_quarantine=row[7],
             user_id=row[8],
             authenticated=row[9],
+            sha256=row[10],
         )
 
     async def get_local_media_by_user_paginate(
@@ -248,7 +271,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         user_id: str,
         order_by: str = MediaSortOrder.CREATED_TS.value,
         direction: Direction = Direction.FORWARDS,
-    ) -> Tuple[List[LocalMedia], int]:
+    ) -> tuple[list[LocalMedia], int]:
         """Get a paginated list of metadata for a local piece of media
         which an user_id has uploaded
 
@@ -265,7 +288,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
         def get_local_media_by_user_paginate_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[LocalMedia], int]:
+        ) -> tuple[list[LocalMedia], int]:
             # Set ordering
             order_by_column = MediaSortOrder(order_by).value
 
@@ -274,14 +297,14 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             else:
                 order = "ASC"
 
-            args: List[Union[str, int]] = [user_id]
+            args: list[str | int] = [user_id]
             sql = """
                 SELECT COUNT(*) as total_media
                 FROM local_media_repository
                 WHERE user_id = ?
             """
             txn.execute(sql, args)
-            count = cast(Tuple[int], txn.fetchone())[0]
+            count = cast(tuple[int], txn.fetchone())[0]
 
             sql = """
                 SELECT
@@ -295,7 +318,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     quarantined_by,
                     safe_from_quarantine,
                     user_id,
-                    authenticated
+                    authenticated,
+                    sha256
                 FROM local_media_repository
                 WHERE user_id = ?
                 ORDER BY {order_by_column} {order}, media_id ASC
@@ -320,6 +344,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     safe_from_quarantine=bool(row[8]),
                     user_id=row[9],
                     authenticated=row[10],
+                    sha256=row[11],
                 )
                 for row in txn
             ]
@@ -336,7 +361,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         keep_profiles: bool,
         include_quarantined_media: bool,
         include_protected_media: bool,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Retrieve a list of media IDs from the local media store.
 
@@ -408,7 +433,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 AND NOT safe_from_quarantine
             """
 
-        def _get_local_media_ids_txn(txn: LoggingTransaction) -> List[str]:
+        def _get_local_media_ids_txn(txn: LoggingTransaction) -> list[str]:
             txn.execute(sql, (before_ts, before_ts, size_gt))
             return [row[0] for row in txn]
 
@@ -445,10 +470,12 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         media_id: str,
         media_type: str,
         time_now_ms: int,
-        upload_name: Optional[str],
+        upload_name: str | None,
         media_length: int,
         user_id: UserID,
-        url_cache: Optional[str] = None,
+        url_cache: str | None = None,
+        sha256: str | None = None,
+        quarantined_by: str | None = None,
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -466,6 +493,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "user_id": user_id.to_string(),
                 "url_cache": url_cache,
                 "authenticated": authenticated,
+                "sha256": sha256,
+                "quarantined_by": quarantined_by,
             },
             desc="store_local_media",
         )
@@ -474,23 +503,31 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         self,
         media_id: str,
         media_type: str,
-        upload_name: Optional[str],
+        upload_name: str | None,
         media_length: int,
         user_id: UserID,
-        url_cache: Optional[str] = None,
+        sha256: str,
+        url_cache: str | None = None,
+        quarantined_by: str | None = None,
     ) -> None:
+        updatevalues = {
+            "media_type": media_type,
+            "upload_name": upload_name,
+            "media_length": media_length,
+            "url_cache": url_cache,
+            "sha256": sha256,
+        }
+
+        # This should never be un-set by this function.
+        if quarantined_by is not None:
+            updatevalues["quarantined_by"] = quarantined_by
+
         await self.db_pool.simple_update_one(
             "local_media_repository",
             keyvalues={
-                "user_id": user_id.to_string(),
                 "media_id": media_id,
             },
-            updatevalues={
-                "media_type": media_type,
-                "upload_name": upload_name,
-                "media_length": media_length,
-                "url_cache": url_cache,
-            },
+            updatevalues=updatevalues,
             desc="update_local_media",
         )
 
@@ -503,7 +540,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             desc="mark_local_media_as_safe",
         )
 
-    async def count_pending_media(self, user_id: UserID) -> Tuple[int, int]:
+    async def count_pending_media(self, user_id: UserID) -> tuple[int, int]:
         """Count the number of pending media for a user.
 
         Returns:
@@ -511,7 +548,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             expiration timestamp.
         """
 
-        def get_pending_media_txn(txn: LoggingTransaction) -> Tuple[int, int]:
+        def get_pending_media_txn(txn: LoggingTransaction) -> tuple[int, int]:
             sql = """
             SELECT COUNT(*), MIN(created_ts)
             FROM local_media_repository
@@ -524,7 +561,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 sql,
                 (
                     user_id.to_string(),
-                    self._clock.time_msec() - self.unused_expiration_time,
+                    self.clock.time_msec() - self.unused_expiration_time,
                 ),
             )
             row = txn.fetchone()
@@ -536,13 +573,13 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             "get_pending_media", get_pending_media_txn
         )
 
-    async def get_url_cache(self, url: str, ts: int) -> Optional[UrlCache]:
+    async def get_url_cache(self, url: str, ts: int) -> UrlCache | None:
         """Get the media_id and ts for a cached URL as of the given timestamp
         Returns:
             None if the URL isn't cached.
         """
 
-        def get_url_cache_txn(txn: LoggingTransaction) -> Optional[UrlCache]:
+        def get_url_cache_txn(txn: LoggingTransaction) -> UrlCache | None:
             # get the most recently cached result (relative to the given ts)
             sql = """
                 SELECT response_code, expires_ts, og
@@ -576,7 +613,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         self,
         url: str,
         response_code: int,
-        etag: Optional[str],
+        etag: str | None,
         expires_ts: int,
         og: str,
         media_id: str,
@@ -596,9 +633,9 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             desc="store_url_cache",
         )
 
-    async def get_local_media_thumbnails(self, media_id: str) -> List[ThumbnailInfo]:
+    async def get_local_media_thumbnails(self, media_id: str) -> list[ThumbnailInfo]:
         rows = cast(
-            List[Tuple[int, int, str, str, int]],
+            list[tuple[int, int, str, str, int]],
             await self.db_pool.simple_select_list(
                 "local_media_repository_thumbnails",
                 {"media_id": media_id},
@@ -644,7 +681,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
     async def get_cached_remote_media(
         self, origin: str, media_id: str
-    ) -> Optional[RemoteMedia]:
+    ) -> RemoteMedia | None:
         row = await self.db_pool.simple_select_one(
             "remote_media_cache",
             {"media_origin": origin, "media_id": media_id},
@@ -657,6 +694,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "last_access_ts",
                 "quarantined_by",
                 "authenticated",
+                "sha256",
             ),
             allow_none=True,
             desc="get_cached_remote_media",
@@ -674,6 +712,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             last_access_ts=row[5],
             quarantined_by=row[6],
             authenticated=row[7],
+            sha256=row[8],
         )
 
     async def store_cached_remote_media(
@@ -683,8 +722,9 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         media_type: str,
         media_length: int,
         time_now_ms: int,
-        upload_name: Optional[str],
+        upload_name: str | None,
         filesystem_id: str,
+        sha256: str | None,
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -703,6 +743,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "filesystem_id": filesystem_id,
                 "last_access_ts": time_now_ms,
                 "authenticated": authenticated,
+                "sha256": sha256,
             },
             desc="store_cached_remote_media",
         )
@@ -710,7 +751,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
     async def update_cached_last_access_time(
         self,
         local_media: Iterable[str],
-        remote_media: Iterable[Tuple[str, str]],
+        remote_media: Iterable[tuple[str, str]],
         time_ms: int,
     ) -> None:
         """Updates the last access time of the given media
@@ -729,10 +770,10 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
             txn.execute_batch(
                 sql,
-                (
+                [
                     (time_ms, media_origin, media_id)
                     for media_origin, media_id in remote_media
-                ),
+                ],
             )
 
             sql = (
@@ -740,7 +781,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 " WHERE media_id = ?"
             )
 
-            txn.execute_batch(sql, ((time_ms, media_id) for media_id in local_media))
+            txn.execute_batch(sql, [(time_ms, media_id) for media_id in local_media])
 
         await self.db_pool.runInteraction(
             "update_cached_last_access_time", update_cache_txn
@@ -748,9 +789,9 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
     async def get_remote_media_thumbnails(
         self, origin: str, media_id: str
-    ) -> List[ThumbnailInfo]:
+    ) -> list[ThumbnailInfo]:
         rows = cast(
-            List[Tuple[int, int, str, str, int]],
+            list[tuple[int, int, str, str, int]],
             await self.db_pool.simple_select_list(
                 "remote_media_cache_thumbnails",
                 {"media_origin": origin, "media_id": media_id},
@@ -779,7 +820,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         t_width: int,
         t_height: int,
         t_type: str,
-    ) -> Optional[ThumbnailInfo]:
+    ) -> ThumbnailInfo | None:
         """Fetch the thumbnail info of given width, height and type."""
 
         row = await self.db_pool.simple_select_one(
@@ -836,7 +877,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
     async def get_remote_media_ids(
         self, before_ts: int, include_quarantined_media: bool
-    ) -> List[Tuple[str, str, str]]:
+    ) -> list[tuple[str, str, str]]:
         """
         Retrieve a list of server name, media ID tuples from the remote media cache.
 
@@ -866,7 +907,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             """
 
         return cast(
-            List[Tuple[str, str, str]],
+            list[tuple[str, str, str]],
             await self.db_pool.execute("get_remote_media_ids", sql, before_ts),
         )
 
@@ -887,7 +928,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             "delete_remote_media", delete_remote_media_txn
         )
 
-    async def get_expired_url_cache(self, now_ts: int) -> List[str]:
+    async def get_expired_url_cache(self, now_ts: int) -> list[str]:
         sql = (
             "SELECT media_id FROM local_media_repository_url_cache"
             " WHERE expires_ts < ?"
@@ -895,7 +936,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             " LIMIT 500"
         )
 
-        def _get_expired_url_cache_txn(txn: LoggingTransaction) -> List[str]:
+        def _get_expired_url_cache_txn(txn: LoggingTransaction) -> list[str]:
             txn.execute(sql, (now_ts,))
             return [row[0] for row in txn]
 
@@ -914,7 +955,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
         await self.db_pool.runInteraction("delete_url_cache", _delete_url_cache_txn)
 
-    async def get_url_cache_media_before(self, before_ts: int) -> List[str]:
+    async def get_url_cache_media_before(self, before_ts: int) -> list[str]:
         sql = (
             "SELECT media_id FROM local_media_repository"
             " WHERE created_ts < ? AND url_cache IS NOT NULL"
@@ -922,7 +963,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             " LIMIT 500"
         )
 
-        def _get_url_cache_media_before_txn(txn: LoggingTransaction) -> List[str]:
+        def _get_url_cache_media_before_txn(txn: LoggingTransaction) -> list[str]:
             txn.execute(sql, (before_ts,))
             return [row[0] for row in txn]
 
@@ -945,4 +986,83 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
         await self.db_pool.runInteraction(
             "delete_url_cache_media", _delete_url_cache_media_txn
+        )
+
+    async def get_is_hash_quarantined(self, sha256: str) -> bool:
+        """Get whether a specific sha256 hash digest matches any quarantined media.
+
+        Returns:
+            None if the media_id doesn't exist.
+        """
+
+        # If we don't have the index yet, performance tanks, so we return False.
+        # In the background updates, remote_media_cache_sha256_idx is created
+        # after local_media_repository_sha256_idx, which is why we only need to
+        # check for the completion of the former.
+        if not await self.db_pool.updates.has_completed_background_update(
+            "remote_media_cache_sha256_idx"
+        ):
+            return False
+
+        def get_matching_media_txn(
+            txn: LoggingTransaction, table: str, sha256: str
+        ) -> bool:
+            # Return on first match
+            sql = """
+            SELECT 1
+            FROM local_media_repository
+            WHERE sha256 = ? AND quarantined_by IS NOT NULL
+
+            UNION ALL
+
+            SELECT 1
+            FROM remote_media_cache
+            WHERE sha256 = ? AND quarantined_by IS NOT NULL
+            LIMIT 1
+            """
+            txn.execute(sql, (sha256, sha256))
+            row = txn.fetchone()
+            return row is not None
+
+        return await self.db_pool.runInteraction(
+            "get_matching_media_txn",
+            get_matching_media_txn,
+            "local_media_repository",
+            sha256,
+        )
+
+    async def get_media_uploaded_size_for_user(
+        self, user_id: str, time_period_ms: int
+    ) -> int:
+        """Get the total size of media uploaded by a user in the last
+        time_period_ms milliseconds.
+
+        Args:
+            user_id: The user ID to check.
+            time_period_ms: The time period in milliseconds to consider.
+
+        Returns:
+            The total size of media uploaded by the user in bytes.
+        """
+
+        sql = """
+            SELECT COALESCE(SUM(media_length), 0)
+            FROM local_media_repository
+            WHERE user_id = ? AND created_ts > ?
+        """
+
+        def _get_media_uploaded_size_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> int:
+            # Calculate the timestamp for the start of the time period
+            start_ts = self.clock.time_msec() - time_period_ms
+            txn.execute(sql, (user_id, start_ts))
+            row = txn.fetchone()
+            if row is None:
+                return 0
+            return row[0]
+
+        return await self.db_pool.runInteraction(
+            "get_media_uploaded_size_for_user",
+            _get_media_uploaded_size_for_user_txn,
         )

@@ -24,7 +24,7 @@
 
 import os
 import sys
-from typing import Any, Dict
+from typing import Any
 
 from PIL import ImageFile
 
@@ -39,22 +39,12 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Note that we use an (unneeded) variable here so that pyupgrade doesn't nuke the
 # if-statement completely.
 py_version = sys.version_info
-if py_version < (3, 8):
-    print("Synapse requires Python 3.8 or above.")
+if py_version < (3, 10):
+    print("Synapse requires Python 3.10 or above.")
     sys.exit(1)
 
 # Allow using the asyncio reactor via env var.
 if strtobool(os.environ.get("SYNAPSE_ASYNC_IO_REACTOR", "0")):
-    from incremental import Version
-
-    import twisted
-
-    # We need a bugfix that is included in Twisted 21.2.0:
-    # https://twistedmatrix.com/trac/ticket/9787
-    if twisted.version < Version("Twisted", 21, 2, 0):
-        print("Using asyncio reactor requires Twisted>=21.2.0")
-        sys.exit(1)
-
     import asyncio
 
     from twisted.internet import asyncioreactor
@@ -80,7 +70,7 @@ try:
     from canonicaljson import register_preserialisation_callback
     from immutabledict import immutabledict
 
-    def _immutabledict_cb(d: immutabledict) -> Dict[str, Any]:
+    def _immutabledict_cb(d: immutabledict) -> dict[str, Any]:
         try:
             return d._dict
         except Exception:

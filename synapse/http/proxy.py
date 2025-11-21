@@ -22,7 +22,7 @@
 import json
 import logging
 import urllib.parse
-from typing import TYPE_CHECKING, Any, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from twisted.internet import protocol
 from twisted.internet.interfaces import ITCPTransport
@@ -51,30 +51,22 @@ logger = logging.getLogger(__name__)
 # "Hop-by-hop" headers (as opposed to "end-to-end" headers) as defined by RFC2616
 # section 13.5.1 and referenced in RFC9110 section 7.6.1. These are meant to only be
 # consumed by the immediate recipient and not be forwarded on.
-HOP_BY_HOP_HEADERS = {
-    "Connection",
-    "Keep-Alive",
-    "Proxy-Authenticate",
-    "Proxy-Authorization",
-    "TE",
-    "Trailers",
-    "Transfer-Encoding",
-    "Upgrade",
+HOP_BY_HOP_HEADERS_LOWERCASE = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
 }
-
-if hasattr(Headers, "_canonicalNameCaps"):
-    # Twisted < 24.7.0rc1
-    _canonicalHeaderName = Headers()._canonicalNameCaps  # type: ignore[attr-defined]
-else:
-    # Twisted >= 24.7.0rc1
-    # But note that `_encodeName` still exists on prior versions,
-    # it just encodes differently
-    _canonicalHeaderName = Headers()._encodeName
+assert all(header.lower() == header for header in HOP_BY_HOP_HEADERS_LOWERCASE)
 
 
 def parse_connection_header_value(
-    connection_header_value: Optional[bytes],
-) -> Set[str]:
+    connection_header_value: bytes | None,
+) -> set[str]:
     """
     Parse the `Connection` header to determine which headers we should not be copied
     over from the remote response.
@@ -92,12 +84,12 @@ def parse_connection_header_value(
 
     Returns:
         The set of header names that should not be copied over from the remote response.
-        The keys are capitalized in canonical capitalization.
+        The keys are lowercased.
     """
-    extra_headers_to_remove: Set[str] = set()
+    extra_headers_to_remove: set[str] = set()
     if connection_header_value:
         extra_headers_to_remove = {
-            _canonicalHeaderName(connection_option.strip()).decode("ascii")
+            connection_option.decode("ascii").strip().lower()
             for connection_option in connection_header_value.split(b",")
         }
 
@@ -114,7 +106,7 @@ class ProxyResource(_AsyncResource):
     isLeaf = True
 
     def __init__(self, reactor: ISynapseReactor, hs: "HomeServer"):
-        super().__init__(True)
+        super().__init__(hs.get_clock(), True)
 
         self.reactor = reactor
         self.agent = hs.get_federation_http_client().agent
@@ -148,7 +140,7 @@ class ProxyResource(_AsyncResource):
             "Invalid Proxy-Authorization header.", Codes.UNAUTHORIZED
         )
 
-    async def _async_render(self, request: "SynapseRequest") -> Tuple[int, Any]:
+    async def _async_render(self, request: "SynapseRequest") -> tuple[int, Any]:
         uri = urllib.parse.urlparse(request.uri)
         assert uri.scheme == b"matrix-federation"
 
@@ -169,12 +161,12 @@ class ProxyResource(_AsyncResource):
             bodyProducer=QuieterFileBodyProducer(request.content),
         )
         request_deferred = timeout_deferred(
-            request_deferred,
+            deferred=request_deferred,
             # This should be set longer than the timeout in `MatrixFederationHttpClient`
             # so that it has enough time to complete and pass us the data before we give
             # up.
             timeout=90,
-            reactor=self.reactor,
+            clock=self._clock,
         )
 
         response = await make_deferred_yieldable(request_deferred)
@@ -194,7 +186,7 @@ class ProxyResource(_AsyncResource):
 
         # The `Connection` header also defines which headers should not be copied over.
         connection_header = response_headers.getRawHeaders(b"connection")
-        extra_headers_to_remove = parse_connection_header_value(
+        extra_headers_to_remove_lowercase = parse_connection_header_value(
             connection_header[0] if connection_header else None
         )
 
@@ -202,10 +194,10 @@ class ProxyResource(_AsyncResource):
         for k, v in response_headers.getAllRawHeaders():
             # Do not copy over any hop-by-hop headers. These are meant to only be
             # consumed by the immediate recipient and not be forwarded on.
-            header_key = k.decode("ascii")
+            header_key_lowercase = k.decode("ascii").lower()
             if (
-                header_key in HOP_BY_HOP_HEADERS
-                or header_key in extra_headers_to_remove
+                header_key_lowercase in HOP_BY_HOP_HEADERS_LOWERCASE
+                or header_key_lowercase in extra_headers_to_remove_lowercase
             ):
                 continue
 
@@ -245,7 +237,7 @@ class _ProxyResponseBody(protocol.Protocol):
     request.
     """
 
-    transport: Optional[ITCPTransport] = None
+    transport: ITCPTransport | None = None
 
     def __init__(self, request: "SynapseRequest") -> None:
         self._request = request

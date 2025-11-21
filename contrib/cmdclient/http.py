@@ -22,7 +22,6 @@
 import json
 import urllib
 from pprint import pformat
-from typing import Optional
 
 from twisted.internet import defer, reactor
 from twisted.web.client import Agent, readBody
@@ -78,7 +77,7 @@ class TwistedHttpClient(HttpClient):
             url, data, headers_dict={"Content-Type": ["application/json"]}
         )
         body = yield readBody(response)
-        defer.returnValue((response.code, body))
+        return response.code, body
 
     @defer.inlineCallbacks
     def get_json(self, url, args=None):
@@ -88,9 +87,9 @@ class TwistedHttpClient(HttpClient):
             url = "%s?%s" % (url, qs)
         response = yield self._create_get_request(url)
         body = yield readBody(response)
-        defer.returnValue(json.loads(body))
+        return json.loads(body)
 
-    def _create_put_request(self, url, json_data, headers_dict: Optional[dict] = None):
+    def _create_put_request(self, url, json_data, headers_dict: dict | None = None):
         """Wrapper of _create_request to issue a PUT request"""
         headers_dict = headers_dict or {}
 
@@ -101,7 +100,7 @@ class TwistedHttpClient(HttpClient):
             "PUT", url, producer=_JsonProducer(json_data), headers_dict=headers_dict
         )
 
-    def _create_get_request(self, url, headers_dict: Optional[dict] = None):
+    def _create_get_request(self, url, headers_dict: dict | None = None):
         """Wrapper of _create_request to issue a GET request"""
         return self._create_request("GET", url, headers_dict=headers_dict or {})
 
@@ -113,7 +112,7 @@ class TwistedHttpClient(HttpClient):
         data=None,
         qparams=None,
         jsonreq=True,
-        headers: Optional[dict] = None,
+        headers: dict | None = None,
     ):
         headers = headers or {}
 
@@ -134,11 +133,11 @@ class TwistedHttpClient(HttpClient):
             response = yield self._create_request(method, url)
 
         body = yield readBody(response)
-        defer.returnValue(json.loads(body))
+        return json.loads(body)
 
     @defer.inlineCallbacks
     def _create_request(
-        self, method, url, producer=None, headers_dict: Optional[dict] = None
+        self, method, url, producer=None, headers_dict: dict | None = None
     ):
         """Creates and sends a request to the given url"""
         headers_dict = headers_dict or {}
@@ -173,7 +172,7 @@ class TwistedHttpClient(HttpClient):
         if self.verbose:
             print("Status %s %s" % (response.code, response.phrase))
             print(pformat(list(response.headers.getAllRawHeaders())))
-        defer.returnValue(response)
+        return response
 
     def sleep(self, seconds):
         d = defer.Deferred()

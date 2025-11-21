@@ -18,43 +18,58 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Set
 
 from parameterized import parameterized
 
-from synapse.http.proxy import parse_connection_header_value
+from synapse.http.proxy import (
+    HOP_BY_HOP_HEADERS_LOWERCASE,
+    parse_connection_header_value,
+)
 
 from tests.unittest import TestCase
+
+
+def mix_case(s: str) -> str:
+    """
+    Mix up the case of each character in the string (upper or lower case)
+    """
+    return "".join(c.upper() if i % 2 == 0 else c.lower() for i, c in enumerate(s))
 
 
 class ProxyTests(TestCase):
     @parameterized.expand(
         [
-            [b"close, X-Foo, X-Bar", {"Close", "X-Foo", "X-Bar"}],
+            [b"close, X-Foo, X-Bar", {"close", "x-foo", "x-bar"}],
             # No whitespace
-            [b"close,X-Foo,X-Bar", {"Close", "X-Foo", "X-Bar"}],
+            [b"close,X-Foo,X-Bar", {"close", "x-foo", "x-bar"}],
             # More whitespace
-            [b"close,    X-Foo,      X-Bar", {"Close", "X-Foo", "X-Bar"}],
+            [b"close,    X-Foo,      X-Bar", {"close", "x-foo", "x-bar"}],
             # "close" directive in not the first position
-            [b"X-Foo, X-Bar, close", {"X-Foo", "X-Bar", "Close"}],
+            [b"X-Foo, X-Bar, close", {"x-foo", "x-bar", "close"}],
             # Normalizes header capitalization
-            [b"keep-alive, x-fOo, x-bAr", {"Keep-Alive", "X-Foo", "X-Bar"}],
+            [b"keep-alive, x-fOo, x-bAr", {"keep-alive", "x-foo", "x-bar"}],
             # Handles header names with whitespace
             [
                 b"keep-alive, x  foo, x bar",
-                {"Keep-Alive", "X  foo", "X bar"},
+                {"keep-alive", "x  foo", "x bar"},
+            ],
+            # Make sure we handle all of the hop-by-hop headers
+            [
+                mix_case(", ".join(HOP_BY_HOP_HEADERS_LOWERCASE)).encode("ascii"),
+                HOP_BY_HOP_HEADERS_LOWERCASE,
             ],
         ]
     )
     def test_parse_connection_header_value(
         self,
         connection_header_value: bytes,
-        expected_extra_headers_to_remove: Set[str],
+        expected_extra_headers_to_remove: set[str],
     ) -> None:
         """
         Tests that the connection header value is parsed correctly
         """
-        self.assertEqual(
+        self.assertIncludes(
             expected_extra_headers_to_remove,
             parse_connection_header_value(connection_header_value),
+            exact=True,
         )

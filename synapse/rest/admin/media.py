@@ -18,10 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 import attr
 
@@ -41,13 +40,81 @@ from synapse.rest.admin._base import (
     assert_requester_is_admin,
     assert_user_is_admin,
 )
-from synapse.storage.databases.main.media_repository import MediaSortOrder
+from synapse.storage.databases.main.media_repository import (
+    MediaSortOrder,
+)
 from synapse.types import JsonDict, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class QueryMediaById(RestServlet):
+    """
+    Fetch info about a piece of local or cached remote media.
+    """
+
+    PATTERNS = admin_patterns("/media/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        self.auth = hs.get_auth()
+        self.server_name = hs.hostname
+        self.hs = hs
+        self.media_repo = hs.get_media_repository()
+
+    async def on_GET(
+        self, request: SynapseRequest, server_name: str, media_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        await assert_user_is_admin(self.auth, requester)
+
+        if not self.hs.is_mine_server_name(server_name):
+            remote_media_info = await self.media_repo.get_cached_remote_media_info(
+                server_name, media_id
+            )
+            if remote_media_info is None:
+                raise NotFoundError("Unknown media")
+            resp = {
+                "media_origin": remote_media_info.media_origin,
+                "user_id": None,
+                "media_id": remote_media_info.media_id,
+                "media_type": remote_media_info.media_type,
+                "media_length": remote_media_info.media_length,
+                "upload_name": remote_media_info.upload_name,
+                "created_ts": remote_media_info.created_ts,
+                "filesystem_id": remote_media_info.filesystem_id,
+                "url_cache": None,
+                "last_access_ts": remote_media_info.last_access_ts,
+                "quarantined_by": remote_media_info.quarantined_by,
+                "authenticated": remote_media_info.authenticated,
+                "safe_from_quarantine": None,
+                "sha256": remote_media_info.sha256,
+            }
+        else:
+            local_media_info = await self.store.get_local_media(media_id)
+            if local_media_info is None:
+                raise NotFoundError("Unknown media")
+            resp = {
+                "media_origin": None,
+                "user_id": local_media_info.user_id,
+                "media_id": local_media_info.media_id,
+                "media_type": local_media_info.media_type,
+                "media_length": local_media_info.media_length,
+                "upload_name": local_media_info.upload_name,
+                "created_ts": local_media_info.created_ts,
+                "filesystem_id": None,
+                "url_cache": local_media_info.url_cache,
+                "last_access_ts": local_media_info.last_access_ts,
+                "quarantined_by": local_media_info.quarantined_by,
+                "authenticated": local_media_info.authenticated,
+                "safe_from_quarantine": local_media_info.safe_from_quarantine,
+                "sha256": local_media_info.sha256,
+            }
+
+        return HTTPStatus.OK, {"media_info": resp}
 
 
 class QuarantineMediaInRoom(RestServlet):
@@ -67,11 +134,11 @@ class QuarantineMediaInRoom(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
-        logging.info("Quarantining room: %s", room_id)
+        logger.info("Quarantining room: %s", room_id)
 
         # Quarantine all media in this room
         num_quarantined = await self.store.quarantine_media_ids_in_room(
@@ -94,11 +161,11 @@ class QuarantineMediaByUser(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
-        logging.info("Quarantining media by user: %s", user_id)
+        logger.info("Quarantining media by user: %s", user_id)
 
         # Quarantine all media this user has uploaded
         num_quarantined = await self.store.quarantine_media_ids_by_user(
@@ -123,11 +190,11 @@ class QuarantineMediaByID(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, server_name: str, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
-        logging.info("Quarantining media by ID: %s/%s", server_name, media_id)
+        logger.info("Quarantining media by ID: %s/%s", server_name, media_id)
 
         # Quarantine this media id
         await self.store.quarantine_media_by_id(
@@ -152,10 +219,10 @@ class UnquarantineMediaByID(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, server_name: str, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        logging.info("Remove from quarantine media by ID: %s/%s", server_name, media_id)
+        logger.info("Remove from quarantine media by ID: %s/%s", server_name, media_id)
 
         # Remove from quarantine this media id
         await self.store.quarantine_media_by_id(server_name, media_id, None)
@@ -174,10 +241,10 @@ class ProtectMediaByID(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        logging.info("Protecting local media by ID: %s", media_id)
+        logger.info("Protecting local media by ID: %s", media_id)
 
         # Protect this media id
         await self.store.mark_local_media_as_safe(media_id, safe=True)
@@ -196,10 +263,10 @@ class UnprotectMediaByID(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        logging.info("Unprotecting local media by ID: %s", media_id)
+        logger.info("Unprotecting local media by ID: %s", media_id)
 
         # Unprotect this media id
         await self.store.mark_local_media_as_safe(media_id, safe=False)
@@ -218,7 +285,7 @@ class ListMediaInRoom(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         local_mxcs, remote_mxcs = await self.store.get_media_mxcs_in_room(room_id)
@@ -233,7 +300,7 @@ class PurgeMediaCacheRestServlet(RestServlet):
         self.media_repository = hs.get_media_repository()
         self.auth = hs.get_auth()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         before_ts = parse_integer(request, "before_ts", required=True)
@@ -271,7 +338,7 @@ class DeleteMediaByID(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, server_name: str, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         if not self._is_mine_server_name(server_name):
@@ -280,7 +347,7 @@ class DeleteMediaByID(RestServlet):
         if await self.store.get_local_media(media_id) is None:
             raise NotFoundError("Unknown media")
 
-        logging.info("Deleting local media by ID: %s", media_id)
+        logger.info("Deleting local media by ID: %s", media_id)
 
         deleted_media, total = await self.media_repository.delete_local_media_ids(
             [media_id]
@@ -307,8 +374,8 @@ class DeleteMediaByDateSize(RestServlet):
         self.media_repository = hs.get_media_repository()
 
     async def on_POST(
-        self, request: SynapseRequest, server_name: Optional[str] = None
-    ) -> Tuple[int, JsonDict]:
+        self, request: SynapseRequest, server_name: str | None = None
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         before_ts = parse_integer(request, "before_ts", required=True)
@@ -327,9 +394,11 @@ class DeleteMediaByDateSize(RestServlet):
         if server_name is not None and self.server_name != server_name:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only delete local media")
 
-        logging.info(
-            "Deleting local media by timestamp: %s, size larger than: %s, keep profile media: %s"
-            % (before_ts, size_gt, keep_profiles)
+        logger.info(
+            "Deleting local media by timestamp: %s, size larger than: %s, keep profile media: %s",
+            before_ts,
+            size_gt,
+            keep_profiles,
         )
 
         deleted_media, total = await self.media_repository.delete_old_local_media(
@@ -364,7 +433,7 @@ class UserMediaRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None
 
@@ -408,7 +477,7 @@ class UserMediaRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None
 
@@ -468,3 +537,4 @@ def register_servlets_for_media_repo(hs: "HomeServer", http_server: HttpServer) 
     DeleteMediaByDateSize(hs).register(http_server)
     DeleteMediaByID(hs).register(http_server)
     UserMediaRestServlet(hs).register(http_server)
+    QueryMediaById(hs).register(http_server)

@@ -10,16 +10,16 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Optional
+from typing import Mapping
 
 from synapse.types import JsonDict
 
 class EventInternalMetadata:
     def __init__(self, internal_metadata_dict: JsonDict): ...
 
-    stream_ordering: Optional[int]
+    stream_ordering: int | None
     """the stream ordering of this event. None, until it has been persisted."""
-    instance_name: Optional[str]
+    instance_name: str | None
     """the instance name of the server that persisted this event. None, until it has been persisted."""
 
     outlier: bool
@@ -32,6 +32,9 @@ class EventInternalMetadata:
     soft_failed: bool
     proactively_send: bool
     redacted: bool
+
+    policy_server_spammy: bool
+    """whether the policy server indicated that this event is spammy"""
 
     txn_id: str
     """The transaction ID, if it was set when the event was created."""
@@ -59,7 +62,7 @@ class EventInternalMetadata:
         (Added in synapse 0.99.0, so may be unreliable for events received before that)
         """
 
-    def get_send_on_behalf_of(self) -> Optional[str]:
+    def get_send_on_behalf_of(self) -> str | None:
         """Whether this server should send the event on behalf of another server.
         This is used by the federation "send_join" API to forward the initial join
         event for a server in the room.
@@ -105,3 +108,29 @@ class EventInternalMetadata:
 
     def is_notifiable(self) -> bool:
         """Whether this event can trigger a push notification"""
+
+def event_visible_to_server(
+    sender: str,
+    target_server_name: str,
+    history_visibility: str,
+    erased_senders: Mapping[str, bool],
+    partial_state_invisible: bool,
+    memberships: list[tuple[str, str]],
+) -> bool:
+    """Determine whether the server is allowed to see the unredacted event.
+
+    Args:
+        sender: The sender of the event.
+        target_server_name: The server we want to send the event to.
+        history_visibility: The history_visibility value at the event.
+        erased_senders: A mapping of users and whether they have requested erasure. If a
+            user is not in the map, it is treated as though they haven't requested erasure.
+        partial_state_invisible: Whether the event should be treated as invisible due to
+            the partial state status of the room.
+        memberships: A list of membership state information at the event for users
+            matching the `target_server_name`. Each list item must contain a tuple of
+            (state_key, membership).
+
+    Returns:
+        Whether the server is allowed to see the unredacted event.
+    """

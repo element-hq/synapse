@@ -20,22 +20,23 @@
 #
 #
 import os
-from typing import Dict
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
 from synapse.api.errors import Codes
+from synapse.media._base import FileInfo
 from synapse.media.filepath import MediaFilePaths
-from synapse.rest.client import login, profile, room
+from synapse.rest.client import login, media, profile, room
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_CMYK_JPEG, SMALL_PNG
+from tests.unittest import override_config
 
 VALID_TIMESTAMP = 1609459200000  # 2021-01-01 in milliseconds
 INVALID_TIMESTAMP_IN_S = 1893456000  # 2030-01-01 in seconds
@@ -46,12 +47,171 @@ class _AdminMediaTests(unittest.HomeserverTestCase):
         synapse.rest.admin.register_servlets,
         synapse.rest.admin.register_servlets_for_media_repo,
         login.register_servlets,
+        media.register_servlets,
     ]
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
+
+
+class QueryMediaByIDTestCase(_AdminMediaTests):
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.hs = hs
+        self.clock = clock
+        self.server_name = hs.hostname
+        self.store = hs.get_datastores().main
+
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
+
+    def _cache_remote_media(self, file_id: str) -> None:
+        file_info = FileInfo(server_name="remote.com", file_id=file_id)
+
+        media_storage = self.hs.get_media_repository().media_storage
+
+        ctx = media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        self.get_success(
+            self.store.store_cached_remote_media(
+                origin="remote.com",
+                media_id=file_id,
+                media_type="image/png",
+                media_length=len(SMALL_PNG),
+                time_now_ms=self.clock.time_msec(),
+                upload_name="test.png",
+                filesystem_id=file_id,
+                sha256=file_id,
+            )
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/remote.com/{file_id}",
+            shorthand=False,
+            access_token=self.admin_user_tok,
+        )
+
+        # Should be successful
+        self.assertEqual(
+            200,
+            channel.code,
+            msg=("Expected to receive a 200 on accessing media"),
+        )
+
+    def test_no_auth(self) -> None:
+        """
+        Try to query media without authentication.
+        """
+        url = f"/_synapse/admin/v1/media/{self.server_name}/12345"
+        channel = self.make_request("GET", url)
+
+        self.assertEqual(
+            401,
+            channel.code,
+            msg=channel.json_body,
+        )
+        self.assertEqual(Codes.MISSING_TOKEN, channel.json_body["errcode"])
+
+    def test_requester_is_no_admin(self) -> None:
+        """
+        If the user is not a server admin, an error is returned.
+        """
+        self.other_user = self.register_user("user", "pass")
+        self.other_user_token = self.login("user", "pass")
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/media/{self.server_name}/12345",
+            access_token=self.other_user_token,
+        )
+
+        self.assertEqual(403, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+    def test_local_media_does_not_exist(self) -> None:
+        """
+        Tests that a lookup for local media that does not exist returns a 404
+        """
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/media/{self.server_name}/12345",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(404, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.NOT_FOUND, channel.json_body["errcode"])
+
+    def test_remote_media_does_not_exist(self) -> None:
+        """
+        Tests that a lookup for remote media that is not cached returns a 404
+        """
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/media/{self.server_name}/12345",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(404, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.NOT_FOUND, channel.json_body["errcode"])
+
+    def test_query_local_media(self) -> None:
+        """
+        Tests that querying an existing local media returns appropriate media info
+        """
+
+        # Upload some media into the room
+        response = self.helper.upload_media(
+            SMALL_PNG,
+            tok=self.admin_user_tok,
+            expect_code=200,
+        )
+        # Extract media ID from the response
+        server_and_media_id = response["content_uri"][6:]  # Cut off 'mxc://'
+        server_name, media_id = server_and_media_id.split("/")
+        self.assertEqual(server_name, self.server_name)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/media/{self.server_name}/{media_id}",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(channel.json_body["media_info"]["authenticated"], True)
+        self.assertEqual(channel.json_body["media_info"]["media_id"], media_id)
+        self.assertEqual(
+            channel.json_body["media_info"]["media_length"], len(SMALL_PNG)
+        )
+        self.assertEqual(
+            channel.json_body["media_info"]["media_type"], "application/json"
+        )
+        self.assertEqual(channel.json_body["media_info"]["upload_name"], "test.png")
+        self.assertEqual(channel.json_body["media_info"]["user_id"], "@admin:test")
+
+    def test_query_remote_media(self) -> None:
+        file_id = "abcdefg12345"
+        self._cache_remote_media(file_id)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/media/remote.com/{file_id}",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(channel.json_body["media_info"]["authenticated"], True)
+        self.assertEqual(channel.json_body["media_info"]["media_id"], file_id)
+        self.assertEqual(
+            channel.json_body["media_info"]["media_length"], len(SMALL_PNG)
+        )
+        self.assertEqual(channel.json_body["media_info"]["media_type"], "image/png")
+        self.assertEqual(channel.json_body["media_info"]["upload_name"], "test.png")
+        self.assertEqual(channel.json_body["media_info"]["media_origin"], "remote.com")
 
 
 class DeleteMediaByIDTestCase(_AdminMediaTests):
@@ -126,6 +286,7 @@ class DeleteMediaByIDTestCase(_AdminMediaTests):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual("Can only delete local media", channel.json_body["error"])
 
+    @override_config({"enable_authenticated_media": False})
     def test_delete_media(self) -> None:
         """
         Tests that delete a media is successfully
@@ -371,6 +532,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
+    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_date(self) -> None:
         """
         Tests that media is not deleted if it is newer than `before_ts`
@@ -408,6 +570,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
+    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_size(self) -> None:
         """
         Tests that media is not deleted if its size is smaller than or equal
@@ -443,6 +606,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
+    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_user_avatar(self) -> None:
         """
         Tests that we do not delete media if is used as a user avatar
@@ -487,6 +651,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
+    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_room_avatar(self) -> None:
         """
         Tests that we do not delete media if it is used as a room avatar
@@ -592,23 +757,27 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
 
 class QuarantineMediaByIDTestCase(_AdminMediaTests):
+    def upload_media_and_return_media_id(self, data: bytes) -> str:
+        # Upload some media into the room
+        response = self.helper.upload_media(
+            data,
+            tok=self.admin_user_tok,
+            expect_code=200,
+        )
+        # Extract media ID from the response
+        server_and_media_id = response["content_uri"][6:]  # Cut off 'mxc://'
+        return server_and_media_id.split("/")[1]
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.server_name = hs.hostname
 
         self.admin_user = self.register_user("admin", "pass", admin=True)
         self.admin_user_tok = self.login("admin", "pass")
-
-        # Upload some media into the room
-        response = self.helper.upload_media(
-            SMALL_PNG,
-            tok=self.admin_user_tok,
-            expect_code=200,
-        )
-        # Extract media ID from the response
-        server_and_media_id = response["content_uri"][6:]  # Cut off 'mxc://'
-        self.media_id = server_and_media_id.split("/")[1]
-
+        self.media_id = self.upload_media_and_return_media_id(SMALL_PNG)
+        self.media_id_2 = self.upload_media_and_return_media_id(SMALL_PNG)
+        self.media_id_3 = self.upload_media_and_return_media_id(SMALL_PNG)
+        self.media_id_other = self.upload_media_and_return_media_id(SMALL_CMYK_JPEG)
         self.url = "/_synapse/admin/v1/media/%s/%s/%s"
 
     @parameterized.expand(["quarantine", "unquarantine"])
@@ -679,6 +848,52 @@ class QuarantineMediaByIDTestCase(_AdminMediaTests):
         media_info = self.get_success(self.store.get_local_media(self.media_id))
         assert media_info is not None
         self.assertFalse(media_info.quarantined_by)
+
+    def test_quarantine_media_match_hash(self) -> None:
+        """
+        Tests that quarantining removes all media with the same hash
+        """
+
+        media_info = self.get_success(self.store.get_local_media(self.media_id))
+        assert media_info is not None
+        self.assertFalse(media_info.quarantined_by)
+
+        # quarantining
+        channel = self.make_request(
+            "POST",
+            self.url % ("quarantine", self.server_name, self.media_id),
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertFalse(channel.json_body)
+
+        # Test that ALL similar media was quarantined.
+        for media_item in [self.media_id, self.media_id_2, self.media_id_3]:
+            media_info = self.get_success(self.store.get_local_media(media_item))
+            assert media_info is not None
+            self.assertTrue(media_info.quarantined_by)
+
+        # Test that other media was not.
+        media_info = self.get_success(self.store.get_local_media(self.media_id_other))
+        assert media_info is not None
+        self.assertFalse(media_info.quarantined_by)
+
+        # remove from quarantine
+        channel = self.make_request(
+            "POST",
+            self.url % ("unquarantine", self.server_name, self.media_id),
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertFalse(channel.json_body)
+
+        # Test that ALL similar media is now reset.
+        for media_item in [self.media_id, self.media_id_2, self.media_id_3]:
+            media_info = self.get_success(self.store.get_local_media(media_item))
+            assert media_info is not None
+            self.assertFalse(media_info.quarantined_by)
 
     def test_quarantine_protected_media(self) -> None:
         """

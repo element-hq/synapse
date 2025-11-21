@@ -18,22 +18,24 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from importlib import metadata
-from typing import Dict, Tuple
-from unittest.mock import patch
+from typing import NoReturn, Protocol
 
-from pkg_resources import parse_version
 from prometheus_client.core import Sample
-from typing_extensions import Protocol
 
-from synapse.app._base import _set_prometheus_client_use_created_metrics
-from synapse.metrics import REGISTRY, InFlightGauge, generate_latest
+from synapse.metrics import (
+    REGISTRY,
+    SERVER_NAME_LABEL,
+    InFlightGauge,
+    LaterGauge,
+    all_later_gauges_to_clean_up_on_shutdown,
+    generate_latest,
+)
 from synapse.util.caches.deferred_cache import DeferredCache
 
 from tests import unittest
 
 
-def get_sample_labels_value(sample: Sample) -> Tuple[Dict[str, str], float]:
+def get_sample_labels_value(sample: Sample) -> tuple[dict[str, str], float]:
     """Extract the labels and values of a sample.
 
     prometheus_client 0.5 changed the sample type to a named tuple with more
@@ -52,7 +54,7 @@ def get_sample_labels_value(sample: Sample) -> Tuple[Dict[str, str], float]:
     # Otherwise fall back to treating it as a plain 3 tuple.
     else:
         # In older versions of prometheus_client Sample was a 3-tuple.
-        labels: Dict[str, str]
+        labels: dict[str, str]
         value: float
         _, labels, value = sample  # type: ignore[misc]
         return labels, value
@@ -64,7 +66,8 @@ class TestMauLimit(unittest.TestCase):
             foo: int
             bar: int
 
-        gauge: InFlightGauge[MetricEntry] = InFlightGauge(
+        # This is a test and does not matter if it uses `SERVER_NAME_LABEL`.
+        gauge: InFlightGauge[MetricEntry] = InFlightGauge(  # type: ignore[missing-server-name-label]
             "test1", "", labels=["test_label"], sub_metrics=["foo", "bar"]
         )
 
@@ -124,7 +127,7 @@ class TestMauLimit(unittest.TestCase):
 
     def get_metrics_from_gauge(
         self, gauge: InFlightGauge
-    ) -> Dict[str, Dict[Tuple[str, ...], float]]:
+    ) -> dict[str, dict[tuple[str, ...], float]]:
         results = {}
 
         for r in gauge.collect():
@@ -160,55 +163,245 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
         Caches produce metrics reflecting their state when scraped.
         """
         CACHE_NAME = "cache_metrics_test_fgjkbdfg"
-        cache: DeferredCache[str, str] = DeferredCache(CACHE_NAME, max_entries=777)
+        cache: DeferredCache[str, str] = DeferredCache(
+            name=CACHE_NAME,
+            clock=self.hs.get_clock(),
+            server_name=self.hs.hostname,
+            max_entries=777,
+        )
 
-        items = {
-            x.split(b"{")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
-            for x in filter(
-                lambda x: b"cache_metrics_test_fgjkbdfg" in x,
-                generate_latest(REGISTRY).split(b"\n"),
-            )
-        }
+        metrics_map = get_latest_metrics()
 
-        self.assertEqual(items["synapse_util_caches_cache_size"], "0.0")
-        self.assertEqual(items["synapse_util_caches_cache_max_size"], "777.0")
+        cache_size_metric = f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="{self.hs.hostname}"}}'
+        cache_max_size_metric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="{self.hs.hostname}"}}'
+
+        cache_size_metric_value = metrics_map.get(cache_size_metric)
+        self.assertIsNotNone(
+            cache_size_metric_value,
+            f"Missing metric {cache_size_metric} in cache metrics {metrics_map}",
+        )
+        cache_max_size_metric_value = metrics_map.get(cache_max_size_metric)
+        self.assertIsNotNone(
+            cache_max_size_metric_value,
+            f"Missing metric {cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+
+        self.assertEqual(cache_size_metric_value, "0.0")
+        self.assertEqual(cache_max_size_metric_value, "777.0")
 
         cache.prefill("1", "hi")
 
-        items = {
-            x.split(b"{")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
-            for x in filter(
-                lambda x: b"cache_metrics_test_fgjkbdfg" in x,
-                generate_latest(REGISTRY).split(b"\n"),
-            )
-        }
+        metrics_map = get_latest_metrics()
 
-        self.assertEqual(items["synapse_util_caches_cache_size"], "1.0")
-        self.assertEqual(items["synapse_util_caches_cache_max_size"], "777.0")
+        cache_size_metric_value = metrics_map.get(cache_size_metric)
+        self.assertIsNotNone(
+            cache_size_metric_value,
+            f"Missing metric {cache_size_metric} in cache metrics {metrics_map}",
+        )
+        cache_max_size_metric_value = metrics_map.get(cache_max_size_metric)
+        self.assertIsNotNone(
+            cache_max_size_metric_value,
+            f"Missing metric {cache_max_size_metric} in cache metrics {metrics_map}",
+        )
 
+        self.assertEqual(cache_size_metric_value, "1.0")
+        self.assertEqual(cache_max_size_metric_value, "777.0")
 
-class PrometheusMetricsHackTestCase(unittest.HomeserverTestCase):
-    if parse_version(metadata.version("prometheus_client")) < parse_version("0.14.0"):
-        skip = "prometheus-client too old"
-
-    def test_created_metrics_disabled(self) -> None:
+    def test_cache_metric_multiple_servers(self) -> None:
         """
-        Tests that a brittle hack, to disable `_created` metrics, works.
-        This involves poking at the internals of prometheus-client.
-        It's not the end of the world if this doesn't work.
-
-        This test gives us a way to notice if prometheus-client changes
-        their internals.
+        Test that cache metrics are reported correctly across multiple servers. We will
+        have an metrics entry for each homeserver that is labeled with the `server_name`
+        label.
         """
-        import prometheus_client.metrics
+        CACHE_NAME = "cache_metric_multiple_servers_test"
+        cache1: DeferredCache[str, str] = DeferredCache(
+            name=CACHE_NAME, clock=self.clock, server_name="hs1", max_entries=777
+        )
+        cache2: DeferredCache[str, str] = DeferredCache(
+            name=CACHE_NAME, clock=self.clock, server_name="hs2", max_entries=777
+        )
 
-        PRIVATE_FLAG_NAME = "_use_created"
+        metrics_map = get_latest_metrics()
 
-        # By default, the pesky `_created` metrics are enabled.
-        # Check this assumption is still valid.
-        self.assertTrue(getattr(prometheus_client.metrics, PRIVATE_FLAG_NAME))
+        hs1_cache_size_metric = (
+            f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="hs1"}}'
+        )
+        hs2_cache_size_metric = (
+            f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="hs2"}}'
+        )
+        hs1_cache_max_size_metric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="hs1"}}'
+        hs2_cache_max_size_metric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="hs2"}}'
 
-        with patch("prometheus_client.metrics") as mock:
-            setattr(mock, PRIVATE_FLAG_NAME, True)
-            _set_prometheus_client_use_created_metrics(False)
-            self.assertFalse(getattr(mock, PRIVATE_FLAG_NAME, False))
+        # Find the metrics for the caches from both homeservers
+        hs1_cache_size_metric_value = metrics_map.get(hs1_cache_size_metric)
+        self.assertIsNotNone(
+            hs1_cache_size_metric_value,
+            f"Missing metric {hs1_cache_size_metric} in cache metrics {metrics_map}",
+        )
+        hs2_cache_size_metric_value = metrics_map.get(hs2_cache_size_metric)
+        self.assertIsNotNone(
+            hs2_cache_size_metric_value,
+            f"Missing metric {hs2_cache_size_metric} in cache metrics {metrics_map}",
+        )
+        hs1_cache_max_size_metric_value = metrics_map.get(hs1_cache_max_size_metric)
+        self.assertIsNotNone(
+            hs1_cache_max_size_metric_value,
+            f"Missing metric {hs1_cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+        hs2_cache_max_size_metric_value = metrics_map.get(hs2_cache_max_size_metric)
+        self.assertIsNotNone(
+            hs2_cache_max_size_metric_value,
+            f"Missing metric {hs2_cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+
+        # Sanity check the metric values
+        self.assertEqual(hs1_cache_size_metric_value, "0.0")
+        self.assertEqual(hs2_cache_size_metric_value, "0.0")
+        self.assertEqual(hs1_cache_max_size_metric_value, "777.0")
+        self.assertEqual(hs2_cache_max_size_metric_value, "777.0")
+
+        # Add something to both caches to change the numbers
+        cache1.prefill("1", "hi")
+        cache2.prefill("2", "ho")
+
+        metrics_map = get_latest_metrics()
+
+        # Find the metrics for the caches from both homeservers
+        hs1_cache_size_metric_value = metrics_map.get(hs1_cache_size_metric)
+        self.assertIsNotNone(
+            hs1_cache_size_metric_value,
+            f"Missing metric {hs1_cache_size_metric} in cache metrics {metrics_map}",
+        )
+        hs2_cache_size_metric_value = metrics_map.get(hs2_cache_size_metric)
+        self.assertIsNotNone(
+            hs2_cache_size_metric_value,
+            f"Missing metric {hs2_cache_size_metric} in cache metrics {metrics_map}",
+        )
+        hs1_cache_max_size_metric_value = metrics_map.get(hs1_cache_max_size_metric)
+        self.assertIsNotNone(
+            hs1_cache_max_size_metric_value,
+            f"Missing metric {hs1_cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+        hs2_cache_max_size_metric_value = metrics_map.get(hs2_cache_max_size_metric)
+        self.assertIsNotNone(
+            hs2_cache_max_size_metric_value,
+            f"Missing metric {hs2_cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+
+        # Sanity check the metric values
+        self.assertEqual(hs1_cache_size_metric_value, "1.0")
+        self.assertEqual(hs2_cache_size_metric_value, "1.0")
+        self.assertEqual(hs1_cache_max_size_metric_value, "777.0")
+        self.assertEqual(hs2_cache_max_size_metric_value, "777.0")
+
+
+class LaterGaugeTests(unittest.HomeserverTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.later_gauge = LaterGauge(
+            name="foo",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+        )
+
+    def tearDown(self) -> None:
+        super().tearDown()
+
+        REGISTRY.unregister(self.later_gauge)
+        all_later_gauges_to_clean_up_on_shutdown.pop(self.later_gauge.name, None)
+
+    def test_later_gauge_multiple_servers(self) -> None:
+        """
+        Test that LaterGauge metrics are reported correctly across multiple servers. We
+        will have an metrics entry for each homeserver that is labeled with the
+        `server_name` label.
+        """
+        self.later_gauge.register_hook(
+            homeserver_instance_id="123", hook=lambda: {("hs1",): 1}
+        )
+        self.later_gauge.register_hook(
+            homeserver_instance_id="456", hook=lambda: {("hs2",): 2}
+        )
+
+        metrics_map = get_latest_metrics()
+
+        # Find the metrics from both homeservers
+        hs1_metric = 'foo{server_name="hs1"}'
+        hs1_metric_value = metrics_map.get(hs1_metric)
+        self.assertIsNotNone(
+            hs1_metric_value,
+            f"Missing metric {hs1_metric} in metrics {metrics_map}",
+        )
+        self.assertEqual(hs1_metric_value, "1.0")
+
+        hs2_metric = 'foo{server_name="hs2"}'
+        hs2_metric_value = metrics_map.get(hs2_metric)
+        self.assertIsNotNone(
+            hs2_metric_value,
+            f"Missing metric {hs2_metric} in metrics {metrics_map}",
+        )
+        self.assertEqual(hs2_metric_value, "2.0")
+
+    def test_later_gauge_hook_exception(self) -> None:
+        """
+        Test that LaterGauge metrics are collected across multiple servers even if one
+        hooks is throwing an exception.
+        """
+
+        def raise_exception() -> NoReturn:
+            raise Exception("fake error generating data")
+
+        # Make the hook for hs1 throw an exception
+        self.later_gauge.register_hook(
+            homeserver_instance_id="123", hook=raise_exception
+        )
+        # Metrics from hs2 still work fine
+        self.later_gauge.register_hook(
+            homeserver_instance_id="456", hook=lambda: {("hs2",): 2}
+        )
+
+        metrics_map = get_latest_metrics()
+
+        # Since we encountered an exception while trying to collect metrics from hs1, we
+        # don't expect to see it here.
+        hs1_metric = 'foo{server_name="hs1"}'
+        hs1_metric_value = metrics_map.get(hs1_metric)
+        self.assertIsNone(
+            hs1_metric_value,
+            (
+                "Since we encountered an exception while trying to collect metrics from hs1"
+                f"we don't expect to see it the metrics_map {metrics_map}"
+            ),
+        )
+
+        # We should still see metrics from hs2 though
+        hs2_metric = 'foo{server_name="hs2"}'
+        hs2_metric_value = metrics_map.get(hs2_metric)
+        self.assertIsNotNone(
+            hs2_metric_value,
+            f"Missing metric {hs2_metric} in cache metrics {metrics_map}",
+        )
+        self.assertEqual(hs2_metric_value, "2.0")
+
+
+def get_latest_metrics() -> dict[str, str]:
+    """
+    Collect the latest metrics from the registry and parse them into an easy to use map.
+    The key includes the metric name and labels.
+
+    Example output:
+    {
+        "synapse_util_caches_cache_size": "0.0",
+        "synapse_util_caches_cache_max_size{name="some_cache",server_name="hs1"}": "777.0",
+        ...
+    }
+    """
+    metric_map = {
+        x.split(b" ")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
+        for x in filter(
+            lambda x: len(x) > 0 and not x.startswith(b"#"),
+            generate_latest(REGISTRY).split(b"\n"),
+        )
+    }
+
+    return metric_map

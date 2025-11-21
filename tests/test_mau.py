@@ -20,17 +20,15 @@
 
 """Tests REST events for /rooms paths."""
 
-from typing import List, Optional
-
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import APP_SERVICE_REGISTRATION_TYPE, LoginType
 from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.appservice import ApplicationService
 from synapse.rest.client import register, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.types import JsonDict, UserID
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -118,7 +116,7 @@ class TestMauLimit(unittest.HomeserverTestCase):
             ApplicationService(
                 token=as_token,
                 id="SomeASID",
-                sender="@as_sender:test",
+                sender=UserID.from_string("@as_sender:test"),
                 namespaces={"users": [{"regex": "@as_*", "exclusive": True}]},
             )
         )
@@ -249,7 +247,7 @@ class TestMauLimit(unittest.HomeserverTestCase):
         }
     )
     def test_as_trial_days(self) -> None:
-        user_tokens: List[str] = []
+        user_tokens: list[str] = []
 
         def advance_time_and_sync() -> None:
             self.reactor.advance(24 * 60 * 61)
@@ -263,7 +261,7 @@ class TestMauLimit(unittest.HomeserverTestCase):
             ApplicationService(
                 token=as_token_1,
                 id="SomeASID",
-                sender="@as_sender_1:test",
+                sender=UserID.from_string("@as_sender_1:test"),
                 namespaces={"users": [{"regex": "@as_1.*", "exclusive": True}]},
             )
         )
@@ -273,7 +271,7 @@ class TestMauLimit(unittest.HomeserverTestCase):
             ApplicationService(
                 token=as_token_2,
                 id="AnotherASID",
-                sender="@as_sender_2:test",
+                sender=UserID.from_string("@as_sender_2:test"),
                 namespaces={"users": [{"regex": "@as_2.*", "exclusive": True}]},
             )
         )
@@ -313,7 +311,7 @@ class TestMauLimit(unittest.HomeserverTestCase):
         )
 
     def create_user(
-        self, localpart: str, token: Optional[str] = None, appservice: bool = False
+        self, localpart: str, token: str | None = None, appservice: bool = False
     ) -> str:
         request_data = {
             "username": localpart,

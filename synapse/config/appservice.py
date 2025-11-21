@@ -21,7 +21,7 @@
 #
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 from urllib import parse as urlparse
 
 import yaml
@@ -61,13 +61,13 @@ class AppServiceConfig(Config):
 
 
 def load_appservices(
-    hostname: str, config_files: List[str]
-) -> List[ApplicationService]:
+    hostname: str, config_files: list[str]
+) -> list[ApplicationService]:
     """Returns a list of Application Services from the config files."""
 
     # Dicts of value -> filename
-    seen_as_tokens: Dict[str, str] = {}
-    seen_ids: Dict[str, str] = {}
+    seen_as_tokens: dict[str, str] = {}
+    seen_ids: dict[str, str] = {}
 
     appservices = []
 
@@ -122,8 +122,7 @@ def _load_appservice(
     localpart = as_info["sender_localpart"]
     if urlparse.quote(localpart) != localpart:
         raise ValueError("sender_localpart needs characters which are not URL encoded.")
-    user = UserID(localpart, hostname)
-    user_id = user.to_string()
+    user_id = UserID(localpart, hostname)
 
     # Rate limiting for users of this AS is on by default (excludes sender)
     rate_limited = as_info.get("rate_limited")
@@ -183,6 +182,18 @@ def _load_appservice(
             "The `org.matrix.msc3202` option should be true or false if specified."
         )
 
+    # Opt-in flag for the MSC4190 behaviours.
+    # When enabled, the following C-S API endpoints change for appservices:
+    # - POST /register does not return an access token
+    # - PUT /devices/{device_id} creates a new device if one does not exist
+    # - DELETE /devices/{device_id} no longer requires UIA
+    # - POST /delete_devices/{device_id} no longer requires UIA
+    msc4190_enabled = as_info.get("io.element.msc4190", False)
+    if not isinstance(msc4190_enabled, bool):
+        raise ValueError(
+            "The `io.element.msc4190` option should be true or false if specified."
+        )
+
     return ApplicationService(
         token=as_info["as_token"],
         url=as_info["url"],
@@ -195,4 +206,5 @@ def _load_appservice(
         ip_range_whitelist=ip_range_whitelist,
         supports_ephemeral=supports_ephemeral,
         msc3202_transaction_extensions=msc3202_transaction_extensions,
+        msc4190_device_management=msc4190_enabled,
     )

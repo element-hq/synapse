@@ -134,8 +134,8 @@ fi
 # Ensure the formatting of Rust code.
 cargo-fmt
 
-# Ensure all Pydantic models use strict types.
-./scripts-dev/check_pydantic_models.py lint
-
 # Ensure type hints are correct.
 mypy
+
+# Generate configuration documentation from the JSON Schema
+./scripts-dev/gen_config_documentation.py schema/synapse-config.schema.yaml > docs/usage/configuration/config_documentation.md

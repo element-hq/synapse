@@ -39,12 +39,54 @@ the use of the
 [List media uploaded by a user](user_admin_api.md#list-media-uploaded-by-a-user)
 Admin API.
 
+## Query a piece of media by ID
+
+This API returns information about a piece of local or cached remote media given the origin server name and media id. If
+information is requested for remote media which is not cached the endpoint will return 404. 
+
+Request:
+```http
+GET /_synapse/admin/v1/media/<origin>/<media_id>
+```
+
+The API returns a JSON body with media info like the following:
+
+Response:
+```json
+{
+  "media_info": {
+    "media_origin": "remote.com",
+    "user_id": null,
+    "media_id": "sdginwegWEG",
+    "media_type": "img/png",
+    "media_length": 67,
+    "upload_name":  "test.png",
+    "created_ts":  300,
+    "filesystem_id":  "wgeweg",
+    "url_cache": null,
+    "last_access_ts": 400,
+    "quarantined_by":  null,
+    "authenticated":  false,
+    "safe_from_quarantine": null,
+    "sha256": "ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a"
+  }
+}
+```
+
 # Quarantine media
 
 Quarantining media means that it is marked as inaccessible by users. It applies
 to any local media, and any locally-cached copies of remote media.
 
 The media file itself (and any thumbnails) is not deleted from the server.
+
+Since Synapse 1.128.0, hashes of uploaded media are tracked. If this media
+is quarantined, Synapse will:
+
+ - Quarantine any media with a matching hash that has already been uploaded.
+ - Quarantine any future media.
+ - Quarantine any existing cached remote media.
+ - Quarantine any future remote media.
 
 ## Quarantining media by ID
 

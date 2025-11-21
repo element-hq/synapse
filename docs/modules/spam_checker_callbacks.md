@@ -76,8 +76,11 @@ _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_a
 async def user_may_invite(inviter: str, invitee: str, room_id: str) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
-Called when processing an invitation. Both inviter and invitee are
-represented by their Matrix user ID (e.g. `@alice:example.com`).
+Called when processing an invitation, both when one is created locally or when
+receiving an invite over federation. Both inviter and invitee are represented by
+their Matrix user ID (e.g. `@alice:example.com`).
+
+Note that federated invites will call `federated_user_may_invite` before this callback.
 
 
 The callback must return one of:
@@ -96,6 +99,34 @@ be used. If this happens, Synapse will not call any of the subsequent implementa
 this callback.
 
 
+### `federated_user_may_invite`
+
+_First introduced in Synapse v1.133.0_
+
+```python
+async def federated_user_may_invite(event: "synapse.events.EventBase") -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
+```
+
+Called when processing an invitation received over federation. Unlike `user_may_invite`,
+this callback receives the entire event, including any stripped state in the `unsigned`
+section, not just the room and user IDs.
+
+The callback must return one of:
+  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
+    decide to reject it.
+  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+If multiple modules implement this callback, they will be considered in order. If a
+callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
+The value of the first callback that does not return `synapse.module_api.NOT_SPAM` will
+be used. If this happens, Synapse will not call any of the subsequent implementations of
+this callback.
+
+If all of the callbacks return `synapse.module_api.NOT_SPAM`, Synapse will also fall
+through to the `user_may_invite` callback before approving the invite.
+
+
 ### `user_may_send_3pid_invite`
 
 _First introduced in Synapse v1.45.0_
@@ -112,7 +143,9 @@ async def user_may_send_3pid_invite(
 ```
 
 Called when processing an invitation using a third-party identifier (also called a 3PID,
-e.g. an email address or a phone number). 
+e.g. an email address or a phone number). It is only called when a 3PID invite is created
+locally - not when one is received in a room over federation. If the 3PID is already associated
+with a Matrix ID, the spam check will go through the `user_may_invite` callback instead.
 
 The inviter is represented by their Matrix user ID (e.g. `@alice:example.com`), and the
 invitee is represented by its medium (e.g. "email") and its address
@@ -156,11 +189,21 @@ _First introduced in Synapse v1.37.0_
 
 _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
 
+_Changed in Synapse v1.132.0: Added the `room_config` argument. Callbacks that only expect a single `user_id` argument are still supported._
+
 ```python
-async def user_may_create_room(user_id: str) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
+async def user_may_create_room(user_id: str, room_config: synapse.module_api.JsonDict) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
-Called when processing a room creation request.
+Called when processing a room creation or room upgrade request.
+
+The arguments passed to this callback are:
+
+* `user_id`: The Matrix user ID of the user (e.g. `@alice:example.com`).
+* `room_config`: The contents of the body of the [`/createRoom` request](https://spec.matrix.org/v1.15/client-server-api/#post_matrixclientv3createroom) as a dictionary.
+  For a [room upgrade request](https://spec.matrix.org/v1.15/client-server-api/#post_matrixclientv3roomsroomidupgrade) it is a synthesised subset of what an equivalent
+  `/createRoom` request would have looked like. Specifically, it contains the `creation_content` (linking to the previous room) and `initial_state` (containing a
+  subset of the state of the previous room).
 
 The callback must return one of:
   - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
@@ -236,13 +279,48 @@ be used. If this happens, Synapse will not call any of the subsequent implementa
 this callback.
 
 
+### `user_may_send_state_event`
+
+_First introduced in Synapse v1.132.0_
+
+```python
+async def user_may_send_state_event(user_id: str, room_id: str, event_type: str, state_key: str, content: JsonDict) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]
+```
+
+**<span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span>**
+
+Called when processing a request to [send state events](https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3roomsroomidstateeventtypestatekey) to a room.
+
+The arguments passed to this callback are:
+
+* `user_id`: The Matrix user ID of the user (e.g. `@alice:example.com`) sending the state event.
+* `room_id`: The ID of the room that the requested state event is being sent to.
+* `event_type`: The requested type of event.
+* `state_key`: The requested state key.
+* `content`: The requested event contents.
+
+The callback must return one of:
+  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
+    decide to reject it.
+  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+If multiple modules implement this callback, they will be considered in order. If a
+callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
+The value of the first callback that does not return `synapse.module_api.NOT_SPAM` will
+be used. If this happens, Synapse will not call any of the subsequent implementations of
+this callback.
+
 
 ### `check_username_for_spam`
 
 _First introduced in Synapse v1.37.0_
 
 ```python
-async def check_username_for_spam(user_profile: synapse.module_api.UserProfile) -> bool
+async def check_username_for_spam(user_profile: synapse.module_api.UserProfile, requester_id: str) -> bool
 ```
 
 Called when computing search results in the user directory. The module must return a
@@ -253,13 +331,15 @@ search results; otherwise return `False`.
 The profile is represented as a dictionary with the following keys:
 
 * `user_id: str`. The Matrix ID for this user.
-* `display_name: Optional[str]`. The user's display name, or `None` if this user
+* `display_name: str | None`. The user's display name, or `None` if this user
   has not set a display name.
-* `avatar_url: Optional[str]`. The `mxc://` URL to the user's avatar, or `None`
+* `avatar_url: str | None`. The `mxc://` URL to the user's avatar, or `None`
   if this user has not set an avatar.
 
 The module is given a copy of the original dictionary, so modifying it from within the
 module cannot modify a user's profile when included in user directory search results.
+
+The requester_id parameter is the ID of the user that called the user directory API.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `False`, Synapse falls through to the next one. The value of the first
@@ -272,10 +352,10 @@ _First introduced in Synapse v1.37.0_
 
 ```python
 async def check_registration_for_spam(
-    email_threepid: Optional[dict],
-    username: Optional[str],
+    email_threepid: dict | None,
+    username: str | None,
     request_info: Collection[Tuple[str, str]],
-    auth_provider_id: Optional[str] = None,
+    auth_provider_id: str | None = None,
 ) -> "synapse.spam_checker_api.RegistrationBehaviour"
 ```
 
@@ -348,6 +428,8 @@ callback returns `False`, Synapse falls through to the next one. The value of th
 callback that does not return `False` will be used. If this happens, Synapse will not call
 any of the subsequent implementations of this callback.
 
+Note that this check is applied to federation invites as of Synapse v1.130.0.
+
 
 ### `check_login_for_spam`
 
@@ -356,10 +438,10 @@ _First introduced in Synapse v1.87.0_
 ```python
 async def check_login_for_spam(
     user_id: str,
-    device_id: Optional[str],
-    initial_display_name: Optional[str],
-    request_info: Collection[Tuple[Optional[str], str]],
-    auth_provider_id: Optional[str] = None,
+    device_id: str | None,
+    initial_display_name: str | None,
+    request_info: Collection[tuple[str | None, str]],
+    auth_provider_id: str | None = None,
 ) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]
 ```
 
@@ -427,7 +509,7 @@ class ListSpamChecker:
             resource=IsUserEvilResource(config),
         )
 
-    async def check_event_for_spam(self, event: "synapse.events.EventBase") -> Union[Literal["NOT_SPAM"], Codes]:
+    async def check_event_for_spam(self, event: "synapse.events.EventBase") -> Literal["NOT_SPAM"] | Codes:
         if event.sender in self.evil_users:
           return Codes.FORBIDDEN
         else:

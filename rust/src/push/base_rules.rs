@@ -81,7 +81,7 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
         ))]),
         actions: Cow::Borrowed(&[Action::Notify]),
         default: true,
-        default_enabled: false,
+        default_enabled: true,
     },
     PushRule {
         rule_id: Cow::Borrowed("global/override/.m.rule.suppress_notices"),
@@ -288,6 +288,29 @@ pub const BASE_APPEND_CONTENT_RULES: &[PushRule] = &[PushRule {
     default: true,
     default_enabled: true,
 }];
+
+pub const BASE_APPEND_POSTCONTENT_RULES: &[PushRule] = &[
+    PushRule {
+        rule_id: Cow::Borrowed("global/postcontent/.io.element.msc4306.rule.unsubscribed_thread"),
+        priority_class: 6,
+        conditions: Cow::Borrowed(&[Condition::Known(
+            KnownCondition::Msc4306ThreadSubscription { subscribed: false },
+        )]),
+        actions: Cow::Borrowed(&[]),
+        default: true,
+        default_enabled: true,
+    },
+    PushRule {
+        rule_id: Cow::Borrowed("global/postcontent/.io.element.msc4306.rule.subscribed_thread"),
+        priority_class: 6,
+        conditions: Cow::Borrowed(&[Condition::Known(
+            KnownCondition::Msc4306ThreadSubscription { subscribed: true },
+        )]),
+        actions: Cow::Borrowed(&[Action::Notify, SOUND_ACTION]),
+        default: true,
+        default_enabled: true,
+    },
+];
 
 pub const BASE_APPEND_UNDERRIDE_RULES: &[PushRule] = &[
     PushRule {
@@ -706,6 +729,7 @@ lazy_static! {
             .iter()
             .chain(BASE_APPEND_OVERRIDE_RULES.iter())
             .chain(BASE_APPEND_CONTENT_RULES.iter())
+            .chain(BASE_APPEND_POSTCONTENT_RULES.iter())
             .chain(BASE_APPEND_UNDERRIDE_RULES.iter())
             .map(|rule| { (&*rule.rule_id, rule) })
             .collect();

@@ -21,14 +21,11 @@
 
 import logging
 from typing import (
+    TYPE_CHECKING,
     Awaitable,
     Callable,
-    Dict,
     Generic,
     Hashable,
-    List,
-    Set,
-    Tuple,
     TypeVar,
 )
 
@@ -37,8 +34,11 @@ from prometheus_client import Gauge
 from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
-from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.util import Clock
+from synapse.metrics import SERVER_NAME_LABEL
+from synapse.util.clock import Clock
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +49,19 @@ R = TypeVar("R")
 number_queued = Gauge(
     "synapse_util_batching_queue_number_queued",
     "The number of items waiting in the queue across all keys",
-    labelnames=("name",),
+    labelnames=("name", SERVER_NAME_LABEL),
 )
 
 number_in_flight = Gauge(
     "synapse_util_batching_queue_number_pending",
     "The number of items across all keys either being processed or waiting in a queue",
-    labelnames=("name",),
+    labelnames=("name", SERVER_NAME_LABEL),
 )
 
 number_of_keys = Gauge(
     "synapse_util_batching_queue_number_of_keys",
     "The number of distinct keys that have items queued",
-    labelnames=("name",),
+    labelnames=("name", SERVER_NAME_LABEL),
 )
 
 
@@ -85,6 +85,8 @@ class BatchingQueue(Generic[V, R]):
     Args:
         name: A name for the queue, used for logging contexts and metrics.
             This must be unique, otherwise the metrics will be wrong.
+        server_name: The homeserver name of the server (used to label metrics)
+            (this should be `hs.hostname`).
         clock: The clock to use to schedule work.
         process_batch_callback: The callback to to be run to process a batch of
             work.
@@ -92,30 +94,46 @@ class BatchingQueue(Generic[V, R]):
 
     def __init__(
         self,
+        *,
         name: str,
+        hs: "HomeServer",
         clock: Clock,
-        process_batch_callback: Callable[[List[V]], Awaitable[R]],
+        process_batch_callback: Callable[[list[V]], Awaitable[R]],
     ):
         self._name = name
+        self.hs = hs
+        self.server_name = hs.hostname
         self._clock = clock
 
         # The set of keys currently being processed.
-        self._processing_keys: Set[Hashable] = set()
+        self._processing_keys: set[Hashable] = set()
 
         # The currently pending batch of values by key, with a Deferred to call
         # with the result of the corresponding `_process_batch_callback` call.
-        self._next_values: Dict[Hashable, List[Tuple[V, defer.Deferred]]] = {}
+        self._next_values: dict[Hashable, list[tuple[V, defer.Deferred]]] = {}
 
         # The function to call with batches of values.
         self._process_batch_callback = process_batch_callback
 
-        number_queued.labels(self._name).set_function(
-            lambda: sum(len(q) for q in self._next_values.values())
+        number_queued.labels(
+            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
+        ).set_function(lambda: sum(len(q) for q in self._next_values.values()))
+
+        number_of_keys.labels(
+            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
+        ).set_function(lambda: len(self._next_values))
+
+        self._number_in_flight_metric: Gauge = number_in_flight.labels(
+            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         )
 
-        number_of_keys.labels(self._name).set_function(lambda: len(self._next_values))
-
-        self._number_in_flight_metric: Gauge = number_in_flight.labels(self._name)
+    def shutdown(self) -> None:
+        """
+        Prepares the object for garbage collection by removing any handed out
+        references.
+        """
+        number_queued.remove(self._name, self.server_name)
+        number_of_keys.remove(self._name, self.server_name)
 
     async def add_to_queue(self, value: V, key: Hashable = ()) -> R:
         """Adds the value to the queue with the given key, returning the result
@@ -135,7 +153,7 @@ class BatchingQueue(Generic[V, R]):
         # If we're not currently processing the key fire off a background
         # process to start processing.
         if key not in self._processing_keys:
-            run_as_background_process(self._name, self._process_queue, key)
+            self.hs.run_as_background_process(self._name, self._process_queue, key)
 
         with self._number_in_flight_metric.track_inprogress():
             return await make_deferred_yieldable(d)

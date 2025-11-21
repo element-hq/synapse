@@ -21,12 +21,11 @@
 
 
 import json
-from typing import Dict, List, Set
 from unittest.mock import ANY, AsyncMock, Mock, call
 
 from netaddr import IPSet
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.api.constants import EduTypes
@@ -36,7 +35,7 @@ from synapse.handlers.typing import FORGET_TIMEOUT, TypingWriterHandler
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
 from synapse.server import HomeServer
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
@@ -79,22 +78,26 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
     ) -> HomeServer:
         # we mock out the keyring so as to skip the authentication check on the
         # federation API call.
-        mock_keyring = Mock(spec=["verify_json_for_server"])
+        mock_keyring = Mock(spec=["verify_json_for_server", "shutdown"])
         mock_keyring.verify_json_for_server = AsyncMock(return_value=True)
+        mock_keyring.shutdown = Mock()
 
         # we mock out the federation client too
         self.mock_federation_client = AsyncMock(spec=["put_json"])
         self.mock_federation_client.put_json.return_value = (200, "OK")
         self.mock_federation_client.agent = MatrixFederationAgent(
-            reactor,
+            server_name="OUR_STUB_HOMESERVER_NAME",
+            reactor=self.reactor,
+            clock=self.clock,
             tls_client_options_factory=None,
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
+            proxy_config=None,
         )
 
         # the tests assume that we are starting at unix time 1000
-        reactor.pump((1000,))
+        self.reactor.pump((1000,))
 
         self.mock_hs_notifier = Mock()
         hs = self.setup_test_homeserver(
@@ -106,7 +109,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
 
         return hs
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         d = super().create_resource_dict()
         d["/_matrix/federation"] = TransportLayerServer(self.hs)
         return d
@@ -139,7 +142,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
             return_value=None
         )
 
-        self.room_members: List[UserID] = []
+        self.room_members: list[UserID] = []
 
         async def check_user_in_room(room_id: str, requester: Requester) -> None:
             if requester.user.to_string() not in [
@@ -159,7 +162,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
             side_effect=check_host_in_room
         )
 
-        async def get_current_hosts_in_room(room_id: str) -> Set[str]:
+        async def get_current_hosts_in_room(room_id: str) -> set[str]:
             return {member.domain for member in self.room_members}
 
         hs.get_storage_controllers().state.get_current_hosts_in_room = Mock(  # type: ignore[method-assign]
@@ -170,7 +173,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
             side_effect=get_current_hosts_in_room
         )
 
-        async def get_users_in_room(room_id: str) -> Set[str]:
+        async def get_users_in_room(room_id: str) -> set[str]:
             return {str(u) for u in self.room_members}
 
         self.datastore.get_users_in_room = Mock(side_effect=get_users_in_room)

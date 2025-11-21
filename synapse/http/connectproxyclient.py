@@ -22,7 +22,7 @@
 import abc
 import base64
 import logging
-from typing import Optional, Union
+from typing import Union
 
 import attr
 from zope.interface import implementer
@@ -33,12 +33,15 @@ from twisted.internet.interfaces import (
     IAddress,
     IConnector,
     IProtocol,
+    IProtocolFactory,
     IReactorCore,
     IStreamClientEndpoint,
 )
-from twisted.internet.protocol import ClientFactory, Protocol, connectionDone
+from twisted.internet.protocol import ClientFactory, connectionDone
 from twisted.python.failure import Failure
 from twisted.web import http
+
+from synapse.logging.context import PreserveLoggingContext
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +108,7 @@ class HTTPConnectProxyEndpoint:
         proxy_endpoint: IStreamClientEndpoint,
         host: bytes,
         port: int,
-        proxy_creds: Optional[ProxyCredentials],
+        proxy_creds: ProxyCredentials | None,
     ):
         self._reactor = reactor
         self._proxy_endpoint = proxy_endpoint
@@ -116,11 +119,7 @@ class HTTPConnectProxyEndpoint:
     def __repr__(self) -> str:
         return "<HTTPConnectProxyEndpoint %s>" % (self._proxy_endpoint,)
 
-    # Mypy encounters a false positive here: it complains that ClientFactory
-    # is incompatible with IProtocolFactory. But ClientFactory inherits from
-    # Factory, which implements IProtocolFactory. So I think this is a bug
-    # in mypy-zope.
-    def connect(self, protocolFactory: ClientFactory) -> "defer.Deferred[IProtocol]":  # type: ignore[override]
+    def connect(self, protocolFactory: IProtocolFactory) -> "defer.Deferred[IProtocol]":
         f = HTTPProxiedClientFactory(
             self._host, self._port, protocolFactory, self._proxy_creds
         )
@@ -148,8 +147,8 @@ class HTTPProxiedClientFactory(protocol.ClientFactory):
         self,
         dst_host: bytes,
         dst_port: int,
-        wrapped_factory: ClientFactory,
-        proxy_creds: Optional[ProxyCredentials],
+        wrapped_factory: IProtocolFactory,
+        proxy_creds: ProxyCredentials | None,
     ):
         self.dst_host = dst_host
         self.dst_port = dst_port
@@ -158,7 +157,10 @@ class HTTPProxiedClientFactory(protocol.ClientFactory):
         self.on_connection: "defer.Deferred[None]" = defer.Deferred()
 
     def startedConnecting(self, connector: IConnector) -> None:
-        return self.wrapped_factory.startedConnecting(connector)
+        # We expect the wrapped factory to be a ClientFactory, but the generic
+        # interfaces only guarantee that it implements IProtocolFactory.
+        if isinstance(self.wrapped_factory, ClientFactory):
+            return self.wrapped_factory.startedConnecting(connector)
 
     def buildProtocol(self, addr: IAddress) -> "HTTPConnectProtocol":
         wrapped_protocol = self.wrapped_factory.buildProtocol(addr)
@@ -176,14 +178,18 @@ class HTTPProxiedClientFactory(protocol.ClientFactory):
     def clientConnectionFailed(self, connector: IConnector, reason: Failure) -> None:
         logger.debug("Connection to proxy failed: %s", reason)
         if not self.on_connection.called:
-            self.on_connection.errback(reason)
-        return self.wrapped_factory.clientConnectionFailed(connector, reason)
+            with PreserveLoggingContext():
+                self.on_connection.errback(reason)
+        if isinstance(self.wrapped_factory, ClientFactory):
+            return self.wrapped_factory.clientConnectionFailed(connector, reason)
 
     def clientConnectionLost(self, connector: IConnector, reason: Failure) -> None:
         logger.debug("Connection to proxy lost: %s", reason)
         if not self.on_connection.called:
-            self.on_connection.errback(reason)
-        return self.wrapped_factory.clientConnectionLost(connector, reason)
+            with PreserveLoggingContext():
+                self.on_connection.errback(reason)
+        if isinstance(self.wrapped_factory, ClientFactory):
+            return self.wrapped_factory.clientConnectionLost(connector, reason)
 
 
 class HTTPConnectProtocol(protocol.Protocol):
@@ -208,9 +214,9 @@ class HTTPConnectProtocol(protocol.Protocol):
         self,
         host: bytes,
         port: int,
-        wrapped_protocol: Protocol,
+        wrapped_protocol: IProtocol,
         connected_deferred: defer.Deferred,
-        proxy_creds: Optional[ProxyCredentials],
+        proxy_creds: ProxyCredentials | None,
     ):
         self.host = host
         self.port = port
@@ -223,22 +229,29 @@ class HTTPConnectProtocol(protocol.Protocol):
         )
         self.http_setup_client.on_connected.addCallback(self.proxyConnected)
 
+        # Set once we start connecting to the wrapped protocol
+        self.wrapped_connection_started = False
+
     def connectionMade(self) -> None:
         self.http_setup_client.makeConnection(self.transport)
 
     def connectionLost(self, reason: Failure = connectionDone) -> None:
-        if self.wrapped_protocol.connected:
+        if self.wrapped_connection_started:
             self.wrapped_protocol.connectionLost(reason)
 
         self.http_setup_client.connectionLost(reason)
 
         if not self.connected_deferred.called:
-            self.connected_deferred.errback(reason)
+            with PreserveLoggingContext():
+                self.connected_deferred.errback(reason)
 
     def proxyConnected(self, _: Union[None, "defer.Deferred[None]"]) -> None:
+        self.wrapped_connection_started = True
+        assert self.transport is not None
         self.wrapped_protocol.makeConnection(self.transport)
 
-        self.connected_deferred.callback(self.wrapped_protocol)
+        with PreserveLoggingContext():
+            self.connected_deferred.callback(self.wrapped_protocol)
 
         # Get any pending data from the http buf and forward it to the original protocol
         buf = self.http_setup_client.clearLineBuffer()
@@ -247,7 +260,7 @@ class HTTPConnectProtocol(protocol.Protocol):
 
     def dataReceived(self, data: bytes) -> None:
         # if we've set up the HTTP protocol, we can send the data there
-        if self.wrapped_protocol.connected:
+        if self.wrapped_connection_started:
             return self.wrapped_protocol.dataReceived(data)
 
         # otherwise, we must still be setting up the connection: send the data to the
@@ -268,7 +281,7 @@ class HTTPConnectSetupClient(http.HTTPClient):
         self,
         host: bytes,
         port: int,
-        proxy_creds: Optional[ProxyCredentials],
+        proxy_creds: ProxyCredentials | None,
     ):
         self.host = host
         self.port = port
@@ -296,7 +309,8 @@ class HTTPConnectSetupClient(http.HTTPClient):
 
     def handleEndHeaders(self) -> None:
         logger.debug("End Headers")
-        self.on_connected.callback(None)
+        with PreserveLoggingContext():
+            self.on_connected.callback(None)
 
     def handleResponse(self, body: bytes) -> None:
         pass

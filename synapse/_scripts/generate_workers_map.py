@@ -25,7 +25,7 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Pattern, Set, Tuple
+from typing import Iterable, Pattern
 
 import yaml
 
@@ -46,7 +46,7 @@ logger = logging.getLogger("generate_workers_map")
 class MockHomeserver(HomeServer):
     DATASTORE_CLASS = DataStore
 
-    def __init__(self, config: HomeServerConfig, worker_app: Optional[str]) -> None:
+    def __init__(self, config: HomeServerConfig, worker_app: str | None) -> None:
         super().__init__(config.server.server_name, config=config)
         self.config.worker.worker_app = worker_app
 
@@ -65,7 +65,7 @@ class EndpointDescription:
 
     # The category of this endpoint. Is read from the `CATEGORY` constant in the servlet
     # class.
-    category: Optional[str]
+    category: str | None
 
     # TODO:
     #  - does it need to be routed based on a stream writer config?
@@ -81,7 +81,7 @@ class EnumerationResource(HttpServer):
     """
 
     def __init__(self, is_worker: bool) -> None:
-        self.registrations: Dict[Tuple[str, str], EndpointDescription] = {}
+        self.registrations: dict[tuple[str, str], EndpointDescription] = {}
         self._is_worker = is_worker
 
     def register_paths(
@@ -115,7 +115,7 @@ class EnumerationResource(HttpServer):
 
 def get_registered_paths_for_hs(
     hs: HomeServer,
-) -> Dict[Tuple[str, str], EndpointDescription]:
+) -> dict[tuple[str, str], EndpointDescription]:
     """
     Given a homeserver, get all registered endpoints and their descriptions.
     """
@@ -141,8 +141,8 @@ def get_registered_paths_for_hs(
 
 
 def get_registered_paths_for_default(
-    worker_app: Optional[str], base_config: HomeServerConfig
-) -> Dict[Tuple[str, str], EndpointDescription]:
+    worker_app: str | None, base_config: HomeServerConfig
+) -> dict[tuple[str, str], EndpointDescription]:
     """
     Given the name of a worker application and a base homeserver configuration,
     returns:
@@ -153,15 +153,24 @@ def get_registered_paths_for_default(
     """
 
     hs = MockHomeserver(base_config, worker_app)
+
     # TODO We only do this to avoid an error, but don't need the database etc
     hs.setup()
-    return get_registered_paths_for_hs(hs)
+    registered_paths = get_registered_paths_for_hs(hs)
+    # NOTE: a more robust implementation would properly shutdown/cleanup each server
+    # to avoid resource buildup.
+    # However, the call to `shutdown` is `async` so it would require additional complexity here.
+    # We are intentionally skipping this cleanup because this is a short-lived, one-off
+    # utility script where the simpler approach is sufficient and we shouldn't run into
+    # any resource buildup issues.
+
+    return registered_paths
 
 
 def elide_http_methods_if_unconflicting(
-    registrations: Dict[Tuple[str, str], EndpointDescription],
-    all_possible_registrations: Dict[Tuple[str, str], EndpointDescription],
-) -> Dict[Tuple[str, str], EndpointDescription]:
+    registrations: dict[tuple[str, str], EndpointDescription],
+    all_possible_registrations: dict[tuple[str, str], EndpointDescription],
+) -> dict[tuple[str, str], EndpointDescription]:
     """
     Elides HTTP methods (by replacing them with `*`) if all possible registered methods
     can be handled by the worker whose registration map is `registrations`.
@@ -171,13 +180,13 @@ def elide_http_methods_if_unconflicting(
     """
 
     def paths_to_methods_dict(
-        methods_and_paths: Iterable[Tuple[str, str]],
-    ) -> Dict[str, Set[str]]:
+        methods_and_paths: Iterable[tuple[str, str]],
+    ) -> dict[str, set[str]]:
         """
         Given (method, path) pairs, produces a dict from path to set of methods
         available at that path.
         """
-        result: Dict[str, Set[str]] = {}
+        result: dict[str, set[str]] = {}
         for method, path in methods_and_paths:
             result.setdefault(path, set()).add(method)
         return result
@@ -201,8 +210,8 @@ def elide_http_methods_if_unconflicting(
 
 
 def simplify_path_regexes(
-    registrations: Dict[Tuple[str, str], EndpointDescription],
-) -> Dict[Tuple[str, str], EndpointDescription]:
+    registrations: dict[tuple[str, str], EndpointDescription],
+) -> dict[tuple[str, str], EndpointDescription]:
     """
     Simplify all the path regexes for the dict of endpoint descriptions,
     so that we don't use the Python-specific regex extensions
@@ -261,8 +270,8 @@ def main() -> None:
 
     # TODO SSO endpoints (pick_idp etc) NOT REGISTERED BY THIS SCRIPT
 
-    categories_to_methods_and_paths: Dict[
-        Optional[str], Dict[Tuple[str, str], EndpointDescription]
+    categories_to_methods_and_paths: dict[
+        str | None, dict[tuple[str, str], EndpointDescription]
     ] = defaultdict(dict)
 
     for (method, path), desc in elided_worker_paths.items():
@@ -273,8 +282,8 @@ def main() -> None:
 
 
 def print_category(
-    category_name: Optional[str],
-    elided_worker_paths: Dict[Tuple[str, str], EndpointDescription],
+    category_name: str | None,
+    elided_worker_paths: dict[tuple[str, str], EndpointDescription],
 ) -> None:
     """
     Prints out a category, in documentation page style.

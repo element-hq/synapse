@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.http.server import DirectServeJsonResource
 from synapse.http.site import SynapseRequest
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 class JwksResource(DirectServeJsonResource):
     def __init__(self, hs: "HomeServer"):
-        super().__init__(extract_context=True)
+        super().__init__(clock=hs.get_clock(), extract_context=True)
 
         # Parameters that are allowed to be exposed in the public key.
         # This is done manually, because authlib's private to public key conversion
@@ -73,5 +73,5 @@ class JwksResource(DirectServeJsonResource):
             "keys": keys,
         }
 
-    async def _async_render_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         return 200, self.res

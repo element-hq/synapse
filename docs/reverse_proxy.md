@@ -5,10 +5,10 @@ It is recommended to put a reverse proxy such as
 [Apache](https://httpd.apache.org/docs/current/mod/mod_proxy_http.html),
 [Caddy](https://caddyserver.com/docs/quick-starts/reverse-proxy),
 [HAProxy](https://www.haproxy.org/) or
-[relayd](https://man.openbsd.org/relayd.8) in front of Synapse. One advantage
-of doing so is that it means that you can expose the default https port
-(443) to Matrix clients without needing to run Synapse with root
-privileges.
+[relayd](https://man.openbsd.org/relayd.8) in front of Synapse.
+This has the advantage of being able to expose the default HTTPS port (443) to Matrix
+clients without requiring Synapse to bind to a privileged port (port numbers less than
+1024), avoiding the need for `CAP_NET_BIND_SERVICE` or running as root.
 
 You should configure your reverse proxy to forward requests to `/_matrix` or
 `/_synapse/client` to Synapse, and have it set the `X-Forwarded-For` and
@@ -74,7 +74,7 @@ server {
         proxy_pass http://localhost:8008;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Host $host;
+        proxy_set_header Host $host:$server_port;
 
         # Nginx by default only allows file uploads up to 1M in size
         # Increase client_max_body_size to match max_upload_size defined in homeserver.yaml
@@ -84,6 +84,45 @@ server {
 	proxy_http_version 1.1;
     }
 }
+```
+
+### Nginx Proxy Manager or NPMPlus
+
+```nginx
+Add New Proxy-Host
+	- Tab Details
+		- Domain Names: matrix.example.com
+		- Scheme: http
+		- Forward Hostname / IP: localhost # IP address or hostname where Synapse is hosted. Bare-metal or Container.
+		- Forward Port: 8008
+
+	- Tab Custom locations
+		- Add Location
+		- Define Location: /_matrix
+		- Scheme: http
+		- Forward Hostname / IP: localhost # IP address or hostname where Synapse is hosted. Bare-metal or Container.
+		- Forward Port: 8008
+		- Click on the gear icon to display a custom configuration field. Increase client_max_body_size to match max_upload_size defined in homeserver.yaml
+			- Enter this in the Custom Field: client_max_body_size 50M;
+
+	- Tab SSL/TLS
+		- Choose your SSL/TLS certificate and preferred settings.
+
+	- Tab Advanced
+		- Enter this in the Custom Field. This means that port 8448 no longer needs to be opened in your Firewall.
+		  The Federation communication use now Port 443.
+
+			location /.well-known/matrix/server {
+			  return 200 '{"m.server": "matrix.example.com:443"}';
+      		  add_header Content-Type application/json;
+			}
+
+ 			location /.well-known/matrix/client {
+      		  return 200 '{"m.homeserver": {"base_url": "https://matrix.example.com"}}';
+      		  add_header Content-Type application/json;
+      		  add_header "Access-Control-Allow-Origin" *;
+			}
+
 ```
 
 ### Caddy v2

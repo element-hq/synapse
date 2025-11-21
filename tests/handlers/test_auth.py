@@ -18,18 +18,17 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 from unittest.mock import AsyncMock
 
 import pymacaroons
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import AuthError, ResourceLimitError
 from synapse.rest import admin
 from synapse.rest.client import login
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -55,7 +54,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
 
         self.user1 = self.register_user("a_user", "pass")
 
-    def token_login(self, token: str) -> Optional[str]:
+    def token_login(self, token: str) -> str | None:
         body = {
             "type": "m.login.token",
             "token": token,

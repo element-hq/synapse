@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any, Set
+from typing import TYPE_CHECKING, Any
 
 from synapse.api.errors import SynapseError
 from synapse.api.urls import ConsentURIBuilder
@@ -40,7 +40,7 @@ class ConsentServerNotices:
         self._server_notices_manager = hs.get_server_notices_manager()
         self._store = hs.get_datastores().main
 
-        self._users_in_progress: Set[str] = set()
+        self._users_in_progress: set[str] = set()
 
         self._current_consent_version = hs.config.consent.user_consent_version
         self._server_notice_content = (

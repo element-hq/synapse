@@ -1,7 +1,7 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023, 2025 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -14,14 +14,18 @@
 
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Set, cast
+from typing import TYPE_CHECKING, Mapping, cast
 
 import attr
 
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.logging.opentracing import log_kv
 from synapse.storage._base import SQLBaseStore, db_to_json
-from synapse.storage.database import LoggingTransaction
+from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
+    LoggingTransaction,
+)
 from synapse.types import MultiWriterStreamToken, RoomStreamToken
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoom,
@@ -31,20 +35,51 @@ from synapse.types.handlers.sliding_sync import (
     RoomStatusMap,
     RoomSyncConfig,
 )
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
+    from synapse.server import HomeServer
     from synapse.storage.databases.main import DataStore
 
 logger = logging.getLogger(__name__)
 
 
 class SlidingSyncStore(SQLBaseStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_connection_room_configs_required_state_id_idx",
+            index_name="sliding_sync_connection_room_configs_required_state_id_idx",
+            table="sliding_sync_connection_room_configs",
+            columns=("required_state_id",),
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_membership_snapshots_membership_event_id_idx",
+            index_name="sliding_sync_membership_snapshots_membership_event_id_idx",
+            table="sliding_sync_membership_snapshots",
+            columns=("membership_event_id",),
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
+            index_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
+            table="sliding_sync_membership_snapshots",
+            columns=("user_id", "event_stream_ordering"),
+            replaces_index="sliding_sync_membership_snapshots_user_id",
+        )
+
     async def get_latest_bump_stamp_for_room(
         self,
         room_id: str,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Get the `bump_stamp` for the room.
 
@@ -64,7 +99,7 @@ class SlidingSyncStore(SQLBaseStore):
         """
 
         return cast(
-            Optional[int],
+            int | None,
             await self.db_pool.simple_select_one_onecol(
                 table="sliding_sync_joined_rooms",
                 keyvalues={"room_id": room_id},
@@ -86,7 +121,7 @@ class SlidingSyncStore(SQLBaseStore):
         user_id: str,
         device_id: str,
         conn_id: str,
-        previous_connection_position: Optional[int],
+        previous_connection_position: int | None,
         per_connection_state: "MutablePerConnectionState",
     ) -> int:
         """Persist updates to the per-connection state for a sliding sync
@@ -119,7 +154,7 @@ class SlidingSyncStore(SQLBaseStore):
         user_id: str,
         device_id: str,
         conn_id: str,
-        previous_connection_position: Optional[int],
+        previous_connection_position: int | None,
         per_connection_state: "PerConnectionStateDB",
     ) -> int:
         # First we fetch (or create) the connection key associated with the
@@ -166,7 +201,7 @@ class SlidingSyncStore(SQLBaseStore):
                     "user_id": user_id,
                     "effective_device_id": device_id,
                     "conn_id": conn_id,
-                    "created_ts": self._clock.time_msec(),
+                    "created_ts": self.clock.time_msec(),
                 },
                 returning=("connection_key",),
             )
@@ -177,7 +212,7 @@ class SlidingSyncStore(SQLBaseStore):
             table="sliding_sync_connection_positions",
             values={
                 "connection_key": connection_key,
-                "created_ts": self._clock.time_msec(),
+                "created_ts": self.clock.time_msec(),
             },
             returning=("connection_position",),
         )
@@ -187,7 +222,7 @@ class SlidingSyncStore(SQLBaseStore):
         # with the updates to `required_state`
 
         # Dict from required state json -> required state ID
-        required_state_to_id: Dict[str, int] = {}
+        required_state_to_id: dict[str, int] = {}
         if previous_connection_position is not None:
             rows = self.db_pool.simple_select_list_txn(
                 txn,
@@ -198,8 +233,8 @@ class SlidingSyncStore(SQLBaseStore):
             for required_state_id, required_state in rows:
                 required_state_to_id[required_state] = required_state_id
 
-        room_to_state_ids: Dict[str, int] = {}
-        unique_required_state: Dict[str, List[str]] = {}
+        room_to_state_ids: dict[str, int] = {}
+        unique_required_state: dict[str, list[str]] = {}
         for room_id, room_state in per_connection_state.room_configs.items():
             serialized_state = json_encoder.encode(
                 # We store the required state as a sorted list of event type /
@@ -383,11 +418,11 @@ class SlidingSyncStore(SQLBaseStore):
             ),
         )
 
-        required_state_map: Dict[int, Dict[str, Set[str]]] = {}
+        required_state_map: dict[int, dict[str, set[str]]] = {}
         for row in rows:
             state = required_state_map[row[0]] = {}
-            for event_type, state_keys in db_to_json(row[1]):
-                state[event_type] = set(state_keys)
+            for event_type, state_key in db_to_json(row[1]):
+                state.setdefault(event_type, set()).add(state_key)
 
         # Get all the room configs, looking up the required state from the map
         # above.
@@ -402,7 +437,7 @@ class SlidingSyncStore(SQLBaseStore):
             ),
         )
 
-        room_configs: Dict[str, RoomSyncConfig] = {}
+        room_configs: dict[str, RoomSyncConfig] = {}
         for (
             room_id,
             timeline_limit,
@@ -414,9 +449,9 @@ class SlidingSyncStore(SQLBaseStore):
             )
 
         # Now look up the per-room stream data.
-        rooms: Dict[str, HaveSentRoom[str]] = {}
-        receipts: Dict[str, HaveSentRoom[str]] = {}
-        account_data: Dict[str, HaveSentRoom[str]] = {}
+        rooms: dict[str, HaveSentRoom[str]] = {}
+        receipts: dict[str, HaveSentRoom[str]] = {}
+        account_data: dict[str, HaveSentRoom[str]] = {}
 
         receipt_rows = self.db_pool.simple_select_list_txn(
             txn,
@@ -457,7 +492,7 @@ class PerConnectionStateDB:
     """An equivalent to `PerConnectionState` that holds data in a format stored
     in the DB.
 
-    The principle difference is that the tokens for the different streams are
+    The principal difference is that the tokens for the different streams are
     serialized to strings.
 
     When persisting this *only* contains updates to the state.

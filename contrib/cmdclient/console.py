@@ -33,7 +33,6 @@ import sys
 import time
 import urllib
 from http import TwistedHttpClient
-from typing import Optional
 
 import urlparse
 from signedjson.key import NACL_ED25519, decode_verify_key_bytes
@@ -245,7 +244,7 @@ class SynapseCmd(cmd.Cmd):
 
         if "flows" not in json_res:
             print("Failed to find any login flows.")
-            defer.returnValue(False)
+            return False
 
         flow = json_res["flows"][0]  # assume first is the one we want.
         if "type" not in flow or "m.login.password" != flow["type"] or "stages" in flow:
@@ -254,8 +253,8 @@ class SynapseCmd(cmd.Cmd):
                 "Unable to login via the command line client. Please visit "
                 "%s to login." % fallback_url
             )
-            defer.returnValue(False)
-        defer.returnValue(True)
+            return False
+        return True
 
     def do_emailrequest(self, line):
         """Requests the association of a third party identifier
@@ -726,7 +725,7 @@ class SynapseCmd(cmd.Cmd):
         method,
         path,
         data=None,
-        query_params: Optional[dict] = None,
+        query_params: dict | None = None,
         alt_text=None,
     ):
         """Runs an HTTP request and pretty prints the output.

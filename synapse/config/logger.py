@@ -26,7 +26,7 @@ import os
 import sys
 import threading
 from string import Template
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from zope.interface import implementer
@@ -40,7 +40,6 @@ from twisted.logger import (
 )
 
 from synapse.logging.context import LoggingContextFilter
-from synapse.logging.filter import MetadataFilter
 from synapse.synapse_rust import reset_logging_config
 from synapse.types import JsonDict
 
@@ -50,6 +49,8 @@ from ._base import Config, ConfigError
 if TYPE_CHECKING:
     from synapse.config.homeserver import HomeServerConfig
     from synapse.server import HomeServer
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_LOG_CONFIG = Template(
     """\
@@ -185,7 +186,7 @@ class LoggingConfig(Config):
             help=argparse.SUPPRESS,
         )
 
-    def generate_files(self, config: Dict[str, Any], config_dir_path: str) -> None:
+    def generate_files(self, config: dict[str, Any], config_dir_path: str) -> None:
         log_config = config.get("log_config")
         if log_config and not os.path.exists(log_config):
             log_file = self.abspath("homeserver.log")
@@ -197,12 +198,27 @@ class LoggingConfig(Config):
                 log_config_file.write(DEFAULT_LOG_CONFIG.substitute(log_file=log_file))
 
 
-def _setup_stdlib_logging(
-    config: "HomeServerConfig", log_config_path: Optional[str], logBeginner: LogBeginner
-) -> None:
+_already_performed_one_time_logging_setup: bool = False
+"""
+Marks whether we've already successfully ran `one_time_logging_setup()`.
+"""
+
+
+def one_time_logging_setup(*, logBeginner: LogBeginner = globalLogBeginner) -> None:
     """
-    Set up Python standard library logging.
+    Perform one-time logging configuration for the Python process.
+
+    For example, we don't need to have multiple log record factories. Once we've
+    configured it once, we don't need to do it again.
+
+    This matters because multiple Synapse instances can be run in the same Python
+    process (c.f. Synapse Pro for small hosts)
     """
+    global _already_performed_one_time_logging_setup
+
+    # We only need to set things up once.
+    if _already_performed_one_time_logging_setup:
+        return
 
     # We add a log record factory that runs all messages through the
     # LoggingContextFilter so that we get the context *at the time we log*
@@ -211,36 +227,14 @@ def _setup_stdlib_logging(
     # writes.
 
     log_context_filter = LoggingContextFilter()
-    log_metadata_filter = MetadataFilter({"server_name": config.server.server_name})
     old_factory = logging.getLogRecordFactory()
 
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
         record = old_factory(*args, **kwargs)
         log_context_filter.filter(record)
-        log_metadata_filter.filter(record)
         return record
 
     logging.setLogRecordFactory(factory)
-
-    # Configure the logger with the initial configuration.
-    if log_config_path is None:
-        log_format = (
-            "%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(request)s"
-            " - %(message)s"
-        )
-
-        logger = logging.getLogger("")
-        logger.setLevel(logging.INFO)
-        logging.getLogger("synapse.storage.SQL").setLevel(logging.INFO)
-
-        formatter = logging.Formatter(log_format)
-
-        handler = logging.StreamHandler()
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-    else:
-        # Load the logging configuration.
-        _load_logging_config(log_config_path)
 
     # Route Twisted's native logging through to the standard library logging
     # system.
@@ -282,6 +276,36 @@ def _setup_stdlib_logging(
 
     logBeginner.beginLoggingTo([_log], redirectStandardIO=False)
 
+    _already_performed_one_time_logging_setup = True
+
+
+def _setup_stdlib_logging(
+    config: "HomeServerConfig", log_config_path: str | None
+) -> None:
+    """
+    Set up Python standard library logging.
+    """
+
+    # Configure the logger with the initial configuration.
+    if log_config_path is None:
+        log_format = (
+            "%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(request)s"
+            " - %(message)s"
+        )
+
+        logger = logging.getLogger("")
+        logger.setLevel(logging.INFO)
+        logging.getLogger("synapse.storage.SQL").setLevel(logging.INFO)
+
+        formatter = logging.Formatter(log_format)
+
+        handler = logging.StreamHandler()
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    else:
+        # Load the logging configuration.
+        _load_logging_config(log_config_path)
+
 
 def _load_logging_config(log_config_path: str) -> None:
     """
@@ -291,7 +315,7 @@ def _load_logging_config(log_config_path: str) -> None:
         log_config = yaml.safe_load(f.read())
 
     if not log_config:
-        logging.warning("Loaded a blank logging config?")
+        logger.warning("Loaded a blank logging config?")
 
     # If the old structured logging configuration is being used, raise an error.
     if "structured" in log_config and log_config.get("structured"):
@@ -303,7 +327,7 @@ def _load_logging_config(log_config_path: str) -> None:
     reset_logging_config()
 
 
-def _reload_logging_config(log_config_path: Optional[str]) -> None:
+def _reload_logging_config(log_config_path: str | None) -> None:
     """
     Reload the log configuration from the file and apply it.
     """
@@ -312,26 +336,21 @@ def _reload_logging_config(log_config_path: Optional[str]) -> None:
         return
 
     _load_logging_config(log_config_path)
-    logging.info("Reloaded log config from %s due to SIGHUP", log_config_path)
+    logger.info("Reloaded log config from %s due to SIGHUP", log_config_path)
 
 
 def setup_logging(
     hs: "HomeServer",
     config: "HomeServerConfig",
     use_worker_options: bool = False,
-    logBeginner: LogBeginner = globalLogBeginner,
 ) -> None:
     """
     Set up the logging subsystem.
 
     Args:
         config: configuration data
-
         use_worker_options: True to use the 'worker_log_config' option
             instead of 'log_config'.
-
-        logBeginner: The Twisted logBeginner to use.
-
     """
     from twisted.internet import reactor
 
@@ -342,23 +361,30 @@ def setup_logging(
     )
 
     # Perform one-time logging configuration.
-    _setup_stdlib_logging(config, log_config_path, logBeginner=logBeginner)
+    one_time_logging_setup()
+
+    # Configure logging.
+    _setup_stdlib_logging(config, log_config_path)
     # Add a SIGHUP handler to reload the logging configuration, if one is available.
     from synapse.app import _base as appbase
 
-    appbase.register_sighup(_reload_logging_config, log_config_path)
+    # We only need to reload the config if there is a log config file path provided to
+    # reload from.
+    if log_config_path:
+        appbase.register_sighup(hs, _reload_logging_config, log_config_path)
 
     # Log immediately so we can grep backwards.
-    logging.warning("***** STARTING SERVER *****")
-    logging.warning(
+    logger.warning("***** STARTING SERVER *****")
+    logger.warning(
         "Server %s version %s",
         sys.argv[0],
         SYNAPSE_VERSION,
     )
-    logging.warning("Copyright (c) 2023 New Vector, Inc")
-    logging.warning(
+    logger.warning("Copyright (c) 2023 New Vector, Inc")
+    logger.warning(
         "Licensed under the AGPL 3.0 license. Website: https://github.com/element-hq/synapse"
     )
-    logging.info("Server hostname: %s", config.server.server_name)
-    logging.info("Instance name: %s", hs.get_instance_name())
-    logging.info("Twisted reactor: %s", type(reactor).__name__)
+    logger.info("Server hostname: %s", config.server.server_name)
+    logger.info("Public Base URL: %s", config.server.public_baseurl)
+    logger.info("Instance name: %s", hs.get_instance_name())
+    logger.info("Twisted reactor: %s", type(reactor).__name__)

@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import EventTypes, Membership, RoomCreationPreset
 from synapse.events import EventBase
@@ -35,6 +35,8 @@ SERVER_NOTICE_ROOM_TAG = "m.server_notice"
 
 class ServerNoticesManager:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname  # nb must be called this for @cached
+        self.clock = hs.get_clock()  # nb must be called this for @cached
         self._store = hs.get_datastores().main
         self._config = hs.config
         self._account_data_handler = hs.get_account_data_handler()
@@ -44,7 +46,6 @@ class ServerNoticesManager:
         self._message_handler = hs.get_message_handler()
         self._storage_controllers = hs.get_storage_controllers()
         self._is_mine_id = hs.is_mine_id
-        self._server_name = hs.hostname
 
         self._notifier = hs.get_notifier()
         self.server_notices_mxid = self._config.servernotices.server_notices_mxid
@@ -58,8 +59,8 @@ class ServerNoticesManager:
         user_id: str,
         event_content: dict,
         type: str = EventTypes.Message,
-        state_key: Optional[str] = None,
-        txn_id: Optional[str] = None,
+        state_key: str | None = None,
+        txn_id: str | None = None,
     ) -> EventBase:
         """Send a notice to the given user
 
@@ -77,7 +78,7 @@ class ServerNoticesManager:
 
         assert self.server_notices_mxid is not None
         requester = create_requester(
-            self.server_notices_mxid, authenticated_entity=self._server_name
+            self.server_notices_mxid, authenticated_entity=self.server_name
         )
 
         logger.info("Sending server notice to %s", user_id)
@@ -98,7 +99,7 @@ class ServerNoticesManager:
         return event
 
     @cached()
-    async def maybe_get_notice_room_for_user(self, user_id: str) -> Optional[str]:
+    async def maybe_get_notice_room_for_user(self, user_id: str) -> str | None:
         """Try to look up the server notice room for this user if it exists.
 
         Does not create one if none can be found.
@@ -151,7 +152,7 @@ class ServerNoticesManager:
         assert self._is_mine_id(user_id), "Cannot send server notices to remote users"
 
         requester = create_requester(
-            self.server_notices_mxid, authenticated_entity=self._server_name
+            self.server_notices_mxid, authenticated_entity=self.server_name
         )
 
         room_id = await self.maybe_get_notice_room_for_user(user_id)
@@ -256,7 +257,7 @@ class ServerNoticesManager:
         """
         assert self.server_notices_mxid is not None
         requester = create_requester(
-            self.server_notices_mxid, authenticated_entity=self._server_name
+            self.server_notices_mxid, authenticated_entity=self.server_name
         )
 
         # Check whether the user has already joined or been invited to this room. If
@@ -279,7 +280,7 @@ class ServerNoticesManager:
 
         if self._config.servernotices.server_notices_auto_join:
             user_requester = create_requester(
-                user_id, authenticated_entity=self._server_name
+                user_id, authenticated_entity=self.server_name
             )
             await self._room_member_handler.update_membership(
                 requester=user_requester,
@@ -293,8 +294,8 @@ class ServerNoticesManager:
         self,
         requester: Requester,
         room_id: str,
-        display_name: Optional[str],
-        avatar_url: Optional[str],
+        display_name: str | None,
+        avatar_url: str | None,
     ) -> None:
         """
         Updates the notice user's profile if it's different from what is in the room.
@@ -340,7 +341,7 @@ class ServerNoticesManager:
         room_id: str,
         info_event_type: str,
         info_content_key: str,
-        info_value: Optional[str],
+        info_value: str | None,
     ) -> None:
         """
         Updates a specific notice room's info if it's different from what is set.

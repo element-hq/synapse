@@ -20,6 +20,7 @@
 #
 
 import enum
+from functools import cache
 from typing import TYPE_CHECKING, Any, Optional
 
 import attr
@@ -27,8 +28,8 @@ import attr.validators
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
-from synapse.config._base import Config, RootConfig
-from synapse.types import JsonDict
+from synapse.config._base import Config, RootConfig, read_file
+from synapse.types import JsonDict, StrSequence
 
 # Determine whether authlib is installed.
 try:
@@ -43,6 +44,12 @@ if TYPE_CHECKING:
     from authlib.jose.rfc7517 import JsonWebKey
 
 
+@cache
+def read_secret_from_file_once(file_path: Any, config_path: StrSequence) -> str:
+    """Returns the memoized secret read from file."""
+    return read_file(file_path, config_path).strip()
+
+
 class ClientAuthMethod(enum.Enum):
     """List of supported client auth methods."""
 
@@ -52,7 +59,7 @@ class ClientAuthMethod(enum.Enum):
     PRIVATE_KEY_JWT = "private_key_jwt"
 
 
-def _parse_jwks(jwks: Optional[JsonDict]) -> Optional["JsonWebKey"]:
+def _parse_jwks(jwks: JsonDict | None) -> Optional["JsonWebKey"]:
     """A helper function to parse a JWK dict into a JsonWebKey."""
 
     if jwks is None:
@@ -61,6 +68,40 @@ def _parse_jwks(jwks: Optional[JsonDict]) -> Optional["JsonWebKey"]:
     from authlib.jose.rfc7517 import JsonWebKey
 
     return JsonWebKey.import_key(jwks)
+
+
+def _check_client_secret(
+    instance: "MSC3861", _attribute: attr.Attribute, _value: str | None
+) -> None:
+    if instance._client_secret and instance._client_secret_path:
+        raise ConfigError(
+            (
+                "You have configured both "
+                "`experimental_features.msc3861.client_secret` and "
+                "`experimental_features.msc3861.client_secret_path`. "
+                "These are mutually incompatible."
+            ),
+            ("experimental", "msc3861", "client_secret"),
+        )
+    # Check client secret can be retrieved
+    instance.client_secret()
+
+
+def _check_admin_token(
+    instance: "MSC3861", _attribute: attr.Attribute, _value: str | None
+) -> None:
+    if instance._admin_token and instance._admin_token_path:
+        raise ConfigError(
+            (
+                "You have configured both "
+                "`experimental_features.msc3861.admin_token` and "
+                "`experimental_features.msc3861.admin_token_path`. "
+                "These are mutually incompatible."
+            ),
+            ("experimental", "msc3861", "admin_token"),
+        )
+    # Check client secret can be retrieved
+    instance.admin_token()
 
 
 @attr.s(slots=True, frozen=True)
@@ -83,7 +124,7 @@ class MSC3861:
     issuer: str = attr.ib(default="", validator=attr.validators.instance_of(str))
     """The URL of the OIDC Provider."""
 
-    issuer_metadata: Optional[JsonDict] = attr.ib(default=None)
+    issuer_metadata: JsonDict | None = attr.ib(default=None)
     """The issuer metadata to use, otherwise discovered from /.well-known/openid-configuration as per MSC2965."""
 
     client_id: str = attr.ib(
@@ -97,13 +138,28 @@ class MSC3861:
     )
     """The auth method used when calling the introspection endpoint."""
 
-    client_secret: Optional[str] = attr.ib(
+    _client_secret: str | None = attr.ib(
         default=None,
-        validator=attr.validators.optional(attr.validators.instance_of(str)),
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_client_secret,
+        ],
     )
     """
     The client secret to use when calling the introspection endpoint,
     when using any of the client_secret_* client auth methods.
+    """
+
+    _client_secret_path: str | None = attr.ib(
+        default=None,
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_client_secret,
+        ],
+    )
+    """
+    Alternative to `client_secret`: allows the secret to be specified in an
+    external file.
     """
 
     jwk: Optional["JsonWebKey"] = attr.ib(default=None, converter=_parse_jwks)
@@ -133,35 +189,70 @@ class MSC3861:
                 ClientAuthMethod.CLIENT_SECRET_BASIC,
                 ClientAuthMethod.CLIENT_SECRET_JWT,
             )
-            and self.client_secret is None
+            and self.client_secret() is None
         ):
             raise ConfigError(
                 f"A client secret must be provided when using the {value} client auth method",
                 ("experimental", "msc3861", "client_auth_method"),
             )
 
-    introspection_endpoint: Optional[str] = attr.ib(
+    introspection_endpoint: str | None = attr.ib(
         default=None,
         validator=attr.validators.optional(attr.validators.instance_of(str)),
     )
     """The URL of the introspection endpoint used to validate access tokens."""
 
-    account_management_url: Optional[str] = attr.ib(
+    account_management_url: str | None = attr.ib(
         default=None,
         validator=attr.validators.optional(attr.validators.instance_of(str)),
     )
     """The URL of the My Account page on the OIDC Provider as per MSC2965."""
 
-    admin_token: Optional[str] = attr.ib(
+    _admin_token: str | None = attr.ib(
         default=None,
-        validator=attr.validators.optional(attr.validators.instance_of(str)),
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_admin_token,
+        ],
     )
     """
     A token that should be considered as an admin token.
     This is used by the OIDC provider, to make admin calls to Synapse.
     """
 
-    def check_config_conflicts(self, root: RootConfig) -> None:
+    _admin_token_path: str | None = attr.ib(
+        default=None,
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_admin_token,
+        ],
+    )
+    """
+    Alternative to `admin_token`: allows the secret to be specified in an
+    external file.
+    """
+
+    def client_secret(self) -> str | None:
+        """Returns the secret given via `client_secret` or `client_secret_path`."""
+        if self._client_secret_path:
+            return read_secret_from_file_once(
+                self._client_secret_path,
+                ("experimental_features", "msc3861", "client_secret_path"),
+            )
+        return self._client_secret
+
+    def admin_token(self) -> str | None:
+        """Returns the admin token given via `admin_token` or `admin_token_path`."""
+        if self._admin_token_path:
+            return read_secret_from_file_once(
+                self._admin_token_path,
+                ("experimental_features", "msc3861", "admin_token_path"),
+            )
+        return self._admin_token
+
+    def check_config_conflicts(
+        self, root: RootConfig, allow_secrets_in_config: bool
+    ) -> None:
         """Checks for any configuration conflicts with other parts of Synapse.
 
         Raises:
@@ -170,6 +261,24 @@ class MSC3861:
 
         if not self.enabled:
             return
+
+        if self._client_secret and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("experimental", "msc3861", "client_secret"),
+            )
+
+        if self.jwk and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("experimental", "msc3861", "jwk"),
+            )
+
+        if self._admin_token and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("experimental", "msc3861", "admin_token"),
+            )
 
         if (
             root.auth.password_enabled_for_reauth
@@ -261,7 +370,9 @@ class ExperimentalConfig(Config):
 
     section = "experimental"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         experimental = config.get("experimental_features") or {}
 
         # MSC3026 (busy presence state)
@@ -299,11 +410,6 @@ class ExperimentalConfig(Config):
         # have opted in to receive them. If enabled, this adds to-device messages to that list.
         self.msc2409_to_device_messages_enabled: bool = experimental.get(
             "msc2409_to_device_messages_enabled", False
-        )
-
-        # The portion of MSC3202 which is related to device masquerading.
-        self.msc3202_device_masquerading_enabled: bool = experimental.get(
-            "msc3202_device_masquerading", False
         )
 
         # The portion of MSC3202 related to transaction extensions:
@@ -365,11 +471,6 @@ class ExperimentalConfig(Config):
         # MSC3874: Filtering /messages with rel_types / not_rel_types.
         self.msc3874_enabled: bool = experimental.get("msc3874_enabled", False)
 
-        # MSC3886: Simple client rendezvous capability
-        self.msc3886_endpoint: Optional[str] = experimental.get(
-            "msc3886_endpoint", None
-        )
-
         # MSC3890: Remotely silence local notifications
         # Note: This option requires "experimental_features.msc3391_enabled" to be
         # set to "true", in order to communicate account data deletions to clients.
@@ -410,7 +511,9 @@ class ExperimentalConfig(Config):
             ) from exc
 
         # Check that none of the other config options conflict with MSC3861 when enabled
-        self.msc3861.check_config_conflicts(self.root)
+        self.msc3861.check_config_conflicts(
+            self.root, allow_secrets_in_config=allow_secrets_in_config
+        )
 
         self.msc4028_push_encrypted_events = experimental.get(
             "msc4028_push_encrypted_events", False
@@ -423,15 +526,19 @@ class ExperimentalConfig(Config):
         # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
 
-        self.msc4108_delegation_endpoint: Optional[str] = experimental.get(
+        self.msc4108_delegation_endpoint: str | None = experimental.get(
             "msc4108_delegation_endpoint", None
         )
 
+        auth_delegated = self.msc3861.enabled or (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False)
+
         if (
             self.msc4108_enabled or self.msc4108_delegation_endpoint is not None
-        ) and not self.msc3861.enabled:
+        ) and not auth_delegated:
             raise ConfigError(
-                "MSC4108 requires MSC3861 to be enabled",
+                "MSC4108 requires MSC3861 or matrix_authentication_service to be enabled",
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
@@ -441,9 +548,48 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
-        self.msc3823_account_suspension = experimental.get(
-            "msc3823_account_suspension", False
+        # MSC4133: Custom profile fields
+        self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
+
+        # MSC4143: Matrix RTC Transport using Livekit Backend
+        self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
+
+        # MSC4169: Backwards-compatible redaction sending using `/send`
+        self.msc4169_enabled: bool = experimental.get("msc4169_enabled", False)
+
+        # MSC4210: Remove legacy mentions
+        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
+
+        # MSC4222: Adding `state_after` to sync v2
+        self.msc4222_enabled: bool = experimental.get("msc4222_enabled", False)
+
+        # MSC4076: Add `disable_badge_count`` to pusher configuration
+        self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)
+
+        # MSC4277: Harmonizing the reporting endpoints
+        #
+        # If enabled, ignore the score parameter and respond with HTTP 200 on
+        # reporting requests regardless of the subject's existence.
+        self.msc4277_enabled: bool = experimental.get("msc4277_enabled", False)
+
+        # MSC4235: Add `via` param to hierarchy endpoint
+        self.msc4235_enabled: bool = experimental.get("msc4235_enabled", False)
+
+        # MSC4263: Preventing MXID enumeration via key queries
+        self.msc4263_limit_key_queries_to_users_who_share_rooms = experimental.get(
+            "msc4263_limit_key_queries_to_users_who_share_rooms",
+            False,
         )
 
-        # MSC4151: Report room API (Client-Server API)
-        self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
+        # MSC4267: Automatically forgetting rooms on leave
+        self.msc4267_enabled: bool = experimental.get("msc4267_enabled", False)
+
+        # MSC4155: Invite filtering
+        self.msc4155_enabled: bool = experimental.get("msc4155_enabled", False)
+
+        # MSC4293: Redact on Kick/Ban
+        self.msc4293_enabled: bool = experimental.get("msc4293_enabled", False)
+
+        # MSC4306: Thread Subscriptions
+        # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
+        self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)

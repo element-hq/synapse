@@ -160,7 +160,7 @@ Using the following curl command:
 ```console
 curl -H 'Authorization: Bearer <access-token>' -X DELETE https://matrix.org/_matrix/client/r0/directory/room/<room-alias>
 ```
-`<access-token>` - can be obtained in riot by looking in the riot settings, down the bottom is:
+`<access-token>` - can be obtained in element by looking in All settings, clicking Help & About and down the bottom is:
 Access Token:\<click to reveal\>
 
 `<room-alias>` - the room alias, eg. #my_room:matrix.org this possibly needs to be URL encoded also, for example  %23my_room%3Amatrix.org
@@ -254,6 +254,8 @@ can be done by installing the `libjemalloc2` package and adding this
 line to `/etc/default/matrix-synapse`:
 
     LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+
+*Note*: You may need to set `PYTHONMALLOC=malloc` to ensure that `jemalloc` can accurately calculate memory usage. By default, Python uses its internal small-object allocator, which may interfere with jemalloc's ability to track memory consumption correctly. This could prevent the [cache_autotuning](../configuration/config_documentation.md#caches) feature from functioning as expected, as the Python allocator may not reach the memory threshold set by `max_cache_memory_usage`, thus not triggering the cache eviction process.
 
 This made a significant difference on Python 2.7 - it's unclear how
 much of an improvement it provides on Python 3.x.

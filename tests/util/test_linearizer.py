@@ -19,18 +19,18 @@
 #
 #
 
-from typing import Hashable, Tuple
+from typing import Hashable, Protocol
 
-from typing_extensions import Protocol
-
-from twisted.internet import defer, reactor
-from twisted.internet.base import ReactorBase
+from twisted.internet import defer
 from twisted.internet.defer import CancelledError, Deferred
 
 from synapse.logging.context import LoggingContext, current_context
 from synapse.util.async_helpers import Linearizer
 
 from tests import unittest
+from tests.server import (
+    get_clock,
+)
 
 
 class UnblockFunction(Protocol):
@@ -38,9 +38,12 @@ class UnblockFunction(Protocol):
 
 
 class LinearizerTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.reactor, self.clock = get_clock()
+
     def _start_task(
         self, linearizer: Linearizer, key: Hashable
-    ) -> Tuple["Deferred[None]", "Deferred[None]", UnblockFunction]:
+    ) -> tuple["Deferred[None]", "Deferred[None]", UnblockFunction]:
         """Starts a task which acquires the linearizer lock, blocks, then completes.
 
         Args:
@@ -75,13 +78,12 @@ class LinearizerTestCase(unittest.TestCase):
 
     def _pump(self) -> None:
         """Pump the reactor to advance `Linearizer`s."""
-        assert isinstance(reactor, ReactorBase)
-        while reactor.getDelayedCalls():
-            reactor.runUntilCurrent()
+        while self.reactor.getDelayedCalls():
+            self.reactor.pump([0] * 100)
 
     def test_linearizer(self) -> None:
         """Tests that a task is queued up behind an earlier task."""
-        linearizer = Linearizer()
+        linearizer = Linearizer(name="test_linearizer", clock=self.clock)
 
         key = object()
 
@@ -102,7 +104,7 @@ class LinearizerTestCase(unittest.TestCase):
 
         Runs through the same scenario as `test_linearizer`.
         """
-        linearizer = Linearizer()
+        linearizer = Linearizer(name="test_linearizer", clock=self.clock)
 
         key = object()
 
@@ -133,11 +135,11 @@ class LinearizerTestCase(unittest.TestCase):
 
         The stack should *not* explode when the slow thing completes.
         """
-        linearizer = Linearizer()
+        linearizer = Linearizer(name="test_linearizer", clock=self.clock)
         key = ""
 
         async def func(i: int) -> None:
-            with LoggingContext("func(%s)" % i) as lc:
+            with LoggingContext(name="func(%s)" % i, server_name="test_server") as lc:
                 async with linearizer.queue(key):
                     self.assertEqual(current_context(), lc)
 
@@ -153,24 +155,24 @@ class LinearizerTestCase(unittest.TestCase):
 
     def test_multiple_entries(self) -> None:
         """Tests a `Linearizer` with a concurrency above 1."""
-        limiter = Linearizer(max_count=3)
+        linearizer = Linearizer(name="test_linearizer", max_count=3, clock=self.clock)
 
         key = object()
 
-        _, acquired_d1, unblock1 = self._start_task(limiter, key)
+        _, acquired_d1, unblock1 = self._start_task(linearizer, key)
         self.assertTrue(acquired_d1.called)
 
-        _, acquired_d2, unblock2 = self._start_task(limiter, key)
+        _, acquired_d2, unblock2 = self._start_task(linearizer, key)
         self.assertTrue(acquired_d2.called)
 
-        _, acquired_d3, unblock3 = self._start_task(limiter, key)
+        _, acquired_d3, unblock3 = self._start_task(linearizer, key)
         self.assertTrue(acquired_d3.called)
 
         # These next two tasks have to wait.
-        _, acquired_d4, unblock4 = self._start_task(limiter, key)
+        _, acquired_d4, unblock4 = self._start_task(linearizer, key)
         self.assertFalse(acquired_d4.called)
 
-        _, acquired_d5, unblock5 = self._start_task(limiter, key)
+        _, acquired_d5, unblock5 = self._start_task(linearizer, key)
         self.assertFalse(acquired_d5.called)
 
         # Once the first task completes, the fourth task can continue.
@@ -188,13 +190,13 @@ class LinearizerTestCase(unittest.TestCase):
         unblock5()
 
         # The next task shouldn't have to wait.
-        _, acquired_d6, unblock6 = self._start_task(limiter, key)
+        _, acquired_d6, unblock6 = self._start_task(linearizer, key)
         self.assertTrue(acquired_d6)
         unblock6()
 
     def test_cancellation(self) -> None:
         """Tests cancellation while waiting for a `Linearizer`."""
-        linearizer = Linearizer()
+        linearizer = Linearizer(name="test_linearizer", clock=self.clock)
 
         key = object()
 
@@ -228,7 +230,7 @@ class LinearizerTestCase(unittest.TestCase):
 
     def test_cancellation_during_sleep(self) -> None:
         """Tests cancellation during the sleep just after waiting for a `Linearizer`."""
-        linearizer = Linearizer()
+        linearizer = Linearizer(name="test_linearizer", clock=self.clock)
 
         key = object()
 

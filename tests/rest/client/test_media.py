@@ -24,14 +24,13 @@ import json
 import os
 import re
 import shutil
-from typing import Any, BinaryIO, Dict, List, Optional, Sequence, Tuple, Type
+from typing import Any, BinaryIO, ClassVar, Sequence
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
-from typing_extensions import ClassVar
 
 from twisted.internet import defer
 from twisted.internet._resolver import HostResolution
@@ -39,14 +38,15 @@ from twisted.internet.address import IPv4Address, IPv6Address
 from twisted.internet.defer import Deferred
 from twisted.internet.error import DNSLookupError
 from twisted.internet.interfaces import IAddress, IResolutionReceiver
+from twisted.internet.testing import AccumulatingProtocol, MemoryReactor
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import AccumulatingProtocol, MemoryReactor
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
 
 from synapse.api.errors import HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
+from synapse.config._base import Config
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.http.client import MultipartResponse
 from synapse.http.types import QueryParams
@@ -54,11 +54,12 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
+from synapse.module_api import MediaUploadLimit
 from synapse.rest import admin
 from synapse.rest.client import login, media
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
 from tests import unittest
@@ -66,6 +67,7 @@ from tests.media.test_media_storage import (
     SVG,
     TestImage,
     empty_file,
+    small_cmyk_jpeg,
     small_lossless_webp,
     small_png,
     small_png_with_transparency,
@@ -137,6 +139,7 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
                 time_now_ms=clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
+                sha256=file_id,
             )
         )
         self.register_user("user", "password")
@@ -262,7 +265,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         assert self.media_repo.url_previewer is not None
         self.url_previewer = self.media_repo.url_previewer
 
-        self.lookups: Dict[str, Any] = {}
+        self.lookups: dict[str, Any] = {}
 
         class Resolver:
             def resolveHostName(
@@ -270,7 +273,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
                 resolutionReceiver: IResolutionReceiver,
                 hostName: str,
                 portNumber: int = 0,
-                addressTypes: Optional[Sequence[Type[IAddress]]] = None,
+                addressTypes: Sequence[type[IAddress]] | None = None,
                 transportSemantics: str = "TCP",
             ) -> IResolutionReceiver:
                 resolution = HostResolution(hostName)
@@ -1005,7 +1008,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         data = base64.b64encode(SMALL_PNG)
 
         end_content = (
-            b"<html><head>" b'<img src="data:image/png;base64,%s" />' b"</head></html>"
+            b'<html><head><img src="data:image/png;base64,%s" /></head></html>'
         ) % (data,)
 
         channel = self.make_request(
@@ -1354,7 +1357,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertEqual(body["og:title"], "Test")
         self.assertNotIn("og:image", body)
 
-    def _download_image(self) -> Tuple[str, str]:
+    def _download_image(self) -> tuple[str, str]:
         """Downloads an image into the URL cache.
         Returns:
             A (host, media_id) tuple representing the MXC URI of the image.
@@ -1615,6 +1618,63 @@ class MediaConfigTest(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body["m.upload.size"], self.hs.config.media.max_upload_size
         )
+
+
+class MediaConfigModuleCallbackTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        media.register_servlets,
+        admin.register_servlets,
+        login.register_servlets,
+    ]
+
+    def make_homeserver(
+        self, reactor: ThreadedMemoryReactorClock, clock: Clock
+    ) -> HomeServer:
+        config = self.default_config()
+
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+        config["media_store_path"] = self.media_store_path
+
+        provider_config = {
+            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+            "store_local": True,
+            "store_synchronous": False,
+            "store_remote": True,
+            "config": {"directory": self.storage_path},
+        }
+
+        config["media_storage_providers"] = [provider_config]
+
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user = self.register_user("user", "password")
+        self.tok = self.login("user", "password")
+
+        hs.get_module_api().register_media_repository_callbacks(
+            get_media_config_for_user=self.get_media_config_for_user,
+        )
+
+    async def get_media_config_for_user(
+        self,
+        user_id: str,
+    ) -> JsonDict | None:
+        # We echo back the user_id and set a custom upload size.
+        return {"m.upload.size": 1024, "user_id": user_id}
+
+    def test_media_config(self) -> None:
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/config",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["m.upload.size"], 1024)
+        self.assertEqual(channel.json_body["user_id"], self.user)
 
 
 class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
@@ -1894,7 +1954,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
     def test_file_download(self) -> None:
         content = io.BytesIO(b"file_to_stream")
         content_uri = self.get_success(
-            self.repo.create_content(
+            self.repo.create_or_update_content(
                 "text/plain",
                 "test_upload",
                 content,
@@ -1916,6 +1976,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
 test_images = [
     small_png,
     small_png_with_transparency,
+    small_cmyk_jpeg,
     small_lossless_webp,
     empty_file,
     SVG,
@@ -1933,12 +1994,12 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
     ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.fetches: List[
-            Tuple[
+        self.fetches: list[
+            tuple[
                 "Deferred[Any]",
                 str,
                 str,
-                Optional[QueryParams],
+                QueryParams | None,
             ]
         ] = []
 
@@ -1949,16 +2010,16 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             download_ratelimiter: Ratelimiter,
             ip_address: Any,
             max_size: int,
-            args: Optional[QueryParams] = None,
+            args: QueryParams | None = None,
             retry_on_dns_fail: bool = True,
             ignore_backoff: bool = False,
             follow_redirects: bool = False,
-        ) -> "Deferred[Tuple[int, Dict[bytes, List[bytes]], bytes]]":
+        ) -> "Deferred[tuple[int, dict[bytes, list[bytes]], bytes]]":
             """A mock for MatrixFederationHttpClient.federation_get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]], bytes]],
-            ) -> Tuple[int, Dict[bytes, List[bytes]], bytes]:
+                r: tuple[bytes, tuple[int, dict[bytes, list[bytes]], bytes]],
+            ) -> tuple[int, dict[bytes, list[bytes]], bytes]:
                 data, response = r
                 output_stream.write(data)
                 return response
@@ -1968,7 +2029,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
                 output_stream.write(f.value.response)
                 return f
 
-            d: Deferred[Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]], bytes]]] = (
+            d: Deferred[tuple[bytes, tuple[int, dict[bytes, list[bytes]], bytes]]] = (
                 Deferred()
             )
             self.fetches.append((d, destination, path, args))
@@ -1983,16 +2044,16 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             download_ratelimiter: Ratelimiter,
             ip_address: Any,
             max_size: int,
-            args: Optional[QueryParams] = None,
+            args: QueryParams | None = None,
             retry_on_dns_fail: bool = True,
             ignore_backoff: bool = False,
             follow_redirects: bool = False,
-        ) -> "Deferred[Tuple[int, Dict[bytes, List[bytes]]]]":
+        ) -> "Deferred[tuple[int, dict[bytes, list[bytes]]]]":
             """A mock for MatrixFederationHttpClient.get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]],
-            ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+                r: tuple[bytes, tuple[int, dict[bytes, list[bytes]]]],
+            ) -> tuple[int, dict[bytes, list[bytes]]]:
                 data, response = r
                 output_stream.write(data)
                 return response
@@ -2002,7 +2063,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
                 output_stream.write(f.value.response)
                 return f
 
-            d: Deferred[Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]]] = Deferred()
+            d: Deferred[tuple[bytes, tuple[int, dict[bytes, list[bytes]]]]] = Deferred()
             self.fetches.append((d, destination, path, args))
             # Note that this callback changes the value held by d.
             d_after_callback = d.addCallbacks(write_to, write_err)
@@ -2046,7 +2107,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
         self.tok = self.login("user", "pass")
 
     def _req(
-        self, content_disposition: Optional[bytes], include_content_type: bool = True
+        self, content_disposition: bytes | None, include_content_type: bool = True
     ) -> FakeChannel:
         channel = self.make_request(
             "GET",
@@ -2357,7 +2418,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
     def _test_thumbnail(
         self,
         method: str,
-        expected_body: Optional[bytes],
+        expected_body: bytes | None,
         expected_found: bool,
         unable_to_thumbnail: bool = False,
     ) -> None:
@@ -2400,7 +2461,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
 
             if expected_body is not None:
                 self.assertEqual(
-                    channel.result["body"], expected_body, channel.result["body"]
+                    channel.result["body"], expected_body, channel.result["body"].hex()
                 )
             else:
                 # ensure that the result is at least some valid image
@@ -2477,7 +2538,7 @@ configs = [
 
 @parameterized_class(configs)
 class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
-    extra_config: Dict[str, Any]
+    extra_config: dict[str, Any]
     servlets = [
         media.register_servlets,
         login.register_servlets,
@@ -2515,7 +2576,7 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         self.user = self.register_user("user", "pass")
         self.tok = self.login("user", "pass")
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -2592,6 +2653,7 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
                 time_now_ms=self.clock.time_msec(),
                 upload_name="remote_test.png",
                 filesystem_id=file_id,
+                sha256=file_id,
             )
         )
 
@@ -2675,3 +2737,424 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
             access_token=self.tok,
         )
         self.assertEqual(channel10.code, 200)
+
+    def test_authenticated_media_etag(self) -> None:
+        """Test that ETag works correctly with authenticated media over client
+        APIs"""
+
+        # upload some local media with authentication on
+        channel = self.make_request(
+            "POST",
+            "_matrix/media/v3/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200)
+        res = channel.json_body.get("content_uri")
+        assert res is not None
+        uri = res.split("mxc://")[1]
+
+        # Check standard media endpoint
+        self._check_caching(f"/download/{uri}")
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        self._check_caching(f"/thumbnail/{uri}{params}")
+
+        # Inject a piece of remote media.
+        file_id = "abcdefg12345"
+        file_info = FileInfo(server_name="lonelyIsland", file_id=file_id)
+
+        media_storage = self.hs.get_media_repository().media_storage
+
+        ctx = media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        # we write the authenticated status when storing media, so this should pick up
+        # config and authenticate the media
+        self.get_success(
+            self.store.store_cached_remote_media(
+                origin="lonelyIsland",
+                media_id="52",
+                media_type="image/png",
+                media_length=1,
+                time_now_ms=self.clock.time_msec(),
+                upload_name="remote_test.png",
+                filesystem_id=file_id,
+                sha256=file_id,
+            )
+        )
+
+        # ensure we have thumbnails for the non-dynamic code path
+        if self.extra_config == {"dynamic_thumbnails": False}:
+            self.get_success(
+                self.repo._generate_thumbnails(
+                    "lonelyIsland", "52", file_id, "image/png"
+                )
+            )
+
+        self._check_caching("/download/lonelyIsland/52")
+
+        params = "?width=32&height=32&method=crop"
+        self._check_caching(f"/thumbnail/lonelyIsland/52{params}")
+
+    def _check_caching(self, path: str) -> None:
+        """
+        Checks that:
+          1. fetching the path returns an ETag header
+          2. refetching with the ETag returns a 304 without a body
+          3. refetching with the ETag but through unauthenticated endpoint
+             returns 404
+        """
+
+        # Request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media{path}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200)
+
+        # Should have a single ETag field
+        etags = channel1.headers.getRawHeaders("ETag")
+        self.assertIsNotNone(etags)
+        assert etags is not None  # For mypy
+        self.assertEqual(len(etags), 1)
+        etag = etags[0]
+
+        # Refetching with the etag should result in 304 and empty body.
+        channel2 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media{path}",
+            access_token=self.tok,
+            shorthand=False,
+            custom_headers=[("If-None-Match", etag)],
+        )
+        self.assertEqual(channel2.code, 304)
+        self.assertEqual(channel2.is_finished(), True)
+        self.assertNotIn("body", channel2.result)
+
+        # Refetching with the etag but no access token should result in 404.
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0{path}",
+            shorthand=False,
+            custom_headers=[("If-None-Match", etag)],
+        )
+        self.assertEqual(channel3.code, 404)
+
+
+class MediaUploadLimits(unittest.HomeserverTestCase):
+    """
+    This test case simulates a homeserver with media upload limits configured.
+    """
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+        config["media_store_path"] = self.media_store_path
+
+        provider_config = {
+            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+            "store_local": True,
+            "store_synchronous": False,
+            "store_remote": True,
+            "config": {"directory": self.storage_path},
+        }
+
+        config["media_storage_providers"] = [provider_config]
+
+        # These are the limits that we are testing
+        config["media_upload_limits"] = [
+            {"time_period": "1d", "max_size": "1K"},
+            {"time_period": "1w", "max_size": "3K"},
+        ]
+
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.repo = hs.get_media_repository()
+        self.client = hs.get_federation_http_client()
+        self.store = hs.get_datastores().main
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def upload_media(self, size: int) -> FakeChannel:
+        """Helper to upload media of a given size."""
+        return self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload",
+            content=b"0" * size,
+            access_token=self.tok,
+            shorthand=False,
+            content_type=b"text/plain",
+            custom_headers=[("Content-Length", str(size))],
+        )
+
+    def test_upload_under_limit(self) -> None:
+        """Test that uploading media under the limit works."""
+        channel = self.upload_media(67)
+        self.assertEqual(channel.code, 200)
+
+    def test_over_day_limit(self) -> None:
+        """Test that uploading media over the daily limit fails."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 400)
+
+    def test_under_daily_limit(self) -> None:
+        """Test that uploading media under the daily limit fails."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        self.reactor.advance(60 * 60 * 24)  # Advance by one day
+
+        # This will succeed as the daily limit has reset
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 200)
+
+        self.reactor.advance(60 * 60 * 24)  # Advance by one day
+
+        # ... and again
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 200)
+
+    def test_over_weekly_limit(self) -> None:
+        """Test that uploading media over the weekly limit fails."""
+        channel = self.upload_media(900)
+        self.assertEqual(channel.code, 200)
+
+        self.reactor.advance(60 * 60 * 24)  # Advance by one day
+
+        channel = self.upload_media(900)
+        self.assertEqual(channel.code, 200)
+
+        self.reactor.advance(2 * 60 * 60 * 24)  # Advance by one day
+
+        channel = self.upload_media(900)
+        self.assertEqual(channel.code, 200)
+
+        self.reactor.advance(2 * 60 * 60 * 24)  # Advance by one day
+
+        # This will fail as the weekly limit has been exceeded
+        channel = self.upload_media(900)
+        self.assertEqual(channel.code, 400)
+
+        # Reset the weekly limit by advancing a week
+        self.reactor.advance(7 * 60 * 60 * 24)  # Advance by 7 days
+
+        # This will succeed as the weekly limit has reset
+        channel = self.upload_media(900)
+        self.assertEqual(channel.code, 200)
+
+
+class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
+    """
+    This test case simulates a homeserver with media upload limits being overridden by the module API.
+    """
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+        config["media_store_path"] = self.media_store_path
+
+        provider_config = {
+            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+            "store_local": True,
+            "store_synchronous": False,
+            "store_remote": True,
+            "config": {"directory": self.storage_path},
+        }
+
+        config["media_storage_providers"] = [provider_config]
+
+        # default limits to use
+        config["media_upload_limits"] = [
+            {"time_period": "1d", "max_size": "1K"},
+            {"time_period": "1w", "max_size": "3K"},
+        ]
+
+        return self.setup_test_homeserver(config=config)
+
+    async def _get_media_upload_limits_for_user(
+        self,
+        user_id: str,
+    ) -> list[MediaUploadLimit] | None:
+        # user1 has custom limits
+        if user_id == self.user1:
+            # n.b. we return these in increasing duration order and Synapse will need to sort them correctly
+            return [
+                MediaUploadLimit(
+                    time_period_ms=Config.parse_duration("1d"), max_bytes=5000
+                ),
+                MediaUploadLimit(
+                    time_period_ms=Config.parse_duration("1w"), max_bytes=15000
+                ),
+            ]
+        # user2 has no limits
+        if user_id == self.user2:
+            return []
+        # otherwise use default
+        return None
+
+    async def _on_media_upload_limit_exceeded(
+        self,
+        user_id: str,
+        limit: MediaUploadLimit,
+        sent_bytes: int,
+        attempted_bytes: int,
+    ) -> None:
+        self.last_media_upload_limit_exceeded: dict[str, object] | None = {
+            "user_id": user_id,
+            "limit": limit,
+            "sent_bytes": sent_bytes,
+            "attempted_bytes": attempted_bytes,
+        }
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.repo = hs.get_media_repository()
+        self.client = hs.get_federation_http_client()
+        self.store = hs.get_datastores().main
+        self.user1 = self.register_user("user1", "pass")
+        self.tok1 = self.login("user1", "pass")
+        self.user2 = self.register_user("user2", "pass")
+        self.tok2 = self.login("user2", "pass")
+        self.user3 = self.register_user("user3", "pass")
+        self.tok3 = self.login("user3", "pass")
+        self.last_media_upload_limit_exceeded = None
+        self.hs.get_module_api().register_media_repository_callbacks(
+            get_media_upload_limits_for_user=self._get_media_upload_limits_for_user,
+            on_media_upload_limit_exceeded=self._on_media_upload_limit_exceeded,
+        )
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def upload_media(self, size: int, tok: str) -> FakeChannel:
+        """Helper to upload media of a given size with a given token."""
+        return self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload",
+            content=b"0" * size,
+            access_token=tok,
+            shorthand=False,
+            content_type=b"text/plain",
+            custom_headers=[("Content-Length", str(size))],
+        )
+
+    def test_upload_under_limit(self) -> None:
+        """Test that uploading media under the limit works."""
+
+        # User 1 uploads 100 bytes
+        channel = self.upload_media(100, self.tok1)
+        self.assertEqual(channel.code, 200)
+
+        # User 2 (unlimited) uploads 100 bytes
+        channel = self.upload_media(100, self.tok2)
+        self.assertEqual(channel.code, 200)
+
+        # User 3 (default) uploads 100 bytes
+        channel = self.upload_media(100, self.tok3)
+        self.assertEqual(channel.code, 200)
+
+        self.assertEqual(self.last_media_upload_limit_exceeded, None)
+
+    def test_uses_custom_limit(self) -> None:
+        """Test that uploading media over the module provided daily limit fails."""
+
+        # User 1 uploads 3000 bytes
+        channel = self.upload_media(3000, self.tok1)
+        self.assertEqual(channel.code, 200)
+
+        # User 1 attempts to upload 4000 bytes taking it over the limit
+        channel = self.upload_media(4000, self.tok1)
+        self.assertEqual(channel.code, 400)
+        assert self.last_media_upload_limit_exceeded is not None
+        self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user1)
+        self.assertEqual(
+            self.last_media_upload_limit_exceeded["limit"],
+            MediaUploadLimit(
+                max_bytes=5000, time_period_ms=Config.parse_duration("1d")
+            ),
+        )
+        self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 3000)
+        self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 4000)
+
+        # User 1 attempts to upload 20000 bytes which is over the weekly limit
+        # This tests that the limits have been sorted as expected
+        channel = self.upload_media(20000, self.tok1)
+        self.assertEqual(channel.code, 400)
+        assert self.last_media_upload_limit_exceeded is not None
+        self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user1)
+        self.assertEqual(
+            self.last_media_upload_limit_exceeded["limit"],
+            MediaUploadLimit(
+                max_bytes=15000, time_period_ms=Config.parse_duration("1w")
+            ),
+        )
+        self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 3000)
+        self.assertEqual(
+            self.last_media_upload_limit_exceeded["attempted_bytes"], 20000
+        )
+
+    def test_uses_unlimited(self) -> None:
+        """Test that unlimited user is not limited when module returns []."""
+        # User 2 uploads 10000 bytes which is over the default limit
+        channel = self.upload_media(10000, self.tok2)
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(self.last_media_upload_limit_exceeded, None)
+
+    def test_uses_defaults(self) -> None:
+        """Test that the default limits are applied when module returned None."""
+        # User 3 uploads 500 bytes
+        channel = self.upload_media(500, self.tok3)
+        self.assertEqual(channel.code, 200)
+
+        # User 3 uploads 800 bytes which is over the limit
+        channel = self.upload_media(800, self.tok3)
+        self.assertEqual(channel.code, 400)
+        assert self.last_media_upload_limit_exceeded is not None
+        self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user3)
+        self.assertEqual(
+            self.last_media_upload_limit_exceeded["limit"],
+            MediaUploadLimit(
+                max_bytes=1024, time_period_ms=Config.parse_duration("1d")
+            ),
+        )
+        self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 500)
+        self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 800)

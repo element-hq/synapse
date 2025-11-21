@@ -18,14 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.media._base import FileInfo
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG
@@ -61,10 +60,11 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
                 time_now_ms=clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
+                sha256=file_id,
             )
         )
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         # We need to manually set the resource tree to include media, the
         # default only does `/_matrix/client` APIs.
         return {"/_matrix/media": self.hs.get_media_repository_resource()}
@@ -91,7 +91,8 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
         {
             # Disable downloads from a domain we won't be requesting downloads from.
             # This proves we haven't broken anything.
-            "prevent_media_downloads_from": ["not-listed.com"]
+            "prevent_media_downloads_from": ["not-listed.com"],
+            "enable_authenticated_media": False,
         }
     )
     def test_remote_media_normally_unblocked(self) -> None:
@@ -132,6 +133,7 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
             # This proves we haven't broken anything.
             "prevent_media_downloads_from": ["not-listed.com"],
             "dynamic_thumbnails": True,
+            "enable_authenticated_media": False,
         }
     )
     def test_remote_media_thumbnail_normally_unblocked(self) -> None:

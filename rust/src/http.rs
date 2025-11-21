@@ -70,7 +70,7 @@ pub fn http_request_from_twisted(request: &Bound<'_, PyAny>) -> PyResult<Request
     let headers_iter = request
         .getattr("requestHeaders")?
         .call_method0("getAllRawHeaders")?
-        .iter()?;
+        .try_iter()?;
 
     for header in headers_iter {
         let header = header?;

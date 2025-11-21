@@ -19,14 +19,13 @@
 #
 #
 
-from typing import Optional, Tuple
+from twisted.internet.defer import Deferred
+from twisted.internet.testing import MemoryReactor
 
-from twisted.internet.task import deferLater
-from twisted.test.proto_helpers import MemoryReactor
-
+from synapse.logging.context import make_deferred_yieldable
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -43,7 +42,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _test_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         # This test task will copy the parameters to the result
         result = None
         if task.params:
@@ -86,9 +85,9 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _sleeping_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         # Sleep for a second
-        await deferLater(self.reactor, 1, lambda: None)
+        await self.hs.get_clock().sleep(1)
         return TaskStatus.COMPLETE, None, None
 
     def test_schedule_lot_of_tasks(self) -> None:
@@ -104,45 +103,55 @@ class TestTaskScheduler(HomeserverTestCase):
                 )
             )
 
-        # This is to give the time to the active tasks to finish
-        self.reactor.advance(1)
+        def get_tasks_of_status(status: TaskStatus) -> list[ScheduledTask]:
+            tasks = (
+                self.get_success(self.task_scheduler.get_task(task_id))
+                for task_id in task_ids
+            )
+            return [t for t in tasks if t is not None and t.status == status]
 
-        # Check that only MAX_CONCURRENT_RUNNING_TASKS tasks has run and that one
-        # is still scheduled.
-        tasks = [
-            self.get_success(self.task_scheduler.get_task(task_id))
-            for task_id in task_ids
-        ]
-
-        self.assertEquals(
-            len(
-                [t for t in tasks if t is not None and t.status == TaskStatus.COMPLETE]
-            ),
+        # At this point, there should be MAX_CONCURRENT_RUNNING_TASKS active tasks and
+        # one scheduled task.
+        self.assertEqual(
+            len(get_tasks_of_status(TaskStatus.ACTIVE)),
             TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS,
         )
+        self.assertEqual(
+            len(get_tasks_of_status(TaskStatus.SCHEDULED)),
+            1,
+        )
 
-        scheduled_tasks = [
-            t for t in tasks if t is not None and t.status == TaskStatus.ACTIVE
-        ]
-        self.assertEquals(len(scheduled_tasks), 1)
-
-        # We need to wait for the next run of the scheduler loop
-        self.reactor.advance((TaskScheduler.SCHEDULE_INTERVAL_MS / 1000))
+        # Give the time to the active tasks to finish
         self.reactor.advance(1)
 
-        # Check that the last task has been properly executed after the next scheduler loop run
+        # Check that MAX_CONCURRENT_RUNNING_TASKS tasks have run and that one
+        # is still scheduled.
+        self.assertEqual(
+            len(get_tasks_of_status(TaskStatus.COMPLETE)),
+            TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS,
+        )
+        scheduled_tasks = get_tasks_of_status(TaskStatus.SCHEDULED)
+        self.assertEqual(len(scheduled_tasks), 1)
+
+        # The scheduled task should start 0.1s after the first of the active tasks
+        # finishes
+        self.reactor.advance(0.1)
+        self.assertEqual(len(get_tasks_of_status(TaskStatus.ACTIVE)), 1)
+
+        # ... and should finally complete after another second
+        self.reactor.advance(1)
         prev_scheduled_task = self.get_success(
             self.task_scheduler.get_task(scheduled_tasks[0].id)
         )
         assert prev_scheduled_task is not None
-        self.assertEquals(
+        self.assertEqual(
             prev_scheduled_task.status,
             TaskStatus.COMPLETE,
         )
 
     async def _raising_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         raise Exception("raising")
 
     def test_schedule_raising_task(self) -> None:
@@ -156,13 +165,15 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _resumable_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         if task.result and "in_progress" in task.result:
             return TaskStatus.COMPLETE, {"success": True}, None
         else:
             await self.task_scheduler.update_task(task.id, result={"in_progress": True})
+            # Create a deferred which we will never complete
+            incomplete_d: Deferred = Deferred()
             # Await forever to simulate an aborted task because of a restart
-            await deferLater(self.reactor, 2**16, lambda: None)
+            await make_deferred_yieldable(incomplete_d)
             # This should never been called
             return TaskStatus.ACTIVE, None, None
 
@@ -192,7 +203,7 @@ class TestTaskSchedulerWithBackgroundWorker(BaseMultiWorkerStreamTestCase):
 
     async def _test_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         return (TaskStatus.COMPLETE, None, None)
 
     @override_config({"run_background_tasks_on": "worker1"})

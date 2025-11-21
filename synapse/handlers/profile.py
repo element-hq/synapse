@@ -20,8 +20,9 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import TYPE_CHECKING
 
+from synapse.api.constants import ProfileFields
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -31,7 +32,7 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
-from synapse.types import JsonDict, Requester, UserID, create_requester
+from synapse.types import JsonDict, JsonValue, Requester, UserID, create_requester
 from synapse.util.caches.descriptors import cached
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
@@ -42,6 +43,8 @@ logger = logging.getLogger(__name__)
 
 MAX_DISPLAYNAME_LEN = 256
 MAX_AVATAR_URL_LEN = 1000
+# Field name length is specced at 255 bytes.
+MAX_CUSTOM_FIELD_LEN = 255
 
 
 class ProfileHandler:
@@ -52,8 +55,9 @@ class ProfileHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname  # nb must be called this for @cached
+        self.clock = hs.get_clock()  # nb must be called this for @cached
         self.store = hs.get_datastores().main
-        self.clock = hs.get_clock()
         self.hs = hs
 
         self.federation = hs.get_federation_client()
@@ -64,8 +68,8 @@ class ProfileHandler:
         self.user_directory_handler = hs.get_user_directory_handler()
         self.request_ratelimiter = hs.get_request_ratelimiter()
 
-        self.max_avatar_size: Optional[int] = hs.config.server.max_avatar_size
-        self.allowed_avatar_mimetypes: Optional[List[str]] = (
+        self.max_avatar_size: int | None = hs.config.server.max_avatar_size
+        self.allowed_avatar_mimetypes: list[str] | None = (
             hs.config.server.allowed_avatar_mimetypes
         )
 
@@ -83,19 +87,31 @@ class ProfileHandler:
 
         Returns:
             A JSON dictionary. For local queries this will include the displayname and avatar_url
-            fields. For remote queries it may contain arbitrary information.
+            fields, if set. For remote queries it may contain arbitrary information.
         """
         target_user = UserID.from_string(user_id)
 
         if self.hs.is_mine(target_user):
             profileinfo = await self.store.get_profileinfo(target_user)
-            if profileinfo.display_name is None and profileinfo.avatar_url is None:
+            extra_fields = await self.store.get_profile_fields(target_user)
+
+            if (
+                profileinfo.display_name is None
+                and profileinfo.avatar_url is None
+                and not extra_fields
+            ):
                 raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)
 
-            return {
-                "displayname": profileinfo.display_name,
-                "avatar_url": profileinfo.avatar_url,
-            }
+            # Do not include display name or avatar if unset.
+            ret = {}
+            if profileinfo.display_name is not None:
+                ret[ProfileFields.DISPLAYNAME] = profileinfo.display_name
+            if profileinfo.avatar_url is not None:
+                ret[ProfileFields.AVATAR_URL] = profileinfo.avatar_url
+            if extra_fields:
+                ret.update(extra_fields)
+
+            return ret
         else:
             try:
                 result = await self.federation.make_query(
@@ -108,7 +124,7 @@ class ProfileHandler:
             except RequestSendFailed as e:
                 raise SynapseError(502, "Failed to fetch profile") from e
             except HttpResponseException as e:
-                if e.code < 500 and e.code != 404:
+                if e.code < 500 and e.code not in (403, 404):
                     # Other codes are not allowed in c2s API
                     logger.info(
                         "Server replied with wrong response: %s %s", e.code, e.msg
@@ -117,7 +133,7 @@ class ProfileHandler:
                     raise SynapseError(502, "Failed to fetch profile")
                 raise e.to_synapse_error()
 
-    async def get_displayname(self, target_user: UserID) -> Optional[str]:
+    async def get_displayname(self, target_user: UserID) -> str | None:
         """
         Fetch a user's display name from their profile.
 
@@ -195,7 +211,7 @@ class ProfileHandler:
                 400, "Displayname is too long (max %i)" % (MAX_DISPLAYNAME_LEN,)
             )
 
-        displayname_to_set: Optional[str] = new_displayname.strip()
+        displayname_to_set: str | None = new_displayname.strip()
         if new_displayname == "":
             displayname_to_set = None
 
@@ -222,7 +238,7 @@ class ProfileHandler:
         if propagate:
             await self._update_join_states(requester, target_user)
 
-    async def get_avatar_url(self, target_user: UserID) -> Optional[str]:
+    async def get_avatar_url(self, target_user: UserID) -> str | None:
         """
         Fetch a user's avatar URL from their profile.
 
@@ -300,7 +316,7 @@ class ProfileHandler:
         if not await self.check_avatar_size_and_mime_type(new_avatar_url):
             raise SynapseError(403, "This avatar is not allowed", Codes.FORBIDDEN)
 
-        avatar_url_to_set: Optional[str] = new_avatar_url
+        avatar_url_to_set: str | None = new_avatar_url
         if new_avatar_url == "":
             avatar_url_to_set = None
 
@@ -351,9 +367,9 @@ class ProfileHandler:
             server_name = host
 
         if self._is_mine_server_name(server_name):
-            media_info: Optional[
-                Union[LocalMedia, RemoteMedia]
-            ] = await self.store.get_local_media(media_id)
+            media_info: (
+                LocalMedia | RemoteMedia | None
+            ) = await self.store.get_local_media(media_id)
         else:
             media_info = await self.store.get_cached_remote_media(server_name, media_id)
 
@@ -399,6 +415,110 @@ class ProfileHandler:
 
         return True
 
+    async def get_profile_field(
+        self, target_user: UserID, field_name: str
+    ) -> JsonValue:
+        """
+        Fetch a user's profile from the database for local users and over federation
+        for remote users.
+
+        Args:
+            target_user: The user ID to fetch the profile for.
+            field_name: The field to fetch the profile for.
+
+        Returns:
+            The value for the profile field or None if the field does not exist.
+        """
+        if self.hs.is_mine(target_user):
+            try:
+                field_value = await self.store.get_profile_field(
+                    target_user, field_name
+                )
+            except StoreError as e:
+                if e.code == 404:
+                    raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)
+                raise
+
+            return field_value
+        else:
+            try:
+                result = await self.federation.make_query(
+                    destination=target_user.domain,
+                    query_type="profile",
+                    args={"user_id": target_user.to_string(), "field": field_name},
+                    ignore_backoff=True,
+                )
+            except RequestSendFailed as e:
+                raise SynapseError(502, "Failed to fetch profile") from e
+            except HttpResponseException as e:
+                raise e.to_synapse_error()
+
+            return result.get(field_name)
+
+    async def set_profile_field(
+        self,
+        target_user: UserID,
+        requester: Requester,
+        field_name: str,
+        new_value: JsonValue,
+        by_admin: bool = False,
+        deactivation: bool = False,
+    ) -> None:
+        """Set a new profile field for a user.
+
+        Args:
+            target_user: the user whose profile is to be changed.
+            requester: The user attempting to make this change.
+            field_name: The name of the profile field to update.
+            new_value: The new field value for this user.
+            by_admin: Whether this change was made by an administrator.
+            deactivation: Whether this change was made while deactivating the user.
+        """
+        if not self.hs.is_mine(target_user):
+            raise SynapseError(400, "User is not hosted on this homeserver")
+
+        if not by_admin and target_user != requester.user:
+            raise AuthError(403, "Cannot set another user's profile")
+
+        await self.store.set_profile_field(target_user, field_name, new_value)
+
+        # Custom fields do not propagate into the user directory *or* rooms.
+        profile = await self.store.get_profileinfo(target_user)
+        await self._third_party_rules.on_profile_update(
+            target_user.to_string(), profile, by_admin, deactivation
+        )
+
+    async def delete_profile_field(
+        self,
+        target_user: UserID,
+        requester: Requester,
+        field_name: str,
+        by_admin: bool = False,
+        deactivation: bool = False,
+    ) -> None:
+        """Delete a field from a user's profile.
+
+        Args:
+            target_user: the user whose profile is to be changed.
+            requester: The user attempting to make this change.
+            field_name: The name of the profile field to remove.
+            by_admin: Whether this change was made by an administrator.
+            deactivation: Whether this change was made while deactivating the user.
+        """
+        if not self.hs.is_mine(target_user):
+            raise SynapseError(400, "User is not hosted on this homeserver")
+
+        if not by_admin and target_user != requester.user:
+            raise AuthError(400, "Cannot set another user's profile")
+
+        await self.store.delete_profile_field(target_user, field_name)
+
+        # Custom fields do not propagate into the user directory *or* rooms.
+        profile = await self.store.get_profileinfo(target_user)
+        await self._third_party_rules.on_profile_update(
+            target_user.to_string(), profile, by_admin, deactivation
+        )
+
     async def on_profile_query(self, args: JsonDict) -> JsonDict:
         """Handles federation profile query requests."""
 
@@ -415,13 +535,30 @@ class ProfileHandler:
 
         just_field = args.get("field", None)
 
-        response = {}
+        response: JsonDict = {}
         try:
-            if just_field is None or just_field == "displayname":
-                response["displayname"] = await self.store.get_profile_displayname(user)
+            if just_field is None or just_field == ProfileFields.DISPLAYNAME:
+                displayname = await self.store.get_profile_displayname(user)
+                # do not set the displayname field if it is None,
+                # since then we send a null in the JSON response
+                if displayname is not None:
+                    response["displayname"] = displayname
+            if just_field is None or just_field == ProfileFields.AVATAR_URL:
+                avatar_url = await self.store.get_profile_avatar_url(user)
+                # do not set the avatar_url field if it is None,
+                # since then we send a null in the JSON response
+                if avatar_url is not None:
+                    response["avatar_url"] = avatar_url
 
-            if just_field is None or just_field == "avatar_url":
-                response["avatar_url"] = await self.store.get_profile_avatar_url(user)
+            if just_field is None:
+                response.update(await self.store.get_profile_fields(user))
+            elif just_field not in (
+                ProfileFields.DISPLAYNAME,
+                ProfileFields.AVATAR_URL,
+            ):
+                response[just_field] = await self.store.get_profile_field(
+                    user, just_field
+                )
         except StoreError as e:
             if e.code == 404:
                 raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)
@@ -469,7 +606,7 @@ class ProfileHandler:
                 )
 
     async def check_profile_query_allowed(
-        self, target_user: UserID, requester: Optional[UserID] = None
+        self, target_user: UserID, requester: UserID | None = None
     ) -> None:
         """Checks whether a profile query is allowed. If the
         'require_auth_for_profile_requests' config flag is set to True and a

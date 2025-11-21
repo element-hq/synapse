@@ -30,3 +30,6 @@ docker-compose up -d
 ### More information
 
 For more information on required environment variables and mounts, see the main docker documentation at [/docker/README.md](../../docker/README.md)
+
+**For a more comprehensive Docker Compose example showcasing a full Matrix 2.0 stack, please see
+https://github.com/element-hq/element-docker-demo**

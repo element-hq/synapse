@@ -26,21 +26,16 @@ from typing import (
     Any,
     Callable,
     ContextManager,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
+    Generator,
     TypeVar,
-    Union,
 )
 from unittest import mock
 from unittest.mock import Mock
 
 from twisted.internet.defer import Deferred
 from twisted.internet.error import ConnectionDone
+from twisted.internet.testing import MemoryReactorClock
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import MemoryReactorClock
 from twisted.web.server import Site
 
 from synapse.http.server import (
@@ -49,7 +44,10 @@ from synapse.http.server import (
     respond_with_json,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import LoggingContext, make_deferred_yieldable
+from synapse.logging.context import (
+    LoggingContext,
+    make_deferred_yieldable,
+)
 from synapse.types import JsonDict
 
 from tests.server import FakeChannel, make_request
@@ -65,8 +63,8 @@ def test_disconnect(
     reactor: MemoryReactorClock,
     channel: FakeChannel,
     expect_cancellation: bool,
-    expected_body: Union[bytes, JsonDict],
-    expected_code: Optional[int] = None,
+    expected_body: bytes | JsonDict,
+    expected_code: int | None = None,
 ) -> None:
     """Disconnects an in-flight request and checks the response.
 
@@ -146,9 +144,9 @@ def make_request_with_cancellation_test(
     site: Site,
     method: str,
     path: str,
-    content: Union[bytes, str, JsonDict] = b"",
+    content: bytes | str | JsonDict = b"",
     *,
-    token: Optional[str] = None,
+    token: str | None = None,
 ) -> FakeChannel:
     """Performs a request repeatedly, disconnecting at successive `await`s, until
     one completes.
@@ -199,19 +197,19 @@ def make_request_with_cancellation_test(
     #
     # We would like to trigger a cancellation at the first `await`, re-run the
     # request and cancel at the second `await`, and so on. By patching
-    # `Deferred.__next__`, we can intercept `await`s, track which ones we have or
+    # `Deferred.__await__`, we can intercept `await`s, track which ones we have or
     # have not seen, and force them to block when they wouldn't have.
 
     # The set of previously seen `await`s.
     # Each element is a stringified stack trace.
-    seen_awaits: Set[Tuple[str, ...]] = set()
+    seen_awaits: set[tuple[str, ...]] = set()
 
     _log_for_request(
         0, f"Running make_request_with_cancellation_test for {test_name}..."
     )
 
     for request_number in itertools.count(1):
-        deferred_patch = Deferred__next__Patch(seen_awaits, request_number)
+        deferred_patch = Deferred__await__Patch(seen_awaits, request_number)
 
         try:
             with mock.patch(
@@ -250,6 +248,8 @@ def make_request_with_cancellation_test(
                             )
 
                 if respond_mock.called:
+                    _log_for_request(request_number, "--- response finished ---")
+
                     # The request ran to completion and we are done with testing it.
 
                     # `respond_with_json` writes the response asynchronously, so we
@@ -311,8 +311,8 @@ def make_request_with_cancellation_test(
     assert False, "unreachable"  # noqa: B011
 
 
-class Deferred__next__Patch:
-    """A `Deferred.__next__` patch that will intercept `await`s and force them
+class Deferred__await__Patch:
+    """A `Deferred.__await__` patch that will intercept `await`s and force them
     to block once it sees a new `await`.
 
     When done with the patch, `unblock_awaits()` must be called to clean up after any
@@ -322,7 +322,7 @@ class Deferred__next__Patch:
 
     Usage:
         seen_awaits = set()
-        deferred_patch = Deferred__next__Patch(seen_awaits, 1)
+        deferred_patch = Deferred__await__Patch(seen_awaits, 1)
         try:
             with deferred_patch.patch():
                 # do things
@@ -331,18 +331,18 @@ class Deferred__next__Patch:
             deferred_patch.unblock_awaits()
     """
 
-    def __init__(self, seen_awaits: Set[Tuple[str, ...]], request_number: int):
+    def __init__(self, seen_awaits: set[tuple[str, ...]], request_number: int):
         """
         Args:
             seen_awaits: The set of stack traces of `await`s that have been previously
-                seen. When the `Deferred.__next__` patch sees a new `await`, it will add
+                seen. When the `Deferred.__await__` patch sees a new `await`, it will add
                 it to the set.
             request_number: The request number to log against.
         """
         self._request_number = request_number
         self._seen_awaits = seen_awaits
 
-        self._original_Deferred___next__ = Deferred.__next__  # type: ignore[misc,unused-ignore]
+        self._original_Deferred__await__ = Deferred.__await__  # type: ignore[misc,unused-ignore]
 
         # The number of `await`s on `Deferred`s we have seen so far.
         self.awaits_seen = 0
@@ -350,25 +350,30 @@ class Deferred__next__Patch:
         # Whether we have seen a new `await` not in `seen_awaits`.
         self.new_await_seen = False
 
+        # Whether to block new await points we see. This gets set to False once
+        # we have cancelled the request to allow things to run after
+        # cancellation.
+        self._block_new_awaits = True
+
         # To force `await`s on resolved `Deferred`s to block, we make up a new
-        # unresolved `Deferred` and return it out of `Deferred.__next__` /
+        # unresolved `Deferred` and return it out of `Deferred.__await__` /
         # `coroutine.send()`. We have to resolve it later, in case the `await`ing
         # coroutine is part of some shared processing, such as `@cached`.
-        self._to_unblock: Dict[Deferred, Union[object, Failure]] = {}
+        self._to_unblock: dict[Deferred, object | Failure] = {}
 
         # The last stack we logged.
-        self._previous_stack: List[inspect.FrameInfo] = []
+        self._previous_stack: list[inspect.FrameInfo] = []
 
     def patch(self) -> ContextManager[Mock]:
-        """Returns a context manager which patches `Deferred.__next__`."""
+        """Returns a context manager which patches `Deferred.__await__`."""
 
-        def Deferred___next__(
-            deferred: "Deferred[T]", value: object = None
-        ) -> "Deferred[T]":
-            """Intercepts `await`s on `Deferred`s and rigs them to block once we have
-            seen enough of them.
+        def Deferred___await__(
+            deferred: "Deferred[T]",
+        ) -> Generator["Deferred[T]", None, T]:
+            """Intercepts calls to `__await__`, which returns a generator
+            yielding deferreds that we await on.
 
-            `Deferred.__next__` will normally:
+            The generator for `__await__` will normally:
                 * return `self` if the `Deferred` is unresolved, in which case
                    `coroutine.send()` will return the `Deferred`, and
                    `_defer.inlineCallbacks` will stop running the coroutine until the
@@ -376,9 +381,43 @@ class Deferred__next__Patch:
                 * raise a `StopIteration(result)`, containing the result of the `await`.
                 * raise another exception, which will come out of the `await`.
             """
+
+            # Get the original generator.
+            gen = self._original_Deferred__await__(deferred)
+
+            # Run the generator, handling each iteration to see if we need to
+            # block.
+            try:
+                while True:
+                    # We've hit a new await point (or the deferred has
+                    # completed), handle it.
+                    handle_next_iteration(deferred)
+
+                    # Continue on.
+                    yield gen.send(None)
+            except StopIteration as e:
+                # We need to convert `StopIteration` into a normal return.
+                return e.value
+
+        def handle_next_iteration(
+            deferred: "Deferred[T]",
+        ) -> None:
+            """Intercepts `await`s on `Deferred`s and rigs them to block once we have
+            seen enough of them.
+
+            Args:
+                deferred: The deferred that we've captured and are intercepting
+                    `await` calls within.
+            """
+            if not self._block_new_awaits:
+                # We're no longer blocking awaits points
+                return
+
             self.awaits_seen += 1
 
-            stack = _get_stack(skip_frames=1)
+            stack = _get_stack(
+                skip_frames=2  # Ignore this function and `Deferred___await__` in stack trace
+            )
             stack_hash = _hash_stack(stack)
 
             if stack_hash not in self._seen_awaits:
@@ -389,19 +428,28 @@ class Deferred__next__Patch:
             if not self.new_await_seen:
                 # This `await` isn't interesting. Let it proceed normally.
 
+                _log_await_stack(
+                    stack,
+                    self._previous_stack,
+                    self._request_number,
+                    "already seen",
+                )
+
                 # Don't log the stack. It's been seen before in a previous run.
                 self._previous_stack = stack
 
-                return self._original_Deferred___next__(deferred, value)
+                return
 
             # We want to block at the current `await`.
             if deferred.called and not deferred.paused:
-                # This `Deferred` already has a result.
-                # We return a new, unresolved, `Deferred` for `_inlineCallbacks` to wait
-                # on. This blocks the coroutine that did this `await`.
+                # This `Deferred` already has a result. We chain a new,
+                # unresolved, `Deferred` to the end of this Deferred that it
+                # will wait on. This blocks the coroutine that did this `await`.
                 # We queue it up for unblocking later.
                 new_deferred: "Deferred[T]" = Deferred()
                 self._to_unblock[new_deferred] = deferred.result
+
+                deferred.addBoth(lambda _: make_deferred_yieldable(new_deferred))
 
                 _log_await_stack(
                     stack,
@@ -411,7 +459,9 @@ class Deferred__next__Patch:
                 )
                 self._previous_stack = stack
 
-                return make_deferred_yieldable(new_deferred)
+                # Continue iterating on the deferred now that we've blocked it
+                # again.
+                return
 
             # This `Deferred` does not have a result yet.
             # The `await` will block normally, so we don't have to do anything.
@@ -423,9 +473,9 @@ class Deferred__next__Patch:
             )
             self._previous_stack = stack
 
-            return self._original_Deferred___next__(deferred, value)
+            return
 
-        return mock.patch.object(Deferred, "__next__", new=Deferred___next__)
+        return mock.patch.object(Deferred, "__await__", new=Deferred___await__)
 
     def unblock_awaits(self) -> None:
         """Unblocks any shared processing that we forced to block.
@@ -433,6 +483,9 @@ class Deferred__next__Patch:
         Must be called when done, otherwise processing shared between multiple requests,
         such as database queries started by `@cached`, will become permanently stuck.
         """
+        # Also disable blocking at future await points
+        self._block_new_awaits = False
+
         to_unblock = self._to_unblock
         self._to_unblock = {}
         for deferred, result in to_unblock.items():
@@ -443,13 +496,13 @@ def _log_for_request(request_number: int, message: str) -> None:
     """Logs a message for an iteration of `make_request_with_cancellation_test`."""
     # We want consistent alignment when logging stack traces, so ensure the logging
     # context has a fixed width name.
-    with LoggingContext(name=f"request-{request_number:<2}"):
+    with LoggingContext(name=f"request-{request_number:<2}", server_name="test_server"):
         logger.info(message)
 
 
 def _log_await_stack(
-    stack: List[inspect.FrameInfo],
-    previous_stack: List[inspect.FrameInfo],
+    stack: list[inspect.FrameInfo],
+    previous_stack: list[inspect.FrameInfo],
     request_number: int,
     note: str,
 ) -> None:
@@ -507,7 +560,7 @@ def _format_stack_frame(frame_info: inspect.FrameInfo) -> str:
     )
 
 
-def _get_stack(skip_frames: int) -> List[inspect.FrameInfo]:
+def _get_stack(skip_frames: int) -> list[inspect.FrameInfo]:
     """Captures the stack for a request.
 
     Skips any twisted frames and stops at `JsonResource.wrapped_async_request_handler`.
@@ -563,6 +616,6 @@ def _get_stack_frame_method_name(frame_info: inspect.FrameInfo) -> str:
     return method_name
 
 
-def _hash_stack(stack: List[inspect.FrameInfo]) -> Tuple[str, ...]:
+def _hash_stack(stack: list[inspect.FrameInfo]) -> tuple[str, ...]:
     """Turns a stack into a hashable value that can be put into a set."""
     return tuple(_format_stack_frame(frame) for frame in stack)

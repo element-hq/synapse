@@ -18,10 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 from unittest import mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import AuthError, StoreError
 from synapse.api.room_versions import RoomVersion
@@ -39,7 +38,7 @@ from synapse.server import HomeServer
 from synapse.state import StateResolutionStore
 from synapse.state.v2 import _mainline_sort, _reverse_topological_power_sort
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import event_injection
@@ -183,7 +182,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         else:
 
             async def get_event(
-                destination: str, event_id: str, timeout: Optional[int] = None
+                destination: str, event_id: str, timeout: int | None = None
             ) -> JsonDict:
                 self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 self.assertEqual(event_id, prev_event.event_id)
@@ -224,7 +223,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         self.reactor.advance(60000)
 
         # Finally, the call under test: send the pulled event into _process_pulled_event
-        with LoggingContext("test"):
+        with LoggingContext(
+            name="test",
+            server_name=self.hs.hostname,
+        ):
             self.get_success(
                 self.hs.get_federation_event_handler()._process_pulled_event(
                     self.OTHER_SERVER_NAME, pulled_event, backfilled=False
@@ -321,7 +323,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         # The function under test: try to process the pulled event
-        with LoggingContext("test"):
+        with LoggingContext(
+            name="test",
+            server_name=self.hs.hostname,
+        ):
             self.get_success(
                 self.hs.get_federation_event_handler()._process_pulled_event(
                     self.OTHER_SERVER_NAME, pulled_event, backfilled=True
@@ -339,7 +344,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(backfill_num_attempts, 1)
 
         # The function under test: try to process the pulled event again
-        with LoggingContext("test"):
+        with LoggingContext(
+            name="test",
+            server_name=self.hs.hostname,
+        ):
             self.get_success(
                 self.hs.get_federation_event_handler()._process_pulled_event(
                     self.OTHER_SERVER_NAME, pulled_event, backfilled=True
@@ -375,7 +383,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         In this test, we pretend we are processing a "pulled" event via
         backfill. The pulled event succesfully processes and the backward
-        extremeties are updated along with clearing out any failed pull attempts
+        extremities are updated along with clearing out any failed pull attempts
         for those old extremities.
 
         We check that we correctly cleared failed pull attempts of the
@@ -447,7 +455,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(backfill_num_attempts, 1)
 
         # The function under test: try to process the pulled event
-        with LoggingContext("test"):
+        with LoggingContext(
+            name="test",
+            server_name=self.hs.hostname,
+        ):
             self.get_success(
                 self.hs.get_federation_event_handler()._process_pulled_event(
                     self.OTHER_SERVER_NAME, pulled_event, backfilled=True
@@ -573,7 +584,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         room_state_endpoint_requested_count = 0
 
         async def get_event(
-            destination: str, event_id: str, timeout: Optional[int] = None
+            destination: str, event_id: str, timeout: int | None = None
         ) -> None:
             nonlocal event_endpoint_requested_count
             event_endpoint_requested_count += 1
@@ -602,7 +613,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         # The function under test: try to backfill and process the pulled event
-        with LoggingContext("test"):
+        with LoggingContext(
+            name="test",
+            server_name=self.hs.hostname,
+        ):
             self.get_success(
                 self.hs.get_federation_event_handler().backfill(
                     self.OTHER_SERVER_NAME,
@@ -742,7 +756,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         }
 
         # The function under test: try to backfill and process the pulled event
-        with LoggingContext("test"):
+        with LoggingContext(
+            name="test",
+            server_name=self.hs.hostname,
+        ):
             self.get_success(
                 self.hs.get_federation_event_handler().backfill(
                     self.OTHER_SERVER_NAME,
@@ -807,6 +824,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         OTHER_USER = f"@user:{self.OTHER_SERVER_NAME}"
         main_store = self.hs.get_datastores().main
+        state_deletion_store = self.hs.get_datastores().state_deletion
 
         # Create the room.
         kermit_user_id = self.register_user("kermit", "test")
@@ -886,7 +904,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         next_depth += 1
         next_timestamp += 100
 
-        with LoggingContext("send_rejected_power_levels_event"):
+        with LoggingContext(
+            name="send_rejected_power_levels_event",
+            server_name=self.hs.hostname,
+        ):
             self.get_success(
                 self.hs.get_federation_event_handler()._process_pulled_event(
                     self.OTHER_SERVER_NAME,
@@ -958,7 +979,9 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                         bert_member_event.event_id: bert_member_event,
                         rejected_kick_event.event_id: rejected_kick_event,
                     },
-                    state_res_store=StateResolutionStore(main_store),
+                    state_res_store=StateResolutionStore(
+                        main_store, state_deletion_store
+                    ),
                 )
             ),
             [bert_member_event.event_id, rejected_kick_event.event_id],
@@ -966,7 +989,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
             "during state resolution. The test setup is incorrect.",
         )
 
-        with LoggingContext("send_rejected_kick_event"):
+        with LoggingContext(
+            name="send_rejected_kick_event",
+            server_name=self.hs.hostname,
+        ):
             self.get_success(
                 self.hs.get_federation_event_handler()._process_pulled_event(
                     self.OTHER_SERVER_NAME, rejected_kick_event, backfilled=False
@@ -1003,7 +1029,9 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                         rejected_power_levels_event.event_id,
                     ],
                     event_map={},
-                    state_res_store=StateResolutionStore(main_store),
+                    state_res_store=StateResolutionStore(
+                        main_store, state_deletion_store
+                    ),
                     full_conflicted_set=set(),
                 )
             ),
@@ -1080,10 +1108,13 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         # We have to bump the clock a bit, to keep the retry logic in
         # `FederationClient.get_pdu` happy
         self.reactor.advance(60000)
-        with LoggingContext("send_pulled_event"):
+        with LoggingContext(
+            name="send_pulled_event",
+            server_name=self.hs.hostname,
+        ):
 
             async def get_event(
-                destination: str, event_id: str, timeout: Optional[int] = None
+                destination: str, event_id: str, timeout: int | None = None
             ) -> JsonDict:
                 self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 self.assertEqual(event_id, missing_event.event_id)

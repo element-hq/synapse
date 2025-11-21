@@ -21,15 +21,15 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
 import attr
-from typing_extensions import Literal
+from pydantic import StrictBool, StrictStr, StringConstraints
+from typing_extensions import Annotated
 
 from twisted.web.server import Request
 
-from synapse._pydantic_compat import StrictBool, StrictStr, constr
 from synapse.api.constants import LoginType
 from synapse.api.errors import (
     Codes,
@@ -48,7 +48,7 @@ from synapse.http.servlet import (
     parse_string,
 )
 from synapse.http.site import SynapseRequest
-from synapse.metrics import threepid_send_requests
+from synapse.metrics import SERVER_NAME_LABEL, threepid_send_requests
 from synapse.push.mailer import Mailer
 from synapse.types import JsonDict
 from synapse.types.rest import RequestBodyModel
@@ -77,6 +77,7 @@ class EmailPasswordRequestTokenRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
+        self.server_name = hs.hostname
         self.datastore = hs.get_datastores().main
         self.config = hs.config
         self.identity_handler = hs.get_identity_handler()
@@ -89,7 +90,7 @@ class EmailPasswordRequestTokenRestServlet(RestServlet):
                 template_text=self.config.email.email_password_reset_template_text,
             )
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if not self.config.email.can_verify_email:
             logger.warning(
                 "User password resets have been disabled due to lack of email config"
@@ -137,9 +138,11 @@ class EmailPasswordRequestTokenRestServlet(RestServlet):
             self.mailer.send_password_reset_mail,
             body.next_link,
         )
-        threepid_send_requests.labels(type="email", reason="password_reset").observe(
-            body.send_attempt
-        )
+        threepid_send_requests.labels(
+            type="email",
+            reason="password_reset",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).observe(body.send_attempt)
 
         # Wrap the session id in a JSON object
         return 200, {"sid": sid}
@@ -158,16 +161,14 @@ class PasswordRestServlet(RestServlet):
         self._set_password_handler = hs.get_set_password_handler()
 
     class PostBody(RequestBodyModel):
-        auth: Optional[AuthenticationData] = None
+        auth: AuthenticationData | None = None
         logout_devices: StrictBool = True
-        if TYPE_CHECKING:
-            # workaround for https://github.com/samuelcolvin/pydantic/issues/156
-            new_password: Optional[StrictStr] = None
-        else:
-            new_password: Optional[constr(max_length=512, strict=True)] = None
+        new_password: (
+            Annotated[str, StringConstraints(max_length=512, strict=True)] | None
+        ) = None
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
         # we do basic sanity checks here because the auth layer will store these
@@ -258,7 +259,7 @@ class PasswordRestServlet(RestServlet):
         # If we have a password in this request, prefer it. Otherwise, use the
         # password hash from an earlier request.
         if new_password:
-            password_hash: Optional[str] = await self.auth_handler.hash(new_password)
+            password_hash: str | None = await self.auth_handler.hash(new_password)
         elif session_id is not None:
             password_hash = existing_session_password_hash
         else:
@@ -288,13 +289,13 @@ class DeactivateAccountRestServlet(RestServlet):
         self._deactivate_account_handler = hs.get_deactivate_account_handler()
 
     class PostBody(RequestBodyModel):
-        auth: Optional[AuthenticationData] = None
-        id_server: Optional[StrictStr] = None
+        auth: AuthenticationData | None = None
+        id_server: StrictStr | None = None
         # Not specced, see https://github.com/matrix-org/matrix-spec/issues/297
         erase: StrictBool = False
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
         requester = await self.auth.get_user_by_req(request)
@@ -326,6 +327,7 @@ class EmailThreepidRequestTokenRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
+        self.server_name = hs.hostname
         self.config = hs.config
         self.identity_handler = hs.get_identity_handler()
         self.store = self.hs.get_datastores().main
@@ -338,7 +340,7 @@ class EmailThreepidRequestTokenRestServlet(RestServlet):
                 template_text=self.config.email.email_add_threepid_template_text,
             )
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if not self.hs.config.registration.enable_3pid_changes:
             raise SynapseError(
                 400, "3PID changes are disabled on this server", Codes.FORBIDDEN
@@ -351,6 +353,7 @@ class EmailThreepidRequestTokenRestServlet(RestServlet):
             raise SynapseError(
                 400,
                 "Adding an email to your account is disabled on this server",
+                Codes.THREEPID_MEDIUM_NOT_SUPPORTED,
             )
 
         body = parse_and_validate_json_object_from_request(
@@ -394,9 +397,11 @@ class EmailThreepidRequestTokenRestServlet(RestServlet):
             body.next_link,
         )
 
-        threepid_send_requests.labels(type="email", reason="add_threepid").observe(
-            body.send_attempt
-        )
+        threepid_send_requests.labels(
+            type="email",
+            reason="add_threepid",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).observe(body.send_attempt)
 
         # Wrap the session id in a JSON object
         return 200, {"sid": sid}
@@ -407,11 +412,12 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self.server_name = hs.hostname
         super().__init__()
         self.store = self.hs.get_datastores().main
         self.identity_handler = hs.get_identity_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_and_validate_json_object_from_request(
             request, MsisdnRequestTokenBody
         )
@@ -457,6 +463,7 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
             raise SynapseError(
                 400,
                 "Adding phone numbers to user account is not supported by this homeserver",
+                Codes.THREEPID_MEDIUM_NOT_SUPPORTED,
             )
 
         ret = await self.identity_handler.requestMsisdnToken(
@@ -468,9 +475,11 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
             body.next_link,
         )
 
-        threepid_send_requests.labels(type="msisdn", reason="add_threepid").observe(
-            body.send_attempt
-        )
+        threepid_send_requests.labels(
+            type="msisdn",
+            reason="add_threepid",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).observe(body.send_attempt)
         logger.info("MSISDN %s: got response from identity server: %s", msisdn, ret)
 
         return 200, ret
@@ -499,7 +508,9 @@ class AddThreepidEmailSubmitTokenServlet(RestServlet):
                 "Adding emails have been disabled due to lack of an email config"
             )
             raise SynapseError(
-                400, "Adding an email to your account is disabled on this server"
+                400,
+                "Adding an email to your account is disabled on this server",
+                Codes.THREEPID_MEDIUM_NOT_SUPPORTED,
             )
 
         sid = parse_string(request, "sid", required=True)
@@ -555,7 +566,7 @@ class AddThreepidMsisdnSubmitTokenServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.identity_handler = hs.get_identity_handler()
 
-    async def on_POST(self, request: Request) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: Request) -> tuple[int, JsonDict]:
         if not self.config.registration.account_threepid_delegate_msisdn:
             raise SynapseError(
                 400,
@@ -589,7 +600,7 @@ class ThreepidRestServlet(RestServlet):
         self.auth_handler = hs.get_auth_handler()
         self.datastore = self.hs.get_datastores().main
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         threepids = await self.datastore.user_get_threepids(requester.user.to_string())
@@ -600,8 +611,8 @@ class ThreepidRestServlet(RestServlet):
     # the endpoint is deprecated. (If you really want to, you could do this by reusing
     # ThreePidBindRestServelet.PostBody with an `alias_generator` to handle
     # `threePidCreds` versus `three_pid_creds`.
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        if self.hs.config.experimental.msc3861.enabled:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        if self.hs.config.mas.enabled or self.hs.config.experimental.msc3861.enabled:
             raise NotFoundError(errcode=Codes.UNRECOGNIZED)
 
         if not self.hs.config.registration.enable_3pid_changes:
@@ -652,12 +663,12 @@ class ThreepidAddRestServlet(RestServlet):
         self.auth_handler = hs.get_auth_handler()
 
     class PostBody(RequestBodyModel):
-        auth: Optional[AuthenticationData] = None
+        auth: AuthenticationData | None = None
         client_secret: ClientSecretStr
         sid: StrictStr
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if not self.hs.config.registration.enable_3pid_changes:
             raise SynapseError(
                 400, "3PID changes are disabled on this server", Codes.FORBIDDEN
@@ -706,7 +717,7 @@ class ThreepidBindRestServlet(RestServlet):
         id_server: StrictStr
         sid: StrictStr
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
         requester = await self.auth.get_user_by_req(request)
@@ -731,10 +742,10 @@ class ThreepidUnbindRestServlet(RestServlet):
 
     class PostBody(RequestBodyModel):
         address: StrictStr
-        id_server: Optional[StrictStr] = None
+        id_server: StrictStr | None = None
         medium: Literal["email", "msisdn"]
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         """Unbind the given 3pid from a specific identity server, or identity servers that are
         known to have this 3pid bound
         """
@@ -760,10 +771,10 @@ class ThreepidDeleteRestServlet(RestServlet):
 
     class PostBody(RequestBodyModel):
         address: StrictStr
-        id_server: Optional[StrictStr] = None
+        id_server: StrictStr | None = None
         medium: Literal["email", "msisdn"]
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if not self.hs.config.registration.enable_3pid_changes:
             raise SynapseError(
                 400, "3PID changes are disabled on this server", Codes.FORBIDDEN
@@ -847,7 +858,7 @@ class WhoamiRestServlet(RestServlet):
         super().__init__()
         self.auth = hs.get_auth()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         response = {
@@ -877,9 +888,9 @@ class AccountStatusRestServlet(RestServlet):
     class PostBody(RequestBodyModel):
         # TODO: we could validate that each user id is an mxid here, and/or parse it
         #       as a UserID
-        user_ids: List[StrictStr]
+        user_ids: list[StrictStr]
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await self._auth.get_user_by_req(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
@@ -893,23 +904,27 @@ class AccountStatusRestServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
+    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+
+    ThreepidRestServlet(hs).register(http_server)
+    WhoamiRestServlet(hs).register(http_server)
+
+    if not auth_delegated:
+        DeactivateAccountRestServlet(hs).register(http_server)
+
     if hs.config.worker.worker_app is None:
-        if not hs.config.experimental.msc3861.enabled:
+        ThreepidBindRestServlet(hs).register(http_server)
+        ThreepidUnbindRestServlet(hs).register(http_server)
+
+        if not auth_delegated:
             EmailPasswordRequestTokenRestServlet(hs).register(http_server)
-            DeactivateAccountRestServlet(hs).register(http_server)
             PasswordRestServlet(hs).register(http_server)
             EmailThreepidRequestTokenRestServlet(hs).register(http_server)
             MsisdnThreepidRequestTokenRestServlet(hs).register(http_server)
             AddThreepidEmailSubmitTokenServlet(hs).register(http_server)
             AddThreepidMsisdnSubmitTokenServlet(hs).register(http_server)
-    ThreepidRestServlet(hs).register(http_server)
-    if hs.config.worker.worker_app is None:
-        ThreepidBindRestServlet(hs).register(http_server)
-        ThreepidUnbindRestServlet(hs).register(http_server)
-        if not hs.config.experimental.msc3861.enabled:
             ThreepidAddRestServlet(hs).register(http_server)
             ThreepidDeleteRestServlet(hs).register(http_server)
-    WhoamiRestServlet(hs).register(http_server)
 
-    if hs.config.worker.worker_app is None and hs.config.experimental.msc3720_enabled:
+    if hs.config.experimental.msc3720_enabled:
         AccountStatusRestServlet(hs).register(http_server)

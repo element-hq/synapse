@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Any, List, Set, Tuple, cast
+from typing import Any, cast
 
 from synapse.api.errors import SynapseError
 from synapse.storage.database import LoggingTransaction
@@ -33,10 +33,77 @@ from synapse.types import RoomStreamToken
 logger = logging.getLogger(__name__)
 
 
+purge_room_tables_with_event_id_index = (
+    "event_auth",
+    "event_edges",
+    "event_json",
+    "event_push_actions_staging",
+    "event_relations",
+    "event_to_state_groups",
+    "event_auth_chains",
+    "event_auth_chain_to_calculate",
+    "redactions",
+    "rejections",
+    "state_events",
+)
+"""
+Tables which lack an index on `room_id` but have one on `event_id`
+"""
+
+purge_room_tables_with_room_id_column = (
+    "current_state_events",
+    "destination_rooms",
+    "event_backward_extremities",
+    "event_forward_extremities",
+    "event_push_actions",
+    "event_search",
+    "event_failed_pull_attempts",
+    # Note: the partial state tables have foreign keys between each other, and to
+    # `events` and `rooms`. We need to delete from them in the right order.
+    "partial_state_events",
+    "partial_state_rooms_servers",
+    "partial_state_rooms",
+    # Note: the _membership(s) tables have foreign keys to the `events` table
+    # so must be deleted first.
+    "local_current_membership",
+    "room_memberships",
+    # Note: the sliding_sync_ tables have foreign keys to the `events` table
+    # so must be deleted first.
+    "sliding_sync_joined_rooms",
+    "sliding_sync_membership_snapshots",
+    "events",
+    "federation_inbound_events_staging",
+    "receipts_graph",
+    "receipts_linearized",
+    "room_aliases",
+    "room_depth",
+    "room_stats_state",
+    "room_stats_current",
+    "room_stats_earliest_token",
+    "stream_ordering_to_exterm",
+    "users_in_public_rooms",
+    "users_who_share_private_rooms",
+    # no useful index, but let's clear them anyway
+    "appservice_room_list",
+    "e2e_room_keys",
+    "event_push_summary",
+    "pusher_throttle",
+    "room_account_data",
+    "room_tags",
+    # "rooms" happens last, to keep the foreign keys in the other tables
+    # happy
+    "rooms",
+)
+"""
+The tables with a `room_id` column regardless of whether they have a useful index on
+`room_id`.
+"""
+
+
 class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
     async def purge_history(
         self, room_id: str, token: str, delete_local_events: bool
-    ) -> Set[int]:
+    ) -> set[int]:
         """Deletes room history before a certain point.
 
         Note that only a single purge can occur at once, this is guaranteed via
@@ -70,7 +137,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         room_id: str,
         token: RoomStreamToken,
         delete_local_events: bool,
-    ) -> Set[int]:
+    ) -> set[int]:
         # Tables that should be pruned:
         #     event_auth
         #     event_backward_extremities
@@ -137,7 +204,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         logger.info("[purge] looking for events to delete")
 
         should_delete_expr = "state_events.state_key IS NULL"
-        should_delete_params: Tuple[Any, ...] = ()
+        should_delete_params: tuple[Any, ...] = ()
         if not delete_local_events:
             should_delete_expr += " AND event_id NOT LIKE ?"
 
@@ -172,6 +239,16 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
 
         txn.execute("SELECT event_id, should_delete FROM events_to_purge")
         event_rows = txn.fetchall()
+
+        if len(event_rows) == 0:
+            logger.info("[purge] no events found to purge")
+
+            # For the sake of cleanliness: drop the temp table.
+            # This will commit the txn in sqlite, so make sure to keep this actually last.
+            txn.execute("DROP TABLE events_to_purge")
+            # no referenced state groups
+            return set()
+
         logger.info(
             "[purge] found %i events before cutoff, of which %i can be deleted",
             len(event_rows),
@@ -199,8 +276,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
 
         # Update backward extremeties
         txn.execute_batch(
-            "INSERT INTO event_backward_extremities (room_id, event_id)"
-            " VALUES (?, ?)",
+            "INSERT INTO event_backward_extremities (room_id, event_id) VALUES (?, ?)",
             [(room_id, event_id) for (event_id,) in new_backwards_extrems],
         )
 
@@ -289,7 +365,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         """,
             (room_id,),
         )
-        (min_depth,) = cast(Tuple[int], txn.fetchone())
+        (min_depth,) = cast(tuple[int], txn.fetchone())
 
         logger.info("[purge] updating room_depth to %d", min_depth)
 
@@ -332,7 +408,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
 
         return referenced_state_groups
 
-    async def purge_room(self, room_id: str) -> List[int]:
+    async def purge_room(self, room_id: str) -> None:
         """Deletes all record of a room
 
         Args:
@@ -348,7 +424,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         # purge any of those rows which were added during the first.
 
         logger.info("[purge] Starting initial main purge of [1/2]")
-        state_groups_to_delete = await self.db_pool.runInteraction(
+        await self.db_pool.runInteraction(
             "purge_room",
             self._purge_room_txn,
             room_id=room_id,
@@ -356,18 +432,15 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         )
 
         logger.info("[purge] Starting secondary main purge of [2/2]")
-        state_groups_to_delete.extend(
-            await self.db_pool.runInteraction(
-                "purge_room",
-                self._purge_room_txn,
-                room_id=room_id,
-            ),
+        await self.db_pool.runInteraction(
+            "purge_room",
+            self._purge_room_txn,
+            room_id=room_id,
         )
+
         logger.info("[purge] Done with main purge")
 
-        return state_groups_to_delete
-
-    def _purge_room_txn(self, txn: LoggingTransaction, room_id: str) -> List[int]:
+    def _purge_room_txn(self, txn: LoggingTransaction, room_id: str) -> None:
         # This collides with event persistence so we cannot write new events and metadata into
         # a room while deleting it or this transaction will fail.
         if isinstance(self.database_engine, PostgresEngine):
@@ -376,18 +449,10 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
                 (room_id,),
             )
 
-        # First, fetch all the state groups that should be deleted, before
-        # we delete that information.
-        txn.execute(
-            """
-                SELECT DISTINCT state_group FROM events
-                INNER JOIN event_to_state_groups USING(event_id)
-                WHERE events.room_id = ?
-            """,
-            (room_id,),
-        )
-
-        state_groups = [row[0] for row in txn]
+        if isinstance(self.database_engine, PostgresEngine):
+            # Disable statement timeouts for this transaction; purging rooms can
+            # take a while!
+            txn.execute("SET LOCAL statement_timeout = 0")
 
         # Get all the auth chains that are referenced by events that are to be
         # deleted.
@@ -410,20 +475,8 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
             referenced_chain_id_tuples,
         )
 
-        # Now we delete tables which lack an index on room_id but have one on event_id
-        for table in (
-            "event_auth",
-            "event_edges",
-            "event_json",
-            "event_push_actions_staging",
-            "event_relations",
-            "event_to_state_groups",
-            "event_auth_chains",
-            "event_auth_chain_to_calculate",
-            "redactions",
-            "rejections",
-            "state_events",
-        ):
+        # Now we delete tables which lack an index on `room_id` but have one on `event_id`
+        for table in purge_room_tables_with_event_id_index:
             logger.info("[purge] removing from %s", table)
 
             txn.execute(
@@ -436,51 +489,9 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
                 (room_id,),
             )
 
-        # next, the tables with an index on room_id (or no useful index)
-        for table in (
-            "current_state_events",
-            "destination_rooms",
-            "event_backward_extremities",
-            "event_forward_extremities",
-            "event_push_actions",
-            "event_search",
-            "event_failed_pull_attempts",
-            # Note: the partial state tables have foreign keys between each other, and to
-            # `events` and `rooms`. We need to delete from them in the right order.
-            "partial_state_events",
-            "partial_state_rooms_servers",
-            "partial_state_rooms",
-            # Note: the _membership(s) tables have foreign keys to the `events` table
-            # so must be deleted first.
-            "local_current_membership",
-            "room_memberships",
-            # Note: the sliding_sync_ tables have foreign keys to the `events` table
-            # so must be deleted first.
-            "sliding_sync_joined_rooms",
-            "sliding_sync_membership_snapshots",
-            "events",
-            "federation_inbound_events_staging",
-            "receipts_graph",
-            "receipts_linearized",
-            "room_aliases",
-            "room_depth",
-            "room_stats_state",
-            "room_stats_current",
-            "room_stats_earliest_token",
-            "stream_ordering_to_exterm",
-            "users_in_public_rooms",
-            "users_who_share_private_rooms",
-            # no useful index, but let's clear them anyway
-            "appservice_room_list",
-            "e2e_room_keys",
-            "event_push_summary",
-            "pusher_throttle",
-            "room_account_data",
-            "room_tags",
-            # "rooms" happens last, to keep the foreign keys in the other tables
-            # happy
-            "rooms",
-        ):
+        # next, the tables with a `room_id` column regardless of whether they have a
+        # useful index on `room_id`
+        for table in purge_room_tables_with_room_id_column:
             logger.info("[purge] removing from %s", table)
             txn.execute("DELETE FROM %s WHERE room_id=?" % (table,), (room_id,))
 
@@ -508,5 +519,3 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         #       periodically anyway (https://github.com/matrix-org/synapse/issues/5888)
 
         self._invalidate_caches_for_room_and_stream(txn, room_id)
-
-        return state_groups

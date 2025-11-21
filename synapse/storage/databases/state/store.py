@@ -22,13 +22,8 @@
 import logging
 from typing import (
     TYPE_CHECKING,
-    Collection,
-    Dict,
     Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
+    Mapping,
     cast,
 )
 
@@ -36,7 +31,10 @@ import attr
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
-from synapse.events.snapshot import UnpersistedEventContext, UnpersistedEventContextBase
+from synapse.events.snapshot import (
+    UnpersistedEventContext,
+    UnpersistedEventContextBase,
+)
 from synapse.logging.opentracing import tag_args, trace
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
@@ -45,6 +43,7 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.databases.state.bg_updates import StateBackgroundUpdateStore
+from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
 from synapse.storage.util.sequence import build_sequence_generator
 from synapse.types import MutableStateMap, StateKey, StateMap
@@ -55,6 +54,7 @@ from synapse.util.cancellation import cancellable
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+    from synapse.storage.databases.state.deletion import StateDeletionDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +68,8 @@ class _GetStateGroupDelta:
     us use the iterable flag when caching
     """
 
-    prev_group: Optional[int]
-    delta_ids: Optional[StateMap[str]]
+    prev_group: int | None
+    delta_ids: StateMap[str] | None
 
     def __len__(self) -> int:
         return len(self.delta_ids) if self.delta_ids else 0
@@ -83,8 +83,11 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         database: DatabasePool,
         db_conn: LoggingDatabaseConnection,
         hs: "HomeServer",
+        state_deletion_store: "StateDeletionDataStore",
     ):
         super().__init__(database, db_conn, hs)
+        self._state_deletion_store = state_deletion_store
+        self.server_name = hs.hostname
 
         # Originally the state store used a single DictionaryCache to cache the
         # event IDs for the state types in a given state group to avoid hammering
@@ -116,14 +119,18 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         # vast majority of state in Matrix (today) is member events.
 
         self._state_group_cache: DictionaryCache[int, StateKey, str] = DictionaryCache(
-            "*stateGroupCache*",
+            name="*stateGroupCache*",
+            clock=hs.get_clock(),
+            server_name=self.server_name,
             # TODO: this hasn't been tuned yet
-            50000,
+            max_entries=50000,
         )
         self._state_group_members_cache: DictionaryCache[int, StateKey, str] = (
             DictionaryCache(
-                "*stateGroupMembersCache*",
-                500000,
+                name="*stateGroupMembersCache*",
+                clock=hs.get_clock(),
+                server_name=self.server_name,
+                max_entries=500000,
             )
         )
 
@@ -162,7 +169,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 return _GetStateGroupDelta(None, None)
 
             delta_ids = cast(
-                List[Tuple[str, str, str]],
+                list[tuple[str, str, str]],
                 self.db_pool.simple_select_list_txn(
                     txn,
                     table="state_groups_state",
@@ -187,8 +194,8 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     @tag_args
     @cancellable
     async def _get_state_groups_from_groups(
-        self, groups: List[int], state_filter: StateFilter
-    ) -> Dict[int, StateMap[str]]:
+        self, groups: list[int], state_filter: StateFilter
+    ) -> dict[int, StateMap[str]]:
         """Returns the state groups for a given set of groups from the
         database, filtering on types of state events.
 
@@ -199,7 +206,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         Returns:
             Dict of state group to state map.
         """
-        results: Dict[int, StateMap[str]] = {}
+        results: dict[int, StateMap[str]] = {}
 
         chunks = [groups[i : i + 100] for i in range(0, len(groups), 100)]
         for chunk in chunks:
@@ -220,7 +227,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         cache: DictionaryCache[int, StateKey, str],
         group: int,
         state_filter: StateFilter,
-    ) -> Tuple[MutableStateMap[str], bool]:
+    ) -> tuple[MutableStateMap[str], bool]:
         """Checks if group is in cache. See `get_state_for_groups`
 
         Args:
@@ -271,8 +278,8 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     @tag_args
     @cancellable
     async def _get_state_for_groups(
-        self, groups: Iterable[int], state_filter: Optional[StateFilter] = None
-    ) -> Dict[int, MutableStateMap[str]]:
+        self, groups: Iterable[int], state_filter: StateFilter | None = None
+    ) -> dict[int, MutableStateMap[str]]:
         """Gets the state at each of a list of state groups, optionally
         filtering by type/state_key
 
@@ -284,7 +291,8 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         Returns:
             Dict of state group to state map.
         """
-        state_filter = state_filter or StateFilter.all()
+        if state_filter is None:
+            state_filter = StateFilter.all()
 
         member_filter, non_member_filter = state_filter.get_member_split()
 
@@ -342,7 +350,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         groups: Iterable[int],
         cache: DictionaryCache[int, StateKey, str],
         state_filter: StateFilter,
-    ) -> Tuple[Dict[int, MutableStateMap[str]], Set[int]]:
+    ) -> tuple[dict[int, MutableStateMap[str]], set[int]]:
         """Gets the state at each of a list of state groups, optionally
         filtering by type/state_key, querying from a specific cache.
 
@@ -374,7 +382,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
     def _insert_into_cache(
         self,
-        group_to_state_dict: Dict[int, StateMap[str]],
+        group_to_state_dict: dict[int, StateMap[str]],
         state_filter: StateFilter,
         cache_seq_num_members: int,
         cache_seq_num_non_members: int,
@@ -439,10 +447,10 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     @tag_args
     async def store_state_deltas_for_batched(
         self,
-        events_and_context: List[Tuple[EventBase, UnpersistedEventContextBase]],
+        events_and_context: list[tuple[EventBase, UnpersistedEventContextBase]],
         room_id: str,
         prev_group: int,
-    ) -> List[Tuple[EventBase, UnpersistedEventContext]]:
+    ) -> list[tuple[EventBase, UnpersistedEventContext]]:
         """Generate and store state deltas for a group of events and contexts created to be
         batch persisted. Note that all the events must be in a linear chain (ie a <- b <- c).
 
@@ -456,9 +464,9 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
         def insert_deltas_group_txn(
             txn: LoggingTransaction,
-            events_and_context: List[Tuple[EventBase, UnpersistedEventContext]],
+            events_and_context: list[tuple[EventBase, UnpersistedEventContext]],
             prev_group: int,
-        ) -> List[Tuple[EventBase, UnpersistedEventContext]]:
+        ) -> list[tuple[EventBase, UnpersistedEventContext]]:
             """Generate and store state groups for the provided events and contexts.
 
             Requires that we have the state as a delta from the last persisted state group.
@@ -466,14 +474,15 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             Returns:
                 A list of state groups
             """
-            is_in_db = self.db_pool.simple_select_one_onecol_txn(
-                txn,
-                table="state_groups",
-                keyvalues={"id": prev_group},
-                retcol="id",
-                allow_none=True,
+
+            # We need to check that the prev group isn't about to be deleted
+            is_missing = (
+                self._state_deletion_store._check_state_groups_and_bump_deletion_txn(
+                    txn,
+                    {prev_group},
+                )
             )
-            if not is_in_db:
+            if is_missing:
                 raise Exception(
                     "Trying to persist state with unpersisted prev_group: %r"
                     % (prev_group,)
@@ -545,6 +554,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                     for key, state_id in context.state_delta_due_to_event.items()
                 ],
             )
+
             return events_and_context
 
         return await self.db_pool.runInteraction(
@@ -560,9 +570,9 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         self,
         event_id: str,
         room_id: str,
-        prev_group: Optional[int],
-        delta_ids: Optional[StateMap[str]],
-        current_state_ids: Optional[StateMap[str]],
+        prev_group: int | None,
+        delta_ids: StateMap[str] | None,
+        current_state_ids: StateMap[str] | None,
     ) -> int:
         """Store a new set of state, returning a newly assigned state group.
 
@@ -591,7 +601,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
         def insert_delta_group_txn(
             txn: LoggingTransaction, prev_group: int, delta_ids: StateMap[str]
-        ) -> Optional[int]:
+        ) -> int | None:
             """Try and persist the new group as a delta.
 
             Requires that we have the state as a delta from a previous state group.
@@ -600,14 +610,15 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 The state group if successfully created, or None if the state
                 needs to be persisted as a full state.
             """
-            is_in_db = self.db_pool.simple_select_one_onecol_txn(
-                txn,
-                table="state_groups",
-                keyvalues={"id": prev_group},
-                retcol="id",
-                allow_none=True,
+
+            # We need to check that the prev group isn't about to be deleted
+            is_missing = (
+                self._state_deletion_store._check_state_groups_and_bump_deletion_txn(
+                    txn,
+                    {prev_group},
+                )
             )
-            if not is_in_db:
+            if is_missing:
                 raise Exception(
                     "Trying to persist state with unpersisted prev_group: %r"
                     % (prev_group,)
@@ -725,8 +736,10 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         )
 
     async def purge_unreferenced_state_groups(
-        self, room_id: str, state_groups_to_delete: Collection[int]
-    ) -> None:
+        self,
+        room_id: str,
+        state_groups_to_sequence_numbers: Mapping[int, int],
+    ) -> bool:
         """Deletes no longer referenced state groups and de-deltas any state
         groups that reference them.
 
@@ -734,27 +747,37 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             room_id: The room the state groups belong to (must all be in the
                 same room).
             state_groups_to_delete: Set of all state groups to delete.
+
+        Returns:
+            Whether any state groups were actually deleted.
         """
 
-        await self.db_pool.runInteraction(
+        return await self.db_pool.runInteraction(
             "purge_unreferenced_state_groups",
             self._purge_unreferenced_state_groups,
             room_id,
-            state_groups_to_delete,
+            state_groups_to_sequence_numbers,
         )
 
     def _purge_unreferenced_state_groups(
         self,
         txn: LoggingTransaction,
         room_id: str,
-        state_groups_to_delete: Collection[int],
-    ) -> None:
+        state_groups_to_sequence_numbers: Mapping[int, int],
+    ) -> bool:
+        state_groups_to_delete = self._state_deletion_store.get_state_groups_ready_for_potential_deletion_txn(
+            txn, state_groups_to_sequence_numbers
+        )
+
+        if not state_groups_to_delete:
+            return False
+
         logger.info(
             "[purge] found %i state groups to delete", len(state_groups_to_delete)
         )
 
         rows = cast(
-            List[Tuple[int]],
+            list[tuple[int]],
             self.db_pool.simple_select_many_txn(
                 txn,
                 table="state_group_edges",
@@ -804,18 +827,28 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         logger.info("[purge] removing redundant state groups")
         txn.execute_batch(
             "DELETE FROM state_groups_state WHERE state_group = ?",
-            ((sg,) for sg in state_groups_to_delete),
+            [(sg,) for sg in state_groups_to_delete],
+        )
+        txn.execute_batch(
+            "DELETE FROM state_group_edges WHERE state_group = ?",
+            [(sg,) for sg in state_groups_to_delete],
         )
         txn.execute_batch(
             "DELETE FROM state_groups WHERE id = ?",
-            ((sg,) for sg in state_groups_to_delete),
+            [(sg,) for sg in state_groups_to_delete],
         )
+        txn.execute_batch(
+            "DELETE FROM state_groups_pending_deletion WHERE state_group = ?",
+            [(sg,) for sg in state_groups_to_delete],
+        )
+
+        return True
 
     @trace
     @tag_args
     async def get_previous_state_groups(
         self, state_groups: Iterable[int]
-    ) -> Dict[int, int]:
+    ) -> dict[int, int]:
         """Fetch the previous groups of the given state groups.
 
         Args:
@@ -826,10 +859,10 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         """
 
         rows = cast(
-            List[Tuple[int, int]],
+            list[tuple[int, int]],
             await self.db_pool.simple_select_many_batch(
                 table="state_group_edges",
-                column="prev_state_group",
+                column="state_group",
                 iterable=state_groups,
                 keyvalues={},
                 retcols=("state_group", "prev_state_group"),
@@ -839,60 +872,77 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
         return dict(rows)
 
-    async def purge_room_state(
-        self, room_id: str, state_groups_to_delete: Collection[int]
-    ) -> None:
-        """Deletes all record of a room from state tables
+    @trace
+    @tag_args
+    async def get_next_state_groups(
+        self, state_groups: Iterable[int]
+    ) -> dict[int, int]:
+        """Fetch the groups that have the given state groups as their previous
+        state groups.
 
         Args:
-            room_id:
-            state_groups_to_delete: State groups to delete
+            state_groups
+
+        Returns:
+            A mapping from state group to previous state group.
         """
 
-        logger.info("[purge] Starting state purge")
-        await self.db_pool.runInteraction(
+        rows = cast(
+            list[tuple[int, int]],
+            await self.db_pool.simple_select_many_batch(
+                table="state_group_edges",
+                column="prev_state_group",
+                iterable=state_groups,
+                keyvalues={},
+                retcols=("state_group", "prev_state_group"),
+                desc="get_next_state_groups",
+            ),
+        )
+
+        return dict(rows)
+
+    async def purge_room_state(self, room_id: str) -> None:
+        return await self.db_pool.runInteraction(
             "purge_room_state",
             self._purge_room_state_txn,
             room_id,
-            state_groups_to_delete,
         )
-        logger.info("[purge] Done with state purge")
 
     def _purge_room_state_txn(
         self,
         txn: LoggingTransaction,
         room_id: str,
-        state_groups_to_delete: Collection[int],
     ) -> None:
-        # first we have to delete the state groups states
-        logger.info("[purge] removing %s from state_groups_state", room_id)
-
-        self.db_pool.simple_delete_many_txn(
-            txn,
-            table="state_groups_state",
-            column="state_group",
-            values=state_groups_to_delete,
-            keyvalues={},
-        )
-
-        # ... and the state group edges
+        # Delete all edges that reference a state group linked to room_id
         logger.info("[purge] removing %s from state_group_edges", room_id)
 
-        self.db_pool.simple_delete_many_txn(
-            txn,
-            table="state_group_edges",
-            column="state_group",
-            values=state_groups_to_delete,
-            keyvalues={},
+        if isinstance(self.database_engine, PostgresEngine):
+            # Disable statement timeouts for this transaction; purging rooms can
+            # take a while!
+            txn.execute("SET LOCAL statement_timeout = 0")
+
+        txn.execute(
+            """
+            DELETE FROM state_group_edges AS sge WHERE sge.state_group IN (
+                SELECT id FROM state_groups AS sg WHERE sg.room_id = ?
+            )""",
+            (room_id,),
         )
 
-        # ... and the state groups
-        logger.info("[purge] removing %s from state_groups", room_id)
+        # state_groups_state table has a room_id column but no index on it, unlike state_groups,
+        # so we delete them by matching the room_id through the state_groups table.
+        logger.info("[purge] removing %s from state_groups_state", room_id)
+        txn.execute(
+            """
+            DELETE FROM state_groups_state AS sgs WHERE sgs.state_group IN (
+                SELECT id FROM state_groups AS sg WHERE sg.room_id = ?
+            )""",
+            (room_id,),
+        )
 
-        self.db_pool.simple_delete_many_txn(
+        logger.info("[purge] removing %s from state_groups", room_id)
+        self.db_pool.simple_delete_txn(
             txn,
             table="state_groups",
-            column="id",
-            values=state_groups_to_delete,
-            keyvalues={},
+            keyvalues={"room_id": room_id},
         )

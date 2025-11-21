@@ -23,7 +23,7 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import RoomCreationPreset
 from synapse.http.server import HttpServer
@@ -62,7 +62,7 @@ class VersionsRestServlet(RestServlet):
             in self.config.room.encryption_enabled_by_default_for_room_presets
         )
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         msc3881_enabled = self.config.experimental.msc3881_enabled
         msc3575_enabled = self.config.experimental.msc3575_enabled
 
@@ -112,6 +112,7 @@ class VersionsRestServlet(RestServlet):
                     "v1.9",
                     "v1.10",
                     "v1.11",
+                    "v1.12",
                 ],
                 # as per MSC1497:
                 "unstable_features": {
@@ -149,9 +150,6 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc3881": msc3881_enabled,
                     # Adds support for filtering /messages by event relation.
                     "org.matrix.msc3874": self.config.experimental.msc3874_enabled,
-                    # Adds support for simple HTTP rendezvous as per MSC3886
-                    "org.matrix.msc3886": self.config.experimental.msc3886_endpoint
-                    is not None,
                     # Adds support for relation-based redactions as per MSC3912.
                     "org.matrix.msc3912": self.config.experimental.msc3912_enabled,
                     # Whether recursively provide relations is supported.
@@ -172,11 +170,18 @@ class VersionsRestServlet(RestServlet):
                         )
                     ),
                     # MSC4140: Delayed events
-                    "org.matrix.msc4140": True,
-                    # MSC4151: Report room API (Client-Server API)
-                    "org.matrix.msc4151": self.config.experimental.msc4151_enabled,
+                    "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
                     # Simplified sliding sync
                     "org.matrix.simplified_msc3575": msc3575_enabled,
+                    # Arbitrary key-value profile fields.
+                    "uk.tcpip.msc4133": self.config.experimental.msc4133_enabled,
+                    "uk.tcpip.msc4133.stable": True,
+                    # MSC4155: Invite filtering
+                    "org.matrix.msc4155": self.config.experimental.msc4155_enabled,
+                    # MSC4306: Support for thread subscriptions
+                    "org.matrix.msc4306": self.config.experimental.msc4306_enabled,
+                    # MSC4169: Backwards-compatible redaction sending using `/send`
+                    "com.beeper.msc4169": self.config.experimental.msc4169_enabled,
                 },
             },
         )
