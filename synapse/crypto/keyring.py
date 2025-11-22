@@ -21,7 +21,7 @@
 
 import abc
 import logging
-from typing import TYPE_CHECKING, Callable, Iterable
+from typing import TYPE_CHECKING, Callable, Iterable, Sequence
 
 import attr
 from signedjson.key import (
@@ -150,57 +150,77 @@ class Keyring:
     """
 
     def __init__(
-        self, hs: "HomeServer", key_fetchers: "Iterable[KeyFetcher] | None" = None
+        self,
+        hs: "HomeServer",
+        test_only_key_fetchers: "Sequence[KeyFetcher] | None" = None,
     ):
-        self.server_name = hs.hostname
+        """
+        Args:
+            hs: The HomeServer instance
+            test_only_key_fetchers: Dependency injection for tests only. If provided,
+                these key fetchers will be used instead of the default ones.
+        """
 
-        if key_fetchers is None:
-            # Always fetch keys from the database.
-            mutable_key_fetchers: list[KeyFetcher] = [StoreKeyFetcher(hs)]
-            # Fetch keys from configured trusted key servers, if any exist.
-            key_servers = hs.config.key.key_servers
-            if key_servers:
-                mutable_key_fetchers.append(PerspectivesKeyFetcher(hs))
-            # Finally, fetch keys from the origin server directly.
-            mutable_key_fetchers.append(ServerKeyFetcher(hs))
+        try:
+            self.server_name = hs.hostname
 
-            self._key_fetchers: Iterable[KeyFetcher] = tuple(mutable_key_fetchers)
-        else:
-            self._key_fetchers = key_fetchers
+            self._key_fetchers: Sequence[KeyFetcher] = []
+            if test_only_key_fetchers is None:
+                # Always fetch keys from the database.
+                self._key_fetchers.append(StoreKeyFetcher(hs))
+                # Fetch keys from configured trusted key servers, if any exist.
+                key_servers = hs.config.key.key_servers
+                if key_servers:
+                    self._key_fetchers.append(PerspectivesKeyFetcher(hs))
+                # Finally, fetch keys from the origin server directly.
+                self._key_fetchers.append(ServerKeyFetcher(hs))
+            else:
+                self._key_fetchers = test_only_key_fetchers
 
-        self._fetch_keys_queue: BatchingQueue[
-            _FetchKeyRequest, dict[str, dict[str, FetchKeyResult]]
-        ] = BatchingQueue(
-            name="keyring_server",
-            hs=hs,
-            clock=hs.get_clock(),
-            # The method called to fetch each key
-            process_batch_callback=self._inner_fetch_key_requests,
-        )
-
-        self._is_mine_server_name = hs.is_mine_server_name
-
-        # build a FetchKeyResult for each of our own keys, to shortcircuit the
-        # fetcher.
-        self._local_verify_keys: dict[str, FetchKeyResult] = {}
-        for key_id, key in hs.config.key.old_signing_keys.items():
-            self._local_verify_keys[key_id] = FetchKeyResult(
-                verify_key=key, valid_until_ts=key.expired
+            self._fetch_keys_queue: BatchingQueue[
+                _FetchKeyRequest, dict[str, dict[str, FetchKeyResult]]
+            ] = BatchingQueue(
+                name="keyring_server",
+                hs=hs,
+                clock=hs.get_clock(),
+                # The method called to fetch each key
+                process_batch_callback=self._inner_fetch_key_requests,
             )
 
-        vk = get_verify_key(hs.signing_key)
-        self._local_verify_keys[f"{vk.alg}:{vk.version}"] = FetchKeyResult(
-            verify_key=vk,
-            valid_until_ts=2**63,  # fake future timestamp
-        )
+            self._is_mine_server_name = hs.is_mine_server_name
+
+            # build a FetchKeyResult for each of our own keys, to shortcircuit the
+            # fetcher.
+            self._local_verify_keys: dict[str, FetchKeyResult] = {}
+            for key_id, key in hs.config.key.old_signing_keys.items():
+                self._local_verify_keys[key_id] = FetchKeyResult(
+                    verify_key=key, valid_until_ts=key.expired
+                )
+
+            vk = get_verify_key(hs.signing_key)
+            self._local_verify_keys[f"{vk.alg}:{vk.version}"] = FetchKeyResult(
+                verify_key=vk,
+                valid_until_ts=2**63,  # fake future timestamp
+            )
+        except Exception:
+            self.shutdown()
+            raise
 
     def shutdown(self) -> None:
         """
         Prepares the KeyRing for garbage collection by shutting down it's queues.
+
+        This needs to be robust enough to be called even if `__init__` failed partway
+        through.
         """
-        self._fetch_keys_queue.shutdown()
-        for key_fetcher in self._key_fetchers:
-            key_fetcher.shutdown()
+        _fetch_keys_queue = getattr(self, "_fetch_keys_queue", None)
+        if _fetch_keys_queue:
+            _fetch_keys_queue.shutdown()
+
+        _key_fetchers = getattr(self, "_key_fetchers", None)
+        if _key_fetchers:
+            for key_fetcher in _key_fetchers:
+                key_fetcher.shutdown()
 
     async def verify_json_for_server(
         self,
@@ -495,8 +515,13 @@ class KeyFetcher(metaclass=abc.ABCMeta):
     def shutdown(self) -> None:
         """
         Prepares the KeyFetcher for garbage collection by shutting down it's queue.
+
+        This needs to be robust enough to be called even if `__init__` failed partway
+        through.
         """
-        self._queue.shutdown()
+        _queue = getattr(self, "_queue", None)
+        if _queue:
+            _queue.shutdown()
 
     async def get_keys(
         self, server_name: str, key_ids: list[str], minimum_valid_until_ts: int
@@ -521,9 +546,24 @@ class StoreKeyFetcher(KeyFetcher):
     """KeyFetcher impl which fetches keys from our data store"""
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__(hs)
+        try:
+            super().__init__(hs)
 
-        self.store = hs.get_datastores().main
+            self.store = hs.get_datastores().main
+
+        # `KeyFetcher` keeps a reference to `hs` which we need to clean up if something
+        # goes wrong so we can cleanly shutdown the homeserver.
+        #
+        # If something goes wrong while initializing the `KeyFetcher`, the caller won't
+        # be able to call shutdown on it because there won't be a reference to the
+        # `KeyFetcher`.
+        #
+        # An error can occur here if someone tries to create a `KeyFetcher` before the
+        # homeserver is fully set up (`HomeServerNotSetupException: HomeServer.setup
+        # must be called before getting datastores`).
+        except Exception:
+            self.shutdown()
+            raise
 
     async def _fetch_keys(
         self, keys_to_fetch: list[_FetchKeyRequest]
@@ -543,9 +583,24 @@ class StoreKeyFetcher(KeyFetcher):
 
 class BaseV2KeyFetcher(KeyFetcher):
     def __init__(self, hs: "HomeServer"):
-        super().__init__(hs)
+        try:
+            super().__init__(hs)
 
-        self.store = hs.get_datastores().main
+            self.store = hs.get_datastores().main
+
+        # `KeyFetcher` keeps a reference to `hs` which we need to clean up if something
+        # goes wrong so we can cleanly shutdown the homeserver.
+        #
+        # If something goes wrong while initializing the `KeyFetcher`, the caller won't
+        # be able to call shutdown on it because there won't be a reference to the
+        # `KeyFetcher`.
+        #
+        # An error can occur here if someone tries to create a `KeyFetcher` before the
+        # homeserver is fully set up (`HomeServerNotSetupException: HomeServer.setup
+        # must be called before getting datastores`).
+        except Exception:
+            self.shutdown()
+            raise
 
     async def process_v2_response(
         self, from_server: str, response_json: JsonDict, time_added_ms: int

@@ -467,11 +467,15 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # TODO: Cleanup replication pieces
 
+        keyring: Keyring | None = None
         try:
-            self.get_keyring().shutdown()
+            keyring = self.get_keyring()
         except HomeServerNotSetupException:
             # If the homeserver wasn't fully setup, keyring won't exist
             pass
+
+        if keyring:
+            keyring.shutdown()
 
         # Cleanup metrics associated with the homeserver
         for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
