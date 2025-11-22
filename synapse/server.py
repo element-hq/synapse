@@ -471,7 +471,9 @@ class HomeServer(metaclass=abc.ABCMeta):
         try:
             keyring = self.get_keyring()
         except HomeServerNotSetupException:
-            # If the homeserver wasn't fully setup, keyring won't exist
+            # If the homeserver wasn't fully setup, keyring won't have existed before
+            # this and will fail to be initialized but it cleans itself up for any
+            # partial initialization problem.
             pass
 
         if keyring:
