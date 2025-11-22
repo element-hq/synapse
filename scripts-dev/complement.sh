@@ -72,6 +72,12 @@ For help on arguments to 'go test', run 'go help testflag'.
 EOF
 }
 
+# We use a function to wrap the script logic so that we can use `return` to exit early
+# if needed. This is particularly useful so that this script can be sourced by other
+# scripts without exiting the calling subshell (composable). This allows us to share
+# variables like `SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES` with other scripts.
+#
+# Returns an exit code of 0 on success, or 1 on failure.
 main() {
   # parse our arguments
   skip_docker_build=""
@@ -204,20 +210,11 @@ main() {
       echo_if_github "::endgroup::"
 
     fi
+  
+    echo "Docker images built."
+  else
+    echo "Skipping Docker image build as requested."
   fi
-
-  if [ -n "$skip_complement_run" ]; then
-      echo "Skipping Complement run as requested."
-      return 0
-  fi
-
-  export COMPLEMENT_BASE_IMAGE=complement-synapse
-  if [ -n "$use_editable_synapse" ]; then
-    export COMPLEMENT_BASE_IMAGE=complement-synapse-editable
-    export COMPLEMENT_HOST_MOUNTS="$editable_mount"
-  fi
-
-  extra_test_args=()
 
   test_packages=(
     ./tests/csapi
@@ -234,6 +231,16 @@ main() {
     ./tests/msc4306
   )
 
+  # Export the list of test packages as a space-separated environment variable, so other
+  # scripts can use it.
+  export SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES="${test_packages[@]}"
+
+  export COMPLEMENT_BASE_IMAGE=complement-synapse
+  if [ -n "$use_editable_synapse" ]; then
+    export COMPLEMENT_BASE_IMAGE=complement-synapse-editable
+    export COMPLEMENT_HOST_MOUNTS="$editable_mount"
+  fi
+
   # Enable dirty runs, so tests will reuse the same container where possible.
   # This significantly speeds up tests, but increases the possibility of test pollution.
   export COMPLEMENT_ENABLE_DIRTY_RUNS=1
@@ -242,8 +249,18 @@ main() {
   # (The prefix is stripped off before reaching the container.)
   export COMPLEMENT_SHARE_ENV_PREFIX=PASS_
 
+  # * -count=1: Only run tests once, and disable caching for tests.
+  # * -v: Output test logs, even if those tests pass.
+  # * -tags=synapse_blacklist: Enable the `synapse_blacklist` build tag, which is
+  #   necessary for `runtime.Synapse` checks/skips to work in the tests
+  test_args=(
+    -v
+    -tags="synapse_blacklist"
+    -count=1
+  )
+
   # It takes longer than 10m to run the whole suite.
-  extra_test_args+=("-timeout=60m")
+  test_args+=("-timeout=60m")
 
   if [[ -n "$WORKERS" ]]; then
     # Use workers.
@@ -295,11 +312,15 @@ main() {
   # particularly tricky.
   export PASS_SYNAPSE_LOG_TESTING=1
 
+  if [ -n "$skip_complement_run" ]; then
+    echo "Skipping Complement run as requested."
+    return 0
+  fi
+  
   # Run the tests!
-  echo "Images built; running complement with ${extra_test_args[@]} $@ ${test_packages[@]}"
+  echo "Running Complement with ${test_args[@]} $@ ${test_packages[@]}"
   cd "$COMPLEMENT_DIR"
-
-  go test -v -tags "synapse_blacklist" -count=1 "${extra_test_args[@]}" "$@" "${test_packages[@]}"
+  go test "${test_args[@]}" "$@" "${test_packages[@]}"
 }
 
 main "$@"
