@@ -25,7 +25,7 @@
 
 import json
 from http import HTTPStatus
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Any, Iterable, Literal
 from unittest.mock import AsyncMock, Mock, call, patch
 from urllib import parse as urlparse
 
@@ -74,7 +74,7 @@ PATH_PREFIX = b"/_matrix/client/api/v1"
 
 
 class RoomBase(unittest.HomeserverTestCase):
-    rmcreator_id: Optional[str] = None
+    rmcreator_id: str | None = None
 
     servlets = [room.register_servlets, room.register_deprecated_servlets]
 
@@ -959,7 +959,7 @@ class RoomsCreateTestCase(RoomBase):
         """Tests that the user_may_join_room spam checker callback is correctly bypassed
         when creating a new room.
 
-        In this test, we use the more recent API in which callbacks return a `Union[Codes, Literal["NOT_SPAM"]]`.
+        In this test, we use the more recent API in which callbacks return a `Codes | Literal["NOT_SPAM"]`.
         """
 
         async def user_may_join_room_codes(
@@ -989,7 +989,7 @@ class RoomsCreateTestCase(RoomBase):
             mxid: str,
             room_id: str,
             is_invite: bool,
-        ) -> Tuple[Codes, dict]:
+        ) -> tuple[Codes, dict]:
             return Codes.INCOMPATIBLE_ROOM_VERSION, {}
 
         join_mock.side_effect = user_may_join_room_tuple
@@ -1002,7 +1002,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         self.assertEqual(join_mock.call_count, 0)
 
-    def _create_basic_room(self) -> Tuple[int, object]:
+    def _create_basic_room(self) -> tuple[int, object]:
         """
         Tries to create a basic room and returns the response code.
         """
@@ -1351,7 +1351,7 @@ class RoomJoinTestCase(RoomBase):
         """
 
         # Register a dummy callback. Make it allow all room joins for now.
-        return_value: Union[Literal["NOT_SPAM"], Tuple[Codes, dict], Codes] = (
+        return_value: Literal["NOT_SPAM"] | tuple[Codes, dict] | Codes = (
             synapse.module_api.NOT_SPAM
         )
 
@@ -1359,7 +1359,7 @@ class RoomJoinTestCase(RoomBase):
             userid: str,
             room_id: str,
             is_invited: bool,
-        ) -> Union[Literal["NOT_SPAM"], Tuple[Codes, dict], Codes]:
+        ) -> Literal["NOT_SPAM"] | tuple[Codes, dict] | Codes:
             return return_value
 
         # `spec` argument is needed for this function mock to have `__qualname__`, which
@@ -1848,20 +1848,20 @@ class RoomMessagesTestCase(RoomBase):
     def test_spam_checker_check_event_for_spam(
         self,
         name: str,
-        value: Union[str, bool, Codes, Tuple[Codes, JsonDict]],
+        value: str | bool | Codes | tuple[Codes, JsonDict],
         expected_code: int,
         expected_fields: dict,
     ) -> None:
         class SpamCheck:
-            mock_return_value: Union[str, bool, Codes, Tuple[Codes, JsonDict], bool] = (
+            mock_return_value: str | bool | Codes | tuple[Codes, JsonDict] | bool = (
                 "NOT_SPAM"
             )
-            mock_content: Optional[JsonDict] = None
+            mock_content: JsonDict | None = None
 
             async def check_event_for_spam(
                 self,
                 event: synapse.events.EventBase,
-            ) -> Union[str, Codes, Tuple[Codes, JsonDict], bool]:
+            ) -> str | Codes | tuple[Codes, JsonDict] | bool:
                 self.mock_content = event.content
                 return self.mock_return_value
 
@@ -1915,7 +1915,7 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
         self.admin_user_id = self.register_user("admin", "pass")
         self.admin_access_token = self.login("admin", "pass")
 
-    def power_levels(self, room_id: str) -> Dict[str, Any]:
+    def power_levels(self, room_id: str) -> dict[str, Any]:
         return self.helper.get_state(
             room_id, "m.room.power_levels", self.admin_access_token
         )
@@ -2076,7 +2076,7 @@ class RoomPowerLevelOverridesInPracticeTestCase(RoomBase):
         # Given the server has config allowing normal users to post my event type
         # And I am a normal member of a room
         # But the room was created with special permissions
-        extra_content: Dict[str, Any] = {
+        extra_content: dict[str, Any] = {
             "power_level_content_override": {"events": {}},
         }
         room_id = self.helper.create_room_as(
@@ -2707,9 +2707,9 @@ class PublicRoomsRoomTypeFilterTestCase(unittest.HomeserverTestCase):
 
     def make_public_rooms_request(
         self,
-        room_types: Optional[List[Union[str, None]]],
-        instance_id: Optional[str] = None,
-    ) -> Tuple[List[Dict[str, Any]], int]:
+        room_types: list[str | None] | None,
+        instance_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
         body: JsonDict = {"filter": {PublicRoomsFilterFields.ROOM_TYPES: room_types}}
         if instance_id:
             body["third_party_instance_id"] = "test|test"
@@ -3470,7 +3470,7 @@ class LabelsTestCase(unittest.HomeserverTestCase):
 
 
 class RelationsTestCase(PaginationTestCase):
-    def _filter_messages(self, filter: JsonDict) -> List[str]:
+    def _filter_messages(self, filter: JsonDict) -> list[str]:
         """Make a request to /messages with a filter, returns the chunk of events."""
         from_token = self.get_success(
             self.from_token.to_string(self.hs.get_datastores().main)
@@ -3968,7 +3968,7 @@ class ThreepidInviteTestCase(unittest.HomeserverTestCase):
         """
         Test allowing/blocking threepid invites with a spam-check module.
 
-        In this test, we use the more recent API in which callbacks return a `Union[Codes, Literal["NOT_SPAM"]]`.
+        In this test, we use the more recent API in which callbacks return a `Codes | Literal["NOT_SPAM"]`.
         """
         # Mock a few functions to prevent the test from failing due to failing to talk to
         # a remote IS. We keep the mock for make_and_store_3pid_invite around so we
@@ -4529,10 +4529,10 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
 
     def _check_redactions(
         self,
-        original_events: List[EventBase],
-        pulled_events: List[JsonDict],
+        original_events: list[EventBase],
+        pulled_events: list[JsonDict],
         expect_redaction: bool,
-        reason: Optional[str] = None,
+        reason: str | None = None,
     ) -> None:
         """
         Checks a set of original events against a second set of the same events, pulled

@@ -20,7 +20,6 @@
 #
 import logging
 from http import HTTPStatus
-from typing import Optional, Union
 from unittest.mock import Mock
 
 from parameterized import parameterized
@@ -192,12 +191,12 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
         async def post_json(
             destination: str,
             path: str,
-            data: Optional[JsonDict] = None,
+            data: JsonDict | None = None,
             long_retries: bool = False,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
             ignore_backoff: bool = False,
-            args: Optional[QueryParams] = None,
-        ) -> Union[JsonDict, list]:
+            args: QueryParams | None = None,
+        ) -> JsonDict | list:
             # If it asks us for new missing events, give them NOTHING
             if path.startswith("/_matrix/federation/v1/get_missing_events/"):
                 return {"events": []}
@@ -462,7 +461,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(r[("m.room.member", joining_user)].membership, "join")
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 3}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 3}})
     def test_make_join_respects_room_join_rate_limit(self) -> None:
         # In the test setup, two users join the room. Since the rate limiter burst
         # count is 3, a new make_join request to the room should be accepted.
@@ -484,7 +483,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.TOO_MANY_REQUESTS, channel.json_body)
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 3}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 3}})
     def test_send_join_contributes_to_room_join_rate_limit_and_is_limited(self) -> None:
         # Make two make_join requests up front. (These are rate limited, but do not
         # contribute to the rate limit.)

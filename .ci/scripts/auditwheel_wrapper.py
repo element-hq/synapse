@@ -25,7 +25,6 @@
 import argparse
 import os
 import subprocess
-from typing import Optional
 from zipfile import ZipFile
 
 from packaging.tags import Tag
@@ -80,7 +79,7 @@ def cpython(wheel_file: str, name: str, version: Version, tag: Tag) -> str:
     return new_wheel_file
 
 
-def main(wheel_file: str, dest_dir: str, archs: Optional[str]) -> None:
+def main(wheel_file: str, dest_dir: str, archs: str | None) -> None:
     """Entry point"""
 
     # Parse the wheel file name into its parts. Note that `parse_wheel_filename`

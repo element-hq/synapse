@@ -23,12 +23,9 @@ import collections.abc
 import logging
 import typing
 from typing import (
-    Dict,
     Iterator,
     Mapping,
-    Optional,
     Sequence,
-    Set,
     TypeVar,
 )
 
@@ -63,7 +60,7 @@ def unwrapFirstError(failure: Failure) -> Failure:
 
 def log_failure(
     failure: Failure, msg: str, consumeErrors: bool = True
-) -> Optional[Failure]:
+) -> Failure | None:
     """Creates a function suitable for passing to `Deferred.addErrback` that
     logs any failures that occur.
 
@@ -119,8 +116,8 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
     """
 
     _underlying_map: Mapping[K, V]
-    _mutable_map: Dict[K, V] = attr.ib(factory=dict)
-    _deletions: Set[K] = attr.ib(factory=set)
+    _mutable_map: dict[K, V] = attr.ib(factory=dict)
+    _deletions: set[K] = attr.ib(factory=set)
 
     def __getitem__(self, key: K) -> V:
         if key in self._deletions:

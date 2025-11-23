@@ -19,7 +19,7 @@
 #
 
 import queue
-from typing import Any, BinaryIO, Optional, Union, cast
+from typing import Any, BinaryIO, cast
 
 from twisted.internet import threads
 from twisted.internet.defer import Deferred
@@ -50,7 +50,7 @@ class BackgroundFileConsumer:
         self._reactor: ISynapseReactor = reactor
 
         # Producer we're registered with
-        self._producer: Optional[Union[IPushProducer, IPullProducer]] = None
+        self._producer: IPushProducer | IPullProducer | None = None
 
         # True if PushProducer, false if PullProducer
         self.streaming = False
@@ -61,18 +61,18 @@ class BackgroundFileConsumer:
 
         # Queue of slices of bytes to be written. When producer calls
         # unregister a final None is sent.
-        self._bytes_queue: queue.Queue[Optional[bytes]] = queue.Queue()
+        self._bytes_queue: queue.Queue[bytes | None] = queue.Queue()
 
         # Deferred that is resolved when finished writing
         #
         # This is really Deferred[None], but mypy doesn't seem to like that.
-        self._finished_deferred: Optional[Deferred[Any]] = None
+        self._finished_deferred: Deferred[Any] | None = None
 
         # If the _writer thread throws an exception it gets stored here.
-        self._write_exception: Optional[Exception] = None
+        self._write_exception: Exception | None = None
 
     def registerProducer(
-        self, producer: Union[IPushProducer, IPullProducer], streaming: bool
+        self, producer: IPushProducer | IPullProducer, streaming: bool
     ) -> None:
         """Part of IConsumer interface
 

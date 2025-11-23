@@ -21,7 +21,7 @@
 """A replication client for use by synapse workers."""
 
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Iterable
 
 from sortedcontainers import SortedList
 
@@ -89,14 +89,14 @@ class ReplicationDataHandler:
         self._pusher_pool = hs.get_pusherpool()
         self._presence_handler = hs.get_presence_handler()
 
-        self.send_handler: Optional[FederationSenderHandler] = None
+        self.send_handler: FederationSenderHandler | None = None
         if hs.should_send_federation():
             self.send_handler = FederationSenderHandler(hs)
 
         # Map from stream and instance to list of deferreds waiting for the stream to
         # arrive at a particular position. The lists are sorted by stream position.
-        self._streams_to_waiters: Dict[
-            Tuple[str, str], SortedList[Tuple[int, Deferred]]
+        self._streams_to_waiters: dict[
+            tuple[str, str], SortedList[tuple[int, Deferred]]
         ] = {}
 
     async def on_rdata(
@@ -113,7 +113,7 @@ class ReplicationDataHandler:
             token: stream token for this batch of rows
             rows: a list of Stream.ROW_TYPE objects as returned by Stream.parse_row.
         """
-        all_room_ids: Set[str] = set()
+        all_room_ids: set[str] = set()
         if stream_name == DeviceListsStream.NAME:
             if any(not row.is_signature and not row.hosts_calculated for row in rows):
                 # This only uses the minimum stream position on the device lists
@@ -200,7 +200,7 @@ class ReplicationDataHandler:
                 if row.data.rejected:
                     continue
 
-                extra_users: Tuple[UserID, ...] = ()
+                extra_users: tuple[UserID, ...] = ()
                 if row.data.type == EventTypes.Member and row.data.state_key:
                     extra_users = (UserID.from_string(row.data.state_key),)
 
@@ -435,7 +435,7 @@ class FederationSenderHandler:
 
         # Stores the latest position in the federation stream we've gotten up
         # to. This is always set before we use it.
-        self.federation_position: Optional[int] = None
+        self.federation_position: int | None = None
 
         self._fed_position_linearizer = Linearizer(
             name="_fed_position_linearizer", clock=hs.get_clock()

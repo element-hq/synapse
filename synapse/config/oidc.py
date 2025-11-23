@@ -21,7 +21,7 @@
 #
 
 from collections import Counter
-from typing import Any, Collection, Iterable, List, Mapping, Optional, Tuple, Type
+from typing import Any, Collection, Iterable, Mapping
 
 import attr
 
@@ -213,7 +213,7 @@ def _parse_oidc_provider_configs(config: JsonDict) -> Iterable["OidcProviderConf
 
 
 def _parse_oidc_config_dict(
-    oidc_config: JsonDict, config_path: Tuple[str, ...]
+    oidc_config: JsonDict, config_path: tuple[str, ...]
 ) -> "OidcProviderConfig":
     """Take the configuration dict and parse it into an OidcProviderConfig
 
@@ -276,7 +276,7 @@ def _parse_oidc_config_dict(
             ) from e
 
     client_secret_jwt_key_config = oidc_config.get("client_secret_jwt_key")
-    client_secret_jwt_key: Optional[OidcProviderClientSecretJwtKey] = None
+    client_secret_jwt_key: OidcProviderClientSecretJwtKey | None = None
     if client_secret_jwt_key_config is not None:
         keyfile = client_secret_jwt_key_config.get("key_file")
         if keyfile:
@@ -384,10 +384,10 @@ class OidcProviderConfig:
     idp_name: str
 
     # Optional MXC URI for icon for this IdP.
-    idp_icon: Optional[str]
+    idp_icon: str | None
 
     # Optional brand identifier for this IdP.
-    idp_brand: Optional[str]
+    idp_brand: str | None
 
     # whether the OIDC discovery mechanism is used to discover endpoints
     discover: bool
@@ -401,11 +401,11 @@ class OidcProviderConfig:
 
     # oauth2 client secret to use. if `None`, use client_secret_jwt_key to generate
     # a secret.
-    client_secret: Optional[str]
+    client_secret: str | None
 
     # key to use to construct a JWT to use as a client secret. May be `None` if
     # `client_secret` is set.
-    client_secret_jwt_key: Optional[OidcProviderClientSecretJwtKey]
+    client_secret_jwt_key: OidcProviderClientSecretJwtKey | None
 
     # auth method to use when exchanging the token.
     # Valid values are 'client_secret_basic', 'client_secret_post' and
@@ -416,7 +416,7 @@ class OidcProviderConfig:
     # Valid values are 'auto', 'always', and 'never'.
     pkce_method: str
 
-    id_token_signing_alg_values_supported: Optional[List[str]]
+    id_token_signing_alg_values_supported: list[str] | None
     """
     List of the JWS signing algorithms (`alg` values) that are supported for signing the
     `id_token`.
@@ -448,18 +448,18 @@ class OidcProviderConfig:
     scopes: Collection[str]
 
     # the oauth2 authorization endpoint. Required if discovery is disabled.
-    authorization_endpoint: Optional[str]
+    authorization_endpoint: str | None
 
     # the oauth2 token endpoint. Required if discovery is disabled.
-    token_endpoint: Optional[str]
+    token_endpoint: str | None
 
     # the OIDC userinfo endpoint. Required if discovery is disabled and the
     # "openid" scope is not requested.
-    userinfo_endpoint: Optional[str]
+    userinfo_endpoint: str | None
 
     # URI where to fetch the JWKS. Required if discovery is disabled and the
     # "openid" scope is used.
-    jwks_uri: Optional[str]
+    jwks_uri: str | None
 
     # Whether Synapse should react to backchannel logouts
     backchannel_logout_enabled: bool
@@ -474,7 +474,7 @@ class OidcProviderConfig:
     # values are: "auto" or "userinfo_endpoint".
     user_profile_method: str
 
-    redirect_uri: Optional[str]
+    redirect_uri: str | None
     """
     An optional replacement for Synapse's hardcoded `redirect_uri` URL
     (`<public_baseurl>/_synapse/client/oidc/callback`). This can be used to send
@@ -491,13 +491,13 @@ class OidcProviderConfig:
     allow_existing_users: bool
 
     # the class of the user mapping provider
-    user_mapping_provider_class: Type
+    user_mapping_provider_class: type
 
     # the config of the user mapping provider
     user_mapping_provider_config: Any
 
     # required attributes to require in userinfo to allow login/registration
-    attribute_requirements: List[SsoAttributeRequirement]
+    attribute_requirements: list[SsoAttributeRequirement]
 
     # Whether automatic registrations are enabled in the ODIC flow. Defaults to True
     enable_registration: bool

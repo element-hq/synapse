@@ -25,7 +25,7 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from io import BytesIO
-from typing import Any, ClassVar, Coroutine, Dict, Generator, Optional, TypeVar, Union
+from typing import Any, ClassVar, Coroutine, Generator, TypeVar, Union
 from unittest.mock import ANY, AsyncMock, Mock
 from urllib.parse import parse_qs
 
@@ -130,7 +130,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         keys.register_servlets,
     ]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
         config["disable_registration"] = True
@@ -759,7 +759,7 @@ class FakeMasServer(HTTPServer):
     secret: str = "verysecret"
     """The shared secret used to authenticate the introspection endpoint."""
 
-    last_token_seen: Optional[str] = None
+    last_token_seen: str | None = None
     """What is the last access token seen by the introspection endpoint."""
 
     calls: int = 0
@@ -834,7 +834,7 @@ class MasAuthDelegation(HomeserverTestCase):
 
         return deferred
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
         config["disable_registration"] = True
@@ -1057,6 +1057,32 @@ class MasAuthDelegation(HomeserverTestCase):
         self.assertEqual(self.server.calls, 1)
 
 
+class MasAuthDelegationWithSubpath(MasAuthDelegation):
+    """Test MAS delegation when the MAS server is hosted on a subpath."""
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        # Override the endpoint to include a subpath
+        config["matrix_authentication_service"]["endpoint"] = (
+            self.server.endpoint + "auth/path/"
+        )
+        return config
+
+    def test_introspection_endpoint_uses_subpath(self) -> None:
+        """Test that the introspection endpoint correctly uses the configured subpath."""
+        expected_introspection_url = (
+            self.server.endpoint + "auth/path/oauth2/introspect"
+        )
+        self.assertEqual(self._auth._introspection_endpoint, expected_introspection_url)
+
+    def test_metadata_url_uses_subpath(self) -> None:
+        """Test that the metadata URL correctly uses the configured subpath."""
+        expected_metadata_url = (
+            self.server.endpoint + "auth/path/.well-known/openid-configuration"
+        )
+        self.assertEqual(self._auth._metadata_url, expected_metadata_url)
+
+
 @parameterized_class(
     ("config",),
     [
@@ -1100,9 +1126,9 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         admin.register_servlets,
     ]
 
-    config: Dict[str, Any]
+    config: dict[str, Any]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
         config["disable_registration"] = True
@@ -1110,7 +1136,7 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         return config
 
     def expect_unauthorized(
-        self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""
+        self, method: str, path: str, content: bytes | str | JsonDict = ""
     ) -> None:
         channel = self.make_request(method, path, content, shorthand=False)
 
@@ -1120,7 +1146,7 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         self,
         method: str,
         path: str,
-        content: Union[bytes, str, JsonDict] = "",
+        content: bytes | str | JsonDict = "",
         auth: bool = False,
     ) -> None:
         channel = self.make_request(
@@ -1133,7 +1159,7 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         )
 
     def expect_forbidden(
-        self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""
+        self, method: str, path: str, content: bytes | str | JsonDict = ""
     ) -> None:
         channel = self.make_request(method, path, content)
 

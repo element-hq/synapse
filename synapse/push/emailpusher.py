@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING
 
 from twisted.internet.error import AlreadyCalled, AlreadyCancelled
 from twisted.internet.interfaces import IDelayedCall
@@ -70,8 +70,8 @@ class EmailPusher(Pusher):
         self.server_name = hs.hostname
         self.store = self.hs.get_datastores().main
         self.email = pusher_config.pushkey
-        self.timed_call: Optional[IDelayedCall] = None
-        self.throttle_params: Dict[str, ThrottleParams] = {}
+        self.timed_call: IDelayedCall | None = None
+        self.throttle_params: dict[str, ThrottleParams] = {}
         self._inited = False
 
         self._is_processing = False
@@ -174,7 +174,7 @@ class EmailPusher(Pusher):
             )
         )
 
-        soonest_due_at: Optional[int] = None
+        soonest_due_at: int | None = None
 
         if not unprocessed:
             await self.save_last_stream_ordering_and_success(self.max_stream_ordering)
@@ -324,7 +324,7 @@ class EmailPusher(Pusher):
         )
 
     async def send_notification(
-        self, push_actions: List[EmailPushAction], reason: EmailReason
+        self, push_actions: list[EmailPushAction], reason: EmailReason
     ) -> None:
         logger.info("Sending notif email for user %r", self.user_id)
 

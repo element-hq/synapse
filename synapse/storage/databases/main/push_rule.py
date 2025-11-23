@@ -23,14 +23,9 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Collection,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
     Sequence,
-    Tuple,
-    Union,
     cast,
 )
 
@@ -69,8 +64,8 @@ logger = logging.getLogger(__name__)
 
 
 def _load_rules(
-    rawrules: List[Tuple[str, int, str, str]],
-    enabled_map: Dict[str, bool],
+    rawrules: list[tuple[str, int, str, str]],
+    enabled_map: dict[str, bool],
     experimental_config: ExperimentalConfig,
 ) -> FilteredPushRules:
     """Take the DB rows returned from the DB and convert them into a full
@@ -206,7 +201,7 @@ class PushRulesWorkerStore(
     @cached(max_entries=5000)
     async def get_push_rules_for_user(self, user_id: str) -> FilteredPushRules:
         rows = cast(
-            List[Tuple[str, int, int, str, str]],
+            list[tuple[str, int, int, str, str]],
             await self.db_pool.simple_select_list(
                 table="push_rules",
                 keyvalues={"user_name": user_id},
@@ -232,9 +227,9 @@ class PushRulesWorkerStore(
             self.hs.config.experimental,
         )
 
-    async def get_push_rules_enabled_for_user(self, user_id: str) -> Dict[str, bool]:
+    async def get_push_rules_enabled_for_user(self, user_id: str) -> dict[str, bool]:
         results = cast(
-            List[Tuple[str, Optional[Union[int, bool]]]],
+            list[tuple[str, int | bool | None]],
             await self.db_pool.simple_select_list(
                 table="push_rules_enable",
                 keyvalues={"user_name": user_id},
@@ -257,7 +252,7 @@ class PushRulesWorkerStore(
                     " WHERE user_id = ? AND ? < stream_id"
                 )
                 txn.execute(sql, (user_id, last_id))
-                (count,) = cast(Tuple[int], txn.fetchone())
+                (count,) = cast(tuple[int], txn.fetchone())
                 return bool(count)
 
             return await self.db_pool.runInteraction(
@@ -271,7 +266,7 @@ class PushRulesWorkerStore(
         if not user_ids:
             return {}
 
-        raw_rules: Dict[str, List[Tuple[str, int, str, str]]] = {
+        raw_rules: dict[str, list[tuple[str, int, str, str]]] = {
             user_id: [] for user_id in user_ids
         }
 
@@ -280,7 +275,7 @@ class PushRulesWorkerStore(
             gather_results(
                 (
                     cast(
-                        "defer.Deferred[List[Tuple[str, str, int, int, str, str]]]",
+                        "defer.Deferred[list[tuple[str, str, int, int, str, str]]]",
                         run_in_background(
                             self.db_pool.simple_select_many_batch,
                             table="push_rules",
@@ -312,7 +307,7 @@ class PushRulesWorkerStore(
                 (rule_id, priority_class, conditions, actions)
             )
 
-        results: Dict[str, FilteredPushRules] = {}
+        results: dict[str, FilteredPushRules] = {}
 
         for user_id, rules in raw_rules.items():
             results[user_id] = _load_rules(
@@ -323,14 +318,14 @@ class PushRulesWorkerStore(
 
     async def bulk_get_push_rules_enabled(
         self, user_ids: Collection[str]
-    ) -> Dict[str, Dict[str, bool]]:
+    ) -> dict[str, dict[str, bool]]:
         if not user_ids:
             return {}
 
-        results: Dict[str, Dict[str, bool]] = {user_id: {} for user_id in user_ids}
+        results: dict[str, dict[str, bool]] = {user_id: {} for user_id in user_ids}
 
         rows = cast(
-            List[Tuple[str, str, Optional[int]]],
+            list[tuple[str, str, int | None]],
             await self.db_pool.simple_select_many_batch(
                 table="push_rules_enable",
                 column="user_name",
@@ -346,7 +341,7 @@ class PushRulesWorkerStore(
 
     async def get_all_push_rule_updates(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, Tuple[str]]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple[str]]], int, bool]:
         """Get updates for push_rules replication stream.
 
         Args:
@@ -373,7 +368,7 @@ class PushRulesWorkerStore(
 
         def get_all_push_rule_updates_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Tuple[int, Tuple[str]]], int, bool]:
+        ) -> tuple[list[tuple[int, tuple[str]]], int, bool]:
             sql = """
                 SELECT stream_id, user_id
                 FROM push_rules_stream
@@ -383,7 +378,7 @@ class PushRulesWorkerStore(
             """
             txn.execute(sql, (last_id, current_id, limit))
             updates = cast(
-                List[Tuple[int, Tuple[str]]],
+                list[tuple[int, tuple[str]]],
                 [(stream_id, (user_id,)) for stream_id, user_id in txn],
             )
 
@@ -405,9 +400,9 @@ class PushRulesWorkerStore(
         rule_id: str,
         priority_class: int,
         conditions: Sequence[Mapping[str, str]],
-        actions: Sequence[Union[Mapping[str, Any], str]],
-        before: Optional[str] = None,
-        after: Optional[str] = None,
+        actions: Sequence[Mapping[str, Any] | str],
+        before: str | None = None,
+        after: str | None = None,
     ) -> None:
         if not self._is_push_writer:
             raise Exception("Not a push writer")
@@ -794,7 +789,7 @@ class PushRulesWorkerStore(
         self,
         user_id: str,
         rule_id: str,
-        actions: List[Union[dict, str]],
+        actions: list[dict | str],
         is_default_rule: bool,
     ) -> None:
         """
@@ -885,7 +880,7 @@ class PushRulesWorkerStore(
         user_id: str,
         rule_id: str,
         op: str,
-        data: Optional[JsonDict] = None,
+        data: JsonDict | None = None,
     ) -> None:
         if not self._is_push_writer:
             raise Exception("Not a push writer")

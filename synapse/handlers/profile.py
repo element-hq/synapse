@@ -20,7 +20,7 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import (
@@ -68,8 +68,8 @@ class ProfileHandler:
         self.user_directory_handler = hs.get_user_directory_handler()
         self.request_ratelimiter = hs.get_request_ratelimiter()
 
-        self.max_avatar_size: Optional[int] = hs.config.server.max_avatar_size
-        self.allowed_avatar_mimetypes: Optional[List[str]] = (
+        self.max_avatar_size: int | None = hs.config.server.max_avatar_size
+        self.allowed_avatar_mimetypes: list[str] | None = (
             hs.config.server.allowed_avatar_mimetypes
         )
 
@@ -133,7 +133,7 @@ class ProfileHandler:
                     raise SynapseError(502, "Failed to fetch profile")
                 raise e.to_synapse_error()
 
-    async def get_displayname(self, target_user: UserID) -> Optional[str]:
+    async def get_displayname(self, target_user: UserID) -> str | None:
         """
         Fetch a user's display name from their profile.
 
@@ -211,7 +211,7 @@ class ProfileHandler:
                 400, "Displayname is too long (max %i)" % (MAX_DISPLAYNAME_LEN,)
             )
 
-        displayname_to_set: Optional[str] = new_displayname.strip()
+        displayname_to_set: str | None = new_displayname.strip()
         if new_displayname == "":
             displayname_to_set = None
 
@@ -238,7 +238,7 @@ class ProfileHandler:
         if propagate:
             await self._update_join_states(requester, target_user)
 
-    async def get_avatar_url(self, target_user: UserID) -> Optional[str]:
+    async def get_avatar_url(self, target_user: UserID) -> str | None:
         """
         Fetch a user's avatar URL from their profile.
 
@@ -316,7 +316,7 @@ class ProfileHandler:
         if not await self.check_avatar_size_and_mime_type(new_avatar_url):
             raise SynapseError(403, "This avatar is not allowed", Codes.FORBIDDEN)
 
-        avatar_url_to_set: Optional[str] = new_avatar_url
+        avatar_url_to_set: str | None = new_avatar_url
         if new_avatar_url == "":
             avatar_url_to_set = None
 
@@ -367,9 +367,9 @@ class ProfileHandler:
             server_name = host
 
         if self._is_mine_server_name(server_name):
-            media_info: Optional[
-                Union[LocalMedia, RemoteMedia]
-            ] = await self.store.get_local_media(media_id)
+            media_info: (
+                LocalMedia | RemoteMedia | None
+            ) = await self.store.get_local_media(media_id)
         else:
             media_info = await self.store.get_cached_remote_media(server_name, media_id)
 
@@ -606,7 +606,7 @@ class ProfileHandler:
                 )
 
     async def check_profile_query_allowed(
-        self, target_user: UserID, requester: Optional[UserID] = None
+        self, target_user: UserID, requester: UserID | None = None
     ) -> None:
         """Checks whether a profile query is allowed. If the
         'require_auth_for_profile_requests' config flag is set to True and a
