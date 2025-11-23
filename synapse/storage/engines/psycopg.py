@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Mapping
 
 import psycopg
 import psycopg.errors
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 class PsycopgEngine(
     # mypy doesn't seem to like that the psycopg Connection and Cursor are Generics.
     PostgresEngine[
-        psycopg.Connection[Tuple], psycopg.Cursor[Tuple], psycopg.IsolationLevel  # type: ignore[type-var]
+        psycopg.Connection[tuple], psycopg.Cursor[tuple], psycopg.IsolationLevel  # type: ignore[type-var]
     ]
 ):
     def __init__(self, database_config: Mapping[str, Any]):
@@ -88,7 +88,7 @@ class PsycopgEngine(
         conn.autocommit = autocommit
 
     def attempt_to_set_isolation_level(
-        self, conn: psycopg.Connection, isolation_level: Optional[IsolationLevel] = None
+        self, conn: psycopg.Connection, isolation_level: IsolationLevel | None = None
     ) -> None:
         if isolation_level is None:
             pg_isolation_level = self.default_isolation_level

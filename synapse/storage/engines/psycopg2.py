@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-from typing import Any, Mapping, NoReturn, Optional
+from typing import Any, Mapping, NoReturn
 
 import psycopg2.extensions
 
@@ -78,7 +78,7 @@ class Psycopg2Engine(
     def attempt_to_set_isolation_level(
         self,
         conn: psycopg2.extensions.connection,
-        isolation_level: Optional[IsolationLevel] = None,
+        isolation_level: IsolationLevel | None = None,
     ) -> None:
         if isolation_level is None:
             pg_isolation_level = self.default_isolation_level

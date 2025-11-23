@@ -484,7 +484,7 @@ class LoggingTransaction:
 
             def f(
                 the_sql: str, the_args: Sequence[Sequence[Any]]
-            ) -> Iterable[Tuple[Any, ...]]:
+            ) -> Iterable[tuple[Any, ...]]:
                 with self.txn.copy(the_sql, the_args) as copy:  # type: ignore[attr-defined]
                     yield from copy.rows()
 
