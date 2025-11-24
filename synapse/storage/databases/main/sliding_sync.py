@@ -38,6 +38,7 @@ from synapse.types.handlers.sliding_sync import (
     RoomSyncConfig,
 )
 from synapse.util.caches.descriptors import cached
+from synapse.util.constants import MILLISECONDS_PER_SECOND, ONE_HOUR_SECONDS
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -582,7 +583,7 @@ class SlidingSyncStore(SQLBaseStore):
                     # We've never sent this user before, so we need to record that
                     # we've sent it at the new connection position.
                     to_update.append((room_id, user_id))
-                elif last_seen_ts + 60 * 60 * 1000 < now:
+                elif last_seen_ts + ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND < now:
                     # We last saw this user over an hour ago, so we update the
                     # timestamp.
                     to_update.append((room_id, user_id))
