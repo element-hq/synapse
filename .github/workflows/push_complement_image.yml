@@ -33,17 +33,17 @@ jobs:
       packages: write
     steps:
       - name: Checkout specific branch (debug build)
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         if: github.event_name == 'workflow_dispatch'
         with:
           ref: ${{ inputs.branch }}
       - name: Checkout clean copy of develop (scheduled build)
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         if: github.event_name == 'schedule'
         with:
           ref: develop
       - name: Checkout clean copy of master (on-push)
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         if: github.event_name == 'push'
         with:
           ref: master
