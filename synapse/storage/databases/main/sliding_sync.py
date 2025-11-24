@@ -182,11 +182,6 @@ class SlidingSyncStore(SQLBaseStore):
         if previous_connection_position is not None:
             # The `previous_connection_position` is a user-supplied value, so we
             # need to make sure that the one they supplied is actually theirs.
-            #
-            # We take out a `FOR UPDATE` lock on the row to prevent races with
-            # the connection deletion. If the connection gets deleted underneath
-            # then the query will return no rows and we raise
-            # `SlidingSyncUnknownPosition` exception.
             sql = """
                 SELECT connection_key
                 FROM sliding_sync_connection_positions
@@ -194,7 +189,6 @@ class SlidingSyncStore(SQLBaseStore):
                 WHERE
                     connection_position = ?
                     AND user_id = ? AND effective_device_id = ? AND conn_id = ?
-                FOR UPDATE
             """
             txn.execute(
                 sql, (previous_connection_position, user_id, device_id, conn_id)
