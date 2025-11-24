@@ -69,6 +69,7 @@ from synapse.types.handlers.sliding_sync import (
 )
 from synapse.types.state import StateFilter
 from synapse.util import MutableOverlayMapping
+from synapse.util.constants import MILLISECONDS_PER_SECOND, ONE_HOUR_SECONDS
 from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
@@ -81,7 +82,7 @@ logger = logging.getLogger(__name__)
 # Minimum time in milliseconds since the last sync before we consider expiring
 # the connection due to too many rooms to send. This stops from getting into
 # tight loops with clients that request lots of data at once.
-MINIMUM_NOT_USED_AGE_EXPIRY_MS = 60 * 60 * 1000  # 1 hour
+MINIMUM_NOT_USED_AGE_EXPIRY_MS = ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND
 
 # How many rooms with updates we allow before we consider the connection
 # expired due to too many rooms to send.

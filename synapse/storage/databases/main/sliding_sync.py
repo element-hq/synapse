@@ -37,6 +37,12 @@ from synapse.types.handlers.sliding_sync import (
     RoomSyncConfig,
 )
 from synapse.util.caches.descriptors import cached
+from synapse.util.constants import (
+    MILLISECONDS_PER_SECOND,
+    ONE_DAY_SECONDS,
+    ONE_HOUR_SECONDS,
+    ONE_MINUTE_SECONDS,
+)
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -51,12 +57,14 @@ logger = logging.getLogger(__name__)
 # position. We don't want to update it on every use to avoid excessive
 # writes, but we want it to be reasonably up-to-date to help with
 # cleaning up old connection positions.
-UPDATE_INTERVAL_LAST_USED_TS_MS = 5 * 60_000
-
+UPDATE_INTERVAL_LAST_USED_TS_MS = 5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND
 
 # Time in milliseconds the connection hasn't been used before we consider it
 # expired and delete it.
-CONNECTION_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000  # 7 days
+CONNECTION_EXPIRY_MS = 7 * ONE_DAY_SECONDS * MILLISECONDS_PER_SECOND
+
+# How often we run the background process to delete old sliding sync connections.
+CONNECTION_EXPIRY_FREQUENCY_MS = ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND
 
 
 class SlidingSyncStore(SQLBaseStore):
@@ -93,7 +101,7 @@ class SlidingSyncStore(SQLBaseStore):
         if self.hs.config.worker.run_background_tasks:
             self.clock.looping_call(
                 self.delete_old_sliding_sync_connections,
-                1 * 60 * 60 * 1000,  # every hour
+                CONNECTION_EXPIRY_FREQUENCY_MS,
             )
 
     async def get_latest_bump_stamp_for_room(
