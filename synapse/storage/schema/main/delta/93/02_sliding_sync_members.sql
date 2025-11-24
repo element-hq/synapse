@@ -14,7 +14,7 @@
 
 -- Tracks which member states have been sent to the client for lazy-loaded
 -- members in sliding sync. This is a *cache* as it doesn't matter if we send
--- down members we've previously sent down.
+-- down members we've previously sent down, i.e. it's safe to delete any rows.
 --
 -- We track a *rough* `last_seen_ts` for each user in each room which indicates
 -- when we last would've sent their member state to the client. This is used so
@@ -34,8 +34,8 @@
 -- for a specific position.
 --
 -- When invalidating rows, we can just delete them. Technically this could
--- incorrectly invalidate for a forked position, but this is acceptable as it's
--- just a cache.
+-- invalidate for a forked position, but this is acceptable as equivalent to a
+-- cache eviction.
 CREATE TABLE sliding_sync_connection_lazy_members (
     connection_key BIGINT NOT NULL REFERENCES sliding_sync_connections(connection_key) ON DELETE CASCADE,
     connection_position BIGINT REFERENCES sliding_sync_connection_positions(connection_position) ON DELETE CASCADE,
