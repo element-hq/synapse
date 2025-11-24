@@ -96,16 +96,13 @@ class DelayedEventsHandler:
                     self.notify_new_event,
                 )
 
-                # Delayed events that are already marked as processed on startup might not have been
-                # sent properly on the last run of the server, so unmark them to send them again.
-                # Caveat: this will double-send delayed events that successfully persisted, but failed
-                # to be removed from the DB table of delayed events.
-                # TODO: To avoid double-sending, scan the timeline to find which of these events were
-                # already sent. To do so, must store delay_ids in sent events to retrieve them later.
-                await self._store.unprocess_delayed_events()
-
+                # Now process any delayed events that are due to be sent.
+                #
+                # We set `reprocess_events` to True in case any events had been
+                # marked as processed, but had not yet actually been sent,
+                # before the homeserver stopped.
                 events, next_send_ts = await self._store.process_timeout_delayed_events(
-                    self._get_current_ts()
+                    self._get_current_ts(), reprocess_events=True
                 )
 
                 if next_send_ts:
