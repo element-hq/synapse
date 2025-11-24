@@ -854,7 +854,8 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         self.helper.send(room_id1, "1", tok=user1_tok)
         self.helper.send(room_id1, "2", tok=user2_tok)
 
-        # Make a first sync to establish a position
+        # Make a first sync with lazy loading for the room members to establish
+        # a position
         sync_body = {
             "lists": {
                 "foo-list": {

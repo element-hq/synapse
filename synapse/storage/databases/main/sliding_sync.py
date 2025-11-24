@@ -616,7 +616,7 @@ class SlidingSyncStore(SQLBaseStore):
                 sql = sql.format(value_placeholder="(?, ?, ?, ?, ?)")
                 txn.execute_batch(sql, args)
 
-        # Remove any invlalidated entries.
+        # Remove any invalidated entries.
         to_remove: list[tuple[str, str]] = []
         for room_id, room_changes in all_changes.items():
             for user_id in room_changes.invalidated_user_ids:

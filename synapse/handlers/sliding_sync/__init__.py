@@ -1098,6 +1098,8 @@ class SlidingSyncHandler:
                                 # have been included already (this can only
                                 # happen if membership state was rolled back due
                                 # to state resolution anyway).
+                                #
+                                # `None` is a wildcard in the `StateFilter`
                                 required_state_types.append((EventTypes.Member, None))
 
                                 # Record the extra members we're returning.
@@ -1607,7 +1609,8 @@ def _required_state_changes(
             continue
 
         if state_key in lazy_load_user_ids:
-            # We're returning this member change.
+            # Because it's part of the `required_user_state`, we're going to
+            # send this member change down.
             continue
 
         if state_key not in previously_returned_user_state:
