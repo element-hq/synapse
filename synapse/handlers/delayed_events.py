@@ -442,8 +442,10 @@ class DelayedEventsHandler:
             delay_id, self._get_current_ts()
         )
 
-        if self._next_send_ts_changed(next_send_ts):
-            self._schedule_next_at(next_send_ts)
+        # Only the main process handles sending delayed events.
+        if self._is_master:
+            if self._next_send_ts_changed(next_send_ts):
+                self._schedule_next_at(next_send_ts)
 
     async def send(self, request: SynapseRequest, delay_id: str) -> None:
         """
