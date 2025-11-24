@@ -474,7 +474,7 @@ class DelayedEventsHandler:
             self._schedule_next_at_or_none(next_send_ts)
 
         if event:
-            await self._send_event(event)
+            await self._send_event(event, False)
 
     async def _send_on_timeout(self) -> None:
         self._next_delayed_event_call = None
@@ -499,7 +499,7 @@ class DelayedEventsHandler:
                 state_info = None
             try:
                 # TODO: send in background if message event or non-conflicting state event
-                finalised_ts = await self._send_event(event)
+                finalised_ts = await self._send_event(event, True)
                 if state_info is not None:
                     sent_state.add(state_info)
             except Exception:
@@ -576,7 +576,7 @@ class DelayedEventsHandler:
     async def _send_event(
         self,
         event: DelayedEventDetails,
-        txn_id: str | None = None,
+        finalise_error: bool,
     ) -> Timestamp:
         user_id = UserID(event.user_localpart, self._config.server.server_name)
         user_id_str = user_id.to_string()
@@ -620,7 +620,6 @@ class DelayedEventsHandler:
                 ) = await self._event_creation_handler.create_and_send_nonmember_event(
                     requester,
                     event_dict,
-                    txn_id=txn_id,
                 )
                 event_id = sent_event.event_id
                 if event.origin_server_ts is None:
@@ -628,10 +627,14 @@ class DelayedEventsHandler:
         except ShadowBanError:
             event_id = generate_fake_event_id()
             send_error = None
-        except SynapseError as e:
-            send_error = e.error_dict(None)
-        except Exception:
-            send_error = cs_error("Internal server error")
+        except Exception as e:
+            if finalise_error:
+                if isinstance(e, SynapseError):
+                    send_error = e.error_dict(None)
+                else:
+                    send_error = cs_error("Internal server error")
+            else:
+                raise
         else:
             send_error = None
         finally:
