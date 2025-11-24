@@ -574,7 +574,10 @@ class SlidingSyncStore(SQLBaseStore):
         # we want to update it.
         to_update: list[tuple[str, str]] = []
         for room_id, room_changes in all_changes.items():
-            for user_id, last_seen_ts in room_changes.returned.items():
+            for (
+                user_id,
+                last_seen_ts,
+            ) in room_changes.returned_user_id_to_last_seen_ts_map.items():
                 if last_seen_ts is None:
                     # We've never sent this user before, so we need to record that
                     # we've sent it at the new connection position.
@@ -616,7 +619,7 @@ class SlidingSyncStore(SQLBaseStore):
         # Remove any invlalidated entries.
         to_remove: list[tuple[str, str]] = []
         for room_id, room_changes in all_changes.items():
-            for user_id in room_changes.invalidated:
+            for user_id in room_changes.invalidated_user_ids:
                 to_remove.append((room_id, user_id))
 
         if to_remove:

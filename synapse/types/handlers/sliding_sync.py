@@ -905,14 +905,16 @@ class RoomLazyMembershipChanges:
     # been lazily loaded. I.e. that either a) we sent those memberships down, or
     # b) we did so previously. The timestamp indicates the time we previously
     # saw the membership.
-    returned: Mapping[str, int | None] = attr.Factory(dict)
+    returned_user_id_to_last_seen_ts_map: Mapping[str, int | None] = attr.Factory(dict)
 
     # A set of user IDs whose membership change we have *not* sent
     # down
-    invalidated: AbstractSet[str] = attr.Factory(set)
+    invalidated_user_ids: AbstractSet[str] = attr.Factory(set)
 
     def __bool__(self) -> bool:
-        return bool(self.returned or self.invalidated)
+        return bool(
+            self.returned_user_id_to_last_seen_ts_map or self.invalidated_user_ids
+        )
 
 
 @attr.s(auto_attribs=True)

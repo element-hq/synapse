@@ -1185,7 +1185,7 @@ class SlidingSyncHandler:
         if lazy_load_room_members:
             returned_users = dict.fromkeys(lazy_load_user_ids)
         new_connection_state.room_lazy_membership[room_id] = RoomLazyMembershipChanges(
-            returned=returned_users
+            returned_user_id_to_last_seen_ts_map=returned_users
         )
 
         if initial:
@@ -1238,7 +1238,7 @@ class SlidingSyncHandler:
 
                 new_connection_state.room_lazy_membership[
                     room_id
-                ].invalidated = changes_return.lazy_members_invalidated
+                ].invalidated_user_ids = changes_return.lazy_members_invalidated
 
                 if changes_return.added_state_filter:
                     # Some state entries got added, so we pull out the current
