@@ -101,6 +101,11 @@ class DelayedEventsHandler:
                 # We set `reprocess_events` to True in case any events had been
                 # marked as processed, but had not yet actually been sent,
                 # before the homeserver stopped.
+                #
+                # Caveat: this will double-send delayed events that successfully persisted, but failed
+                # to be removed from the DB table of delayed events.
+                # TODO: To avoid double-sending, scan the timeline to find which of these events were
+                # already sent. To do so, must store delay_ids in sent events to retrieve them later.
                 events, next_send_ts = await self._store.process_timeout_delayed_events(
                     self._get_current_ts(), reprocess_events=True
                 )
