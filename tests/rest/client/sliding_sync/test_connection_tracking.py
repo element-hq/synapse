@@ -493,7 +493,7 @@ class SlidingSyncConnectionTrackingTestCase(SlidingSyncBase):
             _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # ... but if we wait too long, the connection expires
-        self.reactor.advance(CONNECTION_EXPIRY_MS / 1000)
+        self.reactor.advance(1 + CONNECTION_EXPIRY_MS / 1000)
 
         # This sync should now raise SlidingSyncUnknownPosition
         channel = self.make_sync_request(sync_body, since=from_token, tok=user1_tok)
