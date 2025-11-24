@@ -269,6 +269,8 @@ extend-safe-fixes = [
     "UP007",
     # pyupgrade rules compatible with Python >= 3.10
     "UP045",
+    # Allow ruff to automatically fix trailing spaces within a multi-line string/comment.
+    "W293"
 ]
 
 [tool.ruff.lint.isort]
