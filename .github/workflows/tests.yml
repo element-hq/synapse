@@ -192,7 +192,8 @@ jobs:
         run: scripts-dev/check_line_terminators.sh
 
   lint-newsfile:
-    if: ${{ (github.base_ref == 'develop'  || contains(github.base_ref, 'release-')) && github.actor != 'dependabot[bot]' }}
+    # Only run on pull_request events, targeting develop/release branches, and skip when the PR author is dependabot[bot].
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'develop' || contains(github.base_ref, 'release-')) && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
