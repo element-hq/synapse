@@ -883,7 +883,18 @@ class SlidingSyncRoomLists:
 
                     # Check if we have lots of updates to send, if so then its
                     # better for us to tell the client to do a full resync
-                    # instead.
+                    # instead (to try and avoid long SSS response times when
+                    # there is new data).
+                    #
+                    # Due to the construction of the SSS API the client is in
+                    # charge of setting the range of rooms to request updates
+                    # for. Generally, it will start with a small range and then
+                    # expand (and occasionally it may contract the range again
+                    # if its been offline for a while). If we know there are a
+                    # lot of updates, it's better to reset the connection and
+                    # wait for the client to start again (with a much smaller
+                    # range) than to try and send down a large number of updates
+                    # (which can take a long time).
                     #
                     # We only do this if the last sync was over
                     # `MINIMUM_NOT_USED_AGE_EXPIRY_MS` to ensure we don't get
