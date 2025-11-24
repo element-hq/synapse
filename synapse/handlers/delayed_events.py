@@ -15,7 +15,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-from twisted.internet import defer
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
@@ -81,15 +80,6 @@ class DelayedEventsHandler:
 
         # Guard to ensure we only process event deltas one at a time
         self._event_processing = False
-
-        # Workers don't need to wait for delayed events queued in the DB to be
-        # sent as that will be handled by the main process.
-        #
-        # If a worker attempts to schedule a timer for the next delayed event
-        # while the main process is pulling delayed events from the DB, the two
-        # will not race, as the main process will mark the delayed events as
-        # processed in the DB immediately before sending them.
-        self._initialized_from_db = defer.succeed(None)
 
         if hs.config.worker.worker_app is None:
             self._repl_client = None
@@ -436,7 +426,17 @@ class DelayedEventsHandler:
         await self._delayed_event_mgmt_ratelimiter.ratelimit(
             None, request.getClientAddress().host
         )
-        await make_deferred_yieldable(self._initialized_from_db)
+
+        # Only the main process will schedule delayed events on startup.
+        #
+        # We're not racing the main process here. We're only restarting timeouts for
+        # events that haven't been processed yet. Events get marked as processed
+        # before they're sent, so we won't end up restarting the timeout for an
+        # event that's already on its way out.
+        if self._is_master:
+            # Wait for the processing of existing delayed events from the DB to
+            # complete before accepting any modifications.
+            await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.restart_delayed_event(
             delay_id, self._get_current_ts()
