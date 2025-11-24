@@ -82,10 +82,15 @@ logger = logging.getLogger(__name__)
 # Minimum time in milliseconds since the last sync before we consider expiring
 # the connection due to too many rooms to send. This stops from getting into
 # tight loops with clients that request lots of data at once.
+#
+# c.f. `NUM_ROOMS_THRESHOLD`. These values are somewhat arbitrary picked.
 MINIMUM_NOT_USED_AGE_EXPIRY_MS = ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND
 
-# How many rooms with updates we allow before we consider the connection
-# expired due to too many rooms to send.
+# How many rooms with updates we allow before we consider the connection expired
+# due to too many rooms to send.
+#
+# c.f. `MINIMUM_NOT_USED_AGE_EXPIRY_MS`. These values are somewhat arbitrary
+# picked.
 NUM_ROOMS_THRESHOLD = 100
 
 # Helper definition for the types that we might return. We do this to avoid
