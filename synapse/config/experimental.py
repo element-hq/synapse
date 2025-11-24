@@ -438,6 +438,9 @@ class ExperimentalConfig(Config):
         # previously calculated push actions.
         self.msc2654_enabled: bool = experimental.get("msc2654_enabled", False)
 
+        # MSC2666: Query mutual rooms between two users.
+        self.msc2666_enabled: bool = experimental.get("msc2666_enabled", False)
+
         # MSC2815 (allow room moderators to view redacted event content)
         self.msc2815_enabled: bool = experimental.get("msc2815_enabled", False)
 
