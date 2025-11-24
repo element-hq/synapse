@@ -424,16 +424,10 @@ class DelayedEventsHandler:
             None, request.getClientAddress().host
         )
 
-        # Only the main process will schedule delayed events on startup.
+        # Note: We don't need to wait on `self._initialized_from_db` here as the
+        # events that deals with are already marked as processed.
         #
-        # We're not racing the main process here. We're only restarting timeouts for
-        # events that haven't been processed yet. Events get marked as processed
-        # before they're sent, so we won't end up restarting the timeout for an
-        # event that's already on its way out.
-        if self._is_master:
-            # Wait for the processing of existing delayed events from the DB to
-            # complete before accepting any modifications.
-            await make_deferred_yieldable(self._initialized_from_db)
+        # `restart_delayed_events` will skip over such events entirely.
 
         next_send_ts = await self._store.restart_delayed_event(
             delay_id, self._get_current_ts()
