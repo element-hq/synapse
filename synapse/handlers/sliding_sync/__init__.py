@@ -1141,8 +1141,8 @@ class SlidingSyncHandler:
 
                 required_state_filter = StateFilter.from_types(required_state_types)
 
-        # Define `required_user_state` as all user state we want.
-        required_user_state = explicit_user_state | lazy_load_user_ids
+        # Remove any explicitly requested user state from the lazy-loaded set,
+        # as we track them separately.
         lazy_load_user_ids -= explicit_user_state
 
         # We need this base set of info for the response so let's just fetch it along
@@ -1204,13 +1204,21 @@ class SlidingSyncHandler:
             assert from_bound is not None
 
             if prev_room_sync_config is not None:
-                # Fetch which of the needed lazy-loaded members we have already sent.
-                if required_user_state:
+                # Define `required_user_state` as all user state we want.
+                all_required_user_state = explicit_user_state | lazy_load_user_ids
+
+                # We need to know what user state we previously sent down the
+                # connection so we can determine what has changed.
+                #
+                # We don't just pull out the lazy loaded members here to handle
+                # the case where the client added explicit user state requests
+                # for users they already had lazy loaded.
+                if all_required_user_state:
                     previously_returned_user_state = (
                         await self.store.get_sliding_sync_connection_lazy_members(
                             connection_position=from_token.connection_position,
                             room_id=room_id,
-                            user_ids=required_user_state,
+                            user_ids=all_required_user_state,
                         )
                     )
                 else:
@@ -1223,7 +1231,7 @@ class SlidingSyncHandler:
                     prev_required_state_map=prev_room_sync_config.required_state_map,
                     request_required_state_map=room_sync_config.required_state_map,
                     previously_returned_user_state=previously_returned_user_state,
-                    required_user_state=lazy_load_user_ids,
+                    lazy_load_user_ids=lazy_load_user_ids,
                     state_deltas=room_state_delta_id_map,
                 )
                 changed_required_state_map = changes_return.required_state_map_change
@@ -1561,7 +1569,7 @@ def _required_state_changes(
     prev_required_state_map: Mapping[str, AbstractSet[str]],
     request_required_state_map: Mapping[str, AbstractSet[str]],
     previously_returned_user_state: Mapping[str, int | None],
-    required_user_state: AbstractSet[str],
+    lazy_load_user_ids: AbstractSet[str],
     state_deltas: StateMap[str],
 ) -> _RequiredStateChangesReturn:
     """Calculates the changes between the required state room config from the
@@ -1598,7 +1606,7 @@ def _required_state_changes(
         if event_type != EventTypes.Member:
             continue
 
-        if state_key in required_user_state:
+        if state_key in lazy_load_user_ids:
             # We're returning this member change.
             continue
 
@@ -1612,7 +1620,7 @@ def _required_state_changes(
     if prev_required_state_map == request_required_state_map:
         # There has been no change in state, just need to check lazy members.
         newly_returned_lazy_members = (
-            required_user_state - previously_returned_user_state.keys()
+            lazy_load_user_ids - previously_returned_user_state.keys()
         )
         if newly_returned_lazy_members:
             # There are some new lazy members we need to fetch.
@@ -1724,7 +1732,7 @@ def _required_state_changes(
 
                     # ...or b) if we are going to send the delta down in this
                     # sync.
-                    if state_key in required_user_state:
+                    if state_key in lazy_load_user_ids:
                         lazy_members_previously_returned.add(state_key)
 
                 changes[event_type] = request_state_keys
@@ -1811,7 +1819,7 @@ def _required_state_changes(
     # We also need to pull out any lazy members that are now required but
     # haven't previously been returned.
     for required_user_id in (
-        required_user_state
+        lazy_load_user_ids
         - previously_returned_user_state.keys()
         - lazy_members_previously_returned
     ):
