@@ -77,7 +77,11 @@ from synapse.http import QuieterFileBodyProducer, RequestTimedOutError, redact_u
 from synapse.http.proxyagent import ProxyAgent
 from synapse.http.replicationagent import ReplicationAgent
 from synapse.http.types import QueryParams
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import (
+    PreserveLoggingContext,
+    make_deferred_yieldable,
+    run_in_background,
+)
 from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, StrSequence
@@ -1036,7 +1040,8 @@ class _DiscardBodyWithMaxSizeProtocol(protocol.Protocol):
         Report a max size exceed error and disconnect the first time this is called.
         """
         if not self.deferred.called:
-            self.deferred.errback(BodyExceededMaxSize())
+            with PreserveLoggingContext():
+                self.deferred.errback(BodyExceededMaxSize())
             # Close the connection (forcefully) since all the data will get
             # discarded anyway.
             assert self.transport is not None
@@ -1135,7 +1140,8 @@ class _MultipartParserProtocol(protocol.Protocol):
                         logger.warning(
                             "Exception encountered writing file data to stream: %s", e
                         )
-                        self.deferred.errback()
+                        with PreserveLoggingContext():
+                            self.deferred.errback()
                     self.file_length += end - start
 
             callbacks: "multipart.MultipartCallbacks" = {
@@ -1147,7 +1153,8 @@ class _MultipartParserProtocol(protocol.Protocol):
 
         self.total_length += len(incoming_data)
         if self.max_length is not None and self.total_length >= self.max_length:
-            self.deferred.errback(BodyExceededMaxSize())
+            with PreserveLoggingContext():
+                self.deferred.errback(BodyExceededMaxSize())
             # Close the connection (forcefully) since all the data will get
             # discarded anyway.
             assert self.transport is not None
@@ -1157,7 +1164,8 @@ class _MultipartParserProtocol(protocol.Protocol):
             self.parser.write(incoming_data)
         except Exception as e:
             logger.warning("Exception writing to multipart parser: %s", e)
-            self.deferred.errback()
+            with PreserveLoggingContext():
+                self.deferred.errback()
             return
 
     def connectionLost(self, reason: Failure = connectionDone) -> None:
@@ -1167,9 +1175,11 @@ class _MultipartParserProtocol(protocol.Protocol):
 
         if reason.check(ResponseDone):
             self.multipart_response.length = self.file_length
-            self.deferred.callback(self.multipart_response)
+            with PreserveLoggingContext():
+                self.deferred.callback(self.multipart_response)
         else:
-            self.deferred.errback(reason)
+            with PreserveLoggingContext():
+                self.deferred.errback(reason)
 
 
 class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
@@ -1193,7 +1203,8 @@ class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
         try:
             self.stream.write(data)
         except Exception:
-            self.deferred.errback()
+            with PreserveLoggingContext():
+                self.deferred.errback()
             return
 
         self.length += len(data)
@@ -1201,7 +1212,8 @@ class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
         # connection. dataReceived might be called again if data was received
         # in the meantime.
         if self.max_size is not None and self.length >= self.max_size:
-            self.deferred.errback(BodyExceededMaxSize())
+            with PreserveLoggingContext():
+                self.deferred.errback(BodyExceededMaxSize())
             # Close the connection (forcefully) since all the data will get
             # discarded anyway.
             assert self.transport is not None
@@ -1213,7 +1225,8 @@ class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
             return
 
         if reason.check(ResponseDone):
-            self.deferred.callback(self.length)
+            with PreserveLoggingContext():
+                self.deferred.callback(self.length)
         elif reason.check(PotentialDataLoss):
             # This applies to requests which don't set `Content-Length` or a
             # `Transfer-Encoding` in the response because in this case the end of the
@@ -1222,9 +1235,11 @@ class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
             # behavior is expected of some servers (like YouTube), let's ignore it.
             # Stolen from https://github.com/twisted/treq/pull/49/files
             # http://twistedmatrix.com/trac/ticket/4840
-            self.deferred.callback(self.length)
+            with PreserveLoggingContext():
+                self.deferred.callback(self.length)
         else:
-            self.deferred.errback(reason)
+            with PreserveLoggingContext():
+                self.deferred.errback(reason)
 
 
 def read_body_with_max_size(
