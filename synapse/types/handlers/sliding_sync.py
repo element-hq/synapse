@@ -905,6 +905,11 @@ class RoomLazyMembershipChanges:
     # been lazily loaded. I.e. that either a) we sent those memberships down, or
     # b) we did so previously. The timestamp indicates the time we previously
     # saw the membership.
+    #
+    # We track a *rough* `last_seen_ts` for each user in each room which
+    # indicates when we last would've sent their member state to the client.
+    # This is used so that we can remove members which haven't been seen for a
+    # while to save space.
     returned_user_id_to_last_seen_ts_map: Mapping[str, int | None] = attr.Factory(dict)
 
     # A set of user IDs whose membership change we have *not* sent
