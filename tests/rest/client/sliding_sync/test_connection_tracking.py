@@ -435,7 +435,9 @@ class SlidingSyncConnectionTrackingTestCase(SlidingSyncBase):
 
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
 
-        self.assertIn(room_id, response_body["rooms"])
+        # Check we got all the rooms down
+        for room_id in room_ids:
+            self.assertIn(room_id, response_body["rooms"])
 
         # Send a lot of events to cause the connection to expire
         for room_id in room_ids:
