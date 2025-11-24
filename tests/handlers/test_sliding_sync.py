@@ -4379,6 +4379,9 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We don't need to request anything more if they are requesting
                         # less state now
                         StateFilter.none(),
+                        # Previous request did not include any explicit members,
+                        # so nothing to store.
+                        lazy_members_previously_returned=frozenset(),
                         # Remove "@user2:test" since that state has changed and is no
                         # longer being requested anymore. Since something was removed,
                         # we should persist the changed to required state. That way next
@@ -4393,6 +4396,9 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We don't need to request anything more if they are requesting
                         # less state now
                         StateFilter.none(),
+                        # Previous request did not include any explicit members,
+                        # so nothing to store.
+                        lazy_members_previously_returned=frozenset(),
                         # Nothing should change (we should still keep track that
                         # we've sent specific `EventTypes.Member` before).
                         lazy_members_invalidated=frozenset(),
@@ -4417,6 +4423,9 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         None,
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                        # Previous request did not include any explicit members,
+                        # so nothing to store.
+                        lazy_members_previously_returned=frozenset(),
                         # Remove "@user2:test" since that state has changed and
                         # is no longer being requested anymore. Since something
                         # was removed, we also should persist the changed to
@@ -4431,6 +4440,9 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         None,
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                        # Previous request did not include any explicit members,
+                        # so nothing to store.
+                        lazy_members_previously_returned=frozenset(),
                         # We don't invalidate user2 as they haven't changed
                         lazy_members_invalidated=frozenset(),
                     ),
@@ -4462,6 +4474,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # Remember the fact that we've sent @user3 down before,
                         # but not @user2 as that has been invalidated.
                         lazy_members_previously_returned={"@user3:test"},
+                        # Nothing to invalidate as there are no existing lazy members.
+                        lazy_members_invalidated=frozenset(),
                     ),
                     expected_without_state_deltas=_RequiredStateChangesReturn(
                         # Since `StateValues.LAZY` was added, we should persist the
@@ -4475,6 +4489,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         StateFilter.none(),
                         # Remember the fact that we've sent the users down before.
                         lazy_members_previously_returned={"@user2:test", "@user3:test"},
+                        # Nothing to invalidate as there are no existing lazy members.
+                        lazy_members_invalidated=frozenset(),
                     ),
                 ),
             ),
@@ -4496,7 +4512,18 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We don't need to request anything more if they are requesting
                         # less state now
                         StateFilter.none(),
-                        # Explicitly remove the now invalidated @user2:test membership.
+                        # Previous request did not include any explicit members,
+                        # so nothing to store.
+                        lazy_members_previously_returned=frozenset(),
+                        # Explicitly remove the now invalidated @user2:test
+                        # membership.
+                        #
+                        # We don't invalidate @user3:test as that membership
+                        # hasn't changed. We continue to store the existing lazy
+                        # members since they might be useful for future
+                        # requests. (Alternatively, we could invalidate all
+                        # members in the room when the client stops lazy
+                        # loading, but we opt to keep track of them).
                         lazy_members_invalidated={"@user2:test"},
                     ),
                     expected_without_state_deltas=_RequiredStateChangesReturn(
@@ -4507,6 +4534,9 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We don't need to request anything more if they are requesting
                         # less state now
                         StateFilter.none(),
+                        # Previous request did not include any explicit members,
+                        # so nothing to store.
+                        lazy_members_previously_returned=frozenset(),
                         # Nothing has been invalidated.
                         lazy_members_invalidated=frozenset(),
                     ),
@@ -4529,6 +4559,9 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         {EventTypes.Member: {"@user4:test"}},
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                        # Previous request did not include any explicit members,
+                        # so nothing to store.
+                        lazy_members_previously_returned=frozenset(),
                         # Also remove "@user2:test" since that state has changed and is no
                         # longer being requested anymore. Since something was removed,
                         # we also should persist the changed to required state. That way next
@@ -4543,6 +4576,11 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         {EventTypes.Member: {"@user4:test"}},
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                        # Previous request did not include any explicit members,
+                        # so nothing to store.
+                        lazy_members_previously_returned=frozenset(),
+                        # We don't invalidate user2 as they haven't changed
+                        lazy_members_invalidated=frozenset(),
                     ),
                 ),
             ),
