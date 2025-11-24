@@ -2984,14 +2984,14 @@ twisted = "*"
 
 [[package]]
 name = "types-bleach"
-version = "6.2.0.20250809"
+version = "6.3.0.20251115"
 description = "Typing stubs for bleach"
 optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "types_bleach-6.2.0.20250809-py3-none-any.whl", hash = "sha256:0b372a75117947d9ac8a31ae733fd0f8d92ec75c4772e7b37093ba3fa5b48fb9"},
-    {file = "types_bleach-6.2.0.20250809.tar.gz", hash = "sha256:188d7a1119f6c953140b513ed57ba4213755695815472c19d0c22ac09c79b90b"},
+    {file = "types_bleach-6.3.0.20251115-py3-none-any.whl", hash = "sha256:f81e7cf4ebac3f3d60b66b3fd5236c324e65037d1b28d22c94d5b457f0b98f42"},
+    {file = "types_bleach-6.3.0.20251115.tar.gz", hash = "sha256:96911b20f169a18524d03b61fa7e98a08c411292f7cdb5dc191057f55dad9ae3"},
 ]
 
 [package.dependencies]
