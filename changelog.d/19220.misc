@@ -1,0 +1,1 @@
+Prevent changelog check CI running on @dependabot's PRs even when a human has modified the branch.
