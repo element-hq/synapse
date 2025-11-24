@@ -4374,7 +4374,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     lazy_load_user_ids=set(),
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
-                        # The requested required state hasn't changed
+                        # The `request_required_state_map` hasn't changed
                         None,
                         # We don't need to request anything more if they are requesting
                         # less state now
@@ -4388,7 +4388,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         lazy_members_invalidated={"@user2:test"},
                     ),
                     expected_without_state_deltas=_RequiredStateChangesReturn(
-                        # The requested required state hasn't changed
+                        # The `request_required_state_map` hasn't changed
                         None,
                         # We don't need to request anything more if they are requesting
                         # less state now
@@ -4413,7 +4413,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     lazy_load_user_ids={"@user4:test"},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
-                        # The requested required state hasn't changed
+                        # The `request_required_state_map` hasn't changed
                         None,
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
@@ -4427,7 +4427,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         lazy_members_invalidated={"@user2:test"},
                     ),
                     expected_without_state_deltas=_RequiredStateChangesReturn(
-                        # The requested required state hasn't changed
+                        # The `request_required_state_map` hasn't changed
                         None,
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
@@ -4454,6 +4454,10 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # changed required state config.
                         {EventTypes.Member: {StateValues.LAZY}},
                         # We have already sent @user3 down before.
+                        #
+                        # `@user3:test` is required for lazy loading, but we've
+                        # already sent it down before, so we don't need to
+                        # request it again.
                         StateFilter.none(),
                         # Remember the fact that we've sent @user3 down before,
                         # but not @user2 as that has been invalidated.
@@ -4464,6 +4468,10 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # changed required state config.
                         {EventTypes.Member: {StateValues.LAZY}},
                         # We have already sent @user3 down before.
+                        #
+                        # `@user3:test` is required for lazy loading, but we've
+                        # already sent it down before, so we don't need to
+                        # request it again.
                         StateFilter.none(),
                         # Remember the fact that we've sent the users down before.
                         lazy_members_previously_returned={"@user2:test", "@user3:test"},
