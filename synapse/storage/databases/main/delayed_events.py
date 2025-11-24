@@ -302,11 +302,12 @@ class DelayedEventsStore(SQLBaseStore):
                 )
             )
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
-            sql_where = (
-                "WHERE send_ts <= ?" + ""
-                if reprocess_events
-                else " AND NOT is_processed"  # Skip already-processed events.
-            )
+            sql_where = "WHERE send_ts <= ?"
+
+            if not reprocess_events:
+                # Skip already-processed events.
+                sql_where += " AND NOT is_processed"
+
             sql_args = (current_ts,)
             sql_order = "ORDER BY send_ts"
             if isinstance(self.database_engine, PostgresEngine):
