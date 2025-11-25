@@ -305,6 +305,7 @@ class SlidingSyncHandler:
             # account data, read receipts, typing indicators, to-device messages, etc).
             actual_room_ids=set(relevant_room_map.keys()),
             actual_room_response_map=rooms,
+            room_membership_for_user_at_to_token_map=room_membership_for_user_map,
             from_token=from_token,
             to_token=to_token,
         )

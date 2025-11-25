@@ -383,6 +383,19 @@ class SlidingSyncBody(RequestBodyModel):
             enabled: StrictBool | None = False
             limit: StrictInt = 100
 
+        class ThreadsExtension(RequestBodyModel):
+            """The Threads extension (MSC4360)
+
+            Attributes:
+                enabled: Whether the threads extension is enabled.
+                include_roots: whether to include thread root events in the extension response.
+                limit: maximum number of thread updates to return across all joined rooms.
+            """
+
+            enabled: StrictBool | None = False
+            include_roots: StrictBool = False
+            limit: StrictInt = 100
+
         to_device: ToDeviceExtension | None = None
         e2ee: E2eeExtension | None = None
         account_data: AccountDataExtension | None = None
@@ -390,6 +403,9 @@ class SlidingSyncBody(RequestBodyModel):
         typing: TypingExtension | None = None
         thread_subscriptions: ThreadSubscriptionsExtension | None = Field(
             None, alias="io.element.msc4308.thread_subscriptions"
+        )
+        threads: ThreadsExtension | None = Field(
+            None, alias="io.element.msc4360.threads"
         )
 
     conn_id: StrictStr | None = None

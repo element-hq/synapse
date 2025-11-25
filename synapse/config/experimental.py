@@ -596,3 +596,6 @@ class ExperimentalConfig(Config):
         # MSC4306: Thread Subscriptions
         # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
+
+        # MSC4360: Threads Extension to Sliding Sync
+        self.msc4360_enabled: bool = experimental.get("msc4360_enabled", False)

@@ -19,6 +19,7 @@
 #
 
 import logging
+from collections import defaultdict
 from typing import (
     TYPE_CHECKING,
     Collection,
@@ -40,13 +41,19 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
+from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.databases.main.stream import (
     generate_next_token,
     generate_pagination_bounds,
     generate_pagination_where_clause,
 )
 from synapse.storage.engines import PostgresEngine
-from synapse.types import JsonDict, StreamKeyType, StreamToken
+from synapse.types import (
+    JsonDict,
+    RoomStreamToken,
+    StreamKeyType,
+    StreamToken,
+)
 from synapse.util.caches.descriptors import cached, cachedList
 
 if TYPE_CHECKING:
@@ -88,7 +95,23 @@ class _RelatedEvent:
     sender: str
 
 
-class RelationsWorkerStore(SQLBaseStore):
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class ThreadUpdateInfo:
+    """
+    Information about a thread update for the sliding sync threads extension.
+
+    Attributes:
+        event_id: The event ID of the event in the thread.
+        room_id: The room ID where this thread exists.
+        stream_ordering: The stream ordering of this event.
+    """
+
+    event_id: str
+    room_id: str
+    stream_ordering: int
+
+
+class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
     def __init__(
         self,
         database: DatabasePool,
@@ -584,14 +607,18 @@ class RelationsWorkerStore(SQLBaseStore):
             "get_applicable_edits", _get_applicable_edits_txn
         )
 
-        edits = await self.get_events(edit_ids.values())  # type: ignore[attr-defined]
+        edits = await self.get_events(edit_ids.values())
 
         # Map to the original event IDs to the edit events.
         #
         # There might not be an edit event due to there being no edits or
         # due to the event not being known, either case is treated the same.
         return {
-            original_event_id: edits.get(edit_ids.get(original_event_id))
+            original_event_id: (
+                edits.get(edit_id)
+                if (edit_id := edit_ids.get(original_event_id))
+                else None
+            )
             for original_event_id in event_ids
         }
 
@@ -699,7 +726,7 @@ class RelationsWorkerStore(SQLBaseStore):
             "get_thread_summaries", _get_thread_summaries_txn
         )
 
-        latest_events = await self.get_events(latest_event_ids.values())  # type: ignore[attr-defined]
+        latest_events = await self.get_events(latest_event_ids.values())
 
         # Map to the event IDs to the thread summary.
         #
@@ -1110,6 +1137,148 @@ class RelationsWorkerStore(SQLBaseStore):
         return await self.db_pool.runInteraction(
             "get_related_thread_id", _get_related_thread_id
         )
+
+    async def get_thread_updates_for_rooms(
+        self,
+        *,
+        room_ids: Collection[str],
+        from_token: RoomStreamToken | None = None,
+        to_token: RoomStreamToken | None = None,
+        limit: int = 5,
+        exclude_thread_ids: Collection[str] | None = None,
+    ) -> tuple[dict[str, list[ThreadUpdateInfo]], StreamToken | None]:
+        """Get a list of updated threads, ordered by stream ordering of their
+        latest reply, filtered to only include threads in rooms where the user
+        is currently joined.
+
+        Args:
+            room_ids: The room IDs to fetch thread updates for.
+            from_token: The lower bound (exclusive) for thread updates. If None,
+                fetch from the start of the room timeline.
+            to_token: The upper bound (inclusive) for thread updates. If None,
+                fetch up to the current position in the room timeline.
+            limit: Maximum number of thread updates to return.
+            exclude_thread_ids: Optional collection of thread root event IDs to exclude
+                from the results. Useful for filtering out threads already visible
+                in the room timeline.
+
+        Returns:
+            A tuple of:
+                A dict mapping thread_id to list of ThreadUpdateInfo objects,
+                ordered by stream_ordering descending (most recent first).
+                A prev_batch StreamToken (exclusive) if there are more results available,
+                None otherwise.
+        """
+        # Ensure bad limits aren't being passed in.
+        assert limit > 0
+
+        if len(room_ids) == 0:
+            return ({}), None
+
+        def _get_thread_updates_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> tuple[list[tuple[str, str, str, int]], int | None]:
+            room_clause, room_id_values = make_in_list_sql_clause(
+                txn.database_engine, "e.room_id", room_ids
+            )
+
+            # Generate the pagination clause, if necessary.
+            pagination_clause = ""
+            pagination_args: list[str] = []
+            if from_token:
+                from_bound = from_token.stream
+                pagination_clause += " AND stream_ordering > ?"
+                pagination_args.append(str(from_bound))
+
+            if to_token:
+                to_bound = to_token.stream
+                pagination_clause += " AND stream_ordering <= ?"
+                pagination_args.append(str(to_bound))
+
+            # Generate the exclusion clause for thread IDs, if necessary.
+            exclusion_clause = ""
+            exclusion_args: list[str] = []
+            if exclude_thread_ids:
+                exclusion_clause, exclusion_args = make_in_list_sql_clause(
+                    txn.database_engine,
+                    "er.relates_to_id",
+                    exclude_thread_ids,
+                    negative=True,
+                )
+                exclusion_clause = f" AND {exclusion_clause}"
+
+            # TODO: improve the fact that multiple hits for the same thread means we
+            # won't get as many overall updates for the sss response
+
+            # Find any thread events between the stream ordering bounds.
+            sql = f"""
+                SELECT e.event_id, er.relates_to_id, e.room_id, e.stream_ordering
+                  FROM event_relations AS er
+                  INNER JOIN events AS e ON er.event_id = e.event_id
+                  WHERE er.relation_type = '{RelationTypes.THREAD}'
+                  AND {room_clause}
+                  {exclusion_clause}
+                  {pagination_clause}
+                  ORDER BY stream_ordering DESC
+                  LIMIT ?
+            """
+
+            # Fetch `limit + 1` rows as a way to detect if there are more results beyond
+            # what we're returning. If we get exactly `limit + 1` rows back, we know there
+            # are more results available and we can set `next_token`. We only return the
+            # first `limit` rows to the caller. This avoids needing a separate COUNT query.
+            txn.execute(
+                sql,
+                (
+                    *room_id_values,
+                    *exclusion_args,
+                    *pagination_args,
+                    limit + 1,
+                ),
+            )
+
+            # SQL returns: event_id, thread_id, room_id, stream_ordering
+            rows = cast(list[tuple[str, str, str, int]], txn.fetchall())
+
+            # If there are more events, generate the next pagination key from the
+            # last thread which will be returned.
+            next_token = None
+            if len(rows) > limit:
+                # Set the next_token to be the second last row in the result set since
+                # that will be the last row we return from this function.
+                # This works as an exclusive bound that can be backpaginated from.
+                # Use the stream_ordering field (index 2 in original rows)
+                next_token = rows[-2][3]
+
+            return rows[:limit], next_token
+
+        thread_infos, next_token_int = await self.db_pool.runInteraction(
+            "get_thread_updates_for_user", _get_thread_updates_for_user_txn
+        )
+
+        # Convert the next_token int (stream ordering) to a StreamToken.
+        # Use StreamToken.START as base (all other streams at 0) since only room
+        # position matters.
+        # Subtract 1 to make it exclusive - the client can paginate from this point without
+        # receiving the last thread update that was already returned.
+        next_token = None
+        if next_token_int is not None:
+            next_token = StreamToken.START.copy_and_replace(
+                StreamKeyType.ROOM, RoomStreamToken(stream=next_token_int - 1)
+            )
+
+        # Build ThreadUpdateInfo objects.
+        thread_update_infos: dict[str, list[ThreadUpdateInfo]] = defaultdict(list)
+        for event_id, thread_id, room_id, stream_ordering in thread_infos:
+            thread_update_infos[thread_id].append(
+                ThreadUpdateInfo(
+                    event_id=event_id,
+                    room_id=room_id,
+                    stream_ordering=stream_ordering,
+                )
+            )
+
+        return (thread_update_infos, next_token)
 
 
 class RelationsStore(RelationsWorkerStore):

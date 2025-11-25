@@ -57,19 +57,41 @@ class PaginationConfig:
         from_tok_str = parse_string(request, "from")
         to_tok_str = parse_string(request, "to")
 
+        # Helper function to extract StreamToken from either StreamToken or SlidingSyncStreamToken format
+        def extract_stream_token(token_str: str) -> str:
+            """
+            Extract the StreamToken portion from a token string.
+
+            Handles both:
+            - StreamToken format: "s123_456_..."
+            - SlidingSyncStreamToken format: "5/s123_456_..." (extracts part after /)
+
+            This allows clients using sliding sync to use their pos tokens
+            with endpoints like /relations and /messages.
+            """
+            if "/" in token_str:
+                # SlidingSyncStreamToken format: "connection_position/stream_token"
+                # Split and return just the stream_token part
+                parts = token_str.split("/", 1)
+                if len(parts) == 2:
+                    return parts[1]
+            return token_str
+
         try:
             from_tok = None
             if from_tok_str == "END":
                 from_tok = None  # For backwards compat.
             elif from_tok_str:
-                from_tok = await StreamToken.from_string(store, from_tok_str)
+                stream_token_str = extract_stream_token(from_tok_str)
+                from_tok = await StreamToken.from_string(store, stream_token_str)
         except Exception:
             raise SynapseError(400, "'from' parameter is invalid")
 
         try:
             to_tok = None
             if to_tok_str:
-                to_tok = await StreamToken.from_string(store, to_tok_str)
+                stream_token_str = extract_stream_token(to_tok_str)
+                to_tok = await StreamToken.from_string(store, stream_token_str)
         except Exception:
             raise SynapseError(400, "'to' parameter is invalid")
 
