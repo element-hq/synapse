@@ -30,11 +30,6 @@ from twisted.internet import defer
 
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
-from synapse.util.constants import (
-    MILLISECONDS_PER_SECOND,
-    ONE_HOUR_SECONDS,
-    ONE_MINUTE_SECONDS,
-)
 from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
@@ -223,13 +218,13 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     # table will decrease
     clock.looping_call(
         hs.get_datastores().main.generate_user_daily_visits,
-        5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND,
+        Duration(minutes=5).as_millis(),
     )
 
     # monthly active user limiting functionality
     clock.looping_call(
         hs.get_datastores().main.reap_monthly_active_users,
-        ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND,
+        Duration(hours=1).as_millis(),
     )
     hs.get_datastores().main.reap_monthly_active_users()
 

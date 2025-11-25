@@ -24,7 +24,7 @@ from synapse.api.errors import Codes
 from synapse.handlers.sliding_sync import room_lists
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.storage.databases.main.sliding_sync import CONNECTION_EXPIRY_MS
+from synapse.storage.databases.main.sliding_sync import CONNECTION_EXPIRY
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -407,7 +407,7 @@ class SlidingSyncConnectionTrackingTestCase(SlidingSyncBase):
         we expire the connection and ask the client to do a full resync.
 
         Connections are only expired if they have not been used for a minimum
-        amount of time (MINIMUM_NOT_USED_AGE_EXPIRY_MS) to avoid expiring
+        amount of time (MINIMUM_NOT_USED_AGE_EXPIRY) to avoid expiring
         connections that are actively being used.
         """
 
@@ -455,7 +455,7 @@ class SlidingSyncConnectionTrackingTestCase(SlidingSyncBase):
             self.helper.send(room_id, "msg", tok=user2_tok)
 
         # Advance the clock to ensure that the last_used_ts is old enough
-        self.reactor.advance(2 * room_lists.MINIMUM_NOT_USED_AGE_EXPIRY_MS / 1000)
+        self.reactor.advance(2 * room_lists.MINIMUM_NOT_USED_AGE_EXPIRY.as_secs())
 
         # This sync should now raise SlidingSyncUnknownPosition
         channel = self.make_sync_request(sync_body, since=from_token, tok=user1_tok)
@@ -490,14 +490,14 @@ class SlidingSyncConnectionTrackingTestCase(SlidingSyncBase):
         _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # We can keep syncing so long as the interval between requests is less
-        # than CONNECTION_EXPIRY_MS
+        # than CONNECTION_EXPIRY
         for _ in range(5):
-            self.reactor.advance(0.5 * CONNECTION_EXPIRY_MS / 1000)
+            self.reactor.advance(0.5 * CONNECTION_EXPIRY.as_secs())
 
             _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # ... but if we wait too long, the connection expires
-        self.reactor.advance(1 + CONNECTION_EXPIRY_MS / 1000)
+        self.reactor.advance(1 + CONNECTION_EXPIRY.as_secs())
 
         # This sync should now raise SlidingSyncUnknownPosition
         channel = self.make_sync_request(sync_body, since=from_token, tok=user1_tok)
