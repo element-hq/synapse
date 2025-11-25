@@ -28,9 +28,13 @@ from immutabledict import immutabledict
 from synapse.api.constants import Direction, EventTypes, JoinRules, Membership
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.api.filtering import Filter
+from synapse.events.utils import (
+    SerializeEventConfig,
+)
 from synapse.handlers.pagination import (
     PURGE_ROOM_ACTION_NAME,
     SHUTDOWN_AND_PURGE_ROOM_ACTION_NAME,
+    GetMessagesResult,
 )
 from synapse.http.servlet import (
     ResolveRoomIdMixin,
@@ -44,11 +48,13 @@ from synapse.http.servlet import (
     parse_string,
 )
 from synapse.http.site import SynapseRequest
+from synapse.logging.opentracing import trace
 from synapse.rest.admin._base import (
     admin_patterns,
     assert_requester_is_admin,
     assert_user_is_admin,
 )
+from synapse.rest.client.room import SerializeMessagesDeps, encode_messages_response
 from synapse.storage.databases.main.room import RoomSortOrder
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, RoomID, ScheduledTask, UserID, create_requester
@@ -976,6 +982,7 @@ class RoomMessagesRestServlet(RestServlet):
         self._pagination_handler = hs.get_pagination_handler()
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
+        self._event_serializer = hs.get_event_client_serializer()
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
@@ -999,7 +1006,11 @@ class RoomMessagesRestServlet(RestServlet):
         ):
             as_client_event = False
 
-        msgs = await self._pagination_handler.get_messages(
+        serialize_options = SerializeEventConfig(
+            as_client_event=as_client_event, requester=requester
+        )
+
+        get_messages_result = await self._pagination_handler.get_messages(
             room_id=room_id,
             requester=requester,
             pagin_config=pagination_config,
@@ -1008,7 +1019,27 @@ class RoomMessagesRestServlet(RestServlet):
             use_admin_priviledge=True,
         )
 
-        return HTTPStatus.OK, msgs
+        response_content = await self.encode_response(
+            get_messages_result, serialize_options
+        )
+
+        return HTTPStatus.OK, response_content
+
+    @trace
+    async def encode_response(
+        self,
+        get_messages_result: GetMessagesResult,
+        serialize_options: SerializeEventConfig,
+    ) -> JsonDict:
+        return await encode_messages_response(
+            get_messages_result=get_messages_result,
+            serialize_options=serialize_options,
+            serialize_deps=SerializeMessagesDeps(
+                clock=self._clock,
+                event_serializer=self._event_serializer,
+                store=self._store,
+            ),
+        )
 
 
 class RoomTimestampToEventRestServlet(RestServlet):

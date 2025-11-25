@@ -28,6 +28,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Awaitable
 from urllib import parse as urlparse
 
+import attr
 from prometheus_client.core import Histogram
 
 from twisted.web.server import Request
@@ -45,6 +46,7 @@ from synapse.api.errors import (
 )
 from synapse.api.filtering import Filter
 from synapse.events.utils import (
+    EventClientSerializer,
     SerializeEventConfig,
     format_event_for_client_v2,
     serialize_event,
@@ -70,10 +72,12 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.state import CREATE_KEY, POWER_KEY
+from synapse.storage.databases.main import DataStore
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
+from synapse.util.clock import Clock
 from synapse.util.events import generate_fake_event_id
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -791,6 +795,56 @@ class JoinedRoomMemberListRestServlet(RestServlet):
         return 200, {"joined": users_with_profile}
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class SerializeMessagesDeps:
+    clock: Clock
+    event_serializer: EventClientSerializer
+    store: DataStore
+
+
+@trace
+async def encode_messages_response(
+    *,
+    get_messages_result: GetMessagesResult,
+    serialize_options: SerializeEventConfig,
+    serialize_deps: SerializeMessagesDeps,
+) -> JsonDict:
+    """
+    Serialize a `GetMessagesResult` into the JSON response format for the `/messages`
+    endpoint.
+
+    This logic is shared between the client API and Synapse admin API.
+    """
+
+    time_now = serialize_deps.clock.time_msec()
+
+    serialized_result = {
+        "chunk": (
+            await serialize_deps.event_serializer.serialize_events(
+                get_messages_result.messages_chunk,
+                time_now,
+                config=serialize_options,
+                bundle_aggregations=get_messages_result.bundled_aggregations,
+            )
+        ),
+        "start": await get_messages_result.start_token.to_string(serialize_deps.store),
+    }
+
+    if get_messages_result.end_token:
+        serialized_result["end"] = await get_messages_result.end_token.to_string(
+            serialize_deps.store
+        )
+
+    if get_messages_result.state:
+        serialized_result[
+            "state"
+        ] = await serialize_deps.event_serializer.serialize_events(
+            get_messages_result.state, time_now, config=serialize_options
+        )
+
+    return serialized_result
+
+
 # TODO: Needs better unit testing
 class RoomMessageListRestServlet(RestServlet):
     PATTERNS = client_patterns("/rooms/(?P<room_id>[^/]*)/messages$", v1=True)
@@ -872,31 +926,15 @@ class RoomMessageListRestServlet(RestServlet):
         get_messages_result: GetMessagesResult,
         serialize_options: SerializeEventConfig,
     ) -> JsonDict:
-        time_now = self.clock.time_msec()
-
-        serialized_result = {
-            "chunk": (
-                await self.event_serializer.serialize_events(
-                    get_messages_result.messages_chunk,
-                    time_now,
-                    config=serialize_options,
-                    bundle_aggregations=get_messages_result.bundled_aggregations,
-                )
+        return await encode_messages_response(
+            get_messages_result=get_messages_result,
+            serialize_options=serialize_options,
+            serialize_deps=SerializeMessagesDeps(
+                clock=self.clock,
+                event_serializer=self.event_serializer,
+                store=self.store,
             ),
-            "start": await get_messages_result.start_token.to_string(self.store),
-        }
-
-        if get_messages_result.end_token:
-            serialized_result["end"] = await get_messages_result.end_token.to_string(
-                self.store
-            )
-
-        if get_messages_result.state:
-            serialized_result["state"] = await self.event_serializer.serialize_events(
-                get_messages_result.state, time_now, config=serialize_options
-            )
-
-        return serialized_result
+        )
 
 
 # TODO: Needs unit testing
