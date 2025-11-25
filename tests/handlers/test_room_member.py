@@ -622,7 +622,7 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
         self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
 
 
-class TestMSC4380InviteFiltering(FederatingHomeserverTestCase):
+class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
     """Tests for MSC4380-style invite filtering."""
 
     servlets = [
