@@ -25,6 +25,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_in_list_sql_clause,
 )
 from synapse.storage.engines import PostgresEngine
 from synapse.types import MultiWriterStreamToken, RoomStreamToken
@@ -532,14 +533,17 @@ class SlidingSyncStore(SQLBaseStore):
         def get_sliding_sync_connection_lazy_members_txn(
             txn: LoggingTransaction,
         ) -> Mapping[str, int]:
-            sql = """
-                SELECT user_id, mem.connection_position, last_seen_ts
-                FROM sliding_sync_connection_positions AS pos
-                INNER JOIN sliding_sync_connection_lazy_members AS mem USING (connection_key)
-                WHERE pos.connection_position = ?
+            user_clause, user_args = make_in_list_sql_clause(
+                txn.database_engine, "user_id", user_ids
+            )
+
+            sql = f"""
+                SELECT user_id, connection_position, last_seen_ts
+                FROM sliding_sync_connection_lazy_members AS pos
+                WHERE room_id = ? AND {user_clause}
             """
 
-            txn.execute(sql, (connection_position,))
+            txn.execute(sql, (room_id, *user_args))
 
             # Filter out any cache entries that only apply to forked connection
             # positions. Entries with `NULL` connection position apply to all
