@@ -758,6 +758,10 @@ class FederationServer(FederationBase):
         event, context = await self._on_send_membership_event(
             origin, content, Membership.JOIN, room_id
         )
+        # Collect this now, the internal metadata of event(which should have it) doesn't
+        stream_ordering_of_join = (
+            await self.store.get_current_room_stream_token_for_room_id(room_id)
+        )
 
         prev_state_ids = await context.get_prev_state_ids()
 
@@ -797,6 +801,27 @@ class FederationServer(FederationBase):
             "auth_chain": serialize_and_filter_pdus(auth_chain_events, time_now),
             "members_omitted": caller_supports_partial_state,
         }
+
+        # Check the forward extremities for the room here. If there is more than one, it
+        # is likely that another event was created in the room during the
+        # make_join/send_join handshake. Without being able to determine how long until
+        # the next event will be created that references this 'missing event',
+        # proactively send a dummy extensible event that ties these forward extremities
+        # together. The remote server should search out this missing event on its own.
+        #
+        # By not sending the 'missing event' directly, the stream ordering for it will
+        # be consistent between servers(in that it technically was created before the
+        # join itself).
+
+        forward_extremities = await self.store._get_forward_extremeties_for_room(
+            room_id, stream_ordering_of_join.get_max_stream_pos()
+        )
+
+        if len(forward_extremities) > 1:
+            # I do not feel it is necessary to set this onto the FederationServer class
+            # itself. Its likelihood of being used is extremely low. Make it on-demand
+            _creation_handler = self.hs.get_event_creation_handler()
+            await _creation_handler._send_dummy_events_to_patch_room(room_id)
 
         if servers_in_room is not None:
             resp["servers_in_room"] = list(servers_in_room)
