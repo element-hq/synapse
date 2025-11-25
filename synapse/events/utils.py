@@ -27,13 +27,9 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
-    List,
     Mapping,
     Match,
     MutableMapping,
-    Optional,
-    Union,
 )
 
 import attr
@@ -239,7 +235,7 @@ def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDic
     return allowed_fields
 
 
-def _copy_field(src: JsonDict, dst: JsonDict, field: List[str]) -> None:
+def _copy_field(src: JsonDict, dst: JsonDict, field: list[str]) -> None:
     """Copy the field in 'src' to 'dst'.
 
     For example, if src={"foo":{"bar":5}} and dst={}, and field=["foo","bar"]
@@ -292,7 +288,7 @@ def _escape_slash(m: Match[str]) -> str:
     return m.group(0)
 
 
-def _split_field(field: str) -> List[str]:
+def _split_field(field: str) -> list[str]:
     """
     Splits strings on unescaped dots and removes escaping.
 
@@ -333,7 +329,7 @@ def _split_field(field: str) -> List[str]:
     return result
 
 
-def only_fields(dictionary: JsonDict, fields: List[str]) -> JsonDict:
+def only_fields(dictionary: JsonDict, fields: list[str]) -> JsonDict:
     """Return a new dict with only the fields in 'dictionary' which are present
     in 'fields'.
 
@@ -417,9 +413,9 @@ class SerializeEventConfig:
     event_format: Callable[[JsonDict], JsonDict] = format_event_for_client_v1
     # The entity that requested the event. This is used to determine whether to include
     # the transaction_id in the unsigned section of the event.
-    requester: Optional[Requester] = None
+    requester: Requester | None = None
     # List of event fields to include. If empty, all fields will be returned.
-    only_event_fields: Optional[List[str]] = None
+    only_event_fields: list[str] | None = None
     # Some events can have stripped room state stored in the `unsigned` field.
     # This is required for invite and knock functionality. If this option is
     # False, that state will be removed from the event before it is returned.
@@ -441,7 +437,7 @@ def make_config_for_admin(existing: SerializeEventConfig) -> SerializeEventConfi
 
 
 def serialize_event(
-    e: Union[JsonDict, EventBase],
+    e: JsonDict | EventBase,
     time_now_ms: int,
     *,
     config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
@@ -482,7 +478,7 @@ def serialize_event(
     # If we have a txn_id saved in the internal_metadata, we should include it in the
     # unsigned section of the event if it was sent by the same session as the one
     # requesting the event.
-    txn_id: Optional[str] = getattr(e.internal_metadata, "txn_id", None)
+    txn_id: str | None = getattr(e.internal_metadata, "txn_id", None)
     if (
         txn_id is not None
         and config.requester is not None
@@ -492,7 +488,7 @@ def serialize_event(
         # this includes old events as well as those created by appservice, guests,
         # or with tokens minted with the admin API. For those events, fallback
         # to using the access token instead.
-        event_device_id: Optional[str] = getattr(e.internal_metadata, "device_id", None)
+        event_device_id: str | None = getattr(e.internal_metadata, "device_id", None)
         if event_device_id is not None:
             if event_device_id == config.requester.device_id:
                 d["unsigned"]["transaction_id"] = txn_id
@@ -506,9 +502,7 @@ def serialize_event(
             #
             # For guests and appservice users, we can't check the access token ID
             # so assume it is the same session.
-            event_token_id: Optional[int] = getattr(
-                e.internal_metadata, "token_id", None
-            )
+            event_token_id: int | None = getattr(e.internal_metadata, "token_id", None)
             if (
                 (
                     event_token_id is not None
@@ -573,17 +567,17 @@ class EventClientSerializer:
     def __init__(self, hs: "HomeServer") -> None:
         self._store = hs.get_datastores().main
         self._auth = hs.get_auth()
-        self._add_extra_fields_to_unsigned_client_event_callbacks: List[
+        self._add_extra_fields_to_unsigned_client_event_callbacks: list[
             ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
         ] = []
 
     async def serialize_event(
         self,
-        event: Union[JsonDict, EventBase],
+        event: JsonDict | EventBase,
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
-        bundle_aggregations: Optional[Dict[str, "BundledAggregations"]] = None,
+        bundle_aggregations: dict[str, "BundledAggregations"] | None = None,
     ) -> JsonDict:
         """Serializes a single event.
 
@@ -641,7 +635,7 @@ class EventClientSerializer:
         event: EventBase,
         time_now: int,
         config: SerializeEventConfig,
-        bundled_aggregations: Dict[str, "BundledAggregations"],
+        bundled_aggregations: dict[str, "BundledAggregations"],
         serialized_event: JsonDict,
     ) -> None:
         """Potentially injects bundled aggregations into the unsigned portion of the serialized event.
@@ -714,12 +708,12 @@ class EventClientSerializer:
     @trace
     async def serialize_events(
         self,
-        events: Collection[Union[JsonDict, EventBase]],
+        events: Collection[JsonDict | EventBase],
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
-        bundle_aggregations: Optional[Dict[str, "BundledAggregations"]] = None,
-    ) -> List[JsonDict]:
+        bundle_aggregations: dict[str, "BundledAggregations"] | None = None,
+    ) -> list[JsonDict]:
         """Serializes multiple events.
 
         Args:
@@ -757,13 +751,13 @@ class EventClientSerializer:
         self._add_extra_fields_to_unsigned_client_event_callbacks.append(callback)
 
 
-_PowerLevel = Union[str, int]
-PowerLevelsContent = Mapping[str, Union[_PowerLevel, Mapping[str, _PowerLevel]]]
+_PowerLevel = str | int
+PowerLevelsContent = Mapping[str, _PowerLevel | Mapping[str, _PowerLevel]]
 
 
 def copy_and_fixup_power_levels_contents(
     old_power_levels: PowerLevelsContent,
-) -> Dict[str, Union[int, Dict[str, int]]]:
+) -> dict[str, int | dict[str, int]]:
     """Copy the content of a power_levels event, unfreezing immutabledicts along the way.
 
     We accept as input power level values which are strings, provided they represent an
@@ -779,11 +773,11 @@ def copy_and_fixup_power_levels_contents(
     if not isinstance(old_power_levels, collections.abc.Mapping):
         raise TypeError("Not a valid power-levels content: %r" % (old_power_levels,))
 
-    power_levels: Dict[str, Union[int, Dict[str, int]]] = {}
+    power_levels: dict[str, int | dict[str, int]] = {}
 
     for k, v in old_power_levels.items():
         if isinstance(v, collections.abc.Mapping):
-            h: Dict[str, int] = {}
+            h: dict[str, int] = {}
             power_levels[k] = h
             for k1, v1 in v.items():
                 _copy_power_level_value_as_integer(v1, h, k1)
@@ -903,7 +897,7 @@ def strip_event(event: EventBase) -> JsonDict:
     }
 
 
-def parse_stripped_state_event(raw_stripped_event: Any) -> Optional[StrippedStateEvent]:
+def parse_stripped_state_event(raw_stripped_event: Any) -> StrippedStateEvent | None:
     """
     Given a raw value from an event's `unsigned` field, attempt to parse it into a
     `StrippedStateEvent`.

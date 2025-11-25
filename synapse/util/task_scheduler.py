@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from twisted.python.failure import Failure
 
@@ -53,8 +53,8 @@ running_tasks_gauge = LaterGauge(
 class TaskScheduler:
     """
     This is a simple task scheduler designed for resumable tasks. Normally,
-    you'd use `run_in_background` to start a background task or Twisted's
-    `deferLater` if you want to run it later.
+    you'd use `run_in_background` to start a background task or `clock.call_later`
+    if you want to run it later.
 
     The issue is that these tasks stop completely and won't resume if Synapse is
     shut down for any reason.
@@ -110,13 +110,13 @@ class TaskScheduler:
         self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
-        self._running_tasks: Set[str] = set()
+        self._running_tasks: set[str] = set()
         # A map between action names and their registered function
-        self._actions: Dict[
+        self._actions: dict[
             str,
             Callable[
                 [ScheduledTask],
-                Awaitable[Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]],
+                Awaitable[tuple[TaskStatus, JsonMapping | None, str | None]],
             ],
         ] = {}
         self._run_background_tasks = hs.config.worker.run_background_tasks
@@ -143,7 +143,7 @@ class TaskScheduler:
         self,
         function: Callable[
             [ScheduledTask],
-            Awaitable[Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]],
+            Awaitable[tuple[TaskStatus, JsonMapping | None, str | None]],
         ],
         action_name: str,
     ) -> None:
@@ -167,9 +167,9 @@ class TaskScheduler:
         self,
         action: str,
         *,
-        resource_id: Optional[str] = None,
-        timestamp: Optional[int] = None,
-        params: Optional[JsonMapping] = None,
+        resource_id: str | None = None,
+        timestamp: int | None = None,
+        params: JsonMapping | None = None,
     ) -> str:
         """Schedule a new potentially resumable task. A function matching the specified
         `action` should've been registered with `register_action` before the task is run.
@@ -220,10 +220,10 @@ class TaskScheduler:
         self,
         id: str,
         *,
-        timestamp: Optional[int] = None,
-        status: Optional[TaskStatus] = None,
-        result: Optional[JsonMapping] = None,
-        error: Optional[str] = None,
+        timestamp: int | None = None,
+        status: TaskStatus | None = None,
+        result: JsonMapping | None = None,
+        error: str | None = None,
     ) -> bool:
         """Update some task-associated values. This is exposed publicly so it can
         be used inside task functions, mainly to update the result or resume
@@ -263,7 +263,7 @@ class TaskScheduler:
             error=error,
         )
 
-    async def get_task(self, id: str) -> Optional[ScheduledTask]:
+    async def get_task(self, id: str) -> ScheduledTask | None:
         """Get a specific task description by id.
 
         Args:
@@ -278,12 +278,12 @@ class TaskScheduler:
     async def get_tasks(
         self,
         *,
-        actions: Optional[List[str]] = None,
-        resource_id: Optional[str] = None,
-        statuses: Optional[List[TaskStatus]] = None,
-        max_timestamp: Optional[int] = None,
-        limit: Optional[int] = None,
-    ) -> List[ScheduledTask]:
+        actions: list[str] | None = None,
+        resource_id: str | None = None,
+        statuses: list[TaskStatus] | None = None,
+        max_timestamp: int | None = None,
+        limit: int | None = None,
+    ) -> list[ScheduledTask]:
         """Get a list of tasks. Returns all the tasks if no args are provided.
 
         If an arg is `None`, all tasks matching the other args will be selected.

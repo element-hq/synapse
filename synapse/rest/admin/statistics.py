@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import Direction
 from synapse.api.errors import Codes, SynapseError
@@ -48,7 +48,7 @@ class UserMediaStatisticsRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         order_by = parse_string(
@@ -119,7 +119,7 @@ class LargestRoomsStatistics(RestServlet):
         self.auth = hs.get_auth()
         self.stats_controller = hs.get_storage_controllers().stats
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         room_sizes = await self.stats_controller.get_room_db_size_estimate()

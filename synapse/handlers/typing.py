@@ -20,7 +20,7 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Iterable
 
 import attr
 
@@ -96,15 +96,15 @@ class FollowerTypingHandler:
             )
 
         # map room IDs to serial numbers
-        self._room_serials: Dict[str, int] = {}
+        self._room_serials: dict[str, int] = {}
         # map room IDs to sets of users currently typing
-        self._room_typing: Dict[str, Set[str]] = {}
+        self._room_typing: dict[str, set[str]] = {}
 
-        self._member_last_federation_poke: Dict[RoomMember, int] = {}
+        self._member_last_federation_poke: dict[RoomMember, int] = {}
         self.wheel_timer: WheelTimer[RoomMember] = WheelTimer(bucket_size=5000)
         self._latest_room_serial = 0
 
-        self._rooms_updated: Set[str] = set()
+        self._rooms_updated: set[str] = set()
 
         self.clock.looping_call(self._handle_timeouts, 5000)
         self.clock.looping_call(self._prune_old_typing, FORGET_TIMEOUT)
@@ -195,7 +195,7 @@ class FollowerTypingHandler:
             logger.exception("Error pushing typing notif to remotes")
 
     def process_replication_rows(
-        self, token: int, rows: List[TypingStream.TypingStreamRow]
+        self, token: int, rows: list[TypingStream.TypingStreamRow]
     ) -> None:
         """Should be called whenever we receive updates for typing stream."""
 
@@ -226,7 +226,7 @@ class FollowerTypingHandler:
                 )
 
     async def _send_changes_in_typing_to_remotes(
-        self, room_id: str, prev_typing: Set[str], now_typing: Set[str]
+        self, room_id: str, prev_typing: set[str], now_typing: set[str]
     ) -> None:
         """Process a change in typing of a room from replication, sending EDUs
         for any local users.
@@ -280,7 +280,7 @@ class TypingWriterHandler(FollowerTypingHandler):
         hs.get_distributor().observe("user_left_room", self.user_left_room)
 
         # clock time we expect to stop
-        self._member_typing_until: Dict[RoomMember, int] = {}
+        self._member_typing_until: dict[RoomMember, int] = {}
 
         # caches which room_ids changed at which serials
         self._typing_stream_change_cache = StreamChangeCache(
@@ -452,7 +452,7 @@ class TypingWriterHandler(FollowerTypingHandler):
 
     async def get_all_typing_updates(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, list]], int, bool]:
+    ) -> tuple[list[tuple[int, list]], int, bool]:
         """Get updates for typing replication stream.
 
         Args:
@@ -504,7 +504,7 @@ class TypingWriterHandler(FollowerTypingHandler):
         return rows, current_id, limited
 
     def process_replication_rows(
-        self, token: int, rows: List[TypingStream.TypingStreamRow]
+        self, token: int, rows: list[TypingStream.TypingStreamRow]
     ) -> None:
         # The writing process should never get updates from replication.
         raise Exception("Typing writer instance got typing info over replication")
@@ -531,7 +531,7 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
 
     async def get_new_events_as(
         self, from_key: int, service: ApplicationService
-    ) -> Tuple[List[JsonMapping], int]:
+    ) -> tuple[list[JsonMapping], int]:
         """Returns a set of new typing events that an appservice
         may be interested in.
 
@@ -576,9 +576,9 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
         limit: int,
         room_ids: Iterable[str],
         is_guest: bool,
-        explicit_room_id: Optional[str] = None,
-        to_key: Optional[int] = None,
-    ) -> Tuple[List[JsonMapping], int]:
+        explicit_room_id: str | None = None,
+        to_key: int | None = None,
+    ) -> tuple[list[JsonMapping], int]:
         """
         Find typing notifications for given rooms (> `from_token` and <= `to_token`)
         """

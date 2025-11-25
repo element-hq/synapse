@@ -21,7 +21,7 @@
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, Sequence, Type
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from twisted.web.client import PartialDownloadError
 
@@ -136,7 +136,7 @@ class RecaptchaAuthChecker(UserInteractiveAuthChecker):
         except PartialDownloadError as pde:
             # Twisted is silly
             data = pde.response
-            # For mypy's benefit. A general Error.response is Optional[bytes], but
+            # For mypy's benefit. A general Error.response is bytes | None, but
             # a PartialDownloadError.response should be bytes AFAICS.
             assert data is not None
             resp_body = json_decoder.decode(data.decode("utf-8"))
@@ -321,7 +321,7 @@ class RegistrationTokenAuthChecker(UserInteractiveAuthChecker):
             )
 
 
-INTERACTIVE_AUTH_CHECKERS: Sequence[Type[UserInteractiveAuthChecker]] = [
+INTERACTIVE_AUTH_CHECKERS: Sequence[type[UserInteractiveAuthChecker]] = [
     DummyAuthChecker,
     TermsAuthChecker,
     RecaptchaAuthChecker,

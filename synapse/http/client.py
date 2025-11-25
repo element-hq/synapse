@@ -27,13 +27,8 @@ from typing import (
     Any,
     BinaryIO,
     Callable,
-    Dict,
-    List,
     Mapping,
-    Optional,
     Protocol,
-    Tuple,
-    Union,
 )
 
 import attr
@@ -82,7 +77,11 @@ from synapse.http import QuieterFileBodyProducer, RequestTimedOutError, redact_u
 from synapse.http.proxyagent import ProxyAgent
 from synapse.http.replicationagent import ReplicationAgent
 from synapse.http.types import QueryParams
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import (
+    PreserveLoggingContext,
+    make_deferred_yieldable,
+    run_in_background,
+)
 from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, StrSequence
@@ -121,7 +120,7 @@ incoming_responses_counter = Counter(
 # the type of the headers map, to be passed to the t.w.h.Headers.
 #
 # The actual type accepted by Twisted is
-#   Mapping[Union[str, bytes], Sequence[Union[str, bytes]] ,
+#   Mapping[str | bytes], Sequence[str | bytes] ,
 # allowing us to mix and match str and bytes freely. However: any str is also a
 # Sequence[str]; passing a header string value which is a
 # standalone str is interpreted as a sequence of 1-codepoint strings. This is a disastrous footgun.
@@ -129,21 +128,21 @@ incoming_responses_counter = Counter(
 #
 # We also simplify the keys to be either all str or all bytes. This helps because
 # Dict[K, V] is invariant in K (and indeed V).
-RawHeaders = Union[Mapping[str, "RawHeaderValue"], Mapping[bytes, "RawHeaderValue"]]
+RawHeaders = Mapping[str, "RawHeaderValue"] | Mapping[bytes, "RawHeaderValue"]
 
 # the value actually has to be a List, but List is invariant so we can't specify that
 # the entries can either be Lists or bytes.
-RawHeaderValue = Union[
-    StrSequence,
-    List[bytes],
-    List[Union[str, bytes]],
-    Tuple[bytes, ...],
-    Tuple[Union[str, bytes], ...],
-]
+RawHeaderValue = (
+    StrSequence
+    | list[bytes]
+    | list[str | bytes]
+    | tuple[bytes, ...]
+    | tuple[str | bytes, ...]
+)
 
 
 def _is_ip_blocked(
-    ip_address: IPAddress, allowlist: Optional[IPSet], blocklist: IPSet
+    ip_address: IPAddress, allowlist: IPSet | None, blocklist: IPSet
 ) -> bool:
     """
     Compares an IP address to allowed and disallowed IP sets.
@@ -189,7 +188,7 @@ class _IPBlockingResolver:
     def __init__(
         self,
         reactor: IReactorPluggableNameResolver,
-        ip_allowlist: Optional[IPSet],
+        ip_allowlist: IPSet | None,
         ip_blocklist: IPSet,
     ):
         """
@@ -205,7 +204,7 @@ class _IPBlockingResolver:
     def resolveHostName(
         self, recv: IResolutionReceiver, hostname: str, portNumber: int = 0
     ) -> IResolutionReceiver:
-        addresses: List[IAddress] = []
+        addresses: list[IAddress] = []
 
         def _callback() -> None:
             has_bad_ip = False
@@ -265,7 +264,7 @@ class BlocklistingReactorWrapper:
     def __init__(
         self,
         reactor: IReactorPluggableNameResolver,
-        ip_allowlist: Optional[IPSet],
+        ip_allowlist: IPSet | None,
         ip_blocklist: IPSet,
     ):
         self._reactor = reactor
@@ -294,7 +293,7 @@ class BlocklistingAgentWrapper(Agent):
         self,
         agent: IAgent,
         ip_blocklist: IPSet,
-        ip_allowlist: Optional[IPSet] = None,
+        ip_allowlist: IPSet | None = None,
     ):
         """
         Args:
@@ -310,13 +309,13 @@ class BlocklistingAgentWrapper(Agent):
         self,
         method: bytes,
         uri: bytes,
-        headers: Optional[Headers] = None,
-        bodyProducer: Optional[IBodyProducer] = None,
+        headers: Headers | None = None,
+        bodyProducer: IBodyProducer | None = None,
     ) -> defer.Deferred:
         h = urllib.parse.urlparse(uri.decode("ascii"))
 
         try:
-            # h.hostname is Optional[str], None raises an AddrFormatError, so
+            # h.hostname is str | None, None raises an AddrFormatError, so
             # this is safe even though IPAddress requires a str.
             ip_address = IPAddress(h.hostname)  # type: ignore[arg-type]
         except AddrFormatError:
@@ -349,7 +348,7 @@ class BaseHttpClient:
     def __init__(
         self,
         hs: "HomeServer",
-        treq_args: Optional[Dict[str, Any]] = None,
+        treq_args: dict[str, Any] | None = None,
     ):
         self.hs = hs
         self.server_name = hs.hostname
@@ -374,8 +373,8 @@ class BaseHttpClient:
         self,
         method: str,
         uri: str,
-        data: Optional[bytes] = None,
-        headers: Optional[Headers] = None,
+        data: bytes | None = None,
+        headers: Headers | None = None,
     ) -> IResponse:
         """
         Args:
@@ -479,8 +478,8 @@ class BaseHttpClient:
     async def post_urlencoded_get_json(
         self,
         uri: str,
-        args: Optional[Mapping[str, Union[str, List[str]]]] = None,
-        headers: Optional[RawHeaders] = None,
+        args: Mapping[str, str | list[str]] | None = None,
+        headers: RawHeaders | None = None,
     ) -> Any:
         """
         Args:
@@ -528,7 +527,7 @@ class BaseHttpClient:
             )
 
     async def post_json_get_json(
-        self, uri: str, post_json: Any, headers: Optional[RawHeaders] = None
+        self, uri: str, post_json: Any, headers: RawHeaders | None = None
     ) -> Any:
         """
 
@@ -577,8 +576,8 @@ class BaseHttpClient:
     async def get_json(
         self,
         uri: str,
-        args: Optional[QueryParams] = None,
-        headers: Optional[RawHeaders] = None,
+        args: QueryParams | None = None,
+        headers: RawHeaders | None = None,
     ) -> Any:
         """Gets some json from the given URI.
 
@@ -608,8 +607,8 @@ class BaseHttpClient:
         self,
         uri: str,
         json_body: Any,
-        args: Optional[QueryParams] = None,
-        headers: Optional[RawHeaders] = None,
+        args: QueryParams | None = None,
+        headers: RawHeaders | None = None,
     ) -> Any:
         """Puts some json to the given URI.
 
@@ -659,8 +658,8 @@ class BaseHttpClient:
     async def get_raw(
         self,
         uri: str,
-        args: Optional[QueryParams] = None,
-        headers: Optional[RawHeaders] = None,
+        args: QueryParams | None = None,
+        headers: RawHeaders | None = None,
     ) -> bytes:
         """Gets raw text from the given URI.
 
@@ -704,10 +703,10 @@ class BaseHttpClient:
         self,
         url: str,
         output_stream: BinaryIO,
-        max_size: Optional[int] = None,
-        headers: Optional[RawHeaders] = None,
-        is_allowed_content_type: Optional[Callable[[str], bool]] = None,
-    ) -> Tuple[int, Dict[bytes, List[bytes]], str, int]:
+        max_size: int | None = None,
+        headers: RawHeaders | None = None,
+        is_allowed_content_type: Callable[[str], bool] | None = None,
+    ) -> tuple[int, dict[bytes, list[bytes]], str, int]:
         """GETs a file from a given URL
         Args:
             url: The URL to GET
@@ -815,9 +814,9 @@ class SimpleHttpClient(BaseHttpClient):
     def __init__(
         self,
         hs: "HomeServer",
-        treq_args: Optional[Dict[str, Any]] = None,
-        ip_allowlist: Optional[IPSet] = None,
-        ip_blocklist: Optional[IPSet] = None,
+        treq_args: dict[str, Any] | None = None,
+        ip_allowlist: IPSet | None = None,
+        ip_blocklist: IPSet | None = None,
         use_proxy: bool = False,
     ):
         super().__init__(hs, treq_args=treq_args)
@@ -894,8 +893,8 @@ class ReplicationClient(BaseHttpClient):
         self,
         method: str,
         uri: str,
-        data: Optional[bytes] = None,
-        headers: Optional[Headers] = None,
+        data: bytes | None = None,
+        headers: Headers | None = None,
     ) -> IResponse:
         """
         Make a request, differs from BaseHttpClient.request in that it does not use treq.
@@ -1031,7 +1030,7 @@ class BodyExceededMaxSize(Exception):
 class _DiscardBodyWithMaxSizeProtocol(protocol.Protocol):
     """A protocol which immediately errors upon receiving data."""
 
-    transport: Optional[ITCPTransport] = None
+    transport: ITCPTransport | None = None
 
     def __init__(self, deferred: defer.Deferred):
         self.deferred = deferred
@@ -1041,7 +1040,8 @@ class _DiscardBodyWithMaxSizeProtocol(protocol.Protocol):
         Report a max size exceed error and disconnect the first time this is called.
         """
         if not self.deferred.called:
-            self.deferred.errback(BodyExceededMaxSize())
+            with PreserveLoggingContext():
+                self.deferred.errback(BodyExceededMaxSize())
             # Close the connection (forcefully) since all the data will get
             # discarded anyway.
             assert self.transport is not None
@@ -1061,10 +1061,10 @@ class MultipartResponse:
     """
 
     json: bytes = b"{}"
-    length: Optional[int] = None
-    content_type: Optional[bytes] = None
-    disposition: Optional[bytes] = None
-    url: Optional[bytes] = None
+    length: int | None = None
+    content_type: bytes | None = None
+    disposition: bytes | None = None
+    url: bytes | None = None
 
 
 class _MultipartParserProtocol(protocol.Protocol):
@@ -1072,20 +1072,20 @@ class _MultipartParserProtocol(protocol.Protocol):
     Protocol to read and parse a MSC3916 multipart/mixed response
     """
 
-    transport: Optional[ITCPTransport] = None
+    transport: ITCPTransport | None = None
 
     def __init__(
         self,
         stream: ByteWriteable,
         deferred: defer.Deferred,
         boundary: str,
-        max_length: Optional[int],
+        max_length: int | None,
     ) -> None:
         self.stream = stream
         self.deferred = deferred
         self.boundary = boundary
         self.max_length = max_length
-        self.parser: Optional[MultipartParser] = None
+        self.parser: MultipartParser | None = None
         self.multipart_response = MultipartResponse()
         self.has_redirect = False
         self.in_json = False
@@ -1140,7 +1140,8 @@ class _MultipartParserProtocol(protocol.Protocol):
                         logger.warning(
                             "Exception encountered writing file data to stream: %s", e
                         )
-                        self.deferred.errback()
+                        with PreserveLoggingContext():
+                            self.deferred.errback()
                     self.file_length += end - start
 
             callbacks: "multipart.MultipartCallbacks" = {
@@ -1152,7 +1153,8 @@ class _MultipartParserProtocol(protocol.Protocol):
 
         self.total_length += len(incoming_data)
         if self.max_length is not None and self.total_length >= self.max_length:
-            self.deferred.errback(BodyExceededMaxSize())
+            with PreserveLoggingContext():
+                self.deferred.errback(BodyExceededMaxSize())
             # Close the connection (forcefully) since all the data will get
             # discarded anyway.
             assert self.transport is not None
@@ -1162,7 +1164,8 @@ class _MultipartParserProtocol(protocol.Protocol):
             self.parser.write(incoming_data)
         except Exception as e:
             logger.warning("Exception writing to multipart parser: %s", e)
-            self.deferred.errback()
+            with PreserveLoggingContext():
+                self.deferred.errback()
             return
 
     def connectionLost(self, reason: Failure = connectionDone) -> None:
@@ -1172,18 +1175,20 @@ class _MultipartParserProtocol(protocol.Protocol):
 
         if reason.check(ResponseDone):
             self.multipart_response.length = self.file_length
-            self.deferred.callback(self.multipart_response)
+            with PreserveLoggingContext():
+                self.deferred.callback(self.multipart_response)
         else:
-            self.deferred.errback(reason)
+            with PreserveLoggingContext():
+                self.deferred.errback(reason)
 
 
 class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
     """A protocol which reads body to a stream, erroring if the body exceeds a maximum size."""
 
-    transport: Optional[ITCPTransport] = None
+    transport: ITCPTransport | None = None
 
     def __init__(
-        self, stream: ByteWriteable, deferred: defer.Deferred, max_size: Optional[int]
+        self, stream: ByteWriteable, deferred: defer.Deferred, max_size: int | None
     ):
         self.stream = stream
         self.deferred = deferred
@@ -1198,7 +1203,8 @@ class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
         try:
             self.stream.write(data)
         except Exception:
-            self.deferred.errback()
+            with PreserveLoggingContext():
+                self.deferred.errback()
             return
 
         self.length += len(data)
@@ -1206,7 +1212,8 @@ class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
         # connection. dataReceived might be called again if data was received
         # in the meantime.
         if self.max_size is not None and self.length >= self.max_size:
-            self.deferred.errback(BodyExceededMaxSize())
+            with PreserveLoggingContext():
+                self.deferred.errback(BodyExceededMaxSize())
             # Close the connection (forcefully) since all the data will get
             # discarded anyway.
             assert self.transport is not None
@@ -1218,7 +1225,8 @@ class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
             return
 
         if reason.check(ResponseDone):
-            self.deferred.callback(self.length)
+            with PreserveLoggingContext():
+                self.deferred.callback(self.length)
         elif reason.check(PotentialDataLoss):
             # This applies to requests which don't set `Content-Length` or a
             # `Transfer-Encoding` in the response because in this case the end of the
@@ -1227,13 +1235,15 @@ class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
             # behavior is expected of some servers (like YouTube), let's ignore it.
             # Stolen from https://github.com/twisted/treq/pull/49/files
             # http://twistedmatrix.com/trac/ticket/4840
-            self.deferred.callback(self.length)
+            with PreserveLoggingContext():
+                self.deferred.callback(self.length)
         else:
-            self.deferred.errback(reason)
+            with PreserveLoggingContext():
+                self.deferred.errback(reason)
 
 
 def read_body_with_max_size(
-    response: IResponse, stream: ByteWriteable, max_size: Optional[int]
+    response: IResponse, stream: ByteWriteable, max_size: int | None
 ) -> "defer.Deferred[int]":
     """
     Read a HTTP response body to a file-object. Optionally enforcing a maximum file size.
@@ -1263,7 +1273,7 @@ def read_body_with_max_size(
 
 
 def read_multipart_response(
-    response: IResponse, stream: ByteWriteable, boundary: str, max_length: Optional[int]
+    response: IResponse, stream: ByteWriteable, boundary: str, max_length: int | None
 ) -> "defer.Deferred[MultipartResponse]":
     """
     Reads a MSC3916 multipart/mixed response and parses it, reading the file part (if it contains one) into
@@ -1288,7 +1298,7 @@ def read_multipart_response(
     return d
 
 
-def encode_query_args(args: Optional[QueryParams]) -> bytes:
+def encode_query_args(args: QueryParams | None) -> bytes:
     """
     Encodes a map of query arguments to bytes which can be appended to a URL.
 
@@ -1326,7 +1336,7 @@ class InsecureInterceptableContextFactory(ssl.ContextFactory):
 
 
 def is_unknown_endpoint(
-    e: HttpResponseException, synapse_error: Optional[SynapseError] = None
+    e: HttpResponseException, synapse_error: SynapseError | None = None
 ) -> bool:
     """
     Returns true if the response was due to an endpoint being unimplemented.

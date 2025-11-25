@@ -1,1 +1,0 @@
-Cleanly shutdown `SynapseHomeServer` object.

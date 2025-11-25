@@ -21,7 +21,7 @@
 
 import abc
 import logging
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Mapping, cast
 
 from synapse.storage.engines._base import (
     AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER,
@@ -57,10 +57,10 @@ class PostgresEngine(
         # some degenerate query plan has been created and the client has probably
         # timed out/walked off anyway.
         # This is in milliseconds.
-        self.statement_timeout: Optional[int] = database_config.get(
+        self.statement_timeout: int | None = database_config.get(
             "statement_timeout", 60 * 60 * 1000
         )
-        self._version: Optional[int] = None  # unknown as yet
+        self._version: int | None = None  # unknown as yet
 
         self.config = database_config
 
@@ -80,11 +80,11 @@ class PostgresEngine(
     def single_threaded(self) -> bool:
         return False
 
-    def get_db_locale(self, txn: Cursor) -> Tuple[str, str]:
+    def get_db_locale(self, txn: Cursor) -> tuple[str, str]:
         txn.execute(
             "SELECT datcollate, datctype FROM pg_database WHERE datname = current_database()"
         )
-        collation, ctype = cast(Tuple[str, str], txn.fetchone())
+        collation, ctype = cast(tuple[str, str], txn.fetchone())
         return collation, ctype
 
     def check_database(
@@ -100,8 +100,8 @@ class PostgresEngine(
         allow_unsafe_locale = self.config.get("allow_unsafe_locale", False)
 
         # Are we on a supported PostgreSQL version?
-        if not allow_outdated_version and self._version < 130000:
-            raise RuntimeError("Synapse requires PostgreSQL 13 or above.")
+        if not allow_outdated_version and self._version < 140000:
+            raise RuntimeError("Synapse requires PostgreSQL 14 or above.")
 
         # psycopg and psycopg2 both support using cursors as context managers.
         with db_conn.cursor() as txn:  # type: ignore[attr-defined]

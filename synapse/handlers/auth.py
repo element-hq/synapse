@@ -31,14 +31,8 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Tuple,
-    Type,
-    Union,
     cast,
 )
 
@@ -102,7 +96,7 @@ invalid_login_token_counter = Counter(
 
 def convert_client_dict_legacy_fields_to_identifier(
     submission: JsonDict,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Convert a legacy-formatted login submission to an identifier dict.
 
@@ -154,7 +148,7 @@ def convert_client_dict_legacy_fields_to_identifier(
     return identifier
 
 
-def login_id_phone_to_thirdparty(identifier: JsonDict) -> Dict[str, str]:
+def login_id_phone_to_thirdparty(identifier: JsonDict) -> dict[str, str]:
     """
     Convert a phone login identifier type to a generic threepid identifier.
 
@@ -205,7 +199,7 @@ class AuthHandler:
         self.auth = hs.get_auth()
         self.auth_blocking = hs.get_auth_blocking()
         self.clock = hs.get_clock()
-        self.checkers: Dict[str, UserInteractiveAuthChecker] = {}
+        self.checkers: dict[str, UserInteractiveAuthChecker] = {}
         for auth_checker_class in INTERACTIVE_AUTH_CHECKERS:
             inst = auth_checker_class(hs)
             if inst.is_enabled():
@@ -280,7 +274,7 @@ class AuthHandler:
 
         # A mapping of user ID to extra attributes to include in the login
         # response.
-        self._extra_attributes: Dict[str, SsoLoginExtraAttributes] = {}
+        self._extra_attributes: dict[str, SsoLoginExtraAttributes] = {}
 
         self._auth_delegation_enabled = (
             hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
@@ -290,10 +284,10 @@ class AuthHandler:
         self,
         requester: Requester,
         request: SynapseRequest,
-        request_body: Dict[str, Any],
+        request_body: dict[str, Any],
         description: str,
         can_skip_ui_auth: bool = False,
-    ) -> Tuple[dict, Optional[str]]:
+    ) -> tuple[dict, str | None]:
         """
         Checks that the user is who they claim to be, via a UI auth.
 
@@ -440,12 +434,12 @@ class AuthHandler:
 
     async def check_ui_auth(
         self,
-        flows: List[List[str]],
+        flows: list[list[str]],
         request: SynapseRequest,
-        clientdict: Dict[str, Any],
+        clientdict: dict[str, Any],
         description: str,
-        get_new_session_data: Optional[Callable[[], JsonDict]] = None,
-    ) -> Tuple[dict, dict, str]:
+        get_new_session_data: Callable[[], JsonDict] | None = None,
+    ) -> tuple[dict, dict, str]:
         """
         Takes a dictionary sent by the client in the login / registration
         protocol and handles the User-Interactive Auth flow.
@@ -491,7 +485,7 @@ class AuthHandler:
                 all the stages in any of the permitted flows.
         """
 
-        sid: Optional[str] = None
+        sid: str | None = None
         authdict = clientdict.pop("auth", {})
         if "session" in authdict:
             sid = authdict["session"]
@@ -579,7 +573,7 @@ class AuthHandler:
             )
 
         # check auth type currently being presented
-        errordict: Dict[str, Any] = {}
+        errordict: dict[str, Any] = {}
         if "type" in authdict:
             login_type: str = authdict["type"]
             try:
@@ -617,7 +611,7 @@ class AuthHandler:
         raise InteractiveAuthIncompleteError(session.session_id, ret)
 
     async def add_oob_auth(
-        self, stagetype: str, authdict: Dict[str, Any], clientip: str
+        self, stagetype: str, authdict: dict[str, Any], clientip: str
     ) -> None:
         """
         Adds the result of out-of-band authentication into an existing auth
@@ -641,7 +635,7 @@ class AuthHandler:
             authdict["session"], stagetype, result
         )
 
-    def get_session_id(self, clientdict: Dict[str, Any]) -> Optional[str]:
+    def get_session_id(self, clientdict: dict[str, Any]) -> str | None:
         """
         Gets the session ID for a client given the client dictionary
 
@@ -677,7 +671,7 @@ class AuthHandler:
             raise SynapseError(400, "Unknown session ID: %s" % (session_id,))
 
     async def get_session_data(
-        self, session_id: str, key: str, default: Optional[Any] = None
+        self, session_id: str, key: str, default: Any | None = None
     ) -> Any:
         """
         Retrieve data stored with set_session_data
@@ -702,8 +696,8 @@ class AuthHandler:
         await self.store.delete_old_ui_auth_sessions(expiration_time)
 
     async def _check_auth_dict(
-        self, authdict: Dict[str, Any], clientip: str
-    ) -> Union[Dict[str, Any], str]:
+        self, authdict: dict[str, Any], clientip: str
+    ) -> dict[str, Any] | str:
         """Attempt to validate the auth dict provided by a client
 
         Args:
@@ -750,9 +744,9 @@ class AuthHandler:
 
     def _auth_dict_for_flows(
         self,
-        flows: List[List[str]],
+        flows: list[list[str]],
         session_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         public_flows = []
         for f in flows:
             public_flows.append(f)
@@ -762,7 +756,7 @@ class AuthHandler:
             LoginType.TERMS: self._get_params_terms,
         }
 
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
 
         for f in public_flows:
             for stage in f:
@@ -778,9 +772,9 @@ class AuthHandler:
     async def refresh_token(
         self,
         refresh_token: str,
-        access_token_valid_until_ms: Optional[int],
-        refresh_token_valid_until_ms: Optional[int],
-    ) -> Tuple[str, str, Optional[int]]:
+        access_token_valid_until_ms: int | None,
+        refresh_token_valid_until_ms: int | None,
+    ) -> tuple[str, str, int | None]:
         """
         Consumes a refresh token and generate both a new access token and a new refresh token from it.
 
@@ -913,8 +907,8 @@ class AuthHandler:
         self,
         user_id: str,
         duration_ms: int = (2 * 60 * 1000),
-        auth_provider_id: Optional[str] = None,
-        auth_provider_session_id: Optional[str] = None,
+        auth_provider_id: str | None = None,
+        auth_provider_session_id: str | None = None,
     ) -> str:
         login_token = self.generate_login_token()
         now = self._clock.time_msec()
@@ -932,9 +926,9 @@ class AuthHandler:
         self,
         user_id: str,
         device_id: str,
-        expiry_ts: Optional[int],
-        ultimate_session_expiry_ts: Optional[int],
-    ) -> Tuple[str, int]:
+        expiry_ts: int | None,
+        ultimate_session_expiry_ts: int | None,
+    ) -> tuple[str, int]:
         """
         Creates a new refresh token for the user with the given user ID.
 
@@ -965,11 +959,11 @@ class AuthHandler:
     async def create_access_token_for_user_id(
         self,
         user_id: str,
-        device_id: Optional[str],
-        valid_until_ms: Optional[int],
-        puppets_user_id: Optional[str] = None,
+        device_id: str | None,
+        valid_until_ms: int | None,
+        puppets_user_id: str | None = None,
         is_appservice_ghost: bool = False,
-        refresh_token_id: Optional[int] = None,
+        refresh_token_id: int | None = None,
     ) -> str:
         """
         Creates a new access token for the user with the given user ID.
@@ -1038,7 +1032,7 @@ class AuthHandler:
 
         return access_token
 
-    async def check_user_exists(self, user_id: str) -> Optional[str]:
+    async def check_user_exists(self, user_id: str) -> str | None:
         """
         Checks to see if a user with the given id exists. Will check case
         insensitively, but return None if there are multiple inexact matches.
@@ -1065,9 +1059,7 @@ class AuthHandler:
         """
         return await self.store.is_user_approved(user_id)
 
-    async def _find_user_id_and_pwd_hash(
-        self, user_id: str
-    ) -> Optional[Tuple[str, str]]:
+    async def _find_user_id_and_pwd_hash(self, user_id: str) -> tuple[str, str] | None:
         """Checks to see if a user with the given id exists. Will check case
         insensitively, but will return None if there are multiple inexact
         matches.
@@ -1142,10 +1134,10 @@ class AuthHandler:
 
     async def validate_login(
         self,
-        login_submission: Dict[str, Any],
+        login_submission: dict[str, Any],
         ratelimit: bool = False,
         is_reauth: bool = False,
-    ) -> Tuple[str, Optional[Callable[["LoginResponse"], Awaitable[None]]]]:
+    ) -> tuple[str, Callable[["LoginResponse"], Awaitable[None]] | None]:
         """Authenticates the user for the /login API
 
         Also used by the user-interactive auth flow to validate auth types which don't
@@ -1300,8 +1292,8 @@ class AuthHandler:
     async def _validate_userid_login(
         self,
         username: str,
-        login_submission: Dict[str, Any],
-    ) -> Tuple[str, Optional[Callable[["LoginResponse"], Awaitable[None]]]]:
+        login_submission: dict[str, Any],
+    ) -> tuple[str, Callable[["LoginResponse"], Awaitable[None]] | None]:
         """Helper for validate_login
 
         Handles login, once we've mapped 3pids onto userids
@@ -1390,7 +1382,7 @@ class AuthHandler:
 
     async def check_password_provider_3pid(
         self, medium: str, address: str, password: str
-    ) -> Tuple[Optional[str], Optional[Callable[["LoginResponse"], Awaitable[None]]]]:
+    ) -> tuple[str | None, Callable[["LoginResponse"], Awaitable[None]] | None]:
         """Check if a password provider is able to validate a thirdparty login
 
         Args:
@@ -1417,7 +1409,7 @@ class AuthHandler:
         # if result is None then return (None, None)
         return None, None
 
-    async def _check_local_password(self, user_id: str, password: str) -> Optional[str]:
+    async def _check_local_password(self, user_id: str, password: str) -> str | None:
         """Authenticate a user against the local password database.
 
         user_id is checked case insensitively, but will return None if there are
@@ -1532,8 +1524,8 @@ class AuthHandler:
     async def delete_access_tokens_for_user(
         self,
         user_id: str,
-        except_token_id: Optional[int] = None,
-        device_id: Optional[str] = None,
+        except_token_id: int | None = None,
+        device_id: str | None = None,
     ) -> None:
         """Invalidate access tokens belonging to a user
 
@@ -1683,16 +1675,28 @@ class AuthHandler:
             # Normalise the Unicode in the password
             pw = unicodedata.normalize("NFKC", password)
 
+            bytes_to_hash = pw.encode(
+                "utf8"
+            ) + self.hs.config.auth.password_pepper.encode("utf8")
+            if len(bytes_to_hash) > 72:
+                # bcrypt only looks at the first 72 bytes.
+                #
+                # Note: we explicitly DO NOT log the length of the user's password here.
+                logger.debug(
+                    "Password + pepper is too long; truncating to 72 bytes for bcrypt. "
+                    "This is expected behaviour and will not affect a user's ability to log in. 72 bytes is "
+                    "sufficient entropy for a password."
+                )
+                bytes_to_hash = bytes_to_hash[:72]
+
             return bcrypt.hashpw(
-                pw.encode("utf8") + self.hs.config.auth.password_pepper.encode("utf8"),
+                bytes_to_hash,
                 bcrypt.gensalt(self.bcrypt_rounds),
             ).decode("ascii")
 
         return await defer_to_thread(self.hs.get_reactor(), _do_hash)
 
-    async def validate_hash(
-        self, password: str, stored_hash: Union[bytes, str]
-    ) -> bool:
+    async def validate_hash(self, password: str, stored_hash: bytes | str) -> bool:
         """Validates that self.hash(password) == stored_hash.
 
         Args:
@@ -1706,9 +1710,20 @@ class AuthHandler:
         def _do_validate_hash(checked_hash: bytes) -> bool:
             # Normalise the Unicode in the password
             pw = unicodedata.normalize("NFKC", password)
+            password_pepper = self.hs.config.auth.password_pepper
+
+            bytes_to_hash = pw.encode("utf8") + password_pepper.encode("utf8")
+            if len(bytes_to_hash) > 72:
+                # bcrypt only looks at the first 72 bytes
+                logger.debug(
+                    "Password + pepper is too long; truncating to 72 bytes for bcrypt. "
+                    "This is expected behaviour and will not affect a user's ability to log in. 72 bytes is "
+                    "sufficient entropy for a password."
+                )
+                bytes_to_hash = bytes_to_hash[:72]
 
             return bcrypt.checkpw(
-                pw.encode("utf8") + self.hs.config.auth.password_pepper.encode("utf8"),
+                bytes_to_hash,
                 checked_hash,
             )
 
@@ -1778,9 +1793,9 @@ class AuthHandler:
         auth_provider_id: str,
         request: Request,
         client_redirect_url: str,
-        extra_attributes: Optional[JsonDict] = None,
+        extra_attributes: JsonDict | None = None,
         new_user: bool = False,
-        auth_provider_session_id: Optional[str] = None,
+        auth_provider_session_id: str | None = None,
     ) -> None:
         """Having figured out a mxid for this user, complete the HTTP request
 
@@ -1891,7 +1906,7 @@ class AuthHandler:
 
         extra_attributes = self._extra_attributes.get(login_result["user_id"])
         if extra_attributes:
-            login_result_dict = cast(Dict[str, Any], login_result)
+            login_result_dict = cast(dict[str, Any], login_result)
             login_result_dict.update(extra_attributes.extra_attributes)
 
     def _expire_sso_extra_attributes(self) -> None:
@@ -1927,7 +1942,7 @@ def load_legacy_password_auth_providers(hs: "HomeServer") -> None:
 
 
 def load_single_legacy_password_auth_provider(
-    module: Type,
+    module: type,
     config: JsonDict,
     api: "ModuleApi",
 ) -> None:
@@ -1939,7 +1954,7 @@ def load_single_legacy_password_auth_provider(
 
     # All methods that the module provides should be async, but this wasn't enforced
     # in the old module system, so we wrap them if needed
-    def async_wrapper(f: Optional[Callable]) -> Optional[Callable[..., Awaitable]]:
+    def async_wrapper(f: Callable | None) -> Callable[..., Awaitable] | None:
         # f might be None if the callback isn't implemented by the module. In this
         # case we don't want to register a callback at all so we return None.
         if f is None:
@@ -1952,7 +1967,7 @@ def load_single_legacy_password_auth_provider(
 
             async def wrapped_check_password(
                 username: str, login_type: str, login_dict: JsonDict
-            ) -> Optional[Tuple[str, Optional[Callable]]]:
+            ) -> tuple[str, Callable | None] | None:
                 # We've already made sure f is not None above, but mypy doesn't do well
                 # across function boundaries so we need to tell it f is definitely not
                 # None.
@@ -1971,12 +1986,12 @@ def load_single_legacy_password_auth_provider(
             return wrapped_check_password
 
         # We need to wrap check_auth as in the old form it could return
-        # just a str, but now it must return Optional[Tuple[str, Optional[Callable]]
+        # just a str, but now it must return tuple[str, Callable | None] | None
         if f.__name__ == "check_auth":
 
             async def wrapped_check_auth(
                 username: str, login_type: str, login_dict: JsonDict
-            ) -> Optional[Tuple[str, Optional[Callable]]]:
+            ) -> tuple[str, Callable | None] | None:
                 # We've already made sure f is not None above, but mypy doesn't do well
                 # across function boundaries so we need to tell it f is definitely not
                 # None.
@@ -1992,12 +2007,12 @@ def load_single_legacy_password_auth_provider(
             return wrapped_check_auth
 
         # We need to wrap check_3pid_auth as in the old form it could return
-        # just a str, but now it must return Optional[Tuple[str, Optional[Callable]]
+        # just a str, but now it must return tuple[str, Callable | None] | None
         if f.__name__ == "check_3pid_auth":
 
             async def wrapped_check_3pid_auth(
                 medium: str, address: str, password: str
-            ) -> Optional[Tuple[str, Optional[Callable]]]:
+            ) -> tuple[str, Callable | None] | None:
                 # We've already made sure f is not None above, but mypy doesn't do well
                 # across function boundaries so we need to tell it f is definitely not
                 # None.
@@ -2012,7 +2027,7 @@ def load_single_legacy_password_auth_provider(
 
             return wrapped_check_3pid_auth
 
-        def run(*args: Tuple, **kwargs: Dict) -> Awaitable:
+        def run(*args: tuple, **kwargs: dict) -> Awaitable:
             # mypy doesn't do well across function boundaries so we need to tell it
             # f is definitely not None.
             assert f is not None
@@ -2023,10 +2038,10 @@ def load_single_legacy_password_auth_provider(
 
     # If the module has these methods implemented, then we pull them out
     # and register them as hooks.
-    check_3pid_auth_hook: Optional[CHECK_3PID_AUTH_CALLBACK] = async_wrapper(
+    check_3pid_auth_hook: CHECK_3PID_AUTH_CALLBACK | None = async_wrapper(
         getattr(provider, "check_3pid_auth", None)
     )
-    on_logged_out_hook: Optional[ON_LOGGED_OUT_CALLBACK] = async_wrapper(
+    on_logged_out_hook: ON_LOGGED_OUT_CALLBACK | None = async_wrapper(
         getattr(provider, "on_logged_out", None)
     )
 
@@ -2064,24 +2079,20 @@ def load_single_legacy_password_auth_provider(
 
 CHECK_3PID_AUTH_CALLBACK = Callable[
     [str, str, str],
-    Awaitable[
-        Optional[Tuple[str, Optional[Callable[["LoginResponse"], Awaitable[None]]]]]
-    ],
+    Awaitable[tuple[str, Callable[["LoginResponse"], Awaitable[None]] | None] | None],
 ]
-ON_LOGGED_OUT_CALLBACK = Callable[[str, Optional[str], str], Awaitable]
+ON_LOGGED_OUT_CALLBACK = Callable[[str, str | None, str], Awaitable]
 CHECK_AUTH_CALLBACK = Callable[
     [str, str, JsonDict],
-    Awaitable[
-        Optional[Tuple[str, Optional[Callable[["LoginResponse"], Awaitable[None]]]]]
-    ],
+    Awaitable[tuple[str, Callable[["LoginResponse"], Awaitable[None]] | None] | None],
 ]
 GET_USERNAME_FOR_REGISTRATION_CALLBACK = Callable[
     [JsonDict, JsonDict],
-    Awaitable[Optional[str]],
+    Awaitable[str | None],
 ]
 GET_DISPLAYNAME_FOR_REGISTRATION_CALLBACK = Callable[
     [JsonDict, JsonDict],
-    Awaitable[Optional[str]],
+    Awaitable[str | None],
 ]
 IS_3PID_ALLOWED_CALLBACK = Callable[[str, str, bool], Awaitable[bool]]
 
@@ -2094,36 +2105,33 @@ class PasswordAuthProvider:
 
     def __init__(self) -> None:
         # lists of callbacks
-        self.check_3pid_auth_callbacks: List[CHECK_3PID_AUTH_CALLBACK] = []
-        self.on_logged_out_callbacks: List[ON_LOGGED_OUT_CALLBACK] = []
-        self.get_username_for_registration_callbacks: List[
+        self.check_3pid_auth_callbacks: list[CHECK_3PID_AUTH_CALLBACK] = []
+        self.on_logged_out_callbacks: list[ON_LOGGED_OUT_CALLBACK] = []
+        self.get_username_for_registration_callbacks: list[
             GET_USERNAME_FOR_REGISTRATION_CALLBACK
         ] = []
-        self.get_displayname_for_registration_callbacks: List[
+        self.get_displayname_for_registration_callbacks: list[
             GET_DISPLAYNAME_FOR_REGISTRATION_CALLBACK
         ] = []
-        self.is_3pid_allowed_callbacks: List[IS_3PID_ALLOWED_CALLBACK] = []
+        self.is_3pid_allowed_callbacks: list[IS_3PID_ALLOWED_CALLBACK] = []
 
         # Mapping from login type to login parameters
-        self._supported_login_types: Dict[str, Tuple[str, ...]] = {}
+        self._supported_login_types: dict[str, tuple[str, ...]] = {}
 
         # Mapping from login type to auth checker callbacks
-        self.auth_checker_callbacks: Dict[str, List[CHECK_AUTH_CALLBACK]] = {}
+        self.auth_checker_callbacks: dict[str, list[CHECK_AUTH_CALLBACK]] = {}
 
     def register_password_auth_provider_callbacks(
         self,
-        check_3pid_auth: Optional[CHECK_3PID_AUTH_CALLBACK] = None,
-        on_logged_out: Optional[ON_LOGGED_OUT_CALLBACK] = None,
-        is_3pid_allowed: Optional[IS_3PID_ALLOWED_CALLBACK] = None,
-        auth_checkers: Optional[
-            Dict[Tuple[str, Tuple[str, ...]], CHECK_AUTH_CALLBACK]
-        ] = None,
-        get_username_for_registration: Optional[
-            GET_USERNAME_FOR_REGISTRATION_CALLBACK
-        ] = None,
-        get_displayname_for_registration: Optional[
-            GET_DISPLAYNAME_FOR_REGISTRATION_CALLBACK
-        ] = None,
+        check_3pid_auth: CHECK_3PID_AUTH_CALLBACK | None = None,
+        on_logged_out: ON_LOGGED_OUT_CALLBACK | None = None,
+        is_3pid_allowed: IS_3PID_ALLOWED_CALLBACK | None = None,
+        auth_checkers: dict[tuple[str, tuple[str, ...]], CHECK_AUTH_CALLBACK]
+        | None = None,
+        get_username_for_registration: GET_USERNAME_FOR_REGISTRATION_CALLBACK
+        | None = None,
+        get_displayname_for_registration: GET_DISPLAYNAME_FOR_REGISTRATION_CALLBACK
+        | None = None,
     ) -> None:
         # Register check_3pid_auth callback
         if check_3pid_auth is not None:
@@ -2193,7 +2201,7 @@ class PasswordAuthProvider:
 
     async def check_auth(
         self, username: str, login_type: str, login_dict: JsonDict
-    ) -> Optional[Tuple[str, Optional[Callable[["LoginResponse"], Awaitable[None]]]]]:
+    ) -> tuple[str, Callable[["LoginResponse"], Awaitable[None]] | None] | None:
         """Check if the user has presented valid login credentials
 
         Args:
@@ -2224,14 +2232,14 @@ class PasswordAuthProvider:
                 continue
 
             if result is not None:
-                # Check that the callback returned a Tuple[str, Optional[Callable]]
+                # Check that the callback returned a tuple[str, Callable | None]
                 # "type: ignore[unreachable]" is used after some isinstance checks because mypy thinks
                 # result is always the right type, but as it is 3rd party code it might not be
 
                 if not isinstance(result, tuple) or len(result) != 2:
                     logger.warning(  # type: ignore[unreachable]
                         "Wrong type returned by module API callback %s: %s, expected"
-                        " Optional[Tuple[str, Optional[Callable]]]",
+                        " tuple[str, Callable | None] | None",
                         callback,
                         result,
                     )
@@ -2244,24 +2252,24 @@ class PasswordAuthProvider:
                 if not isinstance(str_result, str):
                     logger.warning(  # type: ignore[unreachable]
                         "Wrong type returned by module API callback %s: %s, expected"
-                        " Optional[Tuple[str, Optional[Callable]]]",
+                        " tuple[str, Callable | None] | None",
                         callback,
                         result,
                     )
                     continue
 
-                # the second should be Optional[Callable]
+                # the second should be Callable | None
                 if callback_result is not None:
                     if not callable(callback_result):
                         logger.warning(  # type: ignore[unreachable]
                             "Wrong type returned by module API callback %s: %s, expected"
-                            " Optional[Tuple[str, Optional[Callable]]]",
+                            " tuple[str, Callable | None] | None",
                             callback,
                             result,
                         )
                         continue
 
-                # The result is a (str, Optional[callback]) tuple so return the successful result
+                # The result is a (str, callback | None) tuple so return the successful result
                 return result
 
         # If this point has been reached then none of the callbacks successfully authenticated
@@ -2270,7 +2278,7 @@ class PasswordAuthProvider:
 
     async def check_3pid_auth(
         self, medium: str, address: str, password: str
-    ) -> Optional[Tuple[str, Optional[Callable[["LoginResponse"], Awaitable[None]]]]]:
+    ) -> tuple[str, Callable[["LoginResponse"], Awaitable[None]] | None] | None:
         # This function is able to return a deferred that either
         # resolves None, meaning authentication failure, or upon
         # success, to a str (which is the user_id) or a tuple of
@@ -2287,14 +2295,14 @@ class PasswordAuthProvider:
                 continue
 
             if result is not None:
-                # Check that the callback returned a Tuple[str, Optional[Callable]]
+                # Check that the callback returned a tuple[str, Callable | None]
                 # "type: ignore[unreachable]" is used after some isinstance checks because mypy thinks
                 # result is always the right type, but as it is 3rd party code it might not be
 
                 if not isinstance(result, tuple) or len(result) != 2:
                     logger.warning(  # type: ignore[unreachable]
                         "Wrong type returned by module API callback %s: %s, expected"
-                        " Optional[Tuple[str, Optional[Callable]]]",
+                        " tuple[str, Callable | None] | None",
                         callback,
                         result,
                     )
@@ -2307,24 +2315,24 @@ class PasswordAuthProvider:
                 if not isinstance(str_result, str):
                     logger.warning(  # type: ignore[unreachable]
                         "Wrong type returned by module API callback %s: %s, expected"
-                        " Optional[Tuple[str, Optional[Callable]]]",
+                        " tuple[str, Callable | None] | None",
                         callback,
                         result,
                     )
                     continue
 
-                # the second should be Optional[Callable]
+                # the second should be Callable | None
                 if callback_result is not None:
                     if not callable(callback_result):
                         logger.warning(  # type: ignore[unreachable]
                             "Wrong type returned by module API callback %s: %s, expected"
-                            " Optional[Tuple[str, Optional[Callable]]]",
+                            " tuple[str, Callable | None] | None",
                             callback,
                             result,
                         )
                         continue
 
-                # The result is a (str, Optional[callback]) tuple so return the successful result
+                # The result is a (str, callback | None) tuple so return the successful result
                 return result
 
         # If this point has been reached then none of the callbacks successfully authenticated
@@ -2332,7 +2340,7 @@ class PasswordAuthProvider:
         return None
 
     async def on_logged_out(
-        self, user_id: str, device_id: Optional[str], access_token: str
+        self, user_id: str, device_id: str | None, access_token: str
     ) -> None:
         # call all of the on_logged_out callbacks
         for callback in self.on_logged_out_callbacks:
@@ -2346,7 +2354,7 @@ class PasswordAuthProvider:
         self,
         uia_results: JsonDict,
         params: JsonDict,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Defines the username to use when registering the user, using the credentials
         and parameters provided during the UIA flow.
 
@@ -2391,7 +2399,7 @@ class PasswordAuthProvider:
         self,
         uia_results: JsonDict,
         params: JsonDict,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Defines the display name to use when registering the user, using the
         credentials and parameters provided during the UIA flow.
 

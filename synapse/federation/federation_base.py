@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Awaitable, Callable, Sequence
 
 from synapse.api.constants import MAX_DEPTH, EventContentFields, EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
@@ -67,7 +67,7 @@ class FederationBase:
 
         # We need to define this lazily otherwise we get a cyclic dependency.
         # self._policy_handler = hs.get_room_policy_handler()
-        self._policy_handler: Optional[RoomPolicyHandler] = None
+        self._policy_handler: RoomPolicyHandler | None = None
 
     def _lazily_get_policy_handler(self) -> RoomPolicyHandler:
         """Lazily get the room policy handler.
@@ -88,9 +88,8 @@ class FederationBase:
         self,
         room_version: RoomVersion,
         pdu: EventBase,
-        record_failure_callback: Optional[
-            Callable[[EventBase, str], Awaitable[None]]
-        ] = None,
+        record_failure_callback: Callable[[EventBase, str], Awaitable[None]]
+        | None = None,
     ) -> EventBase:
         """Checks that event is correctly signed by the sending server.
 
@@ -305,7 +304,7 @@ def _is_invite_via_3pid(event: EventBase) -> bool:
 
 def parse_events_from_pdu_json(
     pdus_json: Sequence[JsonDict], room_version: RoomVersion
-) -> List[EventBase]:
+) -> list[EventBase]:
     return [
         event_from_pdu_json(pdu_json, room_version)
         for pdu_json in filter_pdus_for_valid_depth(pdus_json)

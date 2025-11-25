@@ -21,7 +21,7 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -100,7 +100,7 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
                 template_text=self.config.email.email_already_in_use_template_text,
             )
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if not self.hs.config.email.can_verify_email:
             logger.warning(
                 "Email registration has been disabled due to lack of email config"
@@ -183,7 +183,7 @@ class MsisdnRegisterRequestTokenRestServlet(RestServlet):
         self.server_name = hs.hostname
         self.identity_handler = hs.get_identity_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_json_object_from_request(request)
 
         assert_params_in_dict(
@@ -352,7 +352,7 @@ class UsernameAvailabilityRestServlet(RestServlet):
             hs.config.registration.inhibit_user_in_use_error
         )
 
-    async def on_GET(self, request: Request) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: Request) -> tuple[int, JsonDict]:
         if not self.hs.config.registration.enable_registration:
             raise SynapseError(
                 403, "Registration has been disabled", errcode=Codes.FORBIDDEN
@@ -402,7 +402,7 @@ class RegistrationTokenValidityRestServlet(RestServlet):
             cfg=hs.config.ratelimiting.rc_registration_token_validity,
         )
 
-    async def on_GET(self, request: Request) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: Request) -> tuple[int, JsonDict]:
         await self.ratelimiter.ratelimit(None, (request.getClientAddress().host,))
 
         if not self.hs.config.registration.enable_registration:
@@ -453,7 +453,7 @@ class RegisterRestServlet(RestServlet):
         )
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_json_object_from_request(request)
 
         client_addr = request.getClientAddress().host
@@ -852,8 +852,8 @@ class RegisterRestServlet(RestServlet):
         return result
 
     async def _do_guest_registration(
-        self, params: JsonDict, address: Optional[str] = None
-    ) -> Tuple[int, JsonDict]:
+        self, params: JsonDict, address: str | None = None
+    ) -> tuple[int, JsonDict]:
         if not self.hs.config.registration.allow_guest_access:
             raise SynapseError(403, "Guest access is disabled")
         user_id = await self.registration_handler.register_user(
@@ -913,7 +913,7 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
         self.ratelimiter = hs.get_registration_ratelimiter()
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_json_object_from_request(request)
 
         client_addr = request.getClientAddress().host
@@ -970,7 +970,7 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
 
 def _calculate_registration_flows(
     config: HomeServerConfig, auth_handler: AuthHandler
-) -> List[List[str]]:
+) -> list[list[str]]:
     """Get a suitable flows list for registration
 
     Args:
