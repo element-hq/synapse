@@ -973,6 +973,42 @@ reverse proxy is using.</p>
     }
 }
 </code></pre>
+<h3 id="nginx-proxy-manager-or-npmplus"><a class="header" href="#nginx-proxy-manager-or-npmplus">Nginx Proxy Manager or NPMPlus</a></h3>
+<pre><code class="language-nginx">Add New Proxy-Host
+	- Tab Details
+		- Domain Names: matrix.example.com
+		- Scheme: http
+		- Forward Hostname / IP: localhost # IP address or hostname where Synapse is hosted. Bare-metal or Container.
+		- Forward Port: 8008
+
+	- Tab Custom locations
+		- Add Location
+		- Define Location: /_matrix
+		- Scheme: http
+		- Forward Hostname / IP: localhost # IP address or hostname where Synapse is hosted. Bare-metal or Container.
+		- Forward Port: 8008
+		- Click on the gear icon to display a custom configuration field. Increase client_max_body_size to match max_upload_size defined in homeserver.yaml
+			- Enter this in the Custom Field: client_max_body_size 50M;
+
+	- Tab SSL/TLS
+		- Choose your SSL/TLS certificate and preferred settings.
+
+	- Tab Advanced
+		- Enter this in the Custom Field. This means that port 8448 no longer needs to be opened in your Firewall.
+		  The Federation communication use now Port 443.
+
+			location /.well-known/matrix/server {
+			  return 200 '{&quot;m.server&quot;: &quot;matrix.example.com:443&quot;}';
+      		  add_header Content-Type application/json;
+			}
+
+ 			location /.well-known/matrix/client {
+      		  return 200 '{&quot;m.homeserver&quot;: {&quot;base_url&quot;: &quot;https://matrix.example.com&quot;}}';
+      		  add_header Content-Type application/json;
+      		  add_header &quot;Access-Control-Allow-Origin&quot; *;
+			}
+
+</code></pre>
 <h3 id="caddy-v2"><a class="header" href="#caddy-v2">Caddy v2</a></h3>
 <pre><code>matrix.example.com {
   reverse_proxy /_matrix/* localhost:8008
@@ -1883,7 +1919,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.142.1</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.143.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -1901,6 +1937,11 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11430"><a class="header" href="#upgrading-to-v11430">Upgrading to v1.143.0</a></h1>
+<h2 id="dropping-support-for-postgresql-13"><a class="header" href="#dropping-support-for-postgresql-13">Dropping support for PostgreSQL 13</a></h2>
+<p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we've dropped
+support for PostgreSQL 13, as it is no longer supported upstream.
+This release of Synapse requires PostgreSQL 14+.</p>
 <h1 id="upgrading-to-v11420"><a class="header" href="#upgrading-to-v11420">Upgrading to v1.142.0</a></h1>
 <h2 id="python-310-is-now-required"><a class="header" href="#python-310-is-now-required">Python 3.10+ is now required</a></h2>
 <p>The minimum supported Python version has been increased from v3.9 to v3.10.
@@ -10804,9 +10845,9 @@ search results; otherwise return <code>False</code>.</p>
 <p>The profile is represented as a dictionary with the following keys:</p>
 <ul>
 <li><code>user_id: str</code>. The Matrix ID for this user.</li>
-<li><code>display_name: Optional[str]</code>. The user's display name, or <code>None</code> if this user
+<li><code>display_name: str | None</code>. The user's display name, or <code>None</code> if this user
 has not set a display name.</li>
-<li><code>avatar_url: Optional[str]</code>. The <code>mxc://</code> URL to the user's avatar, or <code>None</code>
+<li><code>avatar_url: str | None</code>. The <code>mxc://</code> URL to the user's avatar, or <code>None</code>
 if this user has not set an avatar.</li>
 </ul>
 <p>The module is given a copy of the original dictionary, so modifying it from within the
@@ -10819,10 +10860,10 @@ any of the subsequent implementations of this callback.</p>
 <h3 id="check_registration_for_spam"><a class="header" href="#check_registration_for_spam"><code>check_registration_for_spam</code></a></h3>
 <p><em>First introduced in Synapse v1.37.0</em></p>
 <pre><code class="language-python">async def check_registration_for_spam(
-    email_threepid: Optional[dict],
-    username: Optional[str],
+    email_threepid: dict | None,
+    username: str | None,
     request_info: Collection[Tuple[str, str]],
-    auth_provider_id: Optional[str] = None,
+    auth_provider_id: str | None = None,
 ) -&gt; &quot;synapse.spam_checker_api.RegistrationBehaviour&quot;
 </code></pre>
 <p>Called when registering a new user. The module must return a <code>RegistrationBehaviour</code>
@@ -10891,10 +10932,10 @@ any of the subsequent implementations of this callback.</p>
 <p><em>First introduced in Synapse v1.87.0</em></p>
 <pre><code class="language-python">async def check_login_for_spam(
     user_id: str,
-    device_id: Optional[str],
-    initial_display_name: Optional[str],
-    request_info: Collection[Tuple[Optional[str], str]],
-    auth_provider_id: Optional[str] = None,
+    device_id: str | None,
+    initial_display_name: str | None,
+    request_info: Collection[tuple[str | None, str]],
+    auth_provider_id: str | None = None,
 ) -&gt; Union[&quot;synapse.module_api.NOT_SPAM&quot;, &quot;synapse.module_api.errors.Codes&quot;]
 </code></pre>
 <p>Called when a user logs in.</p>
@@ -10954,7 +10995,7 @@ class ListSpamChecker:
             resource=IsUserEvilResource(config),
         )
 
-    async def check_event_for_spam(self, event: &quot;synapse.events.EventBase&quot;) -&gt; Union[Literal[&quot;NOT_SPAM&quot;], Codes]:
+    async def check_event_for_spam(self, event: &quot;synapse.events.EventBase&quot;) -&gt; Literal[&quot;NOT_SPAM&quot;] | Codes:
         if event.sender in self.evil_users:
           return Codes.FORBIDDEN
         else:
@@ -10971,7 +11012,7 @@ the module API's <code>register_third_party_rules_callbacks</code> method.</p>
 <pre><code class="language-python">async def check_event_allowed(
     event: &quot;synapse.events.EventBase&quot;,
     state_events: &quot;synapse.types.StateMap&quot;,
-) -&gt; Tuple[bool, Optional[dict]]
+) -&gt; tuple[bool, dict | None]
 </code></pre>
 <p><strong><span style="color:red">
 This callback is very experimental and can and will break without notice. Module developers
@@ -11203,7 +11244,7 @@ class EventCensorer:
         self,
         event: &quot;synapse.events.EventBase&quot;,
         state_events: &quot;synapse.types.StateMap&quot;,
-    ) -&gt; Tuple[bool, Optional[dict]]:
+    ) -&gt; Tuple[bool, dict | None]:
         event_dict = event.get_dict()
         new_event_content = await self.api.http_client.post_json_get_json(
             uri=self._endpoint, post_json=event_dict,
@@ -11227,7 +11268,7 @@ unless a similar presence router is running on that homeserver.)</p>
 <p><em>First introduced in Synapse v1.42.0</em></p>
 <pre><code class="language-python">async def get_users_for_states(
     state_updates: Iterable[&quot;synapse.api.UserPresenceState&quot;],
-) -&gt; Dict[str, Set[&quot;synapse.api.UserPresenceState&quot;]]
+) -&gt; dict[str, set[&quot;synapse.api.UserPresenceState&quot;]]
 </code></pre>
 <p><strong>Requires</strong> <code>get_interested_users</code> to also be registered</p>
 <p>Called when processing updates to the presence state of one or more users. This callback can
@@ -11242,7 +11283,7 @@ Synapse concatenates the sets associated with this key from each dictionary. </p
 <p><em>First introduced in Synapse v1.42.0</em></p>
 <pre><code class="language-python">async def get_interested_users(
     user_id: str
-) -&gt; Union[Set[str], &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;]
+) -&gt; set[str] | &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;
 </code></pre>
 <p><strong>Requires</strong> <code>get_users_for_states</code> to also be registered</p>
 <p>Called when determining which users someone should be able to see the presence state of. This
@@ -11262,7 +11303,7 @@ implementations of this callback.</p>
 <p>The example below is a module that implements both presence router callbacks, and ensures
 that <code>@alice:example.org</code> receives all presence updates from <code>@bob:example.com</code> and
 <code>@charlie:somewhere.org</code>, regardless of whether Alice shares a room with any of them.</p>
-<pre><code class="language-python">from typing import Dict, Iterable, Set, Union
+<pre><code class="language-python">from typing import Iterable
 
 from synapse.module_api import ModuleApi
 
@@ -11279,7 +11320,7 @@ class CustomPresenceRouter:
     async def get_users_for_states(
         self,
         state_updates: Iterable[&quot;synapse.api.UserPresenceState&quot;],
-    ) -&gt; Dict[str, Set[&quot;synapse.api.UserPresenceState&quot;]]:
+    ) -&gt; dict[str, set[&quot;synapse.api.UserPresenceState&quot;]]:
         res = {}
         for update in state_updates:
             if (
@@ -11293,7 +11334,7 @@ class CustomPresenceRouter:
     async def get_interested_users(
         self,
         user_id: str,
-    ) -&gt; Union[Set[str], &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;]:
+    ) -&gt; set[str] | &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;:
         if user_id == &quot;@alice:example.com&quot;:
             return {&quot;@bob:example.com&quot;, &quot;@charlie:somewhere.org&quot;}
 
@@ -11307,7 +11348,7 @@ Synapse instance. Account validity callbacks can be registered using the module 
 <p>The available account validity callbacks are:</p>
 <h3 id="is_user_expired"><a class="header" href="#is_user_expired"><code>is_user_expired</code></a></h3>
 <p><em>First introduced in Synapse v1.39.0</em></p>
-<pre><code class="language-python">async def is_user_expired(user: str) -&gt; Optional[bool]
+<pre><code class="language-python">async def is_user_expired(user: str) -&gt; bool | None
 </code></pre>
 <p>Called when processing any authenticated request (except for logout requests). The module
 can return a <code>bool</code> to indicate whether the user has expired and should be locked out of
@@ -11351,12 +11392,7 @@ callbacks, which should be of the following form:</p>
     user: str,
     login_type: str,
     login_dict: &quot;synapse.module_api.JsonDict&quot;,
-) -&gt; Optional[
-    Tuple[
-        str, 
-        Optional[Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]]]
-    ]
-]
+) -&gt; tuple[str, Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]] | None] | None
 </code></pre>
 <p>The login type and field names should be provided by the user in the
 request to the <code>/login</code> API. <a href="https://matrix.org/docs/spec/client_server/latest#authentication-types">The Matrix specification</a>
@@ -11384,12 +11420,7 @@ authentication fails.</p>
     medium: str, 
     address: str,
     password: str,
-) -&gt; Optional[
-    Tuple[
-        str, 
-        Optional[Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]]]
-    ]
-]
+) -&gt; tuple[str, Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]] | None]
 </code></pre>
 <p>Called when a user attempts to register or log in with a third party identifier,
 such as email. It is passed the medium (eg. <code>email</code>), an address (eg. <code>jdoe@example.com</code>)
@@ -11407,7 +11438,7 @@ the authentication is denied.</p>
 <p><em>First introduced in Synapse v1.46.0</em></p>
 <pre><code class="language-python">async def on_logged_out(
     user_id: str,
-    device_id: Optional[str],
+    device_id: str | None,
     access_token: str
 ) -&gt; None
 </code></pre>
@@ -11422,7 +11453,7 @@ to still be present.</p>
 <pre><code class="language-python">async def get_username_for_registration(
     uia_results: Dict[str, Any],
     params: Dict[str, Any],
-) -&gt; Optional[str]
+) -&gt; str | None
 </code></pre>
 <p>Called when registering a new user. The module can return a username to set for the user
 being registered by returning it as a string, or <code>None</code> if it doesn't wish to force a
@@ -11471,7 +11502,7 @@ generated).</p>
 <pre><code class="language-python">async def get_displayname_for_registration(
     uia_results: Dict[str, Any],
     params: Dict[str, Any],
-) -&gt; Optional[str]
+) -&gt; str | None
 </code></pre>
 <p>Called when registering a new user. The module can return a display name to set for the
 user being registered by returning it as a string, or <code>None</code> if it doesn't wish to force a
@@ -11545,12 +11576,7 @@ class MyAuthProvider:
         username: str,
         login_type: str,
         login_dict: &quot;synapse.module_api.JsonDict&quot;,
-    ) -&gt; Optional[
-        Tuple[
-            str,
-            Optional[Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]]],
-        ]
-    ]:
+    ) -&gt; tuple[str, Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]] | None] | None:
         if login_type != &quot;my.login_type&quot;:
             return None
 
@@ -11562,12 +11588,7 @@ class MyAuthProvider:
         username: str,
         login_type: str,
         login_dict: &quot;synapse.module_api.JsonDict&quot;,
-    ) -&gt; Optional[
-        Tuple[
-            str,
-            Optional[Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]]],
-        ]
-    ]:
+    ) -&gt; tuple[str, Callable[[&quot;synapse.module_api.LoginResponse&quot;], Awaitable[None]] | None] | None:
         if login_type != &quot;m.login.password&quot;:
             return None
 
@@ -11631,7 +11652,7 @@ of local users. Account data callbacks can be registered using the module API's
 <p><em>First introduced in Synapse v1.57.0</em></p>
 <pre><code class="language-python">async def on_account_data_updated(
     user_id: str,
-    room_id: Optional[str],
+    room_id: str | None,
     account_data_type: str,
     content: &quot;synapse.module_api.JsonDict&quot;,
 ) -&gt; None:
@@ -11690,7 +11711,7 @@ class CustomAccountDataModule:
     async def log_new_account_data(
         self,
         user_id: str,
-        room_id: Optional[str],
+        room_id: str | None,
         account_data_type: str,
         content: JsonDict,
     ) -&gt; None:
@@ -11740,7 +11761,7 @@ using the module API's <code>register_media_repository_callbacks</code> method.<
 <p>The available media repository callbacks are:</p>
 <h3 id="get_media_config_for_user"><a class="header" href="#get_media_config_for_user"><code>get_media_config_for_user</code></a></h3>
 <p><em>First introduced in Synapse v1.132.0</em></p>
-<pre><code class="language-python">async def get_media_config_for_user(user_id: str) -&gt; Optional[JsonDict]
+<pre><code class="language-python">async def get_media_config_for_user(user_id: str) -&gt; JsonDict | None
 </code></pre>
 <p><strong><span style="color:red">
 Caution: This callback is currently experimental . The method signature or behaviour
@@ -11782,7 +11803,7 @@ returns <code>False</code> will be used. If this happens, Synapse will not call 
 implementations of this callback.</p>
 <h3 id="get_media_upload_limits_for_user"><a class="header" href="#get_media_upload_limits_for_user"><code>get_media_upload_limits_for_user</code></a></h3>
 <p><em>First introduced in Synapse v1.139.0</em></p>
-<pre><code class="language-python">async def get_media_upload_limits_for_user(user_id: str, size: int) -&gt; Optional[List[synapse.module_api.MediaUploadLimit]]
+<pre><code class="language-python">async def get_media_upload_limits_for_user(user_id: str, size: int) -&gt; list[synapse.module_api.MediaUploadLimit] | None
 </code></pre>
 <p><strong><span style="color:red">
 Caution: This callback is currently experimental. The method signature or behaviour
@@ -11834,7 +11855,7 @@ Synapse is running. Ratelimit callbacks can be registered using the module API's
 <p>The available ratelimit callbacks are:</p>
 <h3 id="get_ratelimit_override_for_user"><a class="header" href="#get_ratelimit_override_for_user"><code>get_ratelimit_override_for_user</code></a></h3>
 <p><em>First introduced in Synapse v1.132.0</em></p>
-<pre><code class="language-python">async def get_ratelimit_override_for_user(user: str, limiter_name: str) -&gt; Optional[synapse.module_api.RatelimitOverride]
+<pre><code class="language-python">async def get_ratelimit_override_for_user(user: str, limiter_name: str) -&gt; synapse.module_api.RatelimitOverride | None
 </code></pre>
 <p><strong><span style="color:red">
 Caution: This callback is currently experimental . The method signature or behaviour
@@ -19309,7 +19330,7 @@ logcontext is not finished before the <code>async</code> processing completes.</
 <tr>
 <td width="50%" valign="top">
 <p><strong>Bad</strong>:</p>
-<pre><code class="language-python">cache: Optional[ObservableDeferred[None]] = None
+<pre><code class="language-python">cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]
@@ -19334,7 +19355,7 @@ with LoggingContext(&quot;request-1&quot;):
 </td>
 <td width="50%" valign="top">
 <p><strong>Good</strong>:</p>
-<pre><code class="language-python">cache: Optional[ObservableDeferred[None]] = None
+<pre><code class="language-python">cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]
@@ -19364,7 +19385,7 @@ with LoggingContext(&quot;request-1&quot;):
 <tr>
 <td width="50%">
 <p><strong>OK</strong>:</p>
-<pre><code class="language-python">cache: Optional[ObservableDeferred[None]] = None
+<pre><code class="language-python">cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]
@@ -19880,7 +19901,7 @@ minimal.</p>
 <p>Information about how the tcp replication module is structured, including how
 the classes interact, can be found in
 <code>synapse/replication/tcp/__init__.py</code></p>
-<div style="break-before: page; page-break-before: always;"></div><h2 id="streams"><a class="header" href="#streams">Streams</a></h2>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="streams"><a class="header" href="#streams">Streams</a></h1>
 <p>Synapse has a concept of &quot;streams&quot;, which are roughly described in <a href="https://github.com/element-hq/synapse/blob/develop/synapse/storage/util/id_generators.py"><code>id_generators.py</code></a>.
 Generally speaking, streams are a series of notifications that something in Synapse's database has changed that the application might need to respond to.
 For example:</p>
@@ -19892,7 +19913,7 @@ For example:</p>
 <p>See <a href="https://github.com/element-hq/synapse/blob/develop/synapse/replication/tcp/streams/__init__.py"><code>synapse.replication.tcp.streams</code></a> for the full list of streams.</p>
 <p>It is very helpful to understand the streams mechanism when working on any part of Synapse that needs to respond to changes—especially if those changes are made by different workers.
 To that end, let's describe streams formally, paraphrasing from the docstring of <a href="https://github.com/element-hq/synapse/blob/a719b703d9bd0dade2565ddcad0e2f3a7a9d4c37/synapse/storage/util/id_generators.py#L96"><code>AbstractStreamIdGenerator</code></a>.</p>
-<h3 id="definition"><a class="header" href="#definition">Definition</a></h3>
+<h2 id="definition"><a class="header" href="#definition">Definition</a></h2>
 <p>A stream is an append-only log <code>T1, T2, ..., Tn, ...</code> of facts<sup class="footnote-reference"><a href="#1">1</a></sup> which grows over time.
 Only &quot;writers&quot; can add facts to a stream, and there may be multiple writers.</p>
 <p>Each fact has an ID, called its &quot;stream ID&quot;.
@@ -19917,7 +19938,7 @@ In the happy case, completion means a fact has been written to the stream table.
 But unhappy cases (e.g. transaction rollback due to an error) also count as completion.
 Once completed, the rows written with that stream ID are fixed, and no new rows
 will be inserted with that ID.</p>
-<h3 id="current-stream-id"><a class="header" href="#current-stream-id">Current stream ID</a></h3>
+<h2 id="current-stream-id"><a class="header" href="#current-stream-id">Current stream ID</a></h2>
 <p>For any given stream reader (including writers themselves), we may define a per-writer current stream ID:</p>
 <blockquote>
 <p>A current stream ID <em>for a writer W</em> is the largest stream ID such that
@@ -19954,7 +19975,7 @@ Consider a single-writer stream which is initially at ID 1.</p>
 <tr><td>Complete 4</td><td>5</td><td>current ID jumps 3-&gt;5, even though 6 is pending</td></tr>
 <tr><td>Complete 6</td><td>6</td><td></td></tr>
 </tbody></table>
-<h3 id="multi-writer-streams"><a class="header" href="#multi-writer-streams">Multi-writer streams</a></h3>
+<h2 id="multi-writer-streams"><a class="header" href="#multi-writer-streams">Multi-writer streams</a></h2>
 <p>There are two ways to view a multi-writer stream.</p>
 <ol>
 <li>Treat it as a collection of distinct single-writer streams, one
@@ -19972,7 +19993,7 @@ But the background process that works through events treats them as a single lin
 The facts this stream holds are instructions to &quot;you should now invalidate these cache entries&quot;.
 We only ever treat this as a multiple single-writer streams as there is no important ordering between cache invalidations.
 (Invalidations are self-contained facts; and the invalidations commute/are idempotent).</p>
-<h3 id="writing-to-streams"><a class="header" href="#writing-to-streams">Writing to streams</a></h3>
+<h2 id="writing-to-streams"><a class="header" href="#writing-to-streams">Writing to streams</a></h2>
 <p>Writers need to track:</p>
 <ul>
 <li>track their current position (i.e. its own per-writer stream ID).</li>
@@ -19988,7 +20009,7 @@ We only ever treat this as a multiple single-writer streams as there is no impor
 <p>To complete a fact, first remove it from your map of facts currently awaiting completion.
 Then, if no earlier fact is awaiting completion, the writer can advance its current position in that stream.
 Upon doing so it should emit an <code>RDATA</code> message<sup class="footnote-reference"><a href="#3">3</a></sup>, once for every fact between the old and the new stream ID.</p>
-<h3 id="subscribing-to-streams"><a class="header" href="#subscribing-to-streams">Subscribing to streams</a></h3>
+<h2 id="subscribing-to-streams"><a class="header" href="#subscribing-to-streams">Subscribing to streams</a></h2>
 <p>Readers need to track the current position of every writer.</p>
 <p>At startup, they can find this by contacting each writer with a <code>REPLICATE</code> message,
 requesting that all writers reply describing their current position in their streams.
@@ -19997,8 +20018,66 @@ Writers reply with a <code>POSITION</code> message.</p>
 The <code>RDATA</code> itself is not a self-contained representation of the fact;
 readers will have to query the stream tables for the full details.
 Readers must also advance their record of the writer's current position for that stream.</p>
-<h1 id="summary"><a class="header" href="#summary">Summary</a></h1>
+<h2 id="summary"><a class="header" href="#summary">Summary</a></h2>
 <p>In a nutshell: we have an append-only log with a &quot;buffer/scratchpad&quot; at the end where we have to wait for the sequence to be linear and contiguous.</p>
+<hr />
+<h2 id="cheatsheet-for-creating-a-new-stream"><a class="header" href="#cheatsheet-for-creating-a-new-stream">Cheatsheet for creating a new stream</a></h2>
+<p>These rough notes and links may help you to create a new stream and add all the
+necessary registration and event handling.</p>
+<p><strong>Create your stream:</strong></p>
+<ul>
+<li><a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/replication/tcp/streams/_base.py#L728">create a stream class and stream row class</a>
+<ul>
+<li>will need an <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L75">ID generator</a>
+<ul>
+<li>may need <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/config/workers.py#L177">writer configuration</a>, if there isn't already an obvious source of configuration for which workers should be designated as writers to your new stream.
+<ul>
+<li>if adding new writer configuration, add Docker-worker configuration, which lets us configure the writer worker in Complement tests: <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/docker/configure_workers_and_start.py#L331">[1]</a>, <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/docker/configure_workers_and_start.py#L440">[2]</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>most of the time, you will likely introduce a new datastore class for the concept represented by the new stream, unless there is already an obvious datastore that covers it.</li>
+<li>consider whether it may make sense to introduce a handler</li>
+</ul>
+<p><strong>Register your stream in:</strong></p>
+<ul>
+<li><a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/replication/tcp/streams/__init__.py#L71"><code>STREAMS_MAP</code></a></li>
+</ul>
+<p><strong>Advance your stream in:</strong></p>
+<ul>
+<li><a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L111"><code>process_replication_position</code> of your appropriate datastore</a>
+<ul>
+<li>don't forget the super call</li>
+</ul>
+</li>
+</ul>
+<p><strong>If you're going to do any caching that needs invalidation from new rows:</strong></p>
+<ul>
+<li>add invalidations to <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L91"><code>process_replication_rows</code> of your appropriate datastore</a>
+<ul>
+<li>don't forget the super call</li>
+</ul>
+</li>
+<li>add local-only <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L201">invalidations to your writer transactions</a></li>
+</ul>
+<p><strong>For streams to be used in sync:</strong></p>
+<ul>
+<li>add a new field to <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/types/__init__.py#L1003"><code>StreamToken</code></a>
+<ul>
+<li>add a new <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/types/__init__.py#L999"><code>StreamKeyType</code></a></li>
+</ul>
+</li>
+<li>add appropriate wake-up rules
+<ul>
+<li>in <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/replication/tcp/client.py#L260"><code>on_rdata</code></a></li>
+<li>locally on the same worker when completing a write, <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/handlers/thread_subscriptions.py#L139">e.g. in your handler</a></li>
+</ul>
+</li>
+<li>add the stream in <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/streams/events.py#L127"><code>bound_future_token</code></a></li>
+</ul>
 <hr />
 <div class="footnote-definition" id="1"><sup class="footnote-definition-label">1</sup>
 <p>we use the word <em>fact</em> here for two reasons.

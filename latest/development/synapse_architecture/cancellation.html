@@ -419,7 +419,7 @@ logcontext is not finished before the <code>async</code> processing completes.</
 <tr>
 <td width="50%" valign="top">
 <p><strong>Bad</strong>:</p>
-<pre><code class="language-python">cache: Optional[ObservableDeferred[None]] = None
+<pre><code class="language-python">cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]
@@ -444,7 +444,7 @@ with LoggingContext(&quot;request-1&quot;):
 </td>
 <td width="50%" valign="top">
 <p><strong>Good</strong>:</p>
-<pre><code class="language-python">cache: Optional[ObservableDeferred[None]] = None
+<pre><code class="language-python">cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]
@@ -474,7 +474,7 @@ with LoggingContext(&quot;request-1&quot;):
 <tr>
 <td width="50%">
 <p><strong>OK</strong>:</p>
-<pre><code class="language-python">cache: Optional[ObservableDeferred[None]] = None
+<pre><code class="language-python">cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]

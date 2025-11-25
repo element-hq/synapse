@@ -167,7 +167,7 @@ Synapse instance. Account validity callbacks can be registered using the module 
 <p>The available account validity callbacks are:</p>
 <h3 id="is_user_expired"><a class="header" href="#is_user_expired"><code>is_user_expired</code></a></h3>
 <p><em>First introduced in Synapse v1.39.0</em></p>
-<pre><code class="language-python">async def is_user_expired(user: str) -&gt; Optional[bool]
+<pre><code class="language-python">async def is_user_expired(user: str) -&gt; bool | None
 </code></pre>
 <p>Called when processing any authenticated request (except for logout requests). The module
 can return a <code>bool</code> to indicate whether the user has expired and should be locked out of

@@ -166,7 +166,7 @@ using the module API's <code>register_media_repository_callbacks</code> method.<
 <p>The available media repository callbacks are:</p>
 <h3 id="get_media_config_for_user"><a class="header" href="#get_media_config_for_user"><code>get_media_config_for_user</code></a></h3>
 <p><em>First introduced in Synapse v1.132.0</em></p>
-<pre><code class="language-python">async def get_media_config_for_user(user_id: str) -&gt; Optional[JsonDict]
+<pre><code class="language-python">async def get_media_config_for_user(user_id: str) -&gt; JsonDict | None
 </code></pre>
 <p><strong><span style="color:red">
 Caution: This callback is currently experimental . The method signature or behaviour
@@ -208,7 +208,7 @@ returns <code>False</code> will be used. If this happens, Synapse will not call 
 implementations of this callback.</p>
 <h3 id="get_media_upload_limits_for_user"><a class="header" href="#get_media_upload_limits_for_user"><code>get_media_upload_limits_for_user</code></a></h3>
 <p><em>First introduced in Synapse v1.139.0</em></p>
-<pre><code class="language-python">async def get_media_upload_limits_for_user(user_id: str, size: int) -&gt; Optional[List[synapse.module_api.MediaUploadLimit]]
+<pre><code class="language-python">async def get_media_upload_limits_for_user(user_id: str, size: int) -&gt; list[synapse.module_api.MediaUploadLimit] | None
 </code></pre>
 <p><strong><span style="color:red">
 Caution: This callback is currently experimental. The method signature or behaviour

@@ -447,9 +447,9 @@ search results; otherwise return <code>False</code>.</p>
 <p>The profile is represented as a dictionary with the following keys:</p>
 <ul>
 <li><code>user_id: str</code>. The Matrix ID for this user.</li>
-<li><code>display_name: Optional[str]</code>. The user's display name, or <code>None</code> if this user
+<li><code>display_name: str | None</code>. The user's display name, or <code>None</code> if this user
 has not set a display name.</li>
-<li><code>avatar_url: Optional[str]</code>. The <code>mxc://</code> URL to the user's avatar, or <code>None</code>
+<li><code>avatar_url: str | None</code>. The <code>mxc://</code> URL to the user's avatar, or <code>None</code>
 if this user has not set an avatar.</li>
 </ul>
 <p>The module is given a copy of the original dictionary, so modifying it from within the
@@ -462,10 +462,10 @@ any of the subsequent implementations of this callback.</p>
 <h3 id="check_registration_for_spam"><a class="header" href="#check_registration_for_spam"><code>check_registration_for_spam</code></a></h3>
 <p><em>First introduced in Synapse v1.37.0</em></p>
 <pre><code class="language-python">async def check_registration_for_spam(
-    email_threepid: Optional[dict],
-    username: Optional[str],
+    email_threepid: dict | None,
+    username: str | None,
     request_info: Collection[Tuple[str, str]],
-    auth_provider_id: Optional[str] = None,
+    auth_provider_id: str | None = None,
 ) -&gt; &quot;synapse.spam_checker_api.RegistrationBehaviour&quot;
 </code></pre>
 <p>Called when registering a new user. The module must return a <code>RegistrationBehaviour</code>
@@ -534,10 +534,10 @@ any of the subsequent implementations of this callback.</p>
 <p><em>First introduced in Synapse v1.87.0</em></p>
 <pre><code class="language-python">async def check_login_for_spam(
     user_id: str,
-    device_id: Optional[str],
-    initial_display_name: Optional[str],
-    request_info: Collection[Tuple[Optional[str], str]],
-    auth_provider_id: Optional[str] = None,
+    device_id: str | None,
+    initial_display_name: str | None,
+    request_info: Collection[tuple[str | None, str]],
+    auth_provider_id: str | None = None,
 ) -&gt; Union[&quot;synapse.module_api.NOT_SPAM&quot;, &quot;synapse.module_api.errors.Codes&quot;]
 </code></pre>
 <p>Called when a user logs in.</p>
@@ -597,7 +597,7 @@ class ListSpamChecker:
             resource=IsUserEvilResource(config),
         )
 
-    async def check_event_for_spam(self, event: &quot;synapse.events.EventBase&quot;) -&gt; Union[Literal[&quot;NOT_SPAM&quot;], Codes]:
+    async def check_event_for_spam(self, event: &quot;synapse.events.EventBase&quot;) -&gt; Literal[&quot;NOT_SPAM&quot;] | Codes:
         if event.sender in self.evil_users:
           return Codes.FORBIDDEN
         else:

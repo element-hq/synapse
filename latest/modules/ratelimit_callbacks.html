@@ -166,7 +166,7 @@ Synapse is running. Ratelimit callbacks can be registered using the module API's
 <p>The available ratelimit callbacks are:</p>
 <h3 id="get_ratelimit_override_for_user"><a class="header" href="#get_ratelimit_override_for_user"><code>get_ratelimit_override_for_user</code></a></h3>
 <p><em>First introduced in Synapse v1.132.0</em></p>
-<pre><code class="language-python">async def get_ratelimit_override_for_user(user: str, limiter_name: str) -&gt; Optional[synapse.module_api.RatelimitOverride]
+<pre><code class="language-python">async def get_ratelimit_override_for_user(user: str, limiter_name: str) -&gt; synapse.module_api.RatelimitOverride | None
 </code></pre>
 <p><strong><span style="color:red">
 Caution: This callback is currently experimental . The method signature or behaviour

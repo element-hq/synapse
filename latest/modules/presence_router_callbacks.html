@@ -175,7 +175,7 @@ unless a similar presence router is running on that homeserver.)</p>
 <p><em>First introduced in Synapse v1.42.0</em></p>
 <pre><code class="language-python">async def get_users_for_states(
     state_updates: Iterable[&quot;synapse.api.UserPresenceState&quot;],
-) -&gt; Dict[str, Set[&quot;synapse.api.UserPresenceState&quot;]]
+) -&gt; dict[str, set[&quot;synapse.api.UserPresenceState&quot;]]
 </code></pre>
 <p><strong>Requires</strong> <code>get_interested_users</code> to also be registered</p>
 <p>Called when processing updates to the presence state of one or more users. This callback can
@@ -190,7 +190,7 @@ Synapse concatenates the sets associated with this key from each dictionary. </p
 <p><em>First introduced in Synapse v1.42.0</em></p>
 <pre><code class="language-python">async def get_interested_users(
     user_id: str
-) -&gt; Union[Set[str], &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;]
+) -&gt; set[str] | &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;
 </code></pre>
 <p><strong>Requires</strong> <code>get_users_for_states</code> to also be registered</p>
 <p>Called when determining which users someone should be able to see the presence state of. This
@@ -210,7 +210,7 @@ implementations of this callback.</p>
 <p>The example below is a module that implements both presence router callbacks, and ensures
 that <code>@alice:example.org</code> receives all presence updates from <code>@bob:example.com</code> and
 <code>@charlie:somewhere.org</code>, regardless of whether Alice shares a room with any of them.</p>
-<pre><code class="language-python">from typing import Dict, Iterable, Set, Union
+<pre><code class="language-python">from typing import Iterable
 
 from synapse.module_api import ModuleApi
 
@@ -227,7 +227,7 @@ class CustomPresenceRouter:
     async def get_users_for_states(
         self,
         state_updates: Iterable[&quot;synapse.api.UserPresenceState&quot;],
-    ) -&gt; Dict[str, Set[&quot;synapse.api.UserPresenceState&quot;]]:
+    ) -&gt; dict[str, set[&quot;synapse.api.UserPresenceState&quot;]]:
         res = {}
         for update in state_updates:
             if (
@@ -241,7 +241,7 @@ class CustomPresenceRouter:
     async def get_interested_users(
         self,
         user_id: str,
-    ) -&gt; Union[Set[str], &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;]:
+    ) -&gt; set[str] | &quot;synapse.module_api.PRESENCE_ALL_USERS&quot;:
         if user_id == &quot;@alice:example.com&quot;:
             return {&quot;@bob:example.com&quot;, &quot;@charlie:somewhere.org&quot;}
 
