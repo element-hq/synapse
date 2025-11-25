@@ -1937,6 +1937,14 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11440"><a class="header" href="#upgrading-to-v11440">Upgrading to v1.144.0</a></h1>
+<h2 id="unstable-mutual-rooms-endpoint-is-now-behind-an-experimental-feature-flag"><a class="header" href="#unstable-mutual-rooms-endpoint-is-now-behind-an-experimental-feature-flag">Unstable mutual rooms endpoint is now behind an experimental feature flag</a></h2>
+<p>The unstable mutual rooms endpoint from
+<a href="https://github.com/matrix-org/matrix-spec-proposals/pull/2666">MSC2666</a>
+(<code>/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms</code>) is now
+disabled by default.  If you rely on this unstable endpoint, you must now set
+<code>experimental_features.msc2666_enabled: true</code> in your configuration to keep
+using it.</p>
 <h1 id="upgrading-to-v11430"><a class="header" href="#upgrading-to-v11430">Upgrading to v1.143.0</a></h1>
 <h2 id="dropping-support-for-postgresql-13"><a class="header" href="#dropping-support-for-postgresql-13">Dropping support for PostgreSQL 13</a></h2>
 <p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we've dropped
