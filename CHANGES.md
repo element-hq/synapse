@@ -1,4 +1,4 @@
-# synapse 1.143.0 (2025-11-25)
+# Synapse 1.143.0 (2025-11-25)
 
 ## Dropping support for PostgreSQL 13
 
