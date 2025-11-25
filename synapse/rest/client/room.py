@@ -911,7 +911,7 @@ class RoomMessageListRestServlet(RestServlet):
         # isn't seeing the full history, we can check the homeserver logs to see if the
         # client just never made the next request with the given `end` token.
         logger.info(
-            "Responding to `/messages` request: {%s} %s -> %d messages with end_token=%s",
+            "Responding to `/messages` request: {%s} %s %s -> %d messages with end_token=%s",
             requester.user.to_string(),
             request.get_method(),
             request.get_redacted_uri(),
