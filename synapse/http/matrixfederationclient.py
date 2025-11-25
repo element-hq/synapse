@@ -1525,14 +1525,16 @@ class MatrixFederationHttpClient:
         )
 
         if not send_req:
-            msg = "Requested file size exceeds ratelimits"
             logger.warning(
-                "{%s} [%s] %s",
+                "{%s} [%s] Requested file size exceeds ratelimits (minimum balance)",
                 request.txn_id,
                 request.destination,
-                msg,
             )
-            raise SynapseError(HTTPStatus.TOO_MANY_REQUESTS, msg, Codes.LIMIT_EXCEEDED)
+            raise SynapseError(
+                HTTPStatus.TOO_MANY_REQUESTS,
+                "Requested file size exceeds ratelimits",
+                Codes.LIMIT_EXCEEDED,
+            )
 
         response = await self._send_request(
             request,
@@ -1548,14 +1550,17 @@ class MatrixFederationHttpClient:
             expected_size = max_size
         else:
             if int(expected_size) > max_size:
-                msg = "Requested file is too large > %r bytes" % (max_size,)
                 logger.warning(
-                    "{%s} [%s] %s",
+                    "{%s} [%s] Requested file is too large > %r bytes",
                     request.txn_id,
                     request.destination,
-                    msg,
+                    max_size,
                 )
-                raise SynapseError(HTTPStatus.BAD_GATEWAY, msg, Codes.TOO_LARGE)
+                raise SynapseError(
+                    HTTPStatus.BAD_GATEWAY,
+                    f"Requested file is too large > {max_size} bytes",
+                    Codes.TOO_LARGE,
+                )
 
             read_body, _ = await download_ratelimiter.can_do_action(
                 requester=None,
@@ -1563,15 +1568,16 @@ class MatrixFederationHttpClient:
                 n_actions=expected_size,
             )
             if not read_body:
-                msg = "Requested file size exceeds ratelimits"
                 logger.warning(
-                    "{%s} [%s] %s",
+                    "{%s} [%s] Requested file size (%r bytes) exceeds ratelimits",
                     request.txn_id,
                     request.destination,
-                    msg,
+                    expected_size,
                 )
                 raise SynapseError(
-                    HTTPStatus.TOO_MANY_REQUESTS, msg, Codes.LIMIT_EXCEEDED
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    "Requested file size exceeds ratelimits",
+                    Codes.LIMIT_EXCEEDED,
                 )
 
         try:
@@ -1686,14 +1692,16 @@ class MatrixFederationHttpClient:
         )
 
         if not send_req:
-            msg = "Requested file size exceeds ratelimits"
             logger.warning(
-                "{%s} [%s] %s",
+                "{%s} [%s] Requested file size exceeds ratelimits (minimum balance)",
                 request.txn_id,
                 request.destination,
-                msg,
             )
-            raise SynapseError(HTTPStatus.TOO_MANY_REQUESTS, msg, Codes.LIMIT_EXCEEDED)
+            raise SynapseError(
+                HTTPStatus.TOO_MANY_REQUESTS,
+                "Requested file size exceeds ratelimits",
+                Codes.LIMIT_EXCEEDED,
+            )
 
         response = await self._send_request(
             request,
@@ -1708,14 +1716,17 @@ class MatrixFederationHttpClient:
             expected_size = max_size
         else:
             if int(expected_size) > max_size:
-                msg = "Requested file is too large > %r bytes" % (max_size,)
                 logger.warning(
-                    "{%s} [%s] %s",
+                    "{%s} [%s] Requested file is too large > %r bytes",
                     request.txn_id,
                     request.destination,
-                    msg,
+                    max_size,
                 )
-                raise SynapseError(HTTPStatus.BAD_GATEWAY, msg, Codes.TOO_LARGE)
+                raise SynapseError(
+                    HTTPStatus.BAD_GATEWAY,
+                    f"Requested file is too large > {max_size!r} bytes",
+                    Codes.TOO_LARGE,
+                )
 
             read_body, _ = await download_ratelimiter.can_do_action(
                 requester=None,
@@ -1723,15 +1734,16 @@ class MatrixFederationHttpClient:
                 n_actions=expected_size,
             )
             if not read_body:
-                msg = "Requested file size exceeds ratelimits"
                 logger.warning(
-                    "{%s} [%s] %s",
+                    "{%s} [%s] Requested file size (%r bytes) exceeds ratelimits",
                     request.txn_id,
                     request.destination,
-                    msg,
+                    int(expected_size),
                 )
                 raise SynapseError(
-                    HTTPStatus.TOO_MANY_REQUESTS, msg, Codes.LIMIT_EXCEEDED
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    f"Requested file size ({expected_size!r} bytes) exceeds ratelimits",
+                    Codes.LIMIT_EXCEEDED,
                 )
 
         # this should be a multipart/mixed response with the boundary string in the header
@@ -1742,14 +1754,15 @@ class MatrixFederationHttpClient:
             content_type_parts = content_type.split("boundary=")
             boundary = content_type_parts[1]
         except Exception:
-            msg = "Remote response is malformed: expected Content-Type of multipart/mixed with a boundary present."
             logger.warning(
-                "{%s} [%s] %s",
+                "{%s} [%s] Remote response is malformed: expected Content-Type of multipart/mixed with a boundary present.",
                 request.txn_id,
                 request.destination,
-                msg,
             )
-            raise SynapseError(HTTPStatus.BAD_GATEWAY, msg)
+            raise SynapseError(
+                HTTPStatus.BAD_GATEWAY,
+                "Remote response is malformed: expected Content-Type of multipart/mixed with a boundary present.",
+            )
 
         try:
             async with self.remote_download_linearizer.queue(ip_address):
@@ -1759,14 +1772,17 @@ class MatrixFederationHttpClient:
                 )
                 deferred.addTimeout(self.default_timeout_seconds, self.reactor)
         except BodyExceededMaxSize:
-            msg = "Requested file is too large > %r bytes" % (expected_size,)
             logger.warning(
-                "{%s} [%s] %s",
+                "{%s} [%s] Requested file is too large > %r bytes",
                 request.txn_id,
                 request.destination,
-                msg,
+                expected_size,
             )
-            raise SynapseError(HTTPStatus.BAD_GATEWAY, msg, Codes.TOO_LARGE)
+            raise SynapseError(
+                HTTPStatus.BAD_GATEWAY,
+                f"Requested file is too large > {expected_size!r} bytes",
+                Codes.TOO_LARGE,
+            )
         except defer.TimeoutError as e:
             logger.warning(
                 "{%s} [%s] Timed out reading response - %s %s",
