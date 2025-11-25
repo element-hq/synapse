@@ -1015,6 +1015,78 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             exact=True,
         )
 
+    def test_lazy_members_forked_position(self) -> None:
+        """Test that lazy loading room members are tracked correctly when a
+        connection position is reused"""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        self.helper.send(room_id1, "1", tok=user2_tok)
+
+        # Make a sync with lazy loading for the room members to establish
+        # a position
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Member, StateValues.LAZY],
+                    ],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # We expect to see only user2's membership in the room
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user2_id)],
+            },
+            exact=True,
+        )
+
+        # Send a message in room1 from user1
+        self.helper.send(room_id1, "2", tok=user1_tok)
+
+        # Make an incremental Sliding Sync request and check that we get user1's
+        # membership.
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+            exact=True,
+        )
+
+        # Now, reuse the original position and check we still get user1's
+        # membership.
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+            exact=True,
+        )
+
     def test_rooms_required_state_me(self) -> None:
         """
         Test `rooms.required_state` correctly handles $ME.
