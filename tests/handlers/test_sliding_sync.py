@@ -3834,7 +3834,7 @@ class RequiredStateChangesTestParameters:
     expected_with_state_deltas: _RequiredStateChangesReturn
     expected_without_state_deltas: _RequiredStateChangesReturn
 
-    previously_returned_user_state: AbstractSet[str] = frozenset()
+    previously_returned_lazy_user_ids: AbstractSet[str] = frozenset()
     lazy_load_user_ids: AbstractSet[str] = frozenset()
 
 
@@ -4370,7 +4370,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 RequiredStateChangesTestParameters(
                     previous_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
-                    previously_returned_user_state={"@user2:test", "@user3:test"},
+                    previously_returned_lazy_user_ids={"@user2:test", "@user3:test"},
                     lazy_load_user_ids=set(),
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
@@ -4415,7 +4415,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 RequiredStateChangesTestParameters(
                     previous_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
-                    previously_returned_user_state={"@user2:test", "@user3:test"},
+                    previously_returned_lazy_user_ids={"@user2:test", "@user3:test"},
                     lazy_load_user_ids={"@user4:test"},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
@@ -4457,7 +4457,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         EventTypes.Member: {"@user2:test", "@user3:test"}
                     },
                     request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
-                    previously_returned_user_state=frozenset(),
+                    previously_returned_lazy_user_ids=frozenset(),
                     lazy_load_user_ids={"@user3:test"},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
@@ -4501,7 +4501,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 RequiredStateChangesTestParameters(
                     previous_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     request_required_state_map={},
-                    previously_returned_user_state={"@user2:test", "@user3:test"},
+                    previously_returned_lazy_user_ids={"@user2:test", "@user3:test"},
                     lazy_load_user_ids=set(),
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
@@ -4549,7 +4549,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 RequiredStateChangesTestParameters(
                     previous_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     request_required_state_map={EventTypes.Member: {"@user4:test"}},
-                    previously_returned_user_state={"@user2:test", "@user3:test"},
+                    previously_returned_lazy_user_ids={"@user2:test", "@user3:test"},
                     lazy_load_user_ids={"@user4:test"},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
@@ -4720,19 +4720,12 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         _test_description: str,
         test_parameters: RequiredStateChangesTestParameters,
     ) -> None:
-        # `_required_state_changes` expects this to be a map from user ID to
-        # timestamp, so let's convert it into one by using a dummy timestamp
-        # value
-        previously_returned_user_state = dict.fromkeys(
-            test_parameters.previously_returned_user_state, 1234
-        )
-
         # Without `state_deltas`
         state_changes = _required_state_changes(
             user_id="@user:test",
             prev_required_state_map=test_parameters.previous_required_state_map,
             request_required_state_map=test_parameters.request_required_state_map,
-            previously_returned_user_state=previously_returned_user_state,
+            previously_returned_lazy_user_ids=test_parameters.previously_returned_lazy_user_ids,
             lazy_load_user_ids=test_parameters.lazy_load_user_ids,
             state_deltas={},
         )
@@ -4763,7 +4756,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             user_id="@user:test",
             prev_required_state_map=test_parameters.previous_required_state_map,
             request_required_state_map=test_parameters.request_required_state_map,
-            previously_returned_user_state=previously_returned_user_state,
+            previously_returned_lazy_user_ids=test_parameters.previously_returned_lazy_user_ids,
             lazy_load_user_ids=test_parameters.lazy_load_user_ids,
             state_deltas=test_parameters.state_deltas,
         )
@@ -4827,7 +4820,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             user_id="@user:test",
             prev_required_state_map=previous_required_state_map,
             request_required_state_map=request_required_state_map,
-            previously_returned_user_state={},
+            previously_returned_lazy_user_ids=frozenset(),
             lazy_load_user_ids=frozenset(),
             state_deltas={},
         )
@@ -4900,7 +4893,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             user_id="@user:test",
             prev_required_state_map=previous_required_state_map,
             request_required_state_map=request_required_state_map,
-            previously_returned_user_state={},
+            previously_returned_lazy_user_ids=frozenset(),
             lazy_load_user_ids=frozenset(),
             state_deltas={},
         )

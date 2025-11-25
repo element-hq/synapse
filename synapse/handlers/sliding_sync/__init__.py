@@ -1216,7 +1216,7 @@ class SlidingSyncHandler:
                 # the case where the client added explicit user state requests
                 # for users they already had lazy loaded.
                 if all_required_user_state:
-                    previously_returned_user_state = (
+                    previously_returned_user_to_last_seen = (
                         await self.store.get_sliding_sync_connection_lazy_members(
                             connection_position=from_token.connection_position,
                             room_id=room_id,
@@ -1224,7 +1224,7 @@ class SlidingSyncHandler:
                         )
                     )
                 else:
-                    previously_returned_user_state = {}
+                    previously_returned_user_to_last_seen = {}
 
                 # Check if there are any changes to the required state config
                 # that we need to handle.
@@ -1232,7 +1232,7 @@ class SlidingSyncHandler:
                     user.to_string(),
                     prev_required_state_map=prev_room_sync_config.required_state_map,
                     request_required_state_map=room_sync_config.required_state_map,
-                    previously_returned_user_state=previously_returned_user_state,
+                    previously_returned_lazy_user_ids=previously_returned_user_to_last_seen.keys(),
                     lazy_load_user_ids=lazy_load_user_ids,
                     state_deltas=room_state_delta_id_map,
                 )
@@ -1570,7 +1570,7 @@ def _required_state_changes(
     *,
     prev_required_state_map: Mapping[str, AbstractSet[str]],
     request_required_state_map: Mapping[str, AbstractSet[str]],
-    previously_returned_user_state: Mapping[str, int | None],
+    previously_returned_lazy_user_ids: AbstractSet[str],
     lazy_load_user_ids: AbstractSet[str],
     state_deltas: StateMap[str],
 ) -> _RequiredStateChangesReturn:
@@ -1593,9 +1593,11 @@ def _required_state_changes(
             request.
         request_required_state_map: The required state map from the current
             request.
-        previously_returned_user_state: The set of user IDs whose lazy-loaded
-            membership we have previously returned to the client.
-        required_user_state: The set of user IDs whose lazy-loaded membership
+        previously_returned_lazy_user_ids: The set of user IDs whose membership
+            we have previously returned to the client due to lazy loading. This
+            is filtered to only include users who have either sent events in the
+            timeline or required state.
+        lazy_load_user_ids: The set of user IDs whose lazy-loaded membership
             is required for this request.
         state_deltas: The state deltas that have changed in the room since the
             previous request.
@@ -1613,7 +1615,7 @@ def _required_state_changes(
             # send this member change down.
             continue
 
-        if state_key not in previously_returned_user_state:
+        if state_key not in previously_returned_lazy_user_ids:
             # We've not previously returned this member so nothing to
             # invalidate.
             continue
@@ -1622,9 +1624,7 @@ def _required_state_changes(
 
     if prev_required_state_map == request_required_state_map:
         # There has been no change in state, just need to check lazy members.
-        newly_returned_lazy_members = (
-            lazy_load_user_ids - previously_returned_user_state.keys()
-        )
+        newly_returned_lazy_members = lazy_load_user_ids - previously_returned_lazy_user_ids
         if newly_returned_lazy_members:
             # There are some new lazy members we need to fetch.
             added_types: list[tuple[str, str | None]] = []
@@ -1812,7 +1812,7 @@ def _required_state_changes(
                     # not membership.
                     pass
                 elif event_type == EventTypes.Member:
-                    if state_key not in previously_returned_user_state:
+                    if state_key not in previously_returned_lazy_user_ids:
                         # Only add *explicit* members we haven't previously sent
                         # down.
                         added.append((event_type, state_key))
@@ -1823,7 +1823,7 @@ def _required_state_changes(
     # haven't previously been returned.
     for required_user_id in (
         lazy_load_user_ids
-        - previously_returned_user_state.keys()
+        - previously_returned_lazy_user_ids
         - lazy_members_previously_returned
     ):
         added.append((EventTypes.Member, required_user_id))
