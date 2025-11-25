@@ -850,11 +850,15 @@ class PerConnectionState:
     since the last time you made a sync request.
 
     Attributes:
+        last_used_ts: The time this connection was last used, in milliseconds.
+            This is only accurate to `UPDATE_CONNECTION_STATE_EVERY_MS`.
         rooms: The status of each room for the events stream.
         receipts: The status of each room for the receipts stream.
         room_configs: Map from room_id to the `RoomSyncConfig` of all
             rooms that we have previously sent down.
     """
+
+    last_used_ts: int | None = None
 
     rooms: RoomStatusMap[RoomStreamToken] = attr.Factory(RoomStatusMap)
     receipts: RoomStatusMap[MultiWriterStreamToken] = attr.Factory(RoomStatusMap)
@@ -867,6 +871,7 @@ class PerConnectionState:
         room_configs = cast(MutableMapping[str, RoomSyncConfig], self.room_configs)
 
         return MutablePerConnectionState(
+            last_used_ts=self.last_used_ts,
             rooms=self.rooms.get_mutable(),
             receipts=self.receipts.get_mutable(),
             account_data=self.account_data.get_mutable(),
@@ -875,6 +880,7 @@ class PerConnectionState:
 
     def copy(self) -> "PerConnectionState":
         return PerConnectionState(
+            last_used_ts=self.last_used_ts,
             rooms=self.rooms.copy(),
             receipts=self.receipts.copy(),
             account_data=self.account_data.copy(),
@@ -925,6 +931,8 @@ class RoomLazyMembershipChanges:
 @attr.s(auto_attribs=True)
 class MutablePerConnectionState(PerConnectionState):
     """A mutable version of `PerConnectionState`"""
+
+    last_used_ts: int | None
 
     rooms: MutableRoomStatusMap[RoomStreamToken]
     receipts: MutableRoomStatusMap[MultiWriterStreamToken]
