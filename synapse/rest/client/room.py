@@ -49,6 +49,7 @@ from synapse.events.utils import (
     format_event_for_client_v2,
     serialize_event,
 )
+from synapse.handlers.pagination import GetMessagesResult
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     ResolveRoomIdMixin,
@@ -64,7 +65,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.logging.opentracing import set_tag
+from synapse.logging.opentracing import set_tag, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
@@ -806,6 +807,7 @@ class RoomMessageListRestServlet(RestServlet):
         self.pagination_handler = hs.get_pagination_handler()
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
+        self.event_serializer = hs.get_event_client_serializer()
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
@@ -839,12 +841,20 @@ class RoomMessageListRestServlet(RestServlet):
         ):
             as_client_event = False
 
-        msgs = await self.pagination_handler.get_messages(
+        serialize_options = SerializeEventConfig(
+            as_client_event=as_client_event, requester=requester
+        )
+
+        get_messages_result = await self.pagination_handler.get_messages(
             room_id=room_id,
             requester=requester,
             pagin_config=pagination_config,
             as_client_event=as_client_event,
             event_filter=event_filter,
+        )
+
+        response_content = await self.encode_response(
+            get_messages_result, serialize_options
         )
 
         processing_end_time = self.clock.time_msec()
@@ -854,7 +864,39 @@ class RoomMessageListRestServlet(RestServlet):
             **{SERVER_NAME_LABEL: self.server_name},
         ).observe((processing_end_time - processing_start_time) / 1000)
 
-        return 200, msgs
+        return 200, response_content
+
+    @trace
+    async def encode_response(
+        self,
+        get_messages_result: GetMessagesResult,
+        serialize_options: SerializeEventConfig,
+    ) -> JsonDict:
+        time_now = self.clock.time_msec()
+
+        serialized_result = {
+            "chunk": (
+                await self.event_serializer.serialize_events(
+                    get_messages_result.messages_chunk,
+                    time_now,
+                    config=serialize_options,
+                    bundle_aggregations=get_messages_result.bundled_aggregations,
+                )
+            ),
+            "start": await get_messages_result.start_token.to_string(self.store),
+        }
+
+        if get_messages_result.end_token:
+            serialized_result["end"] = await get_messages_result.end_token.to_string(
+                self.store
+            )
+
+        if get_messages_result.state:
+            serialized_result["state"] = await self.event_serializer.serialize_events(
+                get_messages_result.state, time_now, config=serialize_options
+            )
+
+        return serialized_result
 
 
 # TODO: Needs unit testing
