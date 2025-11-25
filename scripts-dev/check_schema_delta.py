@@ -9,15 +9,11 @@ from typing import Any
 
 import click
 import git
+import sqlglot
+import sqlglot.expressions
 
 SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
-INDEX_CREATION_REGEX = re.compile(
-    r"CREATE .*INDEX .*ON ([a-z_0-9]+)", flags=re.IGNORECASE
-)
-INDEX_DELETION_REGEX = re.compile(r"DROP .*INDEX ([a-z_0-9]+)", flags=re.IGNORECASE)
-TABLE_CREATION_REGEX = re.compile(
-    r"CREATE .*TABLE.* ([a-z_0-9]+)\s*\(", flags=re.IGNORECASE
-)
+
 
 # The base branch we want to check against. We use the main development branch
 # on the assumption that is what we are developing against.
@@ -153,59 +149,86 @@ def main(force_colors: bool) -> None:
     # and delta files are also numbered in order.
     changed_delta_files.sort()
 
-    # Now check that we're not trying to create or drop indices. If we want to
-    # do that they should be in background updates. The exception is when we
-    # create indices on tables we've just created.
-    created_tables = set()
-    for delta_file in changed_delta_files:
-        with open(delta_file) as fd:
-            delta_lines = fd.readlines()
-
-        for line in delta_lines:
-            # Strip SQL comments
-            line = line.split("--", maxsplit=1)[0]
-
-            # Check and track any tables we create
-            match = TABLE_CREATION_REGEX.search(line)
-            if match:
-                table_name = match.group(1)
-                created_tables.add(table_name)
-
-            # Check for dropping indices, these are always banned
-            match = INDEX_DELETION_REGEX.search(line)
-            if match:
-                clause = match.group()
-
-                click.secho(
-                    f"Found delta with index deletion: '{clause}' in {delta_file}",
-                    fg="red",
-                    bold=True,
-                    color=force_colors,
-                )
-                click.secho(
-                    " ↪ These should be in background updates.",
-                )
-                return_code = 1
-
-            # Check for index creation, which is only allowed for tables we've
-            # created.
-            match = INDEX_CREATION_REGEX.search(line)
-            if match:
-                clause = match.group()
-                table_name = match.group(1)
-                if table_name not in created_tables:
-                    click.secho(
-                        f"Found delta with index creation for existing table: '{clause}' in {delta_file}",
-                        fg="red",
-                        bold=True,
-                        color=force_colors,
-                    )
-                    click.secho(
-                        " ↪ These should be in background updates (or the table should be created in the same delta).",
-                    )
-                    return_code = 1
+    success = check_schema_delta(changed_delta_files, force_colors)
+    if not success:
+        return_code = 1
 
     click.get_current_context().exit(return_code)
+
+
+def check_schema_delta(delta_files: list[str], force_colors: bool) -> bool:
+    """Check that the given schema delta files do not create or drop indices
+    inappropriately.
+
+    Index creation is only allowed on tables created in the same set of deltas.
+
+    Index deletion is never allowed and should be done in background updates.
+    """
+
+    # The tables created in this delta
+    created_tables = set[str]()
+
+    # The indices created/dropped in this delta, a tuple of (table_name, sql)
+    created_indices = list[tuple[str, str]]()
+
+    # The indices dropped in this delta, just the sql
+    dropped_indices = list[str]()
+
+    for delta_file in delta_files:
+        with open(delta_file) as fd:
+            delta_contents = fd.read()
+
+        # Assume the SQL dialect from the file extension, defaulting to Postgres.
+        sql_lang = "postgres"
+        if delta_file.endswith(".sqlite"):
+            sql_lang = "sqlite"
+
+        statements = sqlglot.parse(delta_contents, read=sql_lang)
+
+        for statement in statements:
+            if isinstance(statement, sqlglot.expressions.Create):
+                if statement.kind == "TABLE":
+                    assert isinstance(statement.this, sqlglot.expressions.Schema)
+                    assert isinstance(statement.this.this, sqlglot.expressions.Table)
+
+                    table_name = statement.this.this.name
+                    created_tables.add(table_name)
+                elif statement.kind == "INDEX":
+                    assert isinstance(statement.this, sqlglot.expressions.Index)
+
+                    table_name = statement.this.args["table"].name
+                    created_indices.append((table_name, statement.sql()))
+            elif isinstance(statement, sqlglot.expressions.Drop):
+                if statement.kind == "INDEX":
+                    dropped_indices.append(statement.sql())
+
+    success = True
+    for table_name, clause in created_indices:
+        if table_name not in created_tables:
+            click.secho(
+                f"Found delta with index creation for existing table: '{clause}'",
+                fg="red",
+                bold=True,
+                color=force_colors,
+            )
+            click.secho(
+                " ↪ These should be in background updates (or the table should be created in the same delta).",
+            )
+            success = False
+
+    for clause in dropped_indices:
+        click.secho(
+            f"Found delta with index deletion: '{clause}'",
+            fg="red",
+            bold=True,
+            color=force_colors,
+        )
+        click.secho(
+            " ↪ These should be in background updates.",
+        )
+        success = False
+
+    return success
 
 
 if __name__ == "__main__":
