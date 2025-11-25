@@ -1624,7 +1624,9 @@ def _required_state_changes(
 
     if prev_required_state_map == request_required_state_map:
         # There has been no change in state, just need to check lazy members.
-        newly_returned_lazy_members = lazy_load_user_ids - previously_returned_lazy_user_ids
+        newly_returned_lazy_members = (
+            lazy_load_user_ids - previously_returned_lazy_user_ids
+        )
         if newly_returned_lazy_members:
             # There are some new lazy members we need to fetch.
             added_types: list[tuple[str, str | None]] = []

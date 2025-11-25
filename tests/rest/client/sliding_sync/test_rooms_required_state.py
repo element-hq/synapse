@@ -933,8 +933,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         )
 
     def test_lazy_members_across_multiple_rooms(self) -> None:
-        """Test that lazy loading room members are tracked per-room correctly.
-        """
+        """Test that lazy loading room members are tracked per-room correctly."""
 
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1015,8 +1014,6 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             },
             exact=True,
         )
-
-
 
     def test_rooms_required_state_me(self) -> None:
         """
