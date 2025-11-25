@@ -652,7 +652,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
                 self.bob,
                 AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
                 {
-                    "block_all": True,
+                    "default_action": "block",
                 },
             )
         )
@@ -670,8 +670,8 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
         self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
 
     @override_config({"experimental_features": {"msc4380_enabled": True}})
-    def test_misc4380_non_bool_setting(self) -> None:
-        """Test that `block_all` being set to something non-booly is the same as False."""
+    def test_misc4380_non_string_setting(self) -> None:
+        """Test that `default_action` being set to something non-stringy is the same as "accept"."""
         room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
 
         self.get_success(
@@ -679,7 +679,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
                 self.bob,
                 AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
                 {
-                    "block_all": "True",
+                    "default_action": 1,
                 },
             )
         )
@@ -695,7 +695,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
 
     @override_config({"experimental_features": {"msc4380_enabled": False}})
     def test_msc4380_disabled_allow_invite_local(self) -> None:
-        """Test that MSC4380 will block a user from being invited to a room"""
+        """Test that, when MSC4380 is not enabled, invites are accepted as normal"""
         room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
 
         self.get_success(
@@ -703,7 +703,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
                 self.bob,
                 AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
                 {
-                    "block_all": True,
+                    "default_action": "block",
                 },
             )
         )
@@ -728,7 +728,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
             self.store.add_account_data_for_user(
                 self.bob,
                 AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
-                {"block_all": True},
+                {"default_action": "block"},
             )
         )
 
