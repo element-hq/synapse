@@ -894,7 +894,7 @@ class SlidingSyncRoomLists:
                     # instead (to try and avoid long SSS response times when
                     # there is new data).
                     #
-                    # Due to the construction of the SSS API the client is in
+                    # Due to the construction of the SSS API, the client is in
                     # charge of setting the range of rooms to request updates
                     # for. Generally, it will start with a small range and then
                     # expand (and occasionally it may contract the range again
