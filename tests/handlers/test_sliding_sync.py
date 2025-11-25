@@ -4443,7 +4443,6 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # Previous request did not include any explicit members,
                         # so nothing to store.
                         lazy_members_previously_returned=frozenset(),
-                        # We don't invalidate user2 as they haven't changed
                         lazy_members_invalidated=frozenset(),
                     ),
                 ),
