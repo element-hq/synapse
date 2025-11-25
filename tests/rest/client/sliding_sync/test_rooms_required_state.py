@@ -23,6 +23,7 @@ from synapse.api.constants import EventContentFields, EventTypes, JoinRules, Mem
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import knock, login, room, sync
 from synapse.server import HomeServer
+from synapse.storage.databases.main.events import DeltaState, SlidingSyncTableChanges
 from synapse.storage.databases.main.sliding_sync import LAZY_MEMBERS_UPDATE_INTERVAL_MS
 from synapse.types import SlidingSyncStreamToken
 from synapse.util.clock import Clock
@@ -2061,3 +2062,128 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         )
         # The timestamp for user1 should be updated.
         self.assertGreater(lazy_member_entries[user1_id], prev_timestamp)
+
+    def test_lazy_load_state_reset(self) -> None:
+        """Test that when using lazy-loaded members, if a membership state is
+        reset to a previous state and the sync is not limited, then we send down
+        the state reset.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        content = self.helper.join(room_id, user1_id, tok=user1_tok)
+        first_event_id = content["event_id"]
+
+        # Send a message so that user1 comes down sync.
+        self.helper.send(room_id, "msg", tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Member, StateValues.LAZY],
+                    ],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Check that user1 is returned
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+            exact=True,
+        )
+
+        # user1 changes their display name
+        content = self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            body={"membership": "join", "displayname": "New display name"},
+            state_key=user1_id,
+            tok=user1_tok,
+        )
+        second_event_id = content["event_id"]
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # We should see the updated membership state
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            response_body["rooms"][room_id]["required_state"][0]["event_id"],
+            second_event_id,
+        )
+
+        # Now, fake a reset the membership state to the first event
+        persist_event_store = self.hs.get_datastores().persist_events
+        assert persist_event_store is not None
+
+        self.get_success(
+            persist_event_store.update_current_state(
+                room_id,
+                DeltaState(
+                    to_insert={(EventTypes.Member, user1_id): first_event_id},
+                    to_delete=[],
+                ),
+                # We don't need to worry about sliding sync changes for this test
+                SlidingSyncTableChanges(
+                    room_id=room_id,
+                    joined_room_bump_stamp_to_fully_insert=None,
+                    joined_room_updates={},
+                    membership_snapshot_shared_insert_values={},
+                    to_insert_membership_snapshots=[],
+                    to_delete_membership_snapshots=[],
+                ),
+            )
+        )
+
+        # Send a message from *user2* so that user1 wouldn't normally get
+        # synced.
+        self.helper.send(room_id, "msg2", tok=user2_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # This should be a non-limited sync
+        self.assertFalse(
+            response_body["rooms"][room_id].get("limited", False),
+            "Expected a non-limited timeline",
+        )
+
+        # We should see the reset membership state of user1
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+        )
+        self.assertEqual(
+            response_body["rooms"][room_id]["required_state"][0]["event_id"],
+            first_event_id,
+        )
