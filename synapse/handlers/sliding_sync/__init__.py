@@ -1183,11 +1183,11 @@ class SlidingSyncHandler:
         # loaded members is enabled.
         #
         # We may later update this to account for previously sent members.
-        returned_users = {}
+        returned_user_id_to_last_seen_ts_map = {}
         if lazy_load_room_members:
-            returned_users = dict.fromkeys(lazy_load_user_ids)
+            returned_user_id_to_last_seen_ts_map = dict.fromkeys(lazy_load_user_ids)
         new_connection_state.room_lazy_membership[room_id] = RoomLazyMembershipChanges(
-            returned_user_id_to_last_seen_ts_map=returned_users
+            returned_user_id_to_last_seen_ts_map=returned_user_id_to_last_seen_ts_map
         )
 
         if initial:
@@ -1222,6 +1222,15 @@ class SlidingSyncHandler:
                             room_id=room_id,
                             user_ids=all_required_user_state,
                         )
+                    )
+
+                    # Update the room lazy membership changes to track which
+                    # lazy loaded members were needed for this sync. This is so
+                    # that we can correctly track the last time we sent down
+                    # users' membership (and so can evict old membership state
+                    # from the DB tables).
+                    returned_user_id_to_last_seen_ts_map.update(
+                        previously_returned_user_to_last_seen
                     )
                 else:
                     previously_returned_user_to_last_seen = {}

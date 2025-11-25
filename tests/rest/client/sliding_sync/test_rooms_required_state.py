@@ -23,7 +23,10 @@ from synapse.api.constants import EventContentFields, EventTypes, JoinRules, Mem
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import knock, login, room, sync
 from synapse.server import HomeServer
+from synapse.storage.databases.main.sliding_sync import LAZY_MEMBERS_UPDATE_INTERVAL_MS
+from synapse.types import SlidingSyncStreamToken
 from synapse.util.clock import Clock
+from synapse.util.constants import MILLISECONDS_PER_SECOND
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.test_utils.event_injection import mark_event_as_partial_state
@@ -1932,3 +1935,129 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         # We should not see the room name again, as we have already sent that
         # down.
         self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
+
+    def test_lazy_loaded_last_seen_ts(self) -> None:
+        """Test that the `last_seen_ts` column in
+        `sliding_sync_connection_lazy_members` is correctly kept up to date"""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Send a message so that user1 comes down sync.
+        self.helper.send(room_id, "msg", tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Member, StateValues.LAZY],
+                    ],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Check that user1 is returned
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+            exact=True,
+        )
+
+        # Check that we have an entry in sliding_sync_connection_lazy_members
+        connection_pos1 = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        ).connection_position
+        lazy_member_entries = self.get_success(
+            self.store.get_sliding_sync_connection_lazy_members(
+                connection_pos1, room_id, {user1_id}
+            )
+        )
+        self.assertIn(user1_id, lazy_member_entries)
+
+        prev_timestamp = lazy_member_entries[user1_id]
+
+        # If user1 is sent down again, the last_seen_ts should NOT be updated as
+        # not enough time has passed.
+        self.helper.send(room_id, "msg2", tok=user1_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # We expect the required_state map to be empty as nothing has changed.
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id].get("required_state", []),
+            {},
+            exact=True,
+        )
+
+        connection_pos2 = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        ).connection_position
+
+        lazy_member_entries = self.get_success(
+            self.store.get_sliding_sync_connection_lazy_members(
+                connection_pos2, room_id, {user1_id}
+            )
+        )
+
+        # The timestamp should be unchanged.
+        self.assertEqual(lazy_member_entries[user1_id], prev_timestamp)
+
+        # Now advance the time by `LAZY_MEMBERS_UPDATE_INTERVAL_MS` so that we
+        # would update the timestamp.
+        self.reactor.advance(LAZY_MEMBERS_UPDATE_INTERVAL_MS / MILLISECONDS_PER_SECOND)
+
+        # Send a message from user2
+        self.helper.send(room_id, "msg3", tok=user2_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        connection_pos3 = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        ).connection_position
+
+        lazy_member_entries = self.get_success(
+            self.store.get_sliding_sync_connection_lazy_members(
+                connection_pos3, room_id, {user1_id}
+            )
+        )
+
+        # The timestamp for user1 should be unchanged, as they were not sent down.
+        self.assertEqual(lazy_member_entries[user1_id], prev_timestamp)
+
+        # If user1 sends a message, then the timestamp should be updated.
+        self.helper.send(room_id, "msg4", tok=user1_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        connection_pos4 = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        ).connection_position
+
+        lazy_member_entries = self.get_success(
+            self.store.get_sliding_sync_connection_lazy_members(
+                connection_pos4, room_id, {user1_id}
+            )
+        )
+        # The timestamp for user1 should be updated.
+        self.assertGreater(lazy_member_entries[user1_id], prev_timestamp)

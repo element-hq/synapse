@@ -49,6 +49,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# How often to update the last seen timestamp for lazy members. We don't want to
+# update it too often as that causes DB writes.
+LAZY_MEMBERS_UPDATE_INTERVAL_MS = ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND
+
+
 class SlidingSyncStore(SQLBaseStore):
     def __init__(
         self,
@@ -577,6 +582,10 @@ class SlidingSyncStore(SQLBaseStore):
         # These are either a) new entries we've never sent before (i.e. with a
         # None last_seen_ts), or b) where the `last_seen_ts` is old enough that
         # we want to update it.
+        #
+        # We don't update the timestamp every time to avoid hammering the DB
+        # with writes, and we don't need the timestamp to be precise. It is used
+        # to evict old entries that haven't been used in a while.
         to_update: list[tuple[str, str]] = []
         for room_id, room_changes in all_changes.items():
             for (
@@ -587,9 +596,10 @@ class SlidingSyncStore(SQLBaseStore):
                     # We've never sent this user before, so we need to record that
                     # we've sent it at the new connection position.
                     to_update.append((room_id, user_id))
-                elif last_seen_ts + ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND < now:
-                    # We last saw this user over an hour ago, so we update the
-                    # timestamp.
+                elif last_seen_ts + LAZY_MEMBERS_UPDATE_INTERVAL_MS < now:
+                    # We last saw this user over
+                    # `LAZY_MEMBERS_UPDATE_INTERVAL_MS` ago, so we update the
+                    # timestamp (c.f. comment above).
                     to_update.append((room_id, user_id))
 
         if to_update:
