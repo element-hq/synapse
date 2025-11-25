@@ -916,7 +916,7 @@ class RoomMessageListRestServlet(RestServlet):
             request.get_method(),
             request.get_redacted_uri(),
             len(get_messages_result.messages_chunk),
-            get_messages_result.end_token,
+            await get_messages_result.end_token.to_string(self.store),
         )
 
         response_content = await self.encode_response(
