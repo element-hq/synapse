@@ -90,4 +90,5 @@ class UserMutualRoomsServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    UserMutualRoomsServlet(hs).register(http_server)
+    if hs.config.experimental.msc2666_enabled:
+        UserMutualRoomsServlet(hs).register(http_server)
