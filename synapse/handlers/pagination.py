@@ -82,9 +82,10 @@ class GetMessagesResult:
     """
     A list of room events.
 
-    When the request was `Direction.FORWARDS`, the events are in chronological order.
-
-    When the request was `Direction.BACKWARDS`, the events are in reverse chronological order.
+     - When the request is `Direction.FORWARDS`, events will be in the range:
+       `start_token` < x <= `end_token`, (ascending topological_order)
+     - When the request is `Direction.BACKWARDS`, events will be in the range:
+       `start_token` >= x > `end_token`, (descending topological_order)
 
     Note that an empty chunk does not necessarily imply that no more events are
     available. Clients should continue to paginate until no `end_token` property is returned.
