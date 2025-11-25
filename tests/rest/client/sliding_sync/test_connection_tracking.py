@@ -405,6 +405,10 @@ class SlidingSyncConnectionTrackingTestCase(SlidingSyncBase):
         """
         Test that if we have too much data to send down for incremental sync,
         we expire the connection and ask the client to do a full resync.
+
+        Connections are only expired if they have not been used for a minimum
+        amount of time (MINIMUM_NOT_USED_AGE_EXPIRY_MS) to avoid expiring
+        connections that are actively being used.
         """
 
         user1_id = self.register_user("user1", "pass")
