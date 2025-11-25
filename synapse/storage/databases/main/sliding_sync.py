@@ -608,7 +608,9 @@ class SlidingSyncStore(SQLBaseStore):
             # Ignore conflicts where the existing entry has a different
             # connection position (i.e. from a forked connection position). This
             # may mean that we lose some updates, but that's acceptable as this
-            # is a cache and its fine for it to *not* include rows.
+            # is a cache and its fine for it to *not* include rows. (Downstream
+            # this will cause us to maybe send a few extra lazy members down
+            # sync, but we're allowed to send extra members).
             sql = """
                 INSERT INTO sliding_sync_connection_lazy_members
                 (connection_key, connection_position, room_id, user_id, last_seen_ts)
@@ -639,7 +641,9 @@ class SlidingSyncStore(SQLBaseStore):
 
         if to_remove:
             # We don't try and match on connection position here: it's fine to
-            # remove it from all forks.
+            # remove it from all forks. This is a cache so it's fine to expire
+            # arbitrary entries, the worst that happens is we send a few extra
+            # lazy members down sync.
             self.db_pool.simple_delete_many_batch_txn(
                 txn,
                 table="sliding_sync_connection_lazy_members",
