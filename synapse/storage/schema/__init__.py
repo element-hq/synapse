@@ -171,6 +171,8 @@ Changes in SCHEMA_VERSION = 92
 
 Changes in SCHEMA_VERSION = 93
     - MSC4140: Set delayed events to be uniquely identifiable by their delay ID.
+    - MSC4140: Add columns to the `delayed_events` table to keep track of delayed events
+      that have been sent, cancelled, or failed to be sent due to an error.
 """
 
 

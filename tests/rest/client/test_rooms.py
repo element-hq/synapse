@@ -2402,6 +2402,8 @@ class RoomMessageFilterTestCase(RoomBase):
 class RoomDelayedEventTestCase(RoomBase):
     """Tests delayed events."""
 
+    servlets = RoomBase.servlets + [admin.register_servlets]
+
     user_id = "@sid1:red"
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -2532,6 +2534,54 @@ class RoomDelayedEventTestCase(RoomBase):
         # Test that the new delayed events aren't ratelimited anymore.
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 1,
+            },
+        }
+    )
+    def test_add_delayed_event_num_limit(self) -> None:
+        """Test that users may not have too many scheduled delayed events at once."""
+        user2_user_id = self.register_user("user2", "pass")
+
+        room_id = self.helper.create_room_as(self.user_id, is_public=True)
+        self.helper.join(room_id, user2_user_id)
+
+        txn_id = 0
+
+        def add_delayed_event(
+            expect_success: bool,
+            user_id: str = self.user_id,
+        ) -> None:
+            nonlocal room_id, txn_id
+            self.helper.auth_user_id = user_id
+            txn_id += 1
+            channel = self.make_request(
+                "PUT",
+                (
+                    "rooms/%s/send/m.room.message/%s?org.matrix.msc4140.delay=2000"
+                    % (room_id, txn_id)
+                ).encode("ascii"),
+                {"body": "test", "msgtype": "m.text"},
+            )
+            if expect_success:
+                self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+            else:
+                self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+                self.assertEqual(
+                    "M_MAX_DELAYED_EVENTS_EXCEEDED",
+                    channel.json_body.get("org.matrix.msc4140.errcode"),
+                    channel.json_body,
+                )
+
+        add_delayed_event(True)
+        add_delayed_event(False)
+        add_delayed_event(True, user2_user_id)
+        self.reactor.advance(2)
+        add_delayed_event(True)
 
 
 class RoomSearchTestCase(unittest.HomeserverTestCase):

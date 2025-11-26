@@ -21,7 +21,12 @@ from typing import TYPE_CHECKING
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
-from synapse.http.servlet import RestServlet, parse_json_object_from_request
+from synapse.http.servlet import (
+    RestServlet,
+    parse_json_object_from_request,
+    parse_string_from_args,
+    parse_strings_from_args,
+)
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
 from synapse.types import JsonDict
@@ -36,6 +41,11 @@ class _UpdateDelayedEventAction(Enum):
     CANCEL = "cancel"
     RESTART = "restart"
     SEND = "send"
+
+
+class _DelayedEventStatus(Enum):
+    SCHEDULED = "scheduled"
+    FINALISED = "finalised"
 
 
 class UpdateDelayedEventServlet(RestServlet):
@@ -148,10 +158,27 @@ class DelayedEventsServlet(RestServlet):
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
-        # TODO: Support Pagination stream API ("from" query parameter)
-        delayed_events = await self.delayed_events_handler.get_all_for_user(requester)
 
-        ret = {"delayed_events": delayed_events}
+        # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+        args: dict[bytes, list[bytes]] = request.args  # type: ignore
+        statuses = parse_strings_from_args(
+            args,
+            "status",
+            allowed_values=tuple(s.value for s in _DelayedEventStatus),
+        )
+        delay_ids = parse_strings_from_args(args, "delay_id")
+        # TODO: Support Pagination stream API
+        _from_token = parse_string_from_args(args, "from")
+
+        ret = await self.delayed_events_handler.get_delayed_events_for_user(
+            requester,
+            delay_ids,
+            statuses is None or _DelayedEventStatus.SCHEDULED.value in statuses,
+            statuses is None or _DelayedEventStatus.FINALISED.value in statuses,
+        )
+        # TODO: This is here for backwards compatibility. Remove eventually
+        if statuses is None:
+            ret["delayed_events"] = ret[_DelayedEventStatus.SCHEDULED.value]
         return 200, ret
 
 
