@@ -174,7 +174,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         while not transport.disconnecting:
             self.reactor.advance(1)
 
-        # we should get a 413 Payload Too Large
+        # We should get a 413 Content Too Large
         response = transport.value().decode()
         self.assertRegex(response, r"^HTTP/1\.1 413 ")
         self.assertSubstring("M_TOO_LARGE", response)
