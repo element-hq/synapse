@@ -181,8 +181,8 @@ desired ``localpart`` in the 'Username' box.
 Enterprise quality support for Synapse including SLAs is available as part of an
 `Element Server Suite (ESS) <https://element.io/pricing>`_ subscription.
 
-If you are an existing ESS subscriber then you can raise a `support request <https://ems.element.io/support>`_
-and access the `knowledge base <https://ems-docs.element.io>`_.
+If you are an existing ESS subscriber then you can raise a `support request <https://customer.element.io/support>`_
+and access the `knowledge base <https://docs.element.io>`_.
 
 🤝 Community support
 --------------------
