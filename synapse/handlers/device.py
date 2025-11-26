@@ -20,7 +20,6 @@
 #
 #
 import logging
-import random
 from threading import Lock
 from typing import (
     TYPE_CHECKING,
@@ -866,7 +865,7 @@ class DeviceHandler:
         """
 
         await self._handle_room_un_partial_stated_client(
-            instance_name=random.choice(self._device_list_writers),
+            instance_name=self._device_list_writers[-1],  # TEMP
             room_id=room_id,
         )
 
@@ -883,7 +882,7 @@ class DeviceHandler:
             device_ids: The device IDs that have changed.
         """
         await self._notify_device_update_client(
-            instance_name=random.choice(self._device_list_writers),
+            instance_name=self._device_list_writers[-1],  # TEMP
             user_id=user_id,
             device_ids=list(device_ids),
         )
@@ -900,7 +899,7 @@ class DeviceHandler:
             user_ids: The Matrix IDs of the users that have changed.
         """
         await self._notify_user_signature_update_client(
-            instance_name=random.choice(self._device_list_writers),
+            instance_name=self._device_list_writers[-1],  # TEMP
             from_user_id=from_user_id,
             user_ids=user_ids,
         )
