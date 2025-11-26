@@ -777,6 +777,20 @@ class ThreadPool:
     See twisted.python.threadpool.ThreadPool
     """
 
+    min = 1
+    """
+    "minimum number of threads in the pool"
+
+    This is a "threadless" thread pool, so we always have one thread.
+    """
+
+    max = 1
+    """
+    "maximum number of threads in the pool"
+
+    This is a "threadless" thread pool, so we always have one thread.
+    """
+
     def __init__(self, reactor: IReactorTime):
         self._reactor = reactor
 

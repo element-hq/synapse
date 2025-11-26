@@ -27,6 +27,13 @@ from unittest.mock import patch
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.logging.context import LoggingContext
 from synapse.storage.background_updates import UpdaterStatus
+from synapse.app.homeserver import start
+from synapse.config.server import (
+    TCPListenerConfig,
+    HttpListenerConfig,
+    HttpResourceConfig,
+)
+from tests.server import ThreadedMemoryReactorClock
 
 from tests.server import (
     cleanup_test_reactor_system_event_triggers,
@@ -222,7 +229,47 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
             # to the homeserver
             mock_start.reset_mock()
 
-            # TODO: Start with real ports
+        async def start_with_logging_context() -> None:
+            with LoggingContext(
+                name="start_with_logging_context", server_name=self.hs.hostname
+            ):
+                await start(
+                    self.hs,
+                    # Per the docstring, `freeze` must be False to allow garbage collection later
+                    freeze=False,
+                )
+
+        # Patch one of the random things that's not implemented on the
+        # `ThreadedMemoryReactorClock` that is used in tests.
+        with patch.object(
+            ThreadedMemoryReactorClock, "installNameResolver", return_value=None
+        ) as mock_install_name_resolver:
+            # Listen with real ports (not `FakeTransport` that `start_test_homeserver`
+            # uses)
+            #
+            # Invalid port to force failure
+            invalid_port = 9999999
+            self.hs.config.server.listeners[0] = TCPListenerConfig(
+                port=invalid_port,
+                bind_addresses=["127.0.0.1"],
+                type="http",
+                tls=False,
+                http_options=HttpListenerConfig(
+                    resources=[
+                        HttpResourceConfig(names=["client"]),
+                        HttpResourceConfig(names=["federation"]),
+                    ],
+                ),
+            )
+            self.get_failure(
+                start_with_logging_context(),
+                # Because of the `invalid_port`, we should expect `OverflowError: bind(): port must be 0-65535.`
+                exc=OverflowError,
+            )
+
+            # If this fails, it means the mock was never used in which case, the whole
+            # mock can be removed
+            mock_install_name_resolver.assert_called_once()
 
         hs_ref = weakref.ref(self.hs)
 
