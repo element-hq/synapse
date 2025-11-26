@@ -824,7 +824,7 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
         # With the limit, we should return only the create event, as returning 4
         # state deltas would result in splitting a group:
         #
-        # 1 2 2 2 2 - state IDs/groups
+        # 2 3 3 3 3 - state IDs/groups
         # C N N N N
         # 1 2 3 4 X
 
@@ -934,7 +934,7 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
         # With the limit, we should return only the create event, as returning 4
         # state deltas would result in splitting a group:
         #
-        # 1 2 2 2 2 - state IDs/groups
+        # 2 3 3 3 3 - state IDs/groups
         # C N N N N
         # 1 2 3 4 X
 
