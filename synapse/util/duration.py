@@ -35,6 +35,6 @@ class Duration(timedelta):
         """Returns the duration in milliseconds."""
         return int(self / _ONE_MILLISECOND)
 
-    def as_secs(self) -> int:
+    def as_secs(self) -> float:
         """Returns the duration in seconds."""
-        return int(self.total_seconds())
+        return self.total_seconds()
