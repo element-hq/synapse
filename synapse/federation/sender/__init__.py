@@ -221,10 +221,10 @@ transaction_queue_pending_edus_gauge = LaterGauge(
 # they are being rate limited following previous attempt failures.
 WAKEUP_RETRY_PERIOD = Duration(minutes=1)
 
-# Time (in s) to wait in between waking up each destination, i.e. one destination
+# Time to wait in between waking up each destination, i.e. one destination
 # will be woken up every <x> seconds until we have woken every destination
 # has outstanding catch-up.
-WAKEUP_INTERVAL_BETWEEN_DESTINATIONS_SEC = 5
+WAKEUP_INTERVAL_BETWEEN_DESTINATIONS = Duration(seconds=5)
 
 
 class AbstractFederationSender(metaclass=abc.ABCMeta):
@@ -380,7 +380,7 @@ class _DestinationWakeupQueue:
 
                 queue.attempt_new_transaction()
 
-                await self.clock.sleep(current_sleep_seconds)
+                await self.clock.sleep(Duration(seconds=current_sleep_seconds))
 
                 if not self.queue:
                     break
@@ -1162,4 +1162,4 @@ class FederationSender(AbstractFederationSender):
                     last_processed,
                 )
                 self.wake_destination(destination)
-                await self.clock.sleep(WAKEUP_INTERVAL_BETWEEN_DESTINATIONS_SEC)
+                await self.clock.sleep(WAKEUP_INTERVAL_BETWEEN_DESTINATIONS)

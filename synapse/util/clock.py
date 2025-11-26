@@ -85,14 +85,14 @@ class Clock:
         self.cancel_all_looping_calls()
         self.cancel_all_delayed_calls()
 
-    async def sleep(self, seconds: float) -> None:
+    async def sleep(self, duration: Duration) -> None:
         d: defer.Deferred[float] = defer.Deferred()
         # Start task in the `sentinel` logcontext, to avoid leaking the current context
         # into the reactor once it finishes.
         with context.PreserveLoggingContext():
             # We can ignore the lint here since this class is the one location callLater should
             # be called.
-            self._reactor.callLater(seconds, d.callback, seconds)  # type: ignore[call-later-not-tracked]
+            self._reactor.callLater(duration.as_secs(), d.callback, duration.as_secs())  # type: ignore[call-later-not-tracked]
             await d
 
     def time(self) -> float:

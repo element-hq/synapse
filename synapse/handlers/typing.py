@@ -319,7 +319,7 @@ class TypingWriterHandler(FollowerTypingHandler):
 
         if requester.shadow_banned:
             # We randomly sleep a bit just to annoy the requester.
-            await self.clock.sleep(random.randint(1, 10))
+            await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
             raise ShadowBanError()
 
         await self.auth.check_user_in_room(room_id, requester)
@@ -354,7 +354,7 @@ class TypingWriterHandler(FollowerTypingHandler):
 
         if requester.shadow_banned:
             # We randomly sleep a bit just to annoy the requester.
-            await self.clock.sleep(random.randint(1, 10))
+            await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
             raise ShadowBanError()
 
         await self.auth.check_user_in_room(room_id, requester)

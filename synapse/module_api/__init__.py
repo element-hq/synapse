@@ -1458,7 +1458,7 @@ class ModuleApi:
         Added in Synapse v1.49.0.
         """
 
-        await self._clock.sleep(seconds)
+        await self._clock.sleep(Duration(seconds=seconds))
 
     async def send_http_push_notification(
         self,

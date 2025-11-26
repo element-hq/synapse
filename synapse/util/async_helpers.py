@@ -58,6 +58,7 @@ from synapse.logging.context import (
     run_in_background,
 )
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 logger = logging.getLogger(__name__)
 
@@ -640,7 +641,7 @@ class Linearizer:
         # This needs to happen while we hold the lock. We could put it on the
         # exit path, but that would slow down the uncontended case.
         try:
-            await self._clock.sleep(0)
+            await self._clock.sleep(Duration(seconds=0))
         except CancelledError:
             self._release_lock(key, entry)
             raise

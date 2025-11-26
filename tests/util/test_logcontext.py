@@ -83,7 +83,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 self._check_test_key("sentinel")
 
                 with LoggingContext(name="competing", server_name="test_server"):
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                     self._check_test_key("competing")
 
                 self._check_test_key("sentinel")
@@ -95,9 +95,9 @@ class LoggingContextTestCase(unittest.TestCase):
         reactor.callLater(0, lambda: defer.ensureDeferred(competing_callback()))  # type: ignore[call-later-not-tracked]
 
         with LoggingContext(name="foo", server_name="test_server"):
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
             self._check_test_key("foo")
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
             self._check_test_key("foo")
 
         self.assertTrue(
@@ -129,7 +129,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 self._check_test_key("looping_call")
 
                 with LoggingContext(name="competing", server_name="test_server"):
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                     self._check_test_key("competing")
 
                 self._check_test_key("looping_call")
@@ -143,9 +143,9 @@ class LoggingContextTestCase(unittest.TestCase):
                 lambda: defer.ensureDeferred(competing_callback()), Duration(seconds=0)
             )
             self._check_test_key("foo")
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
             self._check_test_key("foo")
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
             self._check_test_key("foo")
 
         self.assertTrue(
@@ -180,7 +180,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 self._check_test_key("looping_call")
 
                 with LoggingContext(name="competing", server_name="test_server"):
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                     self._check_test_key("competing")
 
                 self._check_test_key("looping_call")
@@ -194,7 +194,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 lambda: defer.ensureDeferred(competing_callback()), Duration(seconds=0)
             )
             self._check_test_key("foo")
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
             self._check_test_key("foo")
 
         self.assertTrue(
@@ -229,7 +229,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 self._check_test_key("call_later")
 
                 with LoggingContext(name="competing", server_name="test_server"):
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                     self._check_test_key("competing")
 
                 self._check_test_key("call_later")
@@ -241,9 +241,9 @@ class LoggingContextTestCase(unittest.TestCase):
         with LoggingContext(name="foo", server_name="test_server"):
             clock.call_later(0, lambda: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
             self._check_test_key("foo")
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
             self._check_test_key("foo")
 
         self.assertTrue(
@@ -281,7 +281,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 self._check_test_key("foo")
 
                 with LoggingContext(name="competing", server_name="test_server"):
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                     self._check_test_key("competing")
 
                 self._check_test_key("foo")
@@ -304,7 +304,7 @@ class LoggingContextTestCase(unittest.TestCase):
             await d
             self._check_test_key("foo")
 
-        await clock.sleep(0)
+        await clock.sleep(Duration(seconds=0))
 
         self.assertTrue(
             callback_finished,
@@ -339,7 +339,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 self._check_test_key("sentinel")
 
                 with LoggingContext(name="competing", server_name="test_server"):
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                     self._check_test_key("competing")
 
                 self._check_test_key("sentinel")
@@ -365,7 +365,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 d.callback(None)
             self._check_test_key("foo")
 
-        await clock.sleep(0)
+        await clock.sleep(Duration(seconds=0))
 
         self.assertTrue(
             callback_finished,
@@ -401,7 +401,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 self._check_test_key("foo")
 
                 with LoggingContext(name="competing", server_name="test_server"):
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                     self._check_test_key("competing")
 
                 self._check_test_key("foo")
@@ -447,7 +447,7 @@ class LoggingContextTestCase(unittest.TestCase):
             run_in_background(lambda: (d.callback(None), d)[1])  # type: ignore[call-overload, func-returns-value]
             self._check_test_key("foo")
 
-        await clock.sleep(0)
+        await clock.sleep(Duration(seconds=0))
 
         self.assertTrue(
             callback_finished,
@@ -487,7 +487,7 @@ class LoggingContextTestCase(unittest.TestCase):
             # Now wait for the function under test to have run, and check that
             # the logcontext is left in a sane state.
             while not callback_finished:
-                await clock.sleep(0)
+                await clock.sleep(Duration(seconds=0))
                 self._check_test_key("foo")
 
         self.assertTrue(
@@ -502,7 +502,7 @@ class LoggingContextTestCase(unittest.TestCase):
     async def test_run_in_background_with_blocking_fn(self) -> None:
         async def blocking_function() -> None:
             # Ignore linter error since we are creating a `Clock` for testing purposes.
-            await Clock(reactor, server_name="test_server").sleep(0)  # type: ignore[multiple-internal-clocks]
+            await Clock(reactor, server_name="test_server").sleep(Duration(seconds=0))  # type: ignore[multiple-internal-clocks]
 
         await self._test_run_in_background(blocking_function)
 
@@ -536,7 +536,9 @@ class LoggingContextTestCase(unittest.TestCase):
         async def testfunc() -> None:
             self._check_test_key("foo")
             # Ignore linter error since we are creating a `Clock` for testing purposes.
-            d = defer.ensureDeferred(Clock(reactor, server_name="test_server").sleep(0))  # type: ignore[multiple-internal-clocks]
+            d = defer.ensureDeferred(
+                Clock(reactor, server_name="test_server").sleep(Duration(seconds=0))  # type: ignore[multiple-internal-clocks]
+            )
             self.assertIs(current_context(), SENTINEL_CONTEXT)
             await d
             self._check_test_key("foo")
@@ -580,7 +582,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 self._check_test_key("foo")
 
                 with LoggingContext(name="competing", server_name="test_server"):
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                     self._check_test_key("competing")
 
                 self._check_test_key("foo")
@@ -592,7 +594,7 @@ class LoggingContextTestCase(unittest.TestCase):
         with LoggingContext(name="foo", server_name="test_server"):
             run_coroutine_in_background(competing_callback())
             self._check_test_key("foo")
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
             self._check_test_key("foo")
 
         self.assertTrue(

@@ -40,6 +40,7 @@ from . import push_tools
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+from synapse.util.duration import Duration
 
 logger = logging.getLogger(__name__)
 
@@ -371,7 +372,7 @@ class HttpPusher(Pusher):
             delay_ms = random.randint(1, self.push_jitter_delay_ms)
             diff_ms = event.origin_server_ts + delay_ms - self.clock.time_msec()
             if diff_ms > 0:
-                await self.clock.sleep(diff_ms / 1000)
+                await self.clock.sleep(Duration(milliseconds=diff_ms))
 
         rejected = await self.dispatch_push_event(event, tweaks, badge)
         if rejected is False:

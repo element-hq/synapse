@@ -203,9 +203,9 @@ def _expire_old_entries(
             if (i + 1) % 10000 == 0:
                 logger.debug("Waiting during drop")
                 if node.last_access_ts_secs > now - expiry_seconds:
-                    await clock.sleep(0.5)
+                    await clock.sleep(Duration(milliseconds=500))
                 else:
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                 logger.debug("Waking during drop")
 
             node = next_node

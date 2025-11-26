@@ -486,7 +486,7 @@ class MediaRepository:
             if now >= wait_until:
                 break
 
-            await self.clock.sleep(0.5)
+            await self.clock.sleep(Duration(milliseconds=500))
 
         logger.info("Media %s has not yet been uploaded", media_id)
         self.respond_not_yet_uploaded(request)

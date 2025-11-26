@@ -26,6 +26,7 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -87,7 +88,7 @@ class TestTaskScheduler(HomeserverTestCase):
         self, task: ScheduledTask
     ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         # Sleep for a second
-        await self.hs.get_clock().sleep(1)
+        await self.hs.get_clock().sleep(Duration(seconds=1))
         return TaskStatus.COMPLETE, None, None
 
     def test_schedule_lot_of_tasks(self) -> None:

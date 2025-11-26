@@ -1820,7 +1820,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 return
 
             # We sleep to ensure that we don't overwhelm the DB.
-            await self.clock.sleep(1.0)
+            await self.clock.sleep(Duration(seconds=1))
 
     async def get_push_actions_for_user(
         self,

@@ -1013,7 +1013,7 @@ class EventCreationHandler:
 
         if not ignore_shadow_ban and requester.shadow_banned:
             # We randomly sleep a bit just to annoy the requester.
-            await self.clock.sleep(random.randint(1, 10))
+            await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
             raise ShadowBanError()
 
         room_version = None
@@ -1516,7 +1516,7 @@ class EventCreationHandler:
                 and requester.shadow_banned
             ):
                 # We randomly sleep a bit just to annoy the requester.
-                await self.clock.sleep(random.randint(1, 10))
+                await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
                 raise ShadowBanError()
 
             if event.is_state():

@@ -916,7 +916,7 @@ class DeviceHandler:
         )
 
     DEVICE_MSGS_DELETE_BATCH_LIMIT = 1000
-    DEVICE_MSGS_DELETE_SLEEP_MS = 100
+    DEVICE_MSGS_DELETE_SLEEP = Duration(milliseconds=100)
 
     async def _delete_device_messages(
         self,
@@ -942,9 +942,7 @@ class DeviceHandler:
             if from_stream_id is None:
                 return TaskStatus.COMPLETE, None, None
 
-            await self.clock.sleep(
-                DeviceWriterHandler.DEVICE_MSGS_DELETE_SLEEP_MS / 1000.0
-            )
+            await self.clock.sleep(DeviceWriterHandler.DEVICE_MSGS_DELETE_SLEEP)
 
 
 class DeviceWriterHandler(DeviceHandler):

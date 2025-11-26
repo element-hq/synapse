@@ -860,7 +860,7 @@ class Notifier:
                 logged = True
 
             # TODO: be better
-            await self.clock.sleep(0.5)
+            await self.clock.sleep(Duration(milliseconds=500))
 
     async def _get_room_ids(
         self, user: UserID, explicit_room_id: str | None

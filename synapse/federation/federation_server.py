@@ -227,7 +227,7 @@ class FederationServer(FederationBase):
                 )
 
             # We pause a bit so that we don't start handling all rooms at once.
-            await self._clock.sleep(random.uniform(0, 0.1))
+            await self._clock.sleep(Duration(seconds=random.uniform(0, 0.1)))
 
     async def on_backfill_request(
         self, origin: str, room_id: str, versions: list[str], limit: int
