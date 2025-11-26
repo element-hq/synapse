@@ -1753,7 +1753,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             shorthand=False,
             access_token=self.tok,
         )
-        assert channel.code == 200
+        self.assertEquals(channel.code, 200)
 
         # next 15 should go through
         for i in range(15):
@@ -1763,7 +1763,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
                 shorthand=False,
                 access_token=self.tok,
             )
-            assert channel2.code == 200
+            self.assertEquals(channel2.code, 200)
 
         # 17th will hit ratelimit
         channel3 = self.make_request(
@@ -1772,7 +1772,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             shorthand=False,
             access_token=self.tok,
         )
-        assert channel3.code == 429
+        self.assertEquals(channel3.code, 429)
 
         # however, a request from a different IP will go through
         channel4 = self.make_request(
@@ -1782,7 +1782,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             client_ip="187.233.230.159",
             access_token=self.tok,
         )
-        assert channel4.code == 200
+        self.assertEquals(channel4.code, 200)
 
         # at 87Kib/s it should take about 2 minutes for enough to drain from bucket that another
         # 30MiB download is authorized - The last download was blocked at 503,316,480.

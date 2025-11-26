@@ -1076,7 +1076,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyz",
             shorthand=False,
         )
-        assert channel.code == 200
+        self.assertEquals(channel.code, 200)
 
         # next 15 should go through
         for i in range(15):
@@ -1085,7 +1085,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
                 f"/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxy{i}",
                 shorthand=False,
             )
-            assert channel2.code == 200
+            self.assertEquals(channel2.code, 200)
 
         # 17th will hit ratelimit
         channel3 = self.make_request(
@@ -1093,7 +1093,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyx",
             shorthand=False,
         )
-        assert channel3.code == 429
+        self.assertEquals(channel3.code, 429)
 
         # however, a request from a different IP will go through
         channel4 = self.make_request(
@@ -1102,7 +1102,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             shorthand=False,
             client_ip="187.233.230.159",
         )
-        assert channel4.code == 200
+        self.assertEquals(channel4.code, 200)
 
         # at 87Kib/s it should take about 2 minutes for enough to drain from bucket that another
         # 30MiB download is authorized - The last download was blocked at 503,316,480.
@@ -1152,7 +1152,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyz",
             shorthand=False,
         )
-        assert channel.code == 200
+        self.assertEquals(channel.code, 200)
 
         # immediate second request should fail
         channel = self.make_request(
@@ -1160,7 +1160,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxy1",
             shorthand=False,
         )
-        assert channel.code == 429
+        self.assertEquals(channel.code, 429)
 
         # advance half a second
         self.reactor.pump([0.5])
@@ -1171,7 +1171,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxy2",
             shorthand=False,
         )
-        assert channel.code == 429
+        self.assertEquals(channel.code, 429)
 
         # advance another half second
         self.reactor.pump([0.5])
@@ -1182,7 +1182,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxy3",
             shorthand=False,
         )
-        assert channel.code == 200
+        self.assertEquals(channel.code, 200)
 
     @override_config(
         {
@@ -1391,11 +1391,11 @@ class MediaRepoSizeModuleCallbackTestCase(unittest.HomeserverTestCase):
 
     def test_upload_allowed(self) -> None:
         self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=200)
-        assert self.last_user_id == self.user
-        assert self.last_size == len(SMALL_PNG)
+        self.assertEquals(self.last_user_id, self.user)
+        self.assertEquals(self.last_size, len(SMALL_PNG))
 
     def test_upload_not_allowed(self) -> None:
         self.mock_result = False
         self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=413)
-        assert self.last_user_id == self.user
-        assert self.last_size == len(SMALL_PNG)
+        self.assertEquals(self.last_user_id, self.user)
+        self.assertEquals(self.last_size, len(SMALL_PNG))
