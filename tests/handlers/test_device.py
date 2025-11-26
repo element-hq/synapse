@@ -449,6 +449,33 @@ class DeviceTestCase(unittest.HomeserverTestCase):
             ],
         )
 
+    def test_delete_device_removes_refresh_tokens(self) -> None:
+        """Deleting a device should also purge any refresh tokens for it."""
+        self._record_users()
+
+        self.get_success(
+            self.store.add_refresh_token_to_user(
+                user_id=user1,
+                token="refresh_token",
+                device_id="abc",
+                expiry_ts=None,
+                ultimate_session_expiry_ts=None,
+            )
+        )
+
+        self.get_success(self.handler.delete_devices(user1, ["abc"]))
+
+        remaining_refresh_token = self.get_success(
+            self.store.db_pool.simple_select_one(
+                table="refresh_tokens",
+                keyvalues={"user_id": user1, "device_id": "abc"},
+                retcols=("id",),
+                desc="get_refresh_token_for_device",
+                allow_none=True,
+            )
+        )
+        self.assertIsNone(remaining_refresh_token)
+
 
 class DehydrationTestCase(unittest.HomeserverTestCase):
     servlets = [
