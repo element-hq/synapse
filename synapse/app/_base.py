@@ -447,39 +447,50 @@ def listen_http(
         hs=hs,
     )
 
-    if isinstance(listener_config, TCPListenerConfig):
-        if listener_config.is_tls():
-            # refresh_certificate should have been called before this.
-            assert context_factory is not None
-            ports = listen_ssl(
-                listener_config.bind_addresses,
-                listener_config.port,
-                site,
-                context_factory,
-                reactor=reactor,
-            )
-            logger.info(
-                "Synapse now listening on TCP port %d (TLS)", listener_config.port
-            )
-        else:
-            ports = listen_tcp(
-                listener_config.bind_addresses,
-                listener_config.port,
-                site,
-                reactor=reactor,
-            )
-            logger.info("Synapse now listening on TCP port %d", listener_config.port)
+    try:
+        if isinstance(listener_config, TCPListenerConfig):
+            if listener_config.is_tls():
+                # refresh_certificate should have been called before this.
+                assert context_factory is not None
+                ports = listen_ssl(
+                    listener_config.bind_addresses,
+                    listener_config.port,
+                    site,
+                    context_factory,
+                    reactor=reactor,
+                )
+                logger.info(
+                    "Synapse now listening on TCP port %d (TLS)", listener_config.port
+                )
+            else:
+                ports = listen_tcp(
+                    listener_config.bind_addresses,
+                    listener_config.port,
+                    site,
+                    reactor=reactor,
+                )
+                logger.info(
+                    "Synapse now listening on TCP port %d", listener_config.port
+                )
 
-    else:
-        ports = listen_unix(
-            listener_config.path, listener_config.mode, site, reactor=reactor
-        )
-        # getHost() returns a UNIXAddress which contains an instance variable of 'name'
-        # encoded as a byte string. Decode as utf-8 so pretty.
-        logger.info(
-            "Synapse now listening on Unix Socket at: %s",
-            ports[0].getHost().name.decode("utf-8"),
-        )
+        else:
+            ports = listen_unix(
+                listener_config.path, listener_config.mode, site, reactor=reactor
+            )
+            # getHost() returns a UNIXAddress which contains an instance variable of 'name'
+            # encoded as a byte string. Decode as utf-8 so pretty.
+            logger.info(
+                "Synapse now listening on Unix Socket at: %s",
+                ports[0].getHost().name.decode("utf-8"),
+            )
+    except Exception as exc:
+        # The Twisted interface says that "Users should not call this function
+        # themselves!" but this appears to be the correct way handle proper cleanup of
+        # the site when things go wrong. In the normal case, a `Port` is created which
+        # we can call `Port.stopListening()` on to do the same thing (but no `Port` is
+        # created when an error occurs).
+        site.doStop()
+        raise Exception("asdf failed to listen") from exc
 
     return ports
 

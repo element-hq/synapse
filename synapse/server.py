@@ -450,6 +450,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         # if gc.is_tracked(self):
         #    logger.error("HomeServer object is tracked by garbage collection so cannot be fully cleaned up")
 
+        logger.info("asdf self._listening_services %s", self._listening_services)
+
         for listener in self._listening_services:
             # During unit tests, an incomplete `twisted.pair.testing._FakePort` is used
             # for listeners so check listener type here to ensure shutdown procedure is

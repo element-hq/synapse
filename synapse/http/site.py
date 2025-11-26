@@ -815,6 +815,10 @@ class SynapseSite(ProxySite):
                 protocol.transport.loseConnection()
         self.connections.clear()
 
+        # Replace the resource tree with an empty resource to break circular references
+        # to the resource tree which holds a bunch of homeserver references.
+        self.resource = Resource()
+
     def log(self, request: SynapseRequest) -> None:  # type: ignore[override]
         pass
 
