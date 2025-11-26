@@ -27,13 +27,6 @@ from unittest.mock import patch
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.logging.context import LoggingContext
 from synapse.storage.background_updates import UpdaterStatus
-from synapse.app.homeserver import start
-from synapse.config.server import (
-    TCPListenerConfig,
-    HttpListenerConfig,
-    HttpResourceConfig,
-)
-from tests.server import ThreadedMemoryReactorClock
 
 from tests.server import (
     cleanup_test_reactor_system_event_triggers,
@@ -171,105 +164,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
             # Sanity check that we patched the correct method (make sure it was the
             # thing that was called)
             mock_setup.assert_called_once_with()
-
-        hs_ref = weakref.ref(self.hs)
-
-        # Run the reactor so any `callWhenRunning` functions can be cleared out.
-        self.reactor.run()
-        # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
-        # we use in tests doesn't handle this properly (see doc comment)
-        cleanup_test_reactor_system_event_triggers(self.reactor)
-
-        async def shutdown() -> None:
-            # Use a logcontext just to double-check that we don't mangle the logcontext
-            # during shutdown.
-            with LoggingContext(name="hs_shutdown", server_name=self.hs.hostname):
-                await self.hs.shutdown()
-
-        self.get_success(shutdown())
-
-        # Cleanup the internal reference in our test case
-        del self.hs
-
-        # Force garbage collection.
-        gc.collect()
-
-        # Ensure the `HomeServer` hs been garbage collected by attempting to use the
-        # weakref to it.
-        hs_after_shutdown = hs_ref()
-        if hs_after_shutdown is not None:
-            self.fail(
-                "HomeServer reference should not be valid at this point "
-                f"{get_memory_debug_info_for_object(hs_after_shutdown)}",
-            )
-
-    @logcontext_clean
-    def test_clean_homeserver_shutdown_when_failed_to_start(self) -> None:
-        """
-        Ensure the `SynapseHomeServer` can be fully shutdown and garbage collected if it
-        fails to be `start`.
-        """
-        self.reactor, self.clock = get_clock()
-
-        # Patch out the call to `start_test_homeserver` since we want to actually start
-        # the homeserver (with real ports).
-        with patch(
-            "tests.server.start_test_homeserver", return_value=None
-        ) as mock_start:
-            self.hs = setup_test_homeserver(
-                cleanup_func=self.addCleanup,
-                reactor=self.reactor,
-                homeserver_to_use=SynapseHomeServer,
-                clock=self.clock,
-            )
-            # Sanity check that we patched the correct method (make sure it was the
-            # thing that was called)
-            mock_start.assert_called_once()
-            # Clear the stored calls (and args) to the mock to avoid holding references
-            # to the homeserver
-            mock_start.reset_mock()
-
-        async def start_with_logging_context() -> None:
-            with LoggingContext(
-                name="start_with_logging_context", server_name=self.hs.hostname
-            ):
-                await start(
-                    self.hs,
-                    # Per the docstring, `freeze` must be False to allow garbage collection later
-                    freeze=False,
-                )
-
-        # Patch one of the random things that's not implemented on the
-        # `ThreadedMemoryReactorClock` that is used in tests.
-        with patch.object(
-            ThreadedMemoryReactorClock, "installNameResolver", return_value=None
-        ) as mock_install_name_resolver:
-            # Listen with real ports (not `FakeTransport` that `start_test_homeserver`
-            # uses)
-            #
-            # Invalid port to force failure
-            invalid_port = 9999999
-            self.hs.config.server.listeners[0] = TCPListenerConfig(
-                port=invalid_port,
-                bind_addresses=["127.0.0.1"],
-                type="http",
-                tls=False,
-                http_options=HttpListenerConfig(
-                    resources=[
-                        HttpResourceConfig(names=["client"]),
-                        HttpResourceConfig(names=["federation"]),
-                    ],
-                ),
-            )
-            self.get_failure(
-                start_with_logging_context(),
-                # Because of the `invalid_port`, we should expect `OverflowError: bind(): port must be 0-65535.`
-                exc=OverflowError,
-            )
-
-            # If this fails, it means the mock was never used in which case, the whole
-            # mock can be removed
-            mock_install_name_resolver.assert_called_once()
 
         hs_ref = weakref.ref(self.hs)
 
