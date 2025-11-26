@@ -81,7 +81,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource
 from twisted.web.server import Request, Site
 
-from synapse.api.constants import MAX_PDU_SIZE
+from synapse.api.constants import MAX_REQUEST_SIZE
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
@@ -433,7 +433,7 @@ def make_request(
         channel,
         site,
         our_server_name="test_server",
-        max_request_body_size=200 * MAX_PDU_SIZE,
+        max_request_body_size=MAX_REQUEST_SIZE,
     )
     channel.request = req
 

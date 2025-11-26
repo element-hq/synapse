@@ -22,6 +22,7 @@
 from twisted.internet.address import IPv6Address
 from twisted.internet.testing import MemoryReactor, StringTransport
 
+from synapse.app._base import max_request_body_size
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
@@ -161,7 +162,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
 
         # Send a request with Content-Length header that exceeds the limit.
         # Default max is 50MB (from media max_upload_size), so send something larger.
-        oversized_length = 60 * 1024 * 1024
+        oversized_length = 1 + max_request_body_size(self.hs.config)
         protocol.dataReceived(
             b"POST / HTTP/1.1\r\n"
             b"Connection: close\r\n"
