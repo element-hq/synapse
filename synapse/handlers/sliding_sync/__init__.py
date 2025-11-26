@@ -1206,8 +1206,13 @@ class SlidingSyncHandler:
             assert from_bound is not None
 
             if prev_room_sync_config is not None:
-                # Define `required_user_state` as all user state we want.
+                # Define `required_user_state` as all user state we want, which
+                # is the explicitly requested members, any needed for lazy
+                # loading, and users whose membership has changed.s
                 all_required_user_state = explicit_user_state | lazy_load_user_ids
+                for state_type, state_key in room_state_delta_id_map:
+                    if state_type == EventTypes.Member:
+                        all_required_user_state.add(state_key)
 
                 # We need to know what user state we previously sent down the
                 # connection so we can determine what has changed.
@@ -1605,7 +1610,7 @@ def _required_state_changes(
         previously_returned_lazy_user_ids: The set of user IDs whose membership
             we have previously returned to the client due to lazy loading. This
             is filtered to only include users who have either sent events in the
-            timeline or required state.
+            timeline, required state or whose membership changed.
         lazy_load_user_ids: The set of user IDs whose lazy-loaded membership
             is required for this request.
         state_deltas: The state deltas that have changed in the room since the
