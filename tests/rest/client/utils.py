@@ -621,7 +621,6 @@ class RestHelper:
             path,
             content=image_data,
             access_token=tok,
-            custom_headers=[("Content-Length", str(image_length))],
         )
 
         assert channel.code == expect_code, "Expected: %d, got: %d, resp: %r" % (

@@ -1728,9 +1728,6 @@ class UsernamePickerTestCase(HomeserverTestCase):
             content_is_form=True,
             custom_headers=[
                 ("Cookie", "username_mapping_session=" + session_id),
-                # old versions of twisted don't do form-parsing without a valid
-                # content-length header.
-                ("Content-Length", str(len(content))),
             ],
         )
         self.assertEqual(chan.code, 302, chan.result)
@@ -1818,9 +1815,6 @@ class UsernamePickerTestCase(HomeserverTestCase):
             content_is_form=True,
             custom_headers=[
                 ("Cookie", "username_mapping_session=" + session_id),
-                # old versions of twisted don't do form-parsing without a valid
-                # content-length header.
-                ("Content-Length", str(len(content))),
             ],
         )
         self.assertEqual(chan.code, 302, chan.result)
