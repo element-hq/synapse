@@ -781,9 +781,9 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
         # events (including the create event, and the first name update) in
         # the room.
         #
-        # All of these state deltas have the same `stream_id`. Do so by editing
-        # the table directly as that's the simplest way to have all share the
-        # same `stream_id`.
+        # All of these state deltas have the same `stream_id` as the original name event.
+        # Do so by editing the table directly as that's the simplest way to have
+        # all share the same `stream_id`.
         self.get_success(
             self.store.db_pool.simple_insert_many(
                 "current_state_delta_stream",
@@ -800,7 +800,7 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
                     (
                         max_stream_id,
                         self.room.to_string(),
-                        "m.room.name",
+                        EventTypes.Name,
                         "",
                         f"${random_string(5)}:test",
                         json.dumps({"name": f"rename #{i}"}),
@@ -812,19 +812,20 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
             )
         )
 
-        # Call the function under test with a limit of 4. Without the limit, we would return
-        # 5 state deltas:
+        # Call the function under test with a limit of 4. Without the limit, we
+        # would return 5 state deltas:
         #
-        # C T T T T
+        # C N N N N
         # 1 2 3 4 5
         #
         # C = m.room.create
-        # T = m.room.topic
+        # N = m.room.name
         #
         # With the limit, we should return only the create event, as returning 4
         # state deltas would result in splitting a group:
         #
-        # C T T T T
+        # 1 2 2 2 2 - state IDs/groups
+        # C N N N N
         # 1 2 3 4 X
 
         clipped_stream_id, deltas = self.get_success(
@@ -888,9 +889,9 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
         # events (including the create event, and the first name update) in
         # the room.
         #
-        # All of these state deltas have the same `stream_id`. Do so by editing
-        # the table directly as that's the simplest way to have all share the
-        # same `stream_id`.
+        # All of these state deltas have the same `stream_id` as the original name event.
+        # Do so by editing the table directly as that's the simplest way to have
+        # all share the same `stream_id`.
         self.get_success(
             self.store.db_pool.simple_insert_many(
                 "current_state_delta_stream",
@@ -907,7 +908,7 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
                     (
                         max_stream_id,
                         self.room.to_string(),
-                        "m.room.name",
+                        EventTypes.Name,
                         "",
                         f"${random_string(5)}:test",
                         json.dumps({"name": f"rename #{i}"}),
@@ -922,30 +923,33 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
         # Call the function under test with a limit of 4. Without the limit, we would return
         # 5 state deltas:
         #
-        # C T T T T
+        # C N N N N
         # 1 2 3 4 5
         #
         # C = m.room.create
-        # T = m.room.topic
+        # N = m.room.name
         #
         # With the limit, we should return only the create event, as returning 4
         # state deltas would result in splitting a group:
         #
-        # C T T T T
+        # 1 2 2 2 2 - state IDs/groups
+        # C N N N N
         # 1 2 3 4 X
 
         clipped_stream_id, deltas = self.get_success(
             self.store.get_partial_current_state_deltas(
-                prev_stream_id=2,
+                prev_stream_id=2,  # Start after the create event (which has stream_id 2).
                 max_stream_id=max_stream_id,
-                limit=2,
+                limit=2,  # Less than the size of the next group (which is 4).
             )
         )
 
-        # 2 is the stream ID of the m.room.create event.
-        # self.assertEqual(
-        #     clipped_stream_id, 3
-        # )
+        self.assertEqual(
+            clipped_stream_id, 3
+        )  # The stream ID of the 4 m.room.name events.
+
+        # We should get all 4 `m.room.name` state deltas, instead of 0, which
+        # would result in a deadlock.
         self.assertEqual(
             len(deltas),
             4,
