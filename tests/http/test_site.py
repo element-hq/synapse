@@ -168,8 +168,9 @@ class SynapseRequestTestCase(HomeserverTestCase):
             b"Connection: close\r\n"
             b"Content-Length: " + str(oversized_length).encode() + b"\r\n"
             b"\r\n"
+            b"" + b"x" * oversized_length + b"\r\n"
+            b"\r\n"
         )
-        protocol.dataReceived(b"x" * oversized_length)
 
         # Advance the reactor to process the request
         while not transport.disconnecting:

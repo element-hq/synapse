@@ -214,8 +214,9 @@ class SynapseRequest(Request):
         # the server with a `MemoryError`, or carefully block just enough resources to cause
         # all other requests to fail.
         #
-        # FIXME: This can be removed once we Twisted releases a fix and we update to a
+        # FIXME: This can be removed once Twisted releases a fix and we update to a
         # version that is patched
+        # See: https://github.com/element-hq/synapse/security/advisories/GHSA-rfq8-j7rh-8hf2
         if command == b"POST":
             ctype = self.requestHeaders.getRawHeaders(b"content-type")
             if ctype and b"multipart/form-data" in ctype[0]:
