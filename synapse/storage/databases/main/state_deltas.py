@@ -147,35 +147,21 @@ class StateDeltasStore(SQLBaseStore):
                 # Nothing to return in the range; we are up to date through max_stream_id.
                 return max_stream_id, []
 
-            included_rows = 0
-            hit_limit = False
-            fetch_upto_stream_id = prev_stream_id
+            # Always retrieve the first group, at the bare minimum. This ensures the
+            # caller always makes progress, even if a single group exceeds `limit`.
+            fetch_upto_stream_id, included_rows = grouped_rows[0]
 
-            for stream_id, count in grouped_rows:
-                if included_rows + count <= limit:
-                    included_rows += count
-                    fetch_upto_stream_id = stream_id
-                else:
-                    # Either we have already included some groups and adding
-                    # this one would exceed the limit, or this is the first
-                    # group and it alone exceeds the limit.
-                    hit_limit = True
-                    if included_rows == 0:
-                        # Return the entire oversized group so that callers make
-                        # progress (even though this may exceed `limit` rows).
-                        fetch_upto_stream_id = stream_id
+            # Determine which other groups we can retrieve at the same time,
+            # without blowing the budget.
+            for stream_id, count in grouped_rows[1:]:
+                if included_rows + count > limit:
                     break
+                included_rows += count
+                fetch_upto_stream_id = stream_id
 
-            if included_rows == 0 and not hit_limit:
-                # This should only happen if `limit` was zero, which is guarded
-                # against above.
-                raise AssertionError(
-                    "Failed to return any rows without hitting the limit or the "
-                    "end of the stream. This should not have happened. Please "
-                    "report it as a bug!"
-                )
-
-            caught_up_with_stream = not hit_limit and len(grouped_rows) < group_limit
+            # If we retrieved fewer groups than the limit, we know we've caught up
+            # with the stream.
+            caught_up_with_stream = len(grouped_rows) < group_limit
 
             # At this point we should have advanced, or bailed out early above.
             assert fetch_upto_stream_id != prev_stream_id
