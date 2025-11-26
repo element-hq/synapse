@@ -31,6 +31,7 @@ from twisted.internet.task import LoopingCall
 from synapse.logging import context
 from synapse.types import ISynapseThreadlessReactor
 from synapse.util import log_failure
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string_insecure_fast
 
 P = ParamSpec("P")
@@ -133,7 +134,7 @@ class Clock:
     def looping_call_now(
         self,
         f: Callable[P, object],
-        msec: float,
+        duration: Duration,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> LoopingCall:
@@ -148,11 +149,11 @@ class Clock:
 
         Args:
             f: The function to call repeatedly.
-            msec: How long to wait between calls in milliseconds.
+            duration: How long to wait between calls.
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
-        return self._looping_call_common(f, msec, True, *args, **kwargs)
+        return self._looping_call_common(f, duration.as_millis(), True, *args, **kwargs)
 
     def _looping_call_common(
         self,

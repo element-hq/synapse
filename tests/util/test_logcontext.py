@@ -37,6 +37,7 @@ from synapse.logging.context import (
 )
 from synapse.types import ISynapseReactor
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.unittest import logcontext_clean
@@ -190,7 +191,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         with LoggingContext(name="foo", server_name="test_server"):
             lc = clock.looping_call_now(
-                lambda: defer.ensureDeferred(competing_callback()), 0
+                lambda: defer.ensureDeferred(competing_callback()), Duration(seconds=0)
             )
             self._check_test_key("foo")
             await clock.sleep(0)
