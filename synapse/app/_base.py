@@ -491,7 +491,10 @@ def listen_http(
         # the site when things go wrong. In the normal case, a `Port` is created which
         # we can call `Port.stopListening()` on to do the same thing (but no `Port` is
         # created when an error occurs).
-        site.doStop()
+        #
+        # We use `site.stopFactory()` instead of `site.doStop()` as the latter assumes
+        # that `site.doStart()` was called (which won't be the case if an error occurs).
+        site.stopFactory()
         raise Exception("asdf failed to listen") from exc
 
     return ports
