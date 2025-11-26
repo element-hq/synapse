@@ -861,7 +861,9 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
             f"Returned {len(next_deltas)} rows, expected all 4 m.room.name events: {next_deltas}",
         )
 
-    def test_get_partial_current_state_deltas_does_not_deadlock(self) -> None:
+    def test_get_partial_current_state_deltas_does_not_enter_infinite_loop(
+        self,
+    ) -> None:
         """
         Tests that `get_partial_current_state_deltas` does not repeatedly return
         zero entries due to the passed `limit` parameter being less than the
@@ -949,7 +951,7 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
         )  # The stream ID of the 4 m.room.name events.
 
         # We should get all 4 `m.room.name` state deltas, instead of 0, which
-        # would result in a deadlock.
+        # would result in the caller entering an infinite loop.
         self.assertEqual(
             len(deltas),
             4,
