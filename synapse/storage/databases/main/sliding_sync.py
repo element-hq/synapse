@@ -37,12 +37,7 @@ from synapse.types.handlers.sliding_sync import (
     RoomSyncConfig,
 )
 from synapse.util.caches.descriptors import cached
-from synapse.util.constants import (
-    MILLISECONDS_PER_SECOND,
-    ONE_DAY_SECONDS,
-    ONE_HOUR_SECONDS,
-    ONE_MINUTE_SECONDS,
-)
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -57,14 +52,14 @@ logger = logging.getLogger(__name__)
 # position. We don't want to update it on every use to avoid excessive
 # writes, but we want it to be reasonably up-to-date to help with
 # cleaning up old connection positions.
-UPDATE_INTERVAL_LAST_USED_TS_MS = 5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND
+UPDATE_INTERVAL_LAST_USED_TS = Duration(minutes=5)
 
 # Time in milliseconds the connection hasn't been used before we consider it
 # expired and delete it.
-CONNECTION_EXPIRY_MS = 7 * ONE_DAY_SECONDS * MILLISECONDS_PER_SECOND
+CONNECTION_EXPIRY = Duration(days=7)
 
 # How often we run the background process to delete old sliding sync connections.
-CONNECTION_EXPIRY_FREQUENCY_MS = ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND
+CONNECTION_EXPIRY_FREQUENCY = Duration(hours=1)
 
 
 class SlidingSyncStore(SQLBaseStore):
@@ -101,7 +96,7 @@ class SlidingSyncStore(SQLBaseStore):
         if self.hs.config.worker.run_background_tasks:
             self.clock.looping_call(
                 self.delete_old_sliding_sync_connections,
-                CONNECTION_EXPIRY_FREQUENCY_MS,
+                CONNECTION_EXPIRY_FREQUENCY.as_millis(),
             )
 
     async def get_latest_bump_stamp_for_room(
@@ -430,7 +425,10 @@ class SlidingSyncStore(SQLBaseStore):
         # Update the `last_used_ts` if it's due to be updated. We don't update
         # every time to avoid excessive writes.
         now = self.clock.time_msec()
-        if last_used_ts is None or now - last_used_ts > UPDATE_INTERVAL_LAST_USED_TS_MS:
+        if (
+            last_used_ts is None
+            or now - last_used_ts > UPDATE_INTERVAL_LAST_USED_TS.as_millis()
+        ):
             self.db_pool.simple_update_txn(
                 txn,
                 table="sliding_sync_connections",
@@ -532,7 +530,7 @@ class SlidingSyncStore(SQLBaseStore):
     @wrap_as_background_process("delete_old_sliding_sync_connections")
     async def delete_old_sliding_sync_connections(self) -> None:
         """Delete sliding sync connections that have not been used for a long time."""
-        cutoff_ts = self.clock.time_msec() - CONNECTION_EXPIRY_MS
+        cutoff_ts = self.clock.time_msec() - CONNECTION_EXPIRY.as_millis()
 
         def delete_old_sliding_sync_connections_txn(txn: LoggingTransaction) -> None:
             sql = """

@@ -26,12 +26,9 @@ from unittest.mock import AsyncMock, Mock, call
 from twisted.internet import defer, reactor as _reactor
 
 from synapse.logging.context import SENTINEL_CONTEXT, LoggingContext, current_context
-from synapse.rest.client.transactions import CLEANUP_PERIOD_MS, HttpTransactionCache
+from synapse.rest.client.transactions import CLEANUP_PERIOD, HttpTransactionCache
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
-from synapse.util.constants import (
-    MILLISECONDS_PER_SECOND,
-)
 
 from tests import unittest
 from tests.server import get_clock
@@ -187,7 +184,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         )
         # Advance time just under the cleanup period.
         # Should NOT have cleaned up yet
-        self.reactor.advance((CLEANUP_PERIOD_MS - 1) / MILLISECONDS_PER_SECOND)
+        self.reactor.advance(CLEANUP_PERIOD.as_secs() - 1)
 
         yield self.cache.fetch_or_execute_request(
             self.mock_request, self.mock_requester, cb, "an arg"
@@ -196,7 +193,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         cb.assert_called_once_with("an arg")
 
         # Advance time just after the cleanup period.
-        self.reactor.advance(2 / MILLISECONDS_PER_SECOND)
+        self.reactor.advance(2)
 
         yield self.cache.fetch_or_execute_request(
             self.mock_request, self.mock_requester, cb, "an arg"
