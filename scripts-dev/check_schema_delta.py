@@ -137,6 +137,9 @@ def main(force_colors: bool) -> None:
             color=force_colors,
         )
 
+        # Mark this run as not successful, but continue so that we report *all*
+        # errors.
+        return_code = 1
     else:
         click.secho(
             f"All deltas are in the correct folder: {current_schema_version}!",
