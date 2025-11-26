@@ -80,8 +80,8 @@ class ApplicationServicesHandler:
         self.clock = hs.get_clock()
         self.notify_appservices = hs.config.worker.should_notify_appservices
         self.event_sources = hs.get_event_sources()
-        self._msc2409_to_device_messages_enabled = (
-            hs.config.experimental.msc2409_to_device_messages_enabled
+        self._msc4203_to_device_messages_enabled = (
+            hs.config.experimental.msc4203_to_device_messages_enabled
         )
         self._msc3202_transaction_extensions_enabled = (
             hs.config.experimental.msc3202_transaction_extensions
@@ -255,9 +255,8 @@ class ApplicationServicesHandler:
                 will cause this function to return early.
 
                 Ephemeral events will only be pushed to appservices that have opted into
-                receiving them by setting `push_ephemeral` to true in their registration
-                file. Note that while MSC2409 is experimental, this option is called
-                `de.sorunome.msc2409.push_ephemeral`.
+                receiving them by setting `recieve_ephemeral` to true in their registration
+                file.
 
                 Appservices will only receive ephemeral events that fall within their
                 registered user and room namespaces.
@@ -283,7 +282,7 @@ class ApplicationServicesHandler:
         # Ignore to-device messages if the feature flag is not enabled
         if (
             stream_key == StreamKeyType.TO_DEVICE
-            and not self._msc2409_to_device_messages_enabled
+            and not self._msc4203_to_device_messages_enabled
         ):
             return
 
@@ -601,7 +600,7 @@ class ApplicationServicesHandler:
             new_token,
         )
 
-        # According to MSC2409, we'll need to add 'to_user_id' and 'to_device_id' fields
+        # According to MSC4203, we'll need to add 'to_user_id' and 'to_device_id' fields
         # to the event JSON so that the application service will know which user/device
         # combination this messages was intended for.
         #

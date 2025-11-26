@@ -355,7 +355,16 @@ class ApplicationServiceApi(SimpleHttpClient):
         if service.supports_ephemeral:
             body.update(
                 {
-                    # TODO: Update to stable prefixes once MSC2409 completes FCP merge.
+                    "ephemeral": ephemeral,
+                    # NOTE: This is actually https://github.com/matrix-org/matrix-spec-proposals/blob/tulir/appservice-to-device/proposals/4203-appservice-to-device.md
+                    # but for legacy reasons uses an older MSC number.
+                    "de.sorunome.msc2409.to_device": to_device_messages,
+                }
+            )
+        elif service.supports_ephemeral_legacy:
+            # Support to be removed in a future spec version.
+            body.update(
+                {
                     "de.sorunome.msc2409.ephemeral": ephemeral,
                     "de.sorunome.msc2409.to_device": to_device_messages,
                 }

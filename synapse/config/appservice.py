@@ -169,7 +169,14 @@ def _load_appservice(
     if as_info.get("ip_range_whitelist"):
         ip_range_whitelist = IPSet(as_info.get("ip_range_whitelist"))
 
-    supports_ephemeral = as_info.get("de.sorunome.msc2409.push_ephemeral", False)
+    supports_ephemeral = as_info.get("receive_ephemeral", False)
+
+    # For ASes that haven't transitioned to the stable fields yet
+    supports_ephemeral_legacy = False
+    if not supports_ephemeral:
+        supports_ephemeral_legacy = as_info.get(
+            "de.sorunome.msc2409.push_ephemeral", False
+        )
 
     # Opt-in flag for the MSC3202-specific transactional behaviour.
     # When enabled, appservice transactions contain the following information:
@@ -205,6 +212,7 @@ def _load_appservice(
         rate_limited=rate_limited,
         ip_range_whitelist=ip_range_whitelist,
         supports_ephemeral=supports_ephemeral,
+        supports_ephemeral_legacy=supports_ephemeral_legacy,
         msc3202_transaction_extensions=msc3202_transaction_extensions,
         msc4190_device_management=msc4190_enabled,
     )
