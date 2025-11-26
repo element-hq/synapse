@@ -214,7 +214,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
             if hs.config.worker.run_background_tasks:
                 self.clock.call_later(
-                    0.0,
+                    Duration(seconds=0),
                     self._set_expiration_date_when_missing,
                 )
 

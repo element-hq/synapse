@@ -254,7 +254,7 @@ class Clock:
 
     def call_later(
         self,
-        delay: float,
+        delay: Duration,
         callback: Callable,
         *args: Any,
         call_later_cancel_on_shutdown: bool = True,
@@ -267,7 +267,7 @@ class Clock:
         `run_as_background_process` to give it more specific label and track metrics.
 
         Args:
-            delay: How long to wait in seconds.
+            delay: How long to wait.
             callback: Function to call
             *args: Postional arguments to pass to function.
             call_later_cancel_on_shutdown: Whether this call should be tracked for cleanup during
@@ -325,7 +325,9 @@ class Clock:
 
         # We can ignore the lint here since this class is the one location callLater should
         # be called.
-        call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
+        call = self._reactor.callLater(
+            delay.as_secs(), wrapped_callback, *args, **kwargs
+        )  # type: ignore[call-later-not-tracked]
 
         logger.debug(
             "call_later(%s): Scheduled call for %ss later (tracked for shutdown: %s)",

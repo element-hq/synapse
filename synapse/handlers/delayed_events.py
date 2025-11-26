@@ -42,6 +42,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
+from synapse.util.duration import Duration
 from synapse.util.events import generate_fake_event_id
 from synapse.util.metrics import Measure
 from synapse.util.sentinel import Sentinel
@@ -92,7 +93,7 @@ class DelayedEventsHandler:
                 # Kick off again (without blocking) to catch any missed notifications
                 # that may have fired before the callback was added.
                 self._clock.call_later(
-                    0,
+                    Duration(seconds=0),
                     self.notify_new_event,
                 )
 
@@ -501,17 +502,17 @@ class DelayedEventsHandler:
 
     def _schedule_next_at(self, next_send_ts: Timestamp) -> None:
         delay = next_send_ts - self._get_current_ts()
-        delay_sec = delay / 1000 if delay > 0 else 0
+        delay_duration = Duration(milliseconds=max(delay, 0))
 
         if self._next_delayed_event_call is None:
             self._next_delayed_event_call = self._clock.call_later(
-                delay_sec,
+                delay_duration,
                 self.hs.run_as_background_process,
                 "_send_on_timeout",
                 self._send_on_timeout,
             )
         else:
-            self._next_delayed_event_call.reset(delay_sec)
+            self._next_delayed_event_call.reset(delay_duration.as_secs())
 
     async def get_all_for_user(self, requester: Requester) -> list[JsonDict]:
         """Return all pending delayed events requested by the given user."""

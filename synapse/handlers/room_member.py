@@ -2191,7 +2191,7 @@ class RoomForgetterHandler(StateDeltasHandler):
 
             # We kick this off to pick up outstanding work from before the last restart.
             self._clock.call_later(
-                0,
+                Duration(seconds=0),
                 self.notify_new_event,
             )
 

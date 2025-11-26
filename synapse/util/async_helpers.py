@@ -819,7 +819,9 @@ def timeout_deferred(
 
     # We don't track these calls since they are short.
     delayed_call = clock.call_later(
-        timeout, time_it_out, call_later_cancel_on_shutdown=cancel_on_shutdown
+        Duration(seconds=timeout),
+        time_it_out,
+        call_later_cancel_on_shutdown=cancel_on_shutdown,
     )
 
     def convert_cancelled(value: Failure) -> Failure:

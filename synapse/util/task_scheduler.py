@@ -469,7 +469,7 @@ class TaskScheduler:
 
             # Try launch a new task since we've finished with this one.
             self._clock.call_later(
-                0.1,
+                Duration(milliseconds=100),
                 self._launch_scheduled_tasks,
             )
 

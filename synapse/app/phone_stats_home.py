@@ -278,14 +278,14 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
         # We need to defer this init for the cases that we daemonize
         # otherwise the process ID we get is that of the non-daemon process
         clock.call_later(
-            0,
+            Duration(seconds=0),
             performance_stats_init,
         )
 
         # We wait 5 minutes to send the first set of stats as the server can
         # be quite busy the first few minutes
         clock.call_later(
-            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME.as_secs(),
+            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME,
             phone_stats_home,
             hs,
             stats,

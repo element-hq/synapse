@@ -239,7 +239,9 @@ class LoggingContextTestCase(unittest.TestCase):
                 callback_finished = True
 
         with LoggingContext(name="foo", server_name="test_server"):
-            clock.call_later(0, lambda: defer.ensureDeferred(competing_callback()))
+            clock.call_later(
+                Duration(seconds=0), lambda: defer.ensureDeferred(competing_callback())
+            )
             self._check_test_key("foo")
             await clock.sleep(Duration(seconds=0))
             self._check_test_key("foo")

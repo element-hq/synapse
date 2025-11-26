@@ -187,7 +187,7 @@ class WorkerLocksHandler:
                 lock.release_lock()
 
         self._clock.call_later(
-            0,
+            Duration(seconds=0),
             _wake_all_locks,
             locks,
         )

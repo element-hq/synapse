@@ -417,6 +417,6 @@ class _PerHostRatelimiter:
                 pass
 
         self.clock.call_later(
-            0.0,
+            Duration(seconds=0),
             start_next_request,
         )

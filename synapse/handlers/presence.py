@@ -862,7 +862,7 @@ class PresenceHandler(BasePresenceHandler):
             # The initial delay is to allow disconnected clients a chance to
             # reconnect before we treat them as offline.
             self.clock.call_later(
-                30,
+                Duration(seconds=30),
                 self.clock.looping_call,
                 self._handle_timeouts,
                 Duration(seconds=5),
@@ -872,7 +872,7 @@ class PresenceHandler(BasePresenceHandler):
         # internally.
         if self._presence_enabled:
             self.clock.call_later(
-                60,
+                Duration(seconds=60),
                 self.clock.looping_call,
                 self._persist_unpersisted_changes,
                 Duration(minutes=1),
