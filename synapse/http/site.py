@@ -817,7 +817,7 @@ class SynapseSite(ProxySite):
 
         # Replace the resource tree with an empty resource to break circular references
         # to the resource tree which holds a bunch of homeserver references.
-        self.resource = Resource()
+        # self.resource = Resource()
 
     def log(self, request: SynapseRequest) -> None:  # type: ignore[override]
         pass
