@@ -196,6 +196,65 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
                 f"{get_memory_debug_info_for_object(hs_after_shutdown)}",
             )
 
+    @logcontext_clean
+    def test_clean_homeserver_shutdown_when_failed_to_start(self) -> None:
+        """
+        Ensure the `SynapseHomeServer` can be fully shutdown and garbage collected if it
+        fails to be `start`.
+        """
+        self.reactor, self.clock = get_clock()
+
+        # Patch out the call to `start_test_homeserver` since we want to actually start
+        # the homeserver (with real ports).
+        with patch(
+            "tests.server.start_test_homeserver", return_value=None
+        ) as mock_start:
+            self.hs = setup_test_homeserver(
+                cleanup_func=self.addCleanup,
+                reactor=self.reactor,
+                homeserver_to_use=SynapseHomeServer,
+                clock=self.clock,
+            )
+            # Sanity check that we patched the correct method (make sure it was the
+            # thing that was called)
+            mock_start.assert_called_once()
+            # Clear the stored calls (and args) to the mock to avoid holding references
+            # to the homeserver
+            mock_start.reset_mock()
+
+            # TODO: Start with real ports
+
+        hs_ref = weakref.ref(self.hs)
+
+        # Run the reactor so any `callWhenRunning` functions can be cleared out.
+        self.reactor.run()
+        # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
+        # we use in tests doesn't handle this properly (see doc comment)
+        cleanup_test_reactor_system_event_triggers(self.reactor)
+
+        async def shutdown() -> None:
+            # Use a logcontext just to double-check that we don't mangle the logcontext
+            # during shutdown.
+            with LoggingContext(name="hs_shutdown", server_name=self.hs.hostname):
+                await self.hs.shutdown()
+
+        self.get_success(shutdown())
+
+        # Cleanup the internal reference in our test case
+        del self.hs
+
+        # Force garbage collection.
+        gc.collect()
+
+        # Ensure the `HomeServer` hs been garbage collected by attempting to use the
+        # weakref to it.
+        hs_after_shutdown = hs_ref()
+        if hs_after_shutdown is not None:
+            self.fail(
+                "HomeServer reference should not be valid at this point "
+                f"{get_memory_debug_info_for_object(hs_after_shutdown)}",
+            )
+
 
 def get_memory_debug_info_for_object(object: Any) -> dict[str, Any]:
     """
