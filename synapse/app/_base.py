@@ -485,10 +485,10 @@ def listen_http(
             )
     except Exception as exc:
         # The Twisted interface says that "Users should not call this function
-        # themselves!" but this appears to be the correct way handle proper cleanup of
-        # the site when things go wrong. In the normal case, a `Port` is created which
-        # we can call `Port.stopListening()` on to do the same thing (but no `Port` is
-        # created when an error occurs).
+        # themselves!" but this appears to be the correct/only way handle proper cleanup
+        # of the site when things go wrong. In the normal case, a `Port` is created
+        # which we can call `Port.stopListening()` on to do the same thing (but no
+        # `Port` is created when an error occurs).
         #
         # We use `site.stopFactory()` instead of `site.doStop()` as the latter assumes
         # that `site.doStart()` was called (which won't be the case if an error occurs).
