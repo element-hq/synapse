@@ -447,8 +447,6 @@ def listen_http(
         hs=hs,
     )
 
-    logger.info("asdf listen_http called with %s", listener_config)
-
     try:
         if isinstance(listener_config, TCPListenerConfig):
             if listener_config.is_tls():
