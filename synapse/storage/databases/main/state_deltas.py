@@ -153,15 +153,20 @@ class StateDeltasStore(SQLBaseStore):
 
             # Determine which other groups we can retrieve at the same time,
             # without blowing the budget.
+            included_all_groups = True
             for stream_id, count in grouped_rows[1:]:
                 if included_rows + count > limit:
+                    included_all_groups = False
                     break
                 included_rows += count
                 fetch_upto_stream_id = stream_id
 
-            # If we retrieved fewer groups than the limit, we know we've caught up
-            # with the stream.
-            caught_up_with_stream = len(grouped_rows) < group_limit
+            # If we retrieved fewer groups than the limit *and* we didn't hit the
+            # `LIMIT ?` cap on the grouping query, we know we've caught up with
+            # the stream.
+            caught_up_with_stream = (
+                included_all_groups and len(grouped_rows) < group_limit
+            )
 
             # At this point we should have advanced, or bailed out early above.
             assert fetch_upto_stream_id != prev_stream_id
