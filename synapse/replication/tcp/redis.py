@@ -53,6 +53,7 @@ from synapse.replication.tcp.protocol import (
     tcp_inbound_commands_counter,
     tcp_outbound_commands_counter,
 )
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.replication.tcp.handler import ReplicationCommandHandler
@@ -317,7 +318,7 @@ class SynapseRedisFactory(RedisFactory):
         self.hs = hs  # nb must be called this for @wrap_as_background_process
         self.server_name = hs.hostname
 
-        hs.get_clock().looping_call(self._send_ping, 30 * 1000)
+        hs.get_clock().looping_call(self._send_ping, Duration(seconds=30))
 
     @wrap_as_background_process("redis_ping")
     async def _send_ping(self) -> None:

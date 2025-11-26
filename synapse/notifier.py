@@ -61,6 +61,7 @@ from synapse.types import (
 from synapse.util.async_helpers import (
     timeout_deferred,
 )
+from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
 from synapse.visibility import filter_events_for_client
 
@@ -235,7 +236,7 @@ class Notifier:
     Primarily used from the /events stream.
     """
 
-    UNUSED_STREAM_EXPIRY_MS = 10 * 60 * 1000
+    UNUSED_STREAM_EXPIRY = Duration(minutes=10)
 
     def __init__(self, hs: "HomeServer"):
         self.user_to_user_stream: dict[str, _NotifierUserStream] = {}
@@ -269,9 +270,7 @@ class Notifier:
 
         self.state_handler = hs.get_state_handler()
 
-        self.clock.looping_call(
-            self.remove_expired_streams, self.UNUSED_STREAM_EXPIRY_MS
-        )
+        self.clock.looping_call(self.remove_expired_streams, self.UNUSED_STREAM_EXPIRY)
 
         # This is not a very cheap test to perform, but it's only executed
         # when rendering the metrics page, which is likely once per minute at
@@ -889,7 +888,7 @@ class Notifier:
     def remove_expired_streams(self) -> None:
         time_now_ms = self.clock.time_msec()
         expired_streams = []
-        expire_before_ts = time_now_ms - self.UNUSED_STREAM_EXPIRY_MS
+        expire_before_ts = time_now_ms - self.UNUSED_STREAM_EXPIRY.as_millis()
         for stream in self.user_to_user_stream.values():
             if stream.count_listeners():
                 continue

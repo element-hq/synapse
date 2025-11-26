@@ -140,7 +140,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         with LoggingContext(name="foo", server_name="test_server"):
             lc = clock.looping_call(
-                lambda: defer.ensureDeferred(competing_callback()), 0
+                lambda: defer.ensureDeferred(competing_callback()), Duration(seconds=0)
             )
             self._check_test_key("foo")
             await clock.sleep(0)

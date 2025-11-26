@@ -41,6 +41,7 @@ from synapse.types import (
     UserID,
 )
 from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import filter_destinations_by_retry_limiter
 from synapse.util.wheel_timer import WheelTimer
@@ -60,15 +61,15 @@ class RoomMember:
 
 
 # How often we expect remote servers to resend us presence.
-FEDERATION_TIMEOUT = 60 * 1000
+FEDERATION_TIMEOUT = Duration(seconds=60)
 
 # How often to resend typing across federation.
-FEDERATION_PING_INTERVAL = 40 * 1000
+FEDERATION_PING_INTERVAL = Duration(seconds=40)
 
 
 # How long to remember a typing notification happened in a room before
 # forgetting about it.
-FORGET_TIMEOUT = 10 * 60 * 1000
+FORGET_TIMEOUT = Duration(minutes=10)
 
 
 class FollowerTypingHandler:
@@ -106,7 +107,7 @@ class FollowerTypingHandler:
 
         self._rooms_updated: set[str] = set()
 
-        self.clock.looping_call(self._handle_timeouts, 5000)
+        self.clock.looping_call(self._handle_timeouts, Duration(seconds=5))
         self.clock.looping_call(self._prune_old_typing, FORGET_TIMEOUT)
 
     def _reset(self) -> None:
@@ -141,7 +142,10 @@ class FollowerTypingHandler:
         # user.
         if self.federation and self.is_mine_id(member.user_id):
             last_fed_poke = self._member_last_federation_poke.get(member, None)
-            if not last_fed_poke or last_fed_poke + FEDERATION_PING_INTERVAL <= now:
+            if (
+                not last_fed_poke
+                or last_fed_poke + FEDERATION_PING_INTERVAL.as_millis() <= now
+            ):
                 self.hs.run_as_background_process(
                     "typing._push_remote",
                     self._push_remote,
@@ -165,7 +169,7 @@ class FollowerTypingHandler:
 
             now = self.clock.time_msec()
             self.wheel_timer.insert(
-                now=now, obj=member, then=now + FEDERATION_PING_INTERVAL
+                now=now, obj=member, then=now + FEDERATION_PING_INTERVAL.as_millis()
             )
 
             hosts: StrCollection = (
@@ -428,8 +432,10 @@ class TypingWriterHandler(FollowerTypingHandler):
         if user.domain in domains:
             logger.info("Got typing update from %s: %r", user_id, content)
             now = self.clock.time_msec()
-            self._member_typing_until[member] = now + FEDERATION_TIMEOUT
-            self.wheel_timer.insert(now=now, obj=member, then=now + FEDERATION_TIMEOUT)
+            self._member_typing_until[member] = now + FEDERATION_TIMEOUT.as_millis()
+            self.wheel_timer.insert(
+                now=now, obj=member, then=now + FEDERATION_TIMEOUT.as_millis()
+            )
             self._push_update_local(member=member, typing=content["typing"])
 
     def _push_update_local(self, member: RoomMember, typing: bool) -> None:

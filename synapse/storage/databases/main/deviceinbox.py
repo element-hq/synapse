@@ -152,7 +152,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         if hs.config.worker.run_background_tasks:
             self.clock.looping_call(
                 run_as_background_process,
-                DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL.as_millis(),
+                DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL,
                 "_delete_old_federation_inbox_rows",
                 self.server_name,
                 self._delete_old_federation_inbox_rows,

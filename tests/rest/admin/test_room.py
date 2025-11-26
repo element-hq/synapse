@@ -1464,7 +1464,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
             self._is_purged(room_id)
 
         # Wait for next scheduler run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         self._is_purged(room_id)
 
@@ -1501,7 +1501,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
             self._is_purged(room_id)
 
         # Wait for next scheduler run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         # Test that all users has been kicked (room is shutdown)
         self._has_no_members(room_id)

@@ -68,7 +68,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
         # The timestamp being 30s after now the task should been executed
         # after the first scheduling loop is run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS / 1000)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         task = self.get_success(self.task_scheduler.get_task(task_id))
         assert task is not None
@@ -187,7 +187,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
         # Simulate a synapse restart by emptying the list of running tasks
         self.task_scheduler._running_tasks = set()
-        self.reactor.advance((TaskScheduler.SCHEDULE_INTERVAL_MS / 1000))
+        self.reactor.advance((TaskScheduler.SCHEDULE_INTERVAL.as_secs()))
 
         task = self.get_success(self.task_scheduler.get_task(task_id))
         assert task is not None

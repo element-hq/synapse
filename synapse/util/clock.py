@@ -106,13 +106,13 @@ class Clock:
     def looping_call(
         self,
         f: Callable[P, object],
-        msec: float,
+        duration: Duration,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Call a function repeatedly.
 
-        Waits `msec` initially before calling `f` for the first time.
+        Waits `duration` initially before calling `f` for the first time.
 
         If the function given to `looping_call` returns an awaitable/deferred, the next
         call isn't scheduled until after the returned awaitable has finished. We get
@@ -125,11 +125,13 @@ class Clock:
 
         Args:
             f: The function to call repeatedly.
-            msec: How long to wait between calls in milliseconds.
+            duration: How long to wait between calls.
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
-        return self._looping_call_common(f, msec, False, *args, **kwargs)
+        return self._looping_call_common(
+            f, duration.as_millis(), False, *args, **kwargs
+        )
 
     def looping_call_now(
         self,

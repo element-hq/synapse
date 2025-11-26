@@ -83,6 +83,7 @@ from synapse.types.state import StateFilter
 from synapse.util import log_failure, unwrapFirstError
 from synapse.util.async_helpers import Linearizer, gather_results
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.duration import Duration
 from synapse.util.json import json_decoder, json_encoder
 from synapse.util.metrics import measure_func
 from synapse.visibility import get_effective_room_visibility_from_state
@@ -551,7 +552,7 @@ class EventCreationHandler:
                     "send_dummy_events_to_fill_extremities",
                     self._send_dummy_events_to_fill_extremities,
                 ),
-                5 * 60 * 1000,
+                Duration(minutes=5),
             )
 
         self._message_handler = hs.get_message_handler()

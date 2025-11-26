@@ -71,6 +71,7 @@ from synapse.util import stringutils
 from synapse.util.async_helpers import Linearizer
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.cancellation import cancellable
+from synapse.util.duration import Duration
 from synapse.util.metrics import measure_func
 from synapse.util.retryutils import (
     NotRetryingDestination,
@@ -85,7 +86,7 @@ logger = logging.getLogger(__name__)
 
 DELETE_DEVICE_MSGS_TASK_NAME = "delete_device_messages"
 MAX_DEVICE_DISPLAY_NAME_LEN = 100
-DELETE_STALE_DEVICES_INTERVAL_MS = 24 * 60 * 60 * 1000
+DELETE_STALE_DEVICES_INTERVAL = Duration(days=1)
 
 
 def _check_device_name_length(name: str | None) -> None:
@@ -186,7 +187,7 @@ class DeviceHandler:
         ):
             self.clock.looping_call(
                 self.hs.run_as_background_process,
-                DELETE_STALE_DEVICES_INTERVAL_MS,
+                DELETE_STALE_DEVICES_INTERVAL,
                 desc="delete_stale_devices",
                 func=self._delete_stale_devices,
             )
@@ -1469,7 +1470,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self._resync_retry_lock = Lock()
         self.clock.looping_call(
             self.hs.run_as_background_process,
-            30 * 1000,
+            Duration(seconds=30),
             func=self._maybe_retry_device_resync,
             desc="_maybe_retry_device_resync",
         )

@@ -62,6 +62,7 @@ from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3E
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters
 from synapse.types import StrCollection
 from synapse.util.async_helpers import delay_cancellation
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
@@ -706,7 +707,7 @@ class DatabasePool:
                 "Total database time: %.3f%% {%s}", ratio * 100, top_three_counters
             )
 
-        self._clock.looping_call(loop, 10000)
+        self._clock.looping_call(loop, Duration(seconds=10))
 
     def new_transaction(
         self,

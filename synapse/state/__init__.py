@@ -54,6 +54,7 @@ from synapse.types import StateMap, StrCollection
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure, measure_func
 from synapse.util.stringutils import shortstr
 
@@ -663,7 +664,7 @@ class StateResolutionHandler:
             _StateResMetrics
         )
 
-        self.clock.looping_call(self._report_metrics, 120 * 1000)
+        self.clock.looping_call(self._report_metrics, Duration(minutes=2))
 
     async def resolve_state_groups(
         self,
