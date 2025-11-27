@@ -235,6 +235,7 @@ main() {
   # scripts can use it.
   export SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES="${test_packages[@]}"
 
+
   export COMPLEMENT_BASE_IMAGE=complement-synapse
   if [ -n "$use_editable_synapse" ]; then
     export COMPLEMENT_BASE_IMAGE=complement-synapse-editable
@@ -280,7 +281,9 @@ main() {
     export COMPLEMENT_SPAWN_HS_TIMEOUT_SECS=120
   else
     export PASS_SYNAPSE_COMPLEMENT_USE_WORKERS=
-    if [[ -n "$POSTGRES" ]]; then
+    if [[ "$POSTGRES" = "psycopg" ]]; then
+      export PASS_SYNAPSE_COMPLEMENT_DATABASE=psycopg
+    elif [[ -n "$POSTGRES" ]]; then
       export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
     else
       export PASS_SYNAPSE_COMPLEMENT_DATABASE=sqlite

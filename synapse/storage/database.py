@@ -20,6 +20,7 @@
 #
 #
 import inspect
+import itertools
 import logging
 import time
 import types
@@ -58,7 +59,14 @@ from synapse.logging.context import (
 )
 from synapse.metrics import SERVER_NAME_LABEL, register_threadpool
 from synapse.storage.background_updates import BackgroundUpdater
-from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
+from synapse.storage.engines import (
+    BaseDatabaseEngine,
+    PostgresEngine,
+    Psycopg2Engine,
+    PsycopgEngine,
+    Sqlite3Engine,
+)
+from synapse.storage.engines._base import IsolationLevel
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters
 from synapse.types import StrCollection
 from synapse.util.async_helpers import delay_cancellation
@@ -407,7 +415,7 @@ class LoggingTransaction:
         More efficient than `executemany` on PostgreSQL
         """
 
-        if isinstance(self.database_engine, PostgresEngine):
+        if isinstance(self.database_engine, Psycopg2Engine):
             from psycopg2.extras import execute_batch
 
             # TODO: is it safe for values to be Iterable[Iterable[Any]] here?
@@ -416,6 +424,8 @@ class LoggingTransaction:
             self._do_execute(
                 lambda the_sql: execute_batch(self.txn, the_sql, args), sql
             )
+
+            # TODO Can psycopg3 do anything better?
         else:
             # TODO: is it safe for values to be Iterable[Iterable[Any]] here?
             # https://docs.python.org/3/library/sqlite3.html?highlight=sqlite3#sqlite3.Cursor.executemany
@@ -427,10 +437,10 @@ class LoggingTransaction:
     def execute_values(
         self,
         sql: str,
-        values: Iterable[Iterable[Any]],
+        values: Collection[Iterable[Any]],
         template: str | None = None,
         fetch: bool = True,
-    ) -> list[tuple]:
+    ) -> Iterable[tuple]:
         """Corresponds to psycopg2.extras.execute_values. Only available when
         using postgres.
 
@@ -441,17 +451,60 @@ class LoggingTransaction:
         compose the query.
         """
         assert isinstance(self.database_engine, PostgresEngine)
-        from psycopg2.extras import execute_values
 
-        return self._do_execute(
-            # TODO: is it safe for values to be Iterable[Iterable[Any]] here?
-            # https://www.psycopg.org/docs/extras.html?highlight=execute_batch#psycopg2.extras.execute_values says values should be Sequence[Sequence]
-            lambda the_sql, the_values: execute_values(
-                self.txn, the_sql, the_values, template=template, fetch=fetch
-            ),
-            sql,
-            values,
-        )
+        # If there's no work to do, skip.
+        if not len(values):
+            return []
+
+        if isinstance(self.database_engine, Psycopg2Engine):
+            from psycopg2.extras import execute_values
+
+            return self._do_execute(
+                # TODO: is it safe for values to be Iterable[Iterable[Any]] here?
+                # https://www.psycopg.org/docs/extras.html?highlight=execute_batch#psycopg2.extras.execute_values says values should be Sequence[Sequence]
+                lambda the_sql, the_values: execute_values(
+                    self.txn, the_sql, the_values, template=template, fetch=fetch
+                ),
+                sql,
+                values,
+            )
+        else:
+            # We use fetch = False to mean a writable query. You *might* be able
+            # to morph that into a COPY (...) FROM STDIN, but it isn't worth the
+            # effort for the few places we set fetch = False.
+            assert fetch is True
+
+            # execute_values requires a single replacement, but we need to expand it
+            # for COPY. This assumes all inner sequences are the same length.
+            value_str = "(" + ", ".join("?" for _ in next(iter(values))) + ")"
+            sql = sql.replace("?", ", ".join(value_str for _ in values))
+
+            # Wrap the SQL in the COPY statement.
+            sql = f"COPY ({sql}) TO STDOUT"
+
+            def f(
+                the_sql: str, the_args: Sequence[Sequence[Any]]
+            ) -> Iterable[tuple[Any, ...]]:
+                with self.txn.copy(the_sql, the_args) as copy:  # type: ignore[attr-defined]
+                    yield from copy.rows()
+
+            # Flatten the values.
+            return self._do_execute(f, sql, list(itertools.chain.from_iterable(values)))
+
+    def copy_write(
+        self, sql: str, args: Iterable[Any], values: Iterable[Iterable[Any]]
+    ) -> None:
+        """Corresponds to a PostgreSQL COPY (...) FROM STDIN call."""
+        assert isinstance(self.database_engine, PsycopgEngine)
+
+        def f(
+            the_sql: str, the_args: Iterable[Any], the_values: Iterable[Iterable[Any]]
+        ) -> None:
+            with self.txn.copy(the_sql, the_args) as copy:  # type: ignore[attr-defined]
+                for record in the_values:
+                    copy.write_row(record)
+
+        self._do_execute(f, sql, args, values)
 
     def execute(self, sql: str, parameters: SQLQueryParameters = ()) -> None:
         self._do_execute(self.txn.execute, sql, parameters)
@@ -498,7 +551,8 @@ class LoggingTransaction:
         # TODO(paul): Maybe use 'info' and 'debug' for values?
         sql_logger.debug("[SQL] {%s} %s", self.name, one_line_sql)
 
-        sql = self.database_engine.convert_param_style(sql)
+        if isinstance(sql, str):
+            sql = self.database_engine.convert_param_style(sql)
         if args:
             try:
                 sql_logger.debug("[SQL values] {%s} %r", self.name, args[0])
@@ -524,7 +578,7 @@ class LoggingTransaction:
             secs = time.time() - start
             sql_logger.debug("[SQL time] {%s} %f sec", self.name, secs)
             sql_query_timer.labels(
-                verb=sql.split()[0], **{SERVER_NAME_LABEL: self.server_name}
+                verb=one_line_sql.split()[0], **{SERVER_NAME_LABEL: self.server_name}
             ).observe(secs)
 
     def close(self) -> None:
@@ -919,7 +973,7 @@ class DatabasePool:
         func: Callable[..., R],
         *args: Any,
         db_autocommit: bool = False,
-        isolation_level: int | None = None,
+        isolation_level: IsolationLevel | None = None,
         **kwargs: Any,
     ) -> R:
         """Starts a transaction on the database and runs a given function
@@ -1001,7 +1055,7 @@ class DatabasePool:
         func: Callable[Concatenate[LoggingDatabaseConnection, P], R],
         *args: Any,
         db_autocommit: bool = False,
-        isolation_level: int | None = None,
+        isolation_level: IsolationLevel | None = None,
         **kwargs: Any,
     ) -> R:
         """Wraps the .runWithConnection() method on the underlying db_pool.
@@ -1216,7 +1270,7 @@ class DatabasePool:
         if not values:
             return
 
-        if isinstance(txn.database_engine, PostgresEngine):
+        if isinstance(txn.database_engine, Psycopg2Engine):
             # We use `execute_values` as it can be a lot faster than `execute_batch`,
             # but it's only available on postgres.
             sql = "INSERT INTO %s (%s) VALUES ?" % (
@@ -1225,6 +1279,14 @@ class DatabasePool:
             )
 
             txn.execute_values(sql, values, fetch=False)
+
+        elif isinstance(txn.database_engine, PsycopgEngine):
+            sql = "COPY %s (%s) FROM STDIN" % (
+                table,
+                ", ".join(k for k in keys),
+            )
+            txn.copy_write(sql, (), values)
+
         else:
             sql = "INSERT INTO %s (%s) VALUES(%s)" % (
                 table,
@@ -1686,7 +1748,7 @@ class DatabasePool:
         for x, y in zip(key_values, value_values):
             args.append(tuple(x) + tuple(y))
 
-        if isinstance(txn.database_engine, PostgresEngine):
+        if isinstance(txn.database_engine, Psycopg2Engine):
             # We use `execute_values` as it can be a lot faster than `execute_batch`,
             # but it's only available on postgres.
             sql = "INSERT INTO %s (%s) VALUES ? ON CONFLICT (%s) DO %s" % (
@@ -1697,6 +1759,8 @@ class DatabasePool:
             )
 
             txn.execute_values(sql, args, fetch=False)
+
+            # TODO Maybe improve for psycopg.
 
         else:
             sql = "INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (%s) DO %s" % (
@@ -2439,7 +2503,7 @@ class DatabasePool:
         txn: LoggingTransaction,
         table: str,
         keys: Collection[str],
-        values: Iterable[Iterable[Any]],
+        values: Sequence[Iterable[Any]],
     ) -> None:
         """Executes a DELETE query on the named table.
 
@@ -2453,7 +2517,7 @@ class DatabasePool:
             values: for each row, a list of values in the same order as `keys`
         """
 
-        if isinstance(txn.database_engine, PostgresEngine):
+        if isinstance(txn.database_engine, Psycopg2Engine):
             # We use `execute_values` as it can be a lot faster than `execute_batch`,
             # but it's only available on postgres.
             sql = "DELETE FROM %s WHERE (%s) IN (VALUES ?)" % (

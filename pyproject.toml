@@ -104,6 +104,7 @@ postgres = [
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
 ]
+psycopg = ["psycopg>=3.1"]
 saml2 = ["pysaml2>=4.5.0"]
 oidc = ["authlib>=0.15.1"]
 # systemd-python is necessary for logging to the systemd journal via
@@ -138,6 +139,8 @@ all = [
     "psycopg2>=2.8;platform_python_implementation != 'PyPy'",
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
+    # experimental psycopg for postgres
+    "psycopg>=3.1",
     # saml2
     "pysaml2>=4.5.0",
     # oidc and jwt

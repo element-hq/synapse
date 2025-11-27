@@ -57,11 +57,11 @@ listeners:
 
 {% if POSTGRES_PASSWORD %}
 database:
-  name: "psycopg2"
+  name: "{{ POSTGRES_DRIVER or "psycopg2" }}"
   args:
     user: "{{ POSTGRES_USER or "synapse" }}"
     password: "{{ POSTGRES_PASSWORD }}"
-    database: "{{ POSTGRES_DB or "synapse" }}"
+    dbname: "{{ POSTGRES_DB or "synapse" }}"
 {% if not SYNAPSE_USE_UNIX_SOCKET %}
 {# Synapse will use a default unix socket for Postgres when host/port is not specified (behavior from `psycopg2`). #}
     host: "{{ POSTGRES_HOST or "db" }}"

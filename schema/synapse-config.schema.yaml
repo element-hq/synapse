@@ -5880,10 +5880,12 @@ $defs:
         enum:
           - sqlite3
           - psycopg2
+          - psycopg
         description: >-
           This option specifies the database engine to use: either `sqlite3`
-          (for SQLite) or `psycopg2` (for PostgreSQL). If no name is specified
-          Synapse will default to SQLite.
+          (for SQLite) or `psycopg2` (for PostgreSQL). `psycopg` references the
+          experimental psycopg3 driver, which may be used as a drop in replacement 
+          for `psycopg2`. If no name is specified Synapse will default to SQLite.
         default: sqlite3
       txn_limit:
         type: integer
