@@ -177,6 +177,12 @@ synapse_port_db = "synapse._scripts.synapse_port_db:main"
 synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
 update_synapse_database = "synapse._scripts.update_synapse_database:main"
 
+[tool.poetry]
+packages = [{ include = "synapse" }]
+
+[tool.poetry.build]
+script = "build_rust.py"
+generate-setup-file = true
 
 [tool.poetry.group.dev.dependencies]
 # We pin development dependencies in poetry.lock so that our tests don't start
