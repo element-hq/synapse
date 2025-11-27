@@ -12,7 +12,7 @@ import git
 
 SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
 INDEX_CREATION_REGEX = re.compile(
-    r"CREATE .*INDEX .*ON ([a-z_0-9]+)", flags=re.IGNORECASE
+    r"CREATE .*INDEX .*ON ([a-z_0-9]+)\s+\(", flags=re.IGNORECASE
 )
 INDEX_DELETION_REGEX = re.compile(r"DROP .*INDEX ([a-z_0-9]+)", flags=re.IGNORECASE)
 TABLE_CREATION_REGEX = re.compile(

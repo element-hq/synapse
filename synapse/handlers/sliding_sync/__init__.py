@@ -17,6 +17,7 @@ import logging
 from itertools import chain
 from typing import TYPE_CHECKING, AbstractSet, Mapping
 
+import attr
 from prometheus_client import Histogram
 from typing_extensions import assert_never
 
@@ -62,6 +63,7 @@ from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
     MutablePerConnectionState,
     PerConnectionState,
+    RoomLazyMembershipChanges,
     RoomSyncConfig,
     SlidingSyncConfig,
     SlidingSyncResult,
@@ -983,14 +985,15 @@ class SlidingSyncHandler:
         #
         # Calculate the `StateFilter` based on the `required_state` for the room
         required_state_filter = StateFilter.none()
-        # The requested `required_state_map` with the lazy membership expanded and
-        # `$ME` replaced with the user's ID. This allows us to see what membership we've
-        # sent down to the client in the next request.
-        #
-        # Make a copy so we can modify it. Still need to be careful to make a copy of
-        # the state key sets if we want to add/remove from them. We could make a deep
-        # copy but this saves us some work.
-        expanded_required_state_map = dict(room_sync_config.required_state_map)
+
+        # Keep track of which users' state we may need to fetch. We split this
+        # into explicit users and lazy loaded users.
+        explicit_user_state = set()
+        lazy_load_user_ids = set()
+
+        # Whether lazy-loading of room members is enabled.
+        lazy_load_room_members = False
+
         if room_membership_for_user_at_to_token.membership not in (
             Membership.INVITE,
             Membership.KNOCK,
@@ -1038,7 +1041,6 @@ class SlidingSyncHandler:
             else:
                 required_state_types: list[tuple[str, str | None]] = []
                 num_wild_state_keys = 0
-                lazy_load_room_members = False
                 num_others = 0
                 for (
                     state_type,
@@ -1070,43 +1072,60 @@ class SlidingSyncHandler:
                                             timeline_event.state_key
                                         )
 
+                            # The client needs to know the membership of everyone in
+                            # the timeline we're returning.
+                            lazy_load_user_ids.update(timeline_membership)
+
                             # Update the required state filter so we pick up the new
                             # membership
-                            for user_id in timeline_membership:
-                                required_state_types.append(
-                                    (EventTypes.Member, user_id)
-                                )
+                            if limited or initial:
+                                # If the timeline is limited, we only need to
+                                # return the membership changes for people in
+                                # the timeline.
+                                for user_id in timeline_membership:
+                                    required_state_types.append(
+                                        (EventTypes.Member, user_id)
+                                    )
+                            else:
+                                # For non-limited timelines we always return all
+                                # membership changes. This is so that clients
+                                # who have fetched the full membership list
+                                # already can continue to maintain it for
+                                # non-limited syncs.
+                                #
+                                # This assumes that for non-limited syncs there
+                                # won't be many membership changes that wouldn't
+                                # have been included already (this can only
+                                # happen if membership state was rolled back due
+                                # to state resolution anyway).
+                                #
+                                # `None` is a wildcard in the `StateFilter`
+                                required_state_types.append((EventTypes.Member, None))
 
-                            # Add an explicit entry for each user in the timeline
-                            #
-                            # Make a new set or copy of the state key set so we can
-                            # modify it without affecting the original
-                            # `required_state_map`
-                            expanded_required_state_map[EventTypes.Member] = (
-                                expanded_required_state_map.get(
-                                    EventTypes.Member, set()
+                                # Record the extra members we're returning.
+                                lazy_load_user_ids.update(
+                                    state_key
+                                    for event_type, state_key in room_state_delta_id_map
+                                    if event_type == EventTypes.Member
                                 )
-                                | timeline_membership
-                            )
-                        elif state_key == StateValues.ME:
+                        else:
                             num_others += 1
-                            required_state_types.append((state_type, user.to_string()))
+
                             # Replace `$ME` with the user's ID so we can deduplicate
                             # when someone requests the same state with `$ME` or with
                             # their user ID.
-                            #
-                            # Make a new set or copy of the state key set so we can
-                            # modify it without affecting the original
-                            # `required_state_map`
-                            expanded_required_state_map[EventTypes.Member] = (
-                                expanded_required_state_map.get(
-                                    EventTypes.Member, set()
-                                )
-                                | {user.to_string()}
+                            normalized_state_key = state_key
+                            if state_key == StateValues.ME:
+                                normalized_state_key = user.to_string()
+
+                            if state_type == EventTypes.Member:
+                                # Also track explicitly requested member state for
+                                # lazy membership tracking.
+                                explicit_user_state.add(normalized_state_key)
+
+                            required_state_types.append(
+                                (state_type, normalized_state_key)
                             )
-                        else:
-                            num_others += 1
-                            required_state_types.append((state_type, state_key))
 
                 set_tag(
                     SynapseTags.FUNC_ARG_PREFIX
@@ -1123,6 +1142,10 @@ class SlidingSyncHandler:
                 )
 
                 required_state_filter = StateFilter.from_types(required_state_types)
+
+        # Remove any explicitly requested user state from the lazy-loaded set,
+        # as we track them separately.
+        lazy_load_user_ids -= explicit_user_state
 
         # We need this base set of info for the response so let's just fetch it along
         # with the `required_state` for the room
@@ -1151,6 +1174,22 @@ class SlidingSyncHandler:
         # We can return all of the state that was requested if this was the first
         # time we've sent the room down this connection.
         room_state: StateMap[EventBase] = {}
+
+        # Includes the state for the heroes if we need them (may contain other
+        # state as well).
+        hero_membership_state: StateMap[EventBase] = {}
+
+        # By default we mark all required user state as being added when lazy
+        # loaded members is enabled.
+        #
+        # We may later update this to account for previously sent members.
+        returned_user_id_to_last_seen_ts_map = {}
+        if lazy_load_room_members:
+            returned_user_id_to_last_seen_ts_map = dict.fromkeys(lazy_load_user_ids)
+        new_connection_state.room_lazy_membership[room_id] = RoomLazyMembershipChanges(
+            returned_user_id_to_last_seen_ts_map=returned_user_id_to_last_seen_ts_map
+        )
+
         if initial:
             room_state = await self.get_current_state_at(
                 room_id=room_id,
@@ -1158,28 +1197,72 @@ class SlidingSyncHandler:
                 state_filter=state_filter,
                 to_token=to_token,
             )
+
+            # The `room_state` includes the hero membership state if needed.
+            # We'll later filter this down so we don't need to do so here.
+            hero_membership_state = room_state
         else:
+            assert from_token is not None
             assert from_bound is not None
 
             if prev_room_sync_config is not None:
+                # Define `required_user_state` as all user state we want, which
+                # is the explicitly requested members, any needed for lazy
+                # loading, and users whose membership has changed.s
+                all_required_user_state = explicit_user_state | lazy_load_user_ids
+                for state_type, state_key in room_state_delta_id_map:
+                    if state_type == EventTypes.Member:
+                        all_required_user_state.add(state_key)
+
+                # We need to know what user state we previously sent down the
+                # connection so we can determine what has changed.
+                #
+                # We don't just pull out the lazy loaded members here to handle
+                # the case where the client added explicit user state requests
+                # for users they already had lazy loaded.
+                if all_required_user_state:
+                    previously_returned_user_to_last_seen = (
+                        await self.store.get_sliding_sync_connection_lazy_members(
+                            connection_position=from_token.connection_position,
+                            room_id=room_id,
+                            user_ids=all_required_user_state,
+                        )
+                    )
+
+                    # Update the room lazy membership changes to track which
+                    # lazy loaded members were needed for this sync. This is so
+                    # that we can correctly track the last time we sent down
+                    # users' membership (and so can evict old membership state
+                    # from the DB tables).
+                    returned_user_id_to_last_seen_ts_map.update(
+                        previously_returned_user_to_last_seen
+                    )
+                else:
+                    previously_returned_user_to_last_seen = {}
+
                 # Check if there are any changes to the required state config
                 # that we need to handle.
-                changed_required_state_map, added_state_filter = (
-                    _required_state_changes(
-                        user.to_string(),
-                        prev_required_state_map=prev_room_sync_config.required_state_map,
-                        request_required_state_map=expanded_required_state_map,
-                        state_deltas=room_state_delta_id_map,
-                    )
+                changes_return = _required_state_changes(
+                    user.to_string(),
+                    prev_required_state_map=prev_room_sync_config.required_state_map,
+                    request_required_state_map=room_sync_config.required_state_map,
+                    previously_returned_lazy_user_ids=previously_returned_user_to_last_seen.keys(),
+                    lazy_load_user_ids=lazy_load_user_ids,
+                    state_deltas=room_state_delta_id_map,
                 )
+                changed_required_state_map = changes_return.required_state_map_change
 
-                if added_state_filter:
+                new_connection_state.room_lazy_membership[
+                    room_id
+                ].invalidated_user_ids = changes_return.lazy_members_invalidated
+
+                if changes_return.added_state_filter:
                     # Some state entries got added, so we pull out the current
                     # state for them. If we don't do this we'd only send down new deltas.
                     state_ids = await self.get_current_state_ids_at(
                         room_id=room_id,
                         room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
-                        state_filter=added_state_filter,
+                        state_filter=changes_return.added_state_filter,
                         to_token=to_token,
                     )
                     room_state_delta_id_map.update(state_ids)
@@ -1191,6 +1274,7 @@ class SlidingSyncHandler:
 
             # If the membership changed and we have to get heroes, get the remaining
             # heroes from the state
+            hero_membership_state = {}
             if hero_user_ids:
                 hero_membership_state = await self.get_current_state_at(
                     room_id=room_id,
@@ -1198,7 +1282,6 @@ class SlidingSyncHandler:
                     state_filter=StateFilter.from_types(hero_room_state),
                     to_token=to_token,
                 )
-                room_state.update(hero_membership_state)
 
         required_room_state: StateMap[EventBase] = {}
         if required_state_filter != StateFilter.none():
@@ -1221,7 +1304,7 @@ class SlidingSyncHandler:
         # Assemble heroes: extract the info from the state we just fetched
         heroes: list[SlidingSyncResult.RoomResult.StrippedHero] = []
         for hero_user_id in hero_user_ids:
-            member_event = room_state.get((EventTypes.Member, hero_user_id))
+            member_event = hero_membership_state.get((EventTypes.Member, hero_user_id))
             if member_event is not None:
                 heroes.append(
                     SlidingSyncResult.RoomResult.StrippedHero(
@@ -1283,7 +1366,7 @@ class SlidingSyncHandler:
             bump_stamp = 0
 
         room_sync_required_state_map_to_persist: Mapping[str, AbstractSet[str]] = (
-            expanded_required_state_map
+            room_sync_config.required_state_map
         )
         if changed_required_state_map:
             room_sync_required_state_map_to_persist = changed_required_state_map
@@ -1473,13 +1556,38 @@ class SlidingSyncHandler:
             return None
 
 
+@attr.s(auto_attribs=True)
+class _RequiredStateChangesReturn:
+    """Return type for _required_state_changes.
+
+    Attributes:
+        required_state_map_change: The updated required state map to store in
+            the room config, or None if there is no change.
+        added_state_filter: The state filter to use to fetch any additional
+            current state that needs to be returned to the client.
+        lazy_members_previously_returned: The set of user IDs we should add to
+            the lazy members cache that we had previously returned.
+        lazy_members_invalidated: The set of user IDs whose membership has
+            changed but we didn't send down, so we need to invalidate them from
+            the cache.
+    """
+
+    required_state_map_change: Mapping[str, AbstractSet[str]] | None
+    added_state_filter: StateFilter
+
+    lazy_members_previously_returned: AbstractSet[str] = frozenset()
+    lazy_members_invalidated: AbstractSet[str] = frozenset()
+
+
 def _required_state_changes(
     user_id: str,
     *,
     prev_required_state_map: Mapping[str, AbstractSet[str]],
     request_required_state_map: Mapping[str, AbstractSet[str]],
+    previously_returned_lazy_user_ids: AbstractSet[str],
+    lazy_load_user_ids: AbstractSet[str],
     state_deltas: StateMap[str],
-) -> tuple[Mapping[str, AbstractSet[str]] | None, StateFilter]:
+) -> _RequiredStateChangesReturn:
     """Calculates the changes between the required state room config from the
     previous requests compared with the current request.
 
@@ -1493,14 +1601,61 @@ def _required_state_changes(
     added, removed and then added again to the required state. In that case we
     only want to re-send that entry down sync if it has changed.
 
-    Returns:
-        A 2-tuple of updated required state config (or None if there is no update)
-        and the state filter to use to fetch extra current state that we need to
-        return.
+    Args:
+        user_id: The user ID of the user making the request.
+        prev_required_state_map: The required state map from the previous
+            request.
+        request_required_state_map: The required state map from the current
+            request.
+        previously_returned_lazy_user_ids: The set of user IDs whose membership
+            we have previously returned to the client due to lazy loading. This
+            is filtered to only include users who have either sent events in the
+            timeline, required state or whose membership changed.
+        lazy_load_user_ids: The set of user IDs whose lazy-loaded membership
+            is required for this request.
+        state_deltas: The state deltas that have changed in the room since the
+            previous request.
     """
+
+    # First we find any lazy members that have been invalidated due to state
+    # changes that we are not sending down.
+    lazy_members_invalidated = set()
+    for event_type, state_key in state_deltas:
+        if event_type != EventTypes.Member:
+            continue
+
+        if state_key in lazy_load_user_ids:
+            # Because it's part of the `required_user_state`, we're going to
+            # send this member change down.
+            continue
+
+        if state_key not in previously_returned_lazy_user_ids:
+            # We've not previously returned this member so nothing to
+            # invalidate.
+            continue
+
+        lazy_members_invalidated.add(state_key)
+
     if prev_required_state_map == request_required_state_map:
-        # There has been no change. Return immediately.
-        return None, StateFilter.none()
+        # There has been no change in state, just need to check lazy members.
+        newly_returned_lazy_members = (
+            lazy_load_user_ids - previously_returned_lazy_user_ids
+        )
+        if newly_returned_lazy_members:
+            # There are some new lazy members we need to fetch.
+            added_types: list[tuple[str, str | None]] = []
+            for new_user_id in newly_returned_lazy_members:
+                added_types.append((EventTypes.Member, new_user_id))
+
+            added_state_filter = StateFilter.from_types(added_types)
+        else:
+            added_state_filter = StateFilter.none()
+
+        return _RequiredStateChangesReturn(
+            required_state_map_change=None,
+            added_state_filter=added_state_filter,
+            lazy_members_invalidated=lazy_members_invalidated,
+        )
 
     prev_wildcard = prev_required_state_map.get(StateValues.WILDCARD, set())
     request_wildcard = request_required_state_map.get(StateValues.WILDCARD, set())
@@ -1510,17 +1665,29 @@ def _required_state_changes(
     # already fetching everything, we don't have to fetch anything now that they've
     # narrowed.
     if StateValues.WILDCARD in prev_wildcard:
-        return request_required_state_map, StateFilter.none()
+        return _RequiredStateChangesReturn(
+            required_state_map_change=request_required_state_map,
+            added_state_filter=StateFilter.none(),
+            lazy_members_invalidated=lazy_members_invalidated,
+        )
 
     # If a event type wildcard has been added or removed we don't try and do
     # anything fancy, and instead always update the effective room required
     # state config to match the request.
     if request_wildcard - prev_wildcard:
         # Some keys were added, so we need to fetch everything
-        return request_required_state_map, StateFilter.all()
+        return _RequiredStateChangesReturn(
+            required_state_map_change=request_required_state_map,
+            added_state_filter=StateFilter.all(),
+            lazy_members_invalidated=lazy_members_invalidated,
+        )
     if prev_wildcard - request_wildcard:
         # Keys were only removed, so we don't have to fetch everything.
-        return request_required_state_map, StateFilter.none()
+        return _RequiredStateChangesReturn(
+            required_state_map_change=request_required_state_map,
+            added_state_filter=StateFilter.none(),
+            lazy_members_invalidated=lazy_members_invalidated,
+        )
 
     # Contains updates to the required state map compared with the previous room
     # config. This has the same format as `RoomSyncConfig.required_state`
@@ -1529,6 +1696,11 @@ def _required_state_changes(
     # The set of types/state keys that we need to fetch and return to the
     # client. Passed to `StateFilter.from_types(...)`
     added: list[tuple[str, str | None]] = []
+
+    # Record any members that were previously explicitly tracked and should now
+    # be tracked as lazy members. This handles the case of membership changing
+    # from e.g. `{@alice:example.com}` to `{LAZY}`.
+    lazy_members_previously_returned: set[str] = set()
 
     # Convert the list of state deltas to map from type to state_keys that have
     # changed.
@@ -1551,6 +1723,39 @@ def _required_state_changes(
         if not request_state_keys - old_state_keys:
             # Nothing *added*, so we skip. Removals happen below.
             continue
+
+        # Handle the special case of adding LAZY membership, where we want to
+        # remember what explicit members we've previously sent down.
+        if event_type == EventTypes.Member:
+            old_state_key_lazy = StateValues.LAZY in old_state_keys
+            request_state_key_lazy = StateValues.LAZY in request_state_keys
+            if not old_state_key_lazy and request_state_key_lazy:
+                # We're adding a LAZY flag. We therefore add any previously
+                # explicit members we've sent down to lazy cache.
+                for state_key in old_state_keys:
+                    if (
+                        state_key == StateValues.WILDCARD
+                        or state_key == StateValues.LAZY
+                    ):
+                        # Ignore non-user IDs.
+                        continue
+
+                    if state_key == StateValues.ME:
+                        # Normalize to proper user ID
+                        state_key = user_id
+
+                    # We remember the user if either a) they haven't been
+                    # invalidated...
+                    if (EventTypes.Member, state_key) not in state_deltas:
+                        lazy_members_previously_returned.add(state_key)
+
+                    # ...or b) if we are going to send the delta down in this
+                    # sync.
+                    if state_key in lazy_load_user_ids:
+                        lazy_members_previously_returned.add(state_key)
+
+                changes[event_type] = request_state_keys
+                continue
 
         # We only remove state keys from the effective state if they've been
         # removed from the request *and* the state has changed. This ensures
@@ -1622,8 +1827,22 @@ def _required_state_changes(
                     # LAZY values should also be ignore for event types that are
                     # not membership.
                     pass
+                elif event_type == EventTypes.Member:
+                    if state_key not in previously_returned_lazy_user_ids:
+                        # Only add *explicit* members we haven't previously sent
+                        # down.
+                        added.append((event_type, state_key))
                 else:
                     added.append((event_type, state_key))
+
+    # We also need to pull out any lazy members that are now required but
+    # haven't previously been returned.
+    for required_user_id in (
+        lazy_load_user_ids
+        - previously_returned_lazy_user_ids
+        - lazy_members_previously_returned
+    ):
+        added.append((EventTypes.Member, required_user_id))
 
     added_state_filter = StateFilter.from_types(added)
 
@@ -1696,6 +1915,16 @@ def _required_state_changes(
                 # Remove entries with empty state keys.
                 new_required_state_map.pop(event_type, None)
 
-        return new_required_state_map, added_state_filter
+        return _RequiredStateChangesReturn(
+            required_state_map_change=new_required_state_map,
+            added_state_filter=added_state_filter,
+            lazy_members_invalidated=lazy_members_invalidated,
+            lazy_members_previously_returned=lazy_members_previously_returned,
+        )
     else:
-        return None, added_state_filter
+        return _RequiredStateChangesReturn(
+            required_state_map_change=None,
+            added_state_filter=added_state_filter,
+            lazy_members_invalidated=lazy_members_invalidated,
+            lazy_members_previously_returned=lazy_members_previously_returned,
+        )

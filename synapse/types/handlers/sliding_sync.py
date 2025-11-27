@@ -892,6 +892,43 @@ class PerConnectionState:
 
 
 @attr.s(auto_attribs=True)
+class RoomLazyMembershipChanges:
+    """Changes to lazily-loaded room memberships for a given room.
+
+    Attributes:
+        returned: Map from user ID to timestamp for users whose membership we
+            have lazily loaded. The timestamp indicates the time we previously
+            saw the membership if we have sent it down previously, or None if
+            we sent it down for the first time.
+
+            Note: this will include users whose membership we would have sent
+                down but didn't due to us having previously sent them.
+        invalidated: Set of user IDs whose latest membership we have *not* sent
+            down
+    """
+
+    # A map from user ID -> timestamp. Indicates that those memberships have
+    # been lazily loaded. I.e. that either a) we sent those memberships down, or
+    # b) we did so previously. The timestamp indicates the time we previously
+    # saw the membership.
+    #
+    # We track a *rough* `last_seen_ts` for each user in each room which
+    # indicates when we last would've sent their member state to the client.
+    # This is used so that we can remove members which haven't been seen for a
+    # while to save space.
+    returned_user_id_to_last_seen_ts_map: Mapping[str, int | None] = attr.Factory(dict)
+
+    # A set of user IDs whose membership change we have *not* sent
+    # down
+    invalidated_user_ids: AbstractSet[str] = attr.Factory(set)
+
+    def __bool__(self) -> bool:
+        return bool(
+            self.returned_user_id_to_last_seen_ts_map or self.invalidated_user_ids
+        )
+
+
+@attr.s(auto_attribs=True)
 class MutablePerConnectionState(PerConnectionState):
     """A mutable version of `PerConnectionState`"""
 
@@ -903,12 +940,19 @@ class MutablePerConnectionState(PerConnectionState):
 
     room_configs: typing.ChainMap[str, RoomSyncConfig]
 
+    # A map from room ID -> user ID -> timestamp. Indicates that those
+    # memberships have been lazily loaded. I.e. that either a) we sent those
+    # memberships down, or b) we did so previously. The timestamp indicates the
+    # time we previously saw the membership.
+    room_lazy_membership: dict[str, RoomLazyMembershipChanges] = attr.Factory(dict)
+
     def has_updates(self) -> bool:
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
             or bool(self.account_data.get_updates())
             or bool(self.get_room_config_updates())
+            or bool(self.room_lazy_membership)
         )
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:
