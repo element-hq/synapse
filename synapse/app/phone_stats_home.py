@@ -30,24 +30,20 @@ from twisted.internet import defer
 
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
-from synapse.util.constants import (
-    MILLISECONDS_PER_SECOND,
-    ONE_HOUR_SECONDS,
-    ONE_MINUTE_SECONDS,
-)
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger("synapse.app.homeserver")
 
-INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS = 5 * ONE_MINUTE_SECONDS
+INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME = Duration(minutes=5)
 """
 We wait 5 minutes to send the first set of stats as the server can be quite busy the
 first few minutes
 """
 
-PHONE_HOME_INTERVAL_SECONDS = 3 * ONE_HOUR_SECONDS
+PHONE_HOME_INTERVAL = Duration(hours=3)
 """
 Phone home stats are sent every 3 hours
 """
@@ -222,13 +218,13 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     # table will decrease
     clock.looping_call(
         hs.get_datastores().main.generate_user_daily_visits,
-        5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND,
+        Duration(minutes=5).as_millis(),
     )
 
     # monthly active user limiting functionality
     clock.looping_call(
         hs.get_datastores().main.reap_monthly_active_users,
-        ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND,
+        Duration(hours=1).as_millis(),
     )
     hs.get_datastores().main.reap_monthly_active_users()
 
@@ -274,7 +270,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
         logger.info("Scheduling stats reporting for 3 hour intervals")
         clock.looping_call(
             phone_stats_home,
-            PHONE_HOME_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND,
+            PHONE_HOME_INTERVAL.as_millis(),
             hs,
             stats,
         )
@@ -289,7 +285,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
         # We wait 5 minutes to send the first set of stats as the server can
         # be quite busy the first few minutes
         clock.call_later(
-            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS,
+            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME.as_secs(),
             phone_stats_home,
             hs,
             stats,

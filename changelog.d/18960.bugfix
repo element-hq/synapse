@@ -1,0 +1,1 @@
+Fix a bug in the database function for fetching state deltas that could result in unnecessarily long query times.
