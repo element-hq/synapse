@@ -184,6 +184,10 @@ packages = [{ include = "synapse" }]
 script = "build_rust.py"
 generate-setup-file = true
 
+# Dependencies used for developing Synapse itself.
+#
+# Hold off on migrating these to `dev-dependencies` (PEP 735) for now until
+# Poetry 2.2.0+, pip 25.1+ are more widely available.
 [tool.poetry.group.dev.dependencies]
 # We pin development dependencies in poetry.lock so that our tests don't start
 # failing on new releases. Keeping lower bounds loose here means that dependabot
