@@ -95,7 +95,7 @@ class KeyringTestCase(unittest.HomeserverTestCase):
     def test_verify_json_objects_for_server_awaits_previous_requests(self) -> None:
         mock_fetcher = Mock()
         mock_fetcher.get_keys = Mock()
-        kr = keyring.Keyring(self.hs, key_fetchers=(mock_fetcher,))
+        kr = keyring.Keyring(self.hs, test_only_key_fetchers=(mock_fetcher,))
 
         # a signed object that we are going to try to validate
         key1 = signedjson.key.generate_signing_key("1")
@@ -286,7 +286,7 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         mock_fetcher = Mock()
         mock_fetcher.get_keys = Mock(side_effect=get_keys)
         kr = keyring.Keyring(
-            self.hs, key_fetchers=(StoreKeyFetcher(self.hs), mock_fetcher)
+            self.hs, test_only_key_fetchers=(StoreKeyFetcher(self.hs), mock_fetcher)
         )
 
         # sign the json
@@ -313,7 +313,7 @@ class KeyringTestCase(unittest.HomeserverTestCase):
 
         mock_fetcher = Mock()
         mock_fetcher.get_keys = Mock(side_effect=get_keys)
-        kr = keyring.Keyring(self.hs, key_fetchers=(mock_fetcher,))
+        kr = keyring.Keyring(self.hs, test_only_key_fetchers=(mock_fetcher,))
 
         json1: JsonDict = {}
         signedjson.sign.sign_json(json1, "server1", key1)
@@ -363,7 +363,9 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         mock_fetcher1.get_keys = Mock(side_effect=get_keys1)
         mock_fetcher2 = Mock()
         mock_fetcher2.get_keys = Mock(side_effect=get_keys2)
-        kr = keyring.Keyring(self.hs, key_fetchers=(mock_fetcher1, mock_fetcher2))
+        kr = keyring.Keyring(
+            self.hs, test_only_key_fetchers=(mock_fetcher1, mock_fetcher2)
+        )
 
         json1: JsonDict = {}
         signedjson.sign.sign_json(json1, "server1", key1)
