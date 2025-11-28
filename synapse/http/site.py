@@ -19,6 +19,7 @@
 #
 #
 import contextlib
+import json
 import logging
 import time
 from http import HTTPStatus
@@ -36,6 +37,7 @@ from twisted.web.http import HTTPChannel
 from twisted.web.resource import IResource, Resource
 from twisted.web.server import Request
 
+from synapse.api.errors import Codes
 from synapse.config.server import ListenerConfig
 from synapse.http import get_request_user_agent, redact_uri
 from synapse.http.proxy import ProxySite
@@ -146,34 +148,93 @@ class SynapseRequest(Request):
 
     # Twisted machinery: this method is called by the Channel once the full request has
     # been received, to dispatch the request to a resource.
-    #
-    # We're patching Twisted to bail/abort early when we see someone trying to upload
-    # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
-    # in-memory (specific problem of this specific `Content-Type`). This protects us
-    # from an attacker uploading something bigger than the available RAM and crashing
-    # the server with a `MemoryError`, or carefully block just enough resources to cause
-    # all other requests to fail.
-    #
-    # FIXME: This can be removed once we Twisted releases a fix and we update to a
-    # version that is patched
     def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
+        # In the case of a Content-Length header being present, and it's value being too
+        # large, this will make debugging issues due to overly large requests much
+        # easier. Currently we handle such cases in `handleContentChunk` and abort the
+        # connection without providing a proper HTTP response.
+        #
+        # Attempting to write an HTTP response from within `handleContentChunk` does not
+        # work, so the code here has been added to at least provide a response in the
+        # case of the Content-Length header being present.
+        content_length_headers = self.requestHeaders.getRawHeaders(b"Content-Length")
+        if content_length_headers is not None:
+            if len(content_length_headers) != 1:
+                logger.warning(
+                    "Dropping request from %s because it contains multiple Content-Length headers: %s %s",
+                    self.client,
+                    command.decode("ascii", errors="replace"),
+                    self.get_redacted_uri(),
+                )
+                self.loseConnection()
+                return
+
+            try:
+                content_length = int(content_length_headers[0])
+                if content_length > self._max_request_body_size:
+                    self.method, self.uri = command, path
+                    self.clientproto = version
+                    logger.warning(
+                        "Rejecting request from %s because Content-Length %d exceeds maximum size %d: %s %s",
+                        self.client,
+                        content_length,
+                        self._max_request_body_size,
+                        self.get_method(),
+                        self.get_redacted_uri(),
+                    )
+
+                    self.code = HTTPStatus.REQUEST_ENTITY_TOO_LARGE.value
+                    self.code_message = bytes(
+                        HTTPStatus.REQUEST_ENTITY_TOO_LARGE.phrase, "ascii"
+                    )
+
+                    error_response_json = {
+                        "errcode": Codes.TOO_LARGE,
+                        "error": "Request content is too large",
+                    }
+                    error_response_bytes = (json.dumps(error_response_json)).encode()
+
+                    self.responseHeaders.setRawHeaders(
+                        b"Content-Type", [b"application/json"]
+                    )
+                    self.responseHeaders.setRawHeaders(
+                        b"content-length", [f"{len(error_response_bytes)}"]
+                    )
+                    self.write(error_response_bytes)
+                    self.loseConnection()
+                    return
+            except ValueError:
+                # Invalid Content-Length header, let it proceed
+                pass
+
+        # We're patching Twisted to bail/abort early when we see someone trying to upload
+        # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
+        # in-memory (specific problem of this specific `Content-Type`). This protects us
+        # from an attacker uploading something bigger than the available RAM and crashing
+        # the server with a `MemoryError`, or carefully block just enough resources to cause
+        # all other requests to fail.
+        #
+        # FIXME: This can be removed once Twisted releases a fix and we update to a
+        # version that is patched
+        # See: https://github.com/element-hq/synapse/security/advisories/GHSA-rfq8-j7rh-8hf2
         if command == b"POST":
             ctype = self.requestHeaders.getRawHeaders(b"content-type")
             if ctype and b"multipart/form-data" in ctype[0]:
                 self.method, self.uri = command, path
                 self.clientproto = version
+                logger.warning(
+                    "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
+                    self.client,
+                    self.get_method(),
+                    self.get_redacted_uri(),
+                )
+
                 self.code = HTTPStatus.UNSUPPORTED_MEDIA_TYPE.value
                 self.code_message = bytes(
                     HTTPStatus.UNSUPPORTED_MEDIA_TYPE.phrase, "ascii"
                 )
-                self.responseHeaders.setRawHeaders(b"content-length", [b"0"])
 
-                logger.warning(
-                    "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
-                    self.client,
-                    command,
-                    path,
-                )
+                self.responseHeaders.setRawHeaders(b"content-length", [b"0"])
                 self.write(b"")
                 self.loseConnection()
                 return
