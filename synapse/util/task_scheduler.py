@@ -139,6 +139,12 @@ class TaskScheduler:
             hook=lambda: {(self.server_name,): len(self._running_tasks)},
         )
 
+        if hs.config.ratelimiting.override_max_concurrent_running_tasks is not None:
+            TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS = (
+                hs.config.ratelimiting.override_max_concurrent_running_tasks
+            )
+        logger.warning("Max concurrent running tasks: %s, override: %s", TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS, hs.config.ratelimiting.override_max_concurrent_running_tasks)
+
     def register_action(
         self,
         function: Callable[
