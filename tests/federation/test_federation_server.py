@@ -30,6 +30,7 @@ from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import FederationError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
+from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import EventBase, make_event_from_dict
 from synapse.federation.federation_base import event_from_pdu_json
 from synapse.http.types import QueryParams
@@ -384,6 +385,13 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
             join_event_dict,
             KNOWN_ROOM_VERSIONS[room_version],
         )
+        if room_version in ["1", "2"]:
+            add_hashes_and_signatures(
+                KNOWN_ROOM_VERSIONS[room_version],
+                join_event_dict,
+                signature_name=self.hs.hostname,
+                signing_key=self.hs.signing_key,
+            )
         channel = self.make_signed_federation_request(
             "PUT",
             f"/_matrix/federation/v2/send_join/{room_id}/x",
@@ -426,39 +434,13 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         r = self.get_success(self._storage_controllers.state.get_current_state(room_id))
         self.assertEqual(r[("m.room.member", joining_user)].membership, "join")
 
-    @parameterized.expand(
-        [
-            ("3"),
-            ("4"),
-            ("5"),
-            ("6"),
-            ("7"),
-            ("8"),
-            ("9"),
-            ("10"),
-            ("11"),
-            ("12"),
-        ]
-    )
+    @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys()])
     @override_config({"use_frozen_dicts": True})
     def test_send_join_with_frozen_dicts(self, room_version: str) -> None:
         """Test send_join with USE_FROZEN_DICTS=True"""
         self._test_send_join_common(room_version)
 
-    @parameterized.expand(
-        [
-            ("3"),
-            ("4"),
-            ("5"),
-            ("6"),
-            ("7"),
-            ("8"),
-            ("9"),
-            ("10"),
-            ("11"),
-            ("12"),
-        ]
-    )
+    @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys()])
     @override_config({"use_frozen_dicts": False})
     def test_send_join_without_frozen_dicts(self, room_version: str) -> None:
         """Test send_join with USE_FROZEN_DICTS=False"""
