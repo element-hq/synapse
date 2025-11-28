@@ -110,7 +110,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: "3.x"
-      - run: "pip install 'click==8.1.1' 'GitPython>=3.1.20'"
+      - run: "pip install 'click==8.1.1' 'GitPython>=3.1.20' 'sqlglot>=28.0.0'"
       - run: scripts-dev/check_schema_delta.py --force-colors
 
   check-lockfile:
