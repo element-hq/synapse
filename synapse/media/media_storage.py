@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 from contextlib import closing
 from io import BytesIO
 from types import TracebackType
@@ -49,16 +50,16 @@ from twisted.internet.interfaces import IConsumer
 from synapse.api.errors import NotFoundError
 from synapse.logging.context import defer_to_thread, run_in_background
 from synapse.logging.opentracing import start_active_span, trace, trace_with_opname
-from synapse.media._base import ThreadedFileSender
+from synapse.media.storage_provider import FileStorageProviderBackend
 from synapse.util.clock import Clock
 from synapse.util.file_consumer import BackgroundFileConsumer
 
 from ..types import JsonDict
-from ._base import FileInfo, Responder
+from ._base import FileInfo, Responder, ThreadedFileSender
 from .filepath import MediaFilePaths
 
 if TYPE_CHECKING:
-    from synapse.media.storage_provider import StorageProvider
+    from synapse.media.storage_provider import StorageProviderWrapper
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -149,11 +150,10 @@ class SHA256TransparentIOReader:
 
 
 class MediaStorage:
-    """Responsible for storing/fetching files from local sources.
+    """Responsible for storing/fetching files from storage providers.
 
     Args:
         hs
-        local_media_directory: Base path where we store media on disk
         filepaths
         storage_providers: List of StorageProvider that are used to fetch and store files.
     """
@@ -161,15 +161,20 @@ class MediaStorage:
     def __init__(
         self,
         hs: "HomeServer",
-        local_media_directory: str,
         filepaths: MediaFilePaths,
-        storage_providers: Sequence["StorageProvider"],
+        storage_providers: Sequence["StorageProviderWrapper"],
     ):
         self.hs = hs
         self.reactor = hs.get_reactor()
-        self.local_media_directory = local_media_directory
         self.filepaths = filepaths
-        self.storage_providers = storage_providers
+        self.storage_providers = list(storage_providers)
+        self.local_provider = None
+        self.local_media_directory = None
+        for provider in self.storage_providers:
+            if isinstance(provider.backend, FileStorageProviderBackend):
+                self.local_provider = provider
+                self.local_media_directory = provider.backend.base_directory
+                break
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.clock = hs.get_clock()
 
@@ -221,46 +226,75 @@ class MediaStorage:
         """
 
         path = self._file_info_to_path(file_info)
-        fname = os.path.join(self.local_media_directory, path)
 
-        dirname = os.path.dirname(fname)
-        os.makedirs(dirname, exist_ok=True)
+        if self.local_provider:
+            fname = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+            dirname = os.path.dirname(fname)
+            os.makedirs(dirname, exist_ok=True)
 
-        try:
-            with start_active_span("writing to main media repo"):
-                with open(fname, "wb") as f:
-                    yield f, fname
+            try:
+                with start_active_span("writing to main media repo"):
+                    with open(fname, "wb") as f:
+                        yield f, fname
 
-            with start_active_span("writing to other storage providers"):
-                spam_check = (
-                    await self._spam_checker_module_callbacks.check_media_file_for_spam(
+                with start_active_span(
+                    "spam checking and writing to other storage providers"
+                ):
+                    spam_check = await self._spam_checker_module_callbacks.check_media_file_for_spam(
                         ReadableFileWrapper(self.clock, fname), file_info
                     )
-                )
-                if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
-                    logger.info("Blocking media due to spam checker")
-                    # Note that we'll delete the stored media, due to the
-                    # try/except below. The media also won't be stored in
-                    # the DB.
-                    # We currently ignore any additional field returned by
-                    # the spam-check API.
-                    raise SpamMediaException(errcode=spam_check[0])
+                    if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                        logger.info("Blocking media due to spam checker")
+                        # Note that we'll delete the stored media, due to the
+                        # try/except below. The media also won't be stored in
+                        # the DB.
+                        # We currently ignore any additional field returned by
+                        # the spam-check API.
+                        raise SpamMediaException(errcode=spam_check[0])
 
-                for provider in self.storage_providers:
-                    with start_active_span(str(provider)):
-                        await provider.store_file(path, file_info)
+                    for provider in self.storage_providers:
+                        if provider is not self.local_provider:
+                            with start_active_span(str(provider)):
+                                await provider.store_file(path, file_info)
 
-        except Exception as e:
+            except Exception as e:
+                try:
+                    os.remove(fname)
+                except Exception:
+                    pass
+
+                raise e from None
+        else:
+            # No local provider, write to temp file
+            with tempfile.NamedTemporaryFile(delete=False) as f:
+                fname = f.name
+                yield cast(BinaryIO, f), fname
+
             try:
-                os.remove(fname)
-            except Exception:
-                pass
+                with start_active_span(
+                    "spam checking and writing to storage providers"
+                ):
+                    spam_check = await self._spam_checker_module_callbacks.check_media_file_for_spam(
+                        ReadableFileWrapper(self.clock, fname), file_info
+                    )
+                    if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                        logger.info("Blocking media due to spam checker")
+                        raise SpamMediaException(errcode=spam_check[0])
 
-            raise e from None
+                    for provider in self.storage_providers:
+                        with start_active_span(str(provider)):
+                            await provider.store_file(path, file_info)
+
+            except Exception as e:
+                try:
+                    os.remove(fname)
+                except Exception:
+                    pass
+
+                raise e from None
 
     async def fetch_media(self, file_info: FileInfo) -> Responder | None:
-        """Attempts to fetch media described by file_info from the local cache
-        and configured storage providers.
+        """Attempts to fetch media described by file_info from the configured storage providers.
 
         Args:
             file_info: Metadata about the media file
@@ -268,6 +302,18 @@ class MediaStorage:
         Returns:
             Returns a Responder if the file was found, otherwise None.
         """
+        # URL cache files are stored locally and should not go through storage providers
+        if file_info.url_cache:
+            path = self._file_info_to_path(file_info)
+            if self.local_provider:
+                local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+                if os.path.isfile(local_path):
+                    # Import here to avoid circular import
+                    from .media_storage import FileResponder
+
+                    return FileResponder(self.hs, open(local_path, "rb"))
+            return None
+
         paths = [self._file_info_to_path(file_info)]
 
         # fallback for remote thumbnails with no method in the filename
@@ -281,13 +327,6 @@ class MediaStorage:
                     content_type=file_info.thumbnail.type,
                 )
             )
-
-        for path in paths:
-            local_path = os.path.join(self.local_media_directory, path)
-            if os.path.exists(local_path):
-                logger.debug("responding with local file %s", local_path)
-                return FileResponder(self.hs, open(local_path, "rb"))
-            logger.debug("local file %s did not exist", local_path)
 
         for provider in self.storage_providers:
             for path in paths:
@@ -311,39 +350,61 @@ class MediaStorage:
             Full path to local file
         """
         path = self._file_info_to_path(file_info)
-        local_path = os.path.join(self.local_media_directory, path)
-        if os.path.exists(local_path):
-            return local_path
-
-        # Fallback for paths without method names
-        # Should be removed in the future
-        if file_info.thumbnail and file_info.server_name:
-            legacy_path = self.filepaths.remote_media_thumbnail_rel_legacy(
-                server_name=file_info.server_name,
-                file_id=file_info.file_id,
-                width=file_info.thumbnail.width,
-                height=file_info.thumbnail.height,
-                content_type=file_info.thumbnail.type,
-            )
-            legacy_local_path = os.path.join(self.local_media_directory, legacy_path)
-            if os.path.exists(legacy_local_path):
-                return legacy_local_path
-
-        dirname = os.path.dirname(local_path)
-        os.makedirs(dirname, exist_ok=True)
-
-        for provider in self.storage_providers:
-            res: Any = await provider.fetch(path, file_info)
-            if res:
-                with res:
-                    consumer = BackgroundFileConsumer(
-                        open(local_path, "wb"), self.reactor
-                    )
-                    await res.write_to_consumer(consumer)
-                    await consumer.wait()
+        if self.local_provider:
+            local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+            if os.path.exists(local_path):
                 return local_path
 
-        raise NotFoundError()
+            # Fallback for paths without method names
+            # Should be removed in the future
+            if file_info.thumbnail and file_info.server_name:
+                legacy_path = self.filepaths.remote_media_thumbnail_rel_legacy(
+                    server_name=file_info.server_name,
+                    file_id=file_info.file_id,
+                    width=file_info.thumbnail.width,
+                    height=file_info.thumbnail.height,
+                    content_type=file_info.thumbnail.type,
+                )
+                legacy_local_path = os.path.join(
+                    self.local_media_directory,  # type: ignore[arg-type]
+                    legacy_path,
+                )
+                if os.path.exists(legacy_local_path):
+                    return legacy_local_path
+
+            dirname = os.path.dirname(local_path)
+            os.makedirs(dirname, exist_ok=True)
+
+            for provider in self.storage_providers:
+                if provider is self.local_provider:
+                    continue
+                remote_res: Any = await provider.fetch(path, file_info)
+                if remote_res:
+                    with remote_res:
+                        consumer = BackgroundFileConsumer(
+                            open(local_path, "wb"), self.reactor
+                        )
+                        await remote_res.write_to_consumer(consumer)
+                        await consumer.wait()
+                    return local_path
+
+            raise NotFoundError()
+        else:
+            # No local provider, download to temp
+            for provider in self.storage_providers:
+                res: Any = await provider.fetch(path, file_info)
+                if res:
+                    temp_dir = tempfile.gettempdir()
+                    temp_path = os.path.join(temp_dir, os.path.basename(path))
+                    with res:
+                        consumer = BackgroundFileConsumer(
+                            open(temp_path, "wb"), self.reactor
+                        )
+                        await res.write_to_consumer(consumer)
+                        await consumer.wait()
+                    return temp_path
+
+            raise NotFoundError()
 
     @trace
     def _file_info_to_path(self, file_info: FileInfo) -> str:

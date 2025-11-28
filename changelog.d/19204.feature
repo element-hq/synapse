@@ -1,0 +1,1 @@
+Made the local media directory optional by treating it as a storage provider. This allows off-site media storage without local cache, where media is stored directly to remote providers only, with temporary files used for thumbnail generation when needed. Contributed by Patrice Brend'amour @dr.allgood.
