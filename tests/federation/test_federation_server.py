@@ -358,15 +358,15 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
 
     def _test_send_join_common(self, room_version: str) -> None:
         """happy-path test of send_join"""
-        creator_user_id = self.register_user("kermit_vx", "test")
-        tok = self.login("kermit_vx", "test")
+        creator_user_id = self.register_user(f"kermit_v{room_version}", "test")
+        tok = self.login(f"kermit_v{room_version}", "test")
         room_id = self.helper.create_room_as(
             room_creator=creator_user_id, tok=tok, room_version=room_version
         )
 
         # Second member joins
-        second_member_user_id = self.register_user("fozzie_vx", "bear")
-        tok2 = self.login("fozzie_vx", "bear")
+        second_member_user_id = self.register_user(f"fozzie_v{room_version}", "bear")
+        tok2 = self.login(f"fozzie_v{room_version}", "bear")
         self.helper.join(room_id, second_member_user_id, tok=tok2)
 
         # Make join for remote user
@@ -402,8 +402,8 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
                 ("m.room.power_levels", ""),
                 ("m.room.join_rules", ""),
                 ("m.room.history_visibility", ""),
-                ("m.room.member", "@kermit_vx:test"),
-                ("m.room.member", "@fozzie_vx:test"),
+                ("m.room.member", f"@kermit_v{room_version}:test"),
+                ("m.room.member", f"@fozzie_v{room_version}:test"),
                 # nb: *not* the joining user
             ],
         )
@@ -416,7 +416,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
             returned_auth_chain_events,
             [
                 ("m.room.create", ""),
-                ("m.room.member", "@kermit_vx:test"),
+                ("m.room.member", f"@kermit_v{room_version}:test"),
                 ("m.room.power_levels", ""),
                 ("m.room.join_rules", ""),
             ],
