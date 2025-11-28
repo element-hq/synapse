@@ -195,12 +195,14 @@ async def filter_events_for_client(
 
         # Filter out call invites in public rooms, as this would potentially
         # ring a lot of users.
-        if (
-            event.type == EventTypes.CallInvite
-            and not event.is_state()
-        ):
+        if event.type == EventTypes.CallInvite and not event.is_state():
             # `state_after_event` should only be None if the event is an outlier,
-            # and call invites should not be outliers.
+            # and earlier code should filter out outliers entirely.
+            #
+            # In addition, we only create outliers locally for out-of-band
+            # invite rejections, invites received over federation, or state
+            # events needed to authorise other events. None of this applies to
+            # call invites.
             assert state_after_event is not None
 
             room_join_rules = state_after_event.get((EventTypes.JoinRules, ""))
