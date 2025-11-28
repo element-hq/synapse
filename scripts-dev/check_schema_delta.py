@@ -166,12 +166,15 @@ def check_schema_delta(delta_files: list[str], force_colors: bool) -> bool:
     Index creation is only allowed on tables created in the same set of deltas.
 
     Index deletion is never allowed and should be done in background updates.
+
+    Returns:
+        True if all checks succeeded, False if at least one failed.
     """
 
     # The tables created in this delta
     created_tables = set[str]()
 
-    # The indices created/dropped in this delta, a tuple of (table_name, sql)
+    # The indices created/dropped in this delta, each a tuple of (table_name, sql)
     created_indices = list[tuple[str, str]]()
 
     # The indices dropped in this delta, just the sql
