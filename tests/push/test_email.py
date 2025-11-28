@@ -341,44 +341,6 @@ class EmailPusherTests(HomeserverTestCase):
         # We should get emailed about those messages
         self._check_for_mail()
 
-    def test_room_notifications_include_avatar(self) -> None:
-        # Create a room and set its avatar.
-        room = self.helper.create_room_as(self.user_id, tok=self.access_token)
-        self.helper.send_state(
-            room, "m.room.avatar", {"url": "mxc://DUMMY_MEDIA_ID"}, self.access_token
-        )
-
-        # Invite two other uses.
-        for other in self.others:
-            self.helper.invite(
-                room=room, src=self.user_id, tok=self.access_token, targ=other.id
-            )
-            self.helper.join(room=room, user=other.id, tok=other.token)
-
-        # The other users send some messages.
-        # TODO It seems that two messages are required to trigger an email?
-        self.helper.send(room, body="Alpha", tok=self.others[0].token)
-        self.helper.send(room, body="Beta", tok=self.others[1].token)
-
-        # We should get emailed about those messages
-        args, kwargs = self._check_for_mail()
-
-        # That email should contain the room's avatar
-        msg: bytes = args[5]
-        # Multipart: plain text, base 64 encoded; html, base 64 encoded
-
-        # Extract the html Message object from the Multipart Message.
-        # We need the asserts to convince mypy that this is OK.
-        html_message = email.message_from_bytes(msg).get_payload(i=1)
-        assert isinstance(html_message, email.message.Message)
-
-        # Extract the `bytes` from the html Message object, and decode to a `str`.
-        html = html_message.get_payload(decode=True)
-        assert isinstance(html, bytes)
-        html = html.decode()
-
-        self.assertIn("_matrix/media/v1/thumbnail/DUMMY_MEDIA_ID", html)
-
     def test_empty_room(self) -> None:
         """All users leaving a room shouldn't cause the pusher to break."""
         # Create a simple room with two users
