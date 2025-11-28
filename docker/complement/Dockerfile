@@ -11,7 +11,7 @@ ARG SYNAPSE_VERSION=latest
 ARG FROM=matrixdotorg/synapse-workers:$SYNAPSE_VERSION
 ARG DEBIAN_VERSION=trixie
 
-FROM docker.io/library/postgres:14-${DEBIAN_VERSION} AS postgres_base
+FROM docker.io/library/postgres:13-${DEBIAN_VERSION} AS postgres_base
 
 FROM $FROM
 # First of all, we copy postgres server from the official postgres image,
@@ -26,7 +26,7 @@ RUN adduser --system --uid 999 postgres --home /var/lib/postgresql
 COPY --from=postgres_base /usr/lib/postgresql /usr/lib/postgresql
 COPY --from=postgres_base /usr/share/postgresql /usr/share/postgresql
 COPY --from=postgres_base --chown=postgres /var/run/postgresql /var/run/postgresql
-ENV PATH="${PATH}:/usr/lib/postgresql/14/bin"
+ENV PATH="${PATH}:/usr/lib/postgresql/13/bin"
 ENV PGDATA=/var/lib/postgresql/data
 
 # We also initialize the database at build time, rather than runtime, so that it's faster to spin up the image.

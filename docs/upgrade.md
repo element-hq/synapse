@@ -136,6 +136,15 @@ disabled by default.  If you rely on this unstable endpoint, you must now set
 `experimental_features.msc2666_enabled: true` in your configuration to keep
 using it.
 
+# Upgrading to v1.143.1
+
+## PostgreSQL 13 support
+
+While in line with our [deprecation policy](deprecation_policy.md), we will be
+dropping support for PostgreSQL 13 as it is no longer supported upstream, synapse
+will log a warning when detecting PostgreSQL 13. Fully removing support will be done
+in an upcoming release.
+
 # Upgrading to v1.143.0
 
 ## Dropping support for PostgreSQL 13
