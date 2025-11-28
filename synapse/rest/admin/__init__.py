@@ -73,6 +73,7 @@ from synapse.rest.admin.registration_tokens import (
     NewRegistrationTokenRestServlet,
     RegistrationTokenRestServlet,
 )
+from synapse.rest.admin.room_reports import RoomReportsRestServlet
 from synapse.rest.admin.rooms import (
     AdminRoomHierarchy,
     BlockRoomRestServlet,
@@ -307,6 +308,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     LargestRoomsStatistics(hs).register(http_server)
     EventReportDetailRestServlet(hs).register(http_server)
     EventReportsRestServlet(hs).register(http_server)
+    RoomReportsRestServlet(hs).register(http_server)
     AccountDataRestServlet(hs).register(http_server)
     PushersRestServlet(hs).register(http_server)
     MakeRoomAdminRestServlet(hs).register(http_server)
