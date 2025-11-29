@@ -161,13 +161,17 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4069": self.config.experimental.msc4069_profile_inhibit_propagation,
                     # Allows clients to handle push for encrypted events.
                     "org.matrix.msc4028": self.config.experimental.msc4028_push_encrypted_events,
-                    # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+                    # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version
                     "org.matrix.msc4108": (
                         self.config.experimental.msc4108_enabled
                         or (
                             self.config.experimental.msc4108_delegation_endpoint
                             is not None
                         )
+                    ),
+                    # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2025 version
+                    "io.element.msc4108": (
+                        self.config.experimental.msc4108v2025_enabled
                     ),
                     # MSC4140: Delayed events
                     "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
