@@ -42,6 +42,7 @@ from synapse.state.v2 import (
 )
 from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import EventID, StateMap
+from synapse.util.duration import Duration
 
 from tests import unittest
 
@@ -61,7 +62,7 @@ ORIGIN_SERVER_TS = 0
 
 
 class FakeClock:
-    async def sleep(self, msec: float) -> None:
+    async def sleep(self, duration: Duration) -> None:
         return None
 
 

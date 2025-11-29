@@ -77,6 +77,7 @@ from synapse.logging.context import run_in_background
 from synapse.storage.databases.main import DataStore
 from synapse.types import DeviceListUpdates, JsonMapping
 from synapse.util.clock import Clock, DelayedCallWrapper
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -504,7 +505,7 @@ class _Recoverer:
         self.scheduled_recovery: DelayedCallWrapper | None = None
 
     def recover(self) -> None:
-        delay = 2**self.backoff_counter
+        delay = Duration(seconds=2**self.backoff_counter)
         logger.info("Scheduling retries on %s in %fs", self.service.id, delay)
         self.scheduled_recovery = self.clock.call_later(
             delay,

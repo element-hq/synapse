@@ -74,6 +74,7 @@ from synapse.storage.databases.main.registration import (
 from synapse.types import JsonDict, Requester, StrCollection, UserID
 from synapse.util import stringutils as stringutils
 from synapse.util.async_helpers import delay_cancellation, maybe_awaitable
+from synapse.util.duration import Duration
 from synapse.util.msisdn import phone_number_to_msisdn
 from synapse.util.stringutils import base62_encode
 from synapse.util.threepids import canonicalise_email
@@ -242,7 +243,7 @@ class AuthHandler:
         if hs.config.worker.run_background_tasks:
             self._clock.looping_call(
                 run_as_background_process,
-                5 * 60 * 1000,
+                Duration(minutes=5),
                 "expire_old_sessions",
                 self.server_name,
                 self._expire_old_sessions,

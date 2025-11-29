@@ -83,6 +83,7 @@ from synapse.types.state import StateFilter
 from synapse.util import log_failure, unwrapFirstError
 from synapse.util.async_helpers import Linearizer, gather_results
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.duration import Duration
 from synapse.util.json import json_decoder, json_encoder
 from synapse.util.metrics import measure_func
 from synapse.visibility import get_effective_room_visibility_from_state
@@ -433,14 +434,11 @@ class MessageHandler:
 
         # Figure out how many seconds we need to wait before expiring the event.
         now_ms = self.clock.time_msec()
-        delay = (expiry_ts - now_ms) / 1000
+        delay = Duration(milliseconds=max(expiry_ts - now_ms, 0))
 
-        # callLater doesn't support negative delays, so trim the delay to 0 if we're
-        # in that case.
-        if delay < 0:
-            delay = 0
-
-        logger.info("Scheduling expiry for event %s in %.3fs", event_id, delay)
+        logger.info(
+            "Scheduling expiry for event %s in %.3fs", event_id, delay.as_secs()
+        )
 
         self._scheduled_expiry = self.clock.call_later(
             delay,
@@ -551,7 +549,7 @@ class EventCreationHandler:
                     "send_dummy_events_to_fill_extremities",
                     self._send_dummy_events_to_fill_extremities,
                 ),
-                5 * 60 * 1000,
+                Duration(minutes=5),
             )
 
         self._message_handler = hs.get_message_handler()
@@ -1012,7 +1010,7 @@ class EventCreationHandler:
 
         if not ignore_shadow_ban and requester.shadow_banned:
             # We randomly sleep a bit just to annoy the requester.
-            await self.clock.sleep(random.randint(1, 10))
+            await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
             raise ShadowBanError()
 
         room_version = None
@@ -1515,7 +1513,7 @@ class EventCreationHandler:
                 and requester.shadow_banned
             ):
                 # We randomly sleep a bit just to annoy the requester.
-                await self.clock.sleep(random.randint(1, 10))
+                await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
                 raise ShadowBanError()
 
             if event.is_state():

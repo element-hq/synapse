@@ -72,7 +72,7 @@ class WorkerLocksHandler:
         # that lock.
         self._locks: dict[tuple[str, str], WeakSet[WaitingLock | WaitingMultiLock]] = {}
 
-        self._clock.looping_call(self._cleanup_locks, 30_000)
+        self._clock.looping_call(self._cleanup_locks, Duration(seconds=30))
 
         self._notifier.add_lock_released_callback(self._on_lock_released)
 
@@ -187,7 +187,7 @@ class WorkerLocksHandler:
                 lock.release_lock()
 
         self._clock.call_later(
-            0,
+            Duration(seconds=0),
             _wake_all_locks,
             locks,
         )

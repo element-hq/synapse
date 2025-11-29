@@ -218,13 +218,13 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     # table will decrease
     clock.looping_call(
         hs.get_datastores().main.generate_user_daily_visits,
-        Duration(minutes=5).as_millis(),
+        Duration(minutes=5),
     )
 
     # monthly active user limiting functionality
     clock.looping_call(
         hs.get_datastores().main.reap_monthly_active_users,
-        Duration(hours=1).as_millis(),
+        Duration(hours=1),
     )
     hs.get_datastores().main.reap_monthly_active_users()
 
@@ -263,14 +263,14 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
     if hs.config.server.limit_usage_by_mau or hs.config.server.mau_stats_only:
         generate_monthly_active_users()
-        clock.looping_call(generate_monthly_active_users, 5 * 60 * 1000)
+        clock.looping_call(generate_monthly_active_users, Duration(minutes=5))
     # End of monthly active user settings
 
     if hs.config.metrics.report_stats:
         logger.info("Scheduling stats reporting for 3 hour intervals")
         clock.looping_call(
             phone_stats_home,
-            PHONE_HOME_INTERVAL.as_millis(),
+            PHONE_HOME_INTERVAL,
             hs,
             stats,
         )
@@ -278,14 +278,14 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
         # We need to defer this init for the cases that we daemonize
         # otherwise the process ID we get is that of the non-daemon process
         clock.call_later(
-            0,
+            Duration(seconds=0),
             performance_stats_init,
         )
 
         # We wait 5 minutes to send the first set of stats as the server can
         # be quite busy the first few minutes
         clock.call_later(
-            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME.as_secs(),
+            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME,
             phone_stats_home,
             hs,
             stats,

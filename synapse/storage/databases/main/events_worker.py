@@ -92,6 +92,7 @@ from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.lrucache import AsyncLruCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.metrics import Measure
 
@@ -278,7 +279,7 @@ class EventsWorkerStore(SQLBaseStore):
             # We periodically clean out old transaction ID mappings
             self.clock.looping_call(
                 self._cleanup_old_transaction_ids,
-                5 * 60 * 1000,
+                Duration(minutes=5),
             )
 
         self._get_event_cache: AsyncLruCache[tuple[str], EventCacheEntry] = (

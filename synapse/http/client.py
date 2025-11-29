@@ -87,6 +87,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, StrSequence
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
@@ -172,7 +173,7 @@ def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCa
 
     def _scheduler(x: Callable[[], object]) -> IDelayedCall:
         return clock.call_later(
-            _EPSILON,
+            Duration(seconds=_EPSILON),
             x,
         )
 

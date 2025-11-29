@@ -29,6 +29,7 @@ from synapse.logging.context import SENTINEL_CONTEXT, LoggingContext, current_co
 from synapse.rest.client.transactions import CLEANUP_PERIOD, HttpTransactionCache
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.server import get_clock
@@ -93,7 +94,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
             # Ignore `multiple-internal-clocks` linter error here since we are creating a `Clock`
             # for testing purposes.
             yield defer.ensureDeferred(
-                Clock(reactor, server_name="test_server").sleep(0)  # type: ignore[multiple-internal-clocks]
+                Clock(reactor, server_name="test_server").sleep(Duration(seconds=0))  # type: ignore[multiple-internal-clocks]
             )
             return 1, {}
 

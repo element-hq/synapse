@@ -96,7 +96,7 @@ class SlidingSyncStore(SQLBaseStore):
         if self.hs.config.worker.run_background_tasks:
             self.clock.looping_call(
                 self.delete_old_sliding_sync_connections,
-                CONNECTION_EXPIRY_FREQUENCY.as_millis(),
+                CONNECTION_EXPIRY_FREQUENCY,
             )
 
     async def get_latest_bump_stamp_for_room(
