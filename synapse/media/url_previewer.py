@@ -330,8 +330,12 @@ class UrlPreviewer:
 
                 # Compile the Open Graph response by using the scraped
                 # information from the HTML and overlaying any information
-                # from the oEmbed response.
-                og = {**og_from_html, **og_from_oembed}
+                # from the oEmbed response on top.
+                #
+                # The ordering here is intentional: certain websites (especially
+                # SPA Javascript-based ones) including Mastodon and YouTube provide
+                # almost nothing in HTML but through oEmbed instead.
+                og = og_from_oembed | og_from_html
 
                 await self._precache_image_url(user, media_info, og)
             else:
