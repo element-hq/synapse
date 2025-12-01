@@ -55,8 +55,6 @@ from synapse.util.iterutils import batch_iter
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-THIRTY_MINUTES = Duration(minutes=30)
-
 logger = logging.getLogger(__name__)
 
 
@@ -228,7 +226,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         # Create a background job for culling expired 3PID validity tokens
         if hs.config.worker.run_background_tasks:
             self.clock.looping_call(
-                self.cull_expired_threepid_validation_tokens, THIRTY_MINUTES
+                self.cull_expired_threepid_validation_tokens, Duration(minutes=30)
             )
 
     async def register_user(
@@ -2739,7 +2737,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
 
         # Create a background job for removing expired login tokens
         if hs.config.worker.run_background_tasks:
-            self.clock.looping_call(self._delete_expired_login_tokens, THIRTY_MINUTES)
+            self.clock.looping_call(self._delete_expired_login_tokens, Duration(minutes=30))
 
     async def add_access_token_to_user(
         self,
