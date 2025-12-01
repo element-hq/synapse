@@ -212,7 +212,7 @@ class Keyring:
                 valid_until_ts=2**63,  # fake future timestamp
             )
 
-            # We reached the end of the block whichs means everything was successful, so
+            # We reached the end of the block which means everything was successful, so
             # no exit handlers are needed (remove them all).
             exit.pop_all()
 
@@ -556,7 +556,7 @@ class StoreKeyFetcher(KeyFetcher):
             # HomeServer.setup must be called before getting datastores`).
             self.store = hs.get_datastores().main
 
-            # We reached the end of the block whichs means everything was successful, so
+            # We reached the end of the block which means everything was successful, so
             # no exit handlers are needed (remove them all).
             exit.pop_all()
 
@@ -589,7 +589,7 @@ class BaseV2KeyFetcher(KeyFetcher):
             # HomeServer.setup must be called before getting datastores`).
             self.store = hs.get_datastores().main
 
-            # We reached the end of the block whichs means everything was successful, so
+            # We reached the end of the block which means everything was successful, so
             # no exit handlers are needed (remove them all).
             exit.pop_all()
 
