@@ -28,13 +28,14 @@ use mime::Mime;
 use pyo3::{
     exceptions::PyValueError,
     pyclass, pymethods,
-    types::{IntoPyDict, PyAnyMethods, PyModule, PyModuleMethods},
+    types::{PyAnyMethods, PyModule, PyModuleMethods},
     Bound, IntoPyObject, Py, PyAny, PyResult, Python,
 };
 use ulid::Ulid;
 
 use self::session::Session;
 use crate::{
+    duration::SynapseDuration,
     errors::{NotFoundError, SynapseError},
     http::{http_request_from_twisted, http_response_to_twisted, HeaderMapPyExt},
     UnwrapInfallible,
@@ -132,10 +133,7 @@ impl RendezvousHandler {
             .unwrap_infallible()
             .unbind();
 
-        let duration_module = py.import("synapse.util.duration")?;
-
-        let kwargs = [("milliseconds", eviction_interval)].into_py_dict(py)?;
-        let eviction_duration = duration_module.call_method("Duration", (), Some(&kwargs))?;
+        let eviction_duration = SynapseDuration::from_milliseconds(eviction_interval);
 
         // Construct a Python object so that we can get a reference to the
         // evict method and schedule it to run.
@@ -154,7 +152,7 @@ impl RendezvousHandler {
         let evict = self_.getattr(py, "_evict")?;
         homeserver.call_method0("get_clock")?.call_method(
             "looping_call",
-            (evict, eviction_duration),
+            (evict, &eviction_duration),
             None,
         )?;
 
