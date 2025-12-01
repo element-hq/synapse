@@ -292,10 +292,10 @@ def _prepare() -> None:
     subprocess.run("git diff --cached", shell=True)
 
     print(
-        "Consider any upcoming platform deprecations that should be mentioned in the changelog. (ie. upcoming Python, PostgreSQL or SQLite deprecations)"
+        "Consider any upcoming platform deprecations that should be mentioned in the changelog. (e.g. upcoming Python, PostgreSQL or SQLite deprecations)"
     )
     print(
-        "Platform deprecations should be mentioned at least 1 release prior to being deprecated."
+        "Platform deprecations should be mentioned at least 1 release prior to being unsupported."
     )
     if click.confirm("Edit changelog?", default=False):
         click.edit(filename="CHANGES.md")
