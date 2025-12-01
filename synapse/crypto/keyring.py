@@ -219,9 +219,6 @@ class Keyring:
     def shutdown(self) -> None:
         """
         Prepares the KeyRing for garbage collection by shutting down it's queues.
-
-        This needs to be robust enough to be called even if `__init__` failed partway
-        through.
         """
         self._fetch_keys_queue.shutdown()
 
