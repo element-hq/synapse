@@ -250,7 +250,7 @@ class DeviceTestCase(unittest.HomeserverTestCase):
         self.assertEqual(10, len(res))
 
         # wait for the task scheduler to do a second delete pass
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS / 1000)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         # remaining messages should now be deleted
         res = self.get_success(

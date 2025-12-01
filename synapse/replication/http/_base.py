@@ -42,6 +42,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.cancellation import is_function_cancellable
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -317,7 +318,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
                             # If we timed out we probably don't need to worry about backing
                             # off too much, but lets just wait a little anyway.
-                            await clock.sleep(1)
+                            await clock.sleep(Duration(seconds=1))
                         except (ConnectError, DNSLookupError) as e:
                             if not cls.RETRY_ON_CONNECT_ERROR:
                                 raise
@@ -332,7 +333,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                                 e,
                             )
 
-                            await clock.sleep(delay)
+                            await clock.sleep(Duration(seconds=delay))
                             attempts += 1
                 except HttpResponseException as e:
                     # We convert to SynapseError as we know that it was a SynapseError

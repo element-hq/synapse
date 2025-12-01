@@ -62,6 +62,7 @@ from synapse.types import (
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.json import json_decoder, json_encoder
 from synapse.util.stringutils import shortstr
@@ -191,7 +192,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         if hs.config.worker.run_background_tasks:
             self.clock.looping_call(
-                self._prune_old_outbound_device_pokes, 60 * 60 * 1000
+                self._prune_old_outbound_device_pokes, Duration(hours=1)
             )
 
     def process_replication_rows(
