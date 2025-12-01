@@ -104,6 +104,8 @@ class GetMessagesResult:
     A list of state events relevant to showing the chunk. For example, if
     lazy_load_members is enabled in the filter then this may contain the membership
     events for the senders of events in the chunk.
+
+    Omitted from the response when `None`.
     """
 
     start_token: StreamToken

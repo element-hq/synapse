@@ -830,12 +830,12 @@ async def encode_messages_response(
         "start": await get_messages_result.start_token.to_string(serialize_deps.store),
     }
 
-    if get_messages_result.end_token:
+    if get_messages_result.end_token is not None:
         serialized_result["end"] = await get_messages_result.end_token.to_string(
             serialize_deps.store
         )
 
-    if get_messages_result.state:
+    if get_messages_result.state is not None:
         serialized_result[
             "state"
         ] = await serialize_deps.event_serializer.serialize_events(
