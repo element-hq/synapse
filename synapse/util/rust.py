@@ -114,8 +114,21 @@ def get_synapse_source_directory() -> str | None:
         # No direct url metadata. Check if this is an egg-info install.
         #
         # An egg-info install is when there exists a `matrix_synapse.egg-info`
-        # directory alongside the source tree. This is created by setuptools,
-        # which `poetry install` may create.
+        # directory alongside the source tree, containing the package metadata.
+        # This allows discovering packages in the current directory, without
+        # installing them properly to the environment wide `site-packages`
+        # directory.
+        #
+        # When searching for a package, Python will look for `.egg-info` files
+        # in the current working directory before looking in `site-packages`.
+        # This means that when running Synapse (or the tests) from the source
+        # tree Python will pick up the synapse package from the egg-info
+        # install.
+        #
+        # Poetry will create an egg-info install when running `poetry install`.
+        #
+        # The combination of the above means that it is very common for
+        # developers (e.g. running tests) to encounter egg-info installs.
         #
         # In this case we can find the source tree by looking for the
         # `matrix_synapse.egg-info/PKG-INFO` file, and going up two directories
