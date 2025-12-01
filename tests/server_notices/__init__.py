@@ -20,6 +20,7 @@ from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.unittest import override_config
@@ -131,7 +132,7 @@ class ServerNoticesTests(unittest.HomeserverTestCase):
                 break
 
             # Sleep and try again.
-            self.get_success(self.clock.sleep(0.1))
+            self.get_success(self.clock.sleep(Duration(milliseconds=100)))
         else:
             self.fail(
                 f"Failed to join the server notices room. No 'join' field in sync_body['rooms']: {sync_body['rooms']}"

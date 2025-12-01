@@ -2724,6 +2724,22 @@ files = [
 ]
 
 [[package]]
+name = "sqlglot"
+version = "28.0.0"
+description = "An easily customizable SQL parser and transpiler"
+optional = false
+python-versions = ">=3.9"
+groups = ["dev"]
+files = [
+    {file = "sqlglot-28.0.0-py3-none-any.whl", hash = "sha256:ac1778e7fa4812f4f7e5881b260632fc167b00ca4c1226868891fb15467122e4"},
+    {file = "sqlglot-28.0.0.tar.gz", hash = "sha256:cc9a651ef4182e61dac58aa955e5fb21845a5865c6a4d7d7b5a7857450285ad4"},
+]
+
+[package.extras]
+dev = ["duckdb (>=0.6)", "maturin (>=1.4,<2.0)", "mypy", "pandas", "pandas-stubs", "pdoc", "pre-commit", "pyperf", "python-dateutil", "pytz", "ruff (==0.7.2)", "types-python-dateutil", "types-pytz", "typing_extensions"]
+rs = ["sqlglotrs (==0.7.3)"]
+
+[[package]]
 name = "systemd-python"
 version = "235"
 description = "Python interface for libsystemd"
@@ -3346,4 +3362,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "4f8d98723236eaf3d13f440dce95ec6cc3c4dc49ba3a0e45bf9cfbb51aca899c"
+content-hash = "98b9062f48205a3bcc99b43ae665083d360a15d4a208927fa978df9c36fd5315"

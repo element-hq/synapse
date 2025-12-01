@@ -56,6 +56,7 @@ from synapse.types import JsonDict, StrCollection
 from synapse.util.caches.descriptors import cached
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.cancellation import cancellable
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.json import json_encoder
 
@@ -155,7 +156,7 @@ class EventFederationWorkerStore(
 
         if hs.config.worker.run_background_tasks:
             hs.get_clock().looping_call(
-                self._delete_old_forward_extrem_cache, 60 * 60 * 1000
+                self._delete_old_forward_extrem_cache, Duration(hours=1)
             )
 
         # Cache of event ID to list of auth event IDs and their depths.
@@ -171,7 +172,9 @@ class EventFederationWorkerStore(
         # index.
         self.tests_allow_no_chain_cover_index = True
 
-        self.clock.looping_call(self._get_stats_for_federation_staging, 30 * 1000)
+        self.clock.looping_call(
+            self._get_stats_for_federation_staging, Duration(seconds=30)
+        )
 
         if isinstance(self.database_engine, PostgresEngine):
             self.db_pool.updates.register_background_validate_constraint_and_delete_rows(

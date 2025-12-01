@@ -34,6 +34,7 @@ from synapse.api.errors import (
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
 from synapse.types import JsonDict, JsonValue, Requester, UserID, create_requester
 from synapse.util.caches.descriptors import cached
+from synapse.util.duration import Duration
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
 if TYPE_CHECKING:
@@ -583,7 +584,7 @@ class ProfileHandler:
         # Do not actually update the room state for shadow-banned users.
         if requester.shadow_banned:
             # We randomly sleep a bit just to annoy the requester.
-            await self.clock.sleep(random.randint(1, 10))
+            await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
             return
 
         room_ids = await self.store.get_rooms_for_user(target_user.to_string())

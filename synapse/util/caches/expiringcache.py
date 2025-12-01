@@ -38,6 +38,7 @@ from twisted.internet import defer
 from synapse.config import cache as cache_config
 from synapse.util.caches import EvictionReason, register_cache
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -112,7 +113,7 @@ class ExpiringCache(Generic[KT, VT]):
         def f() -> "defer.Deferred[None]":
             return hs.run_as_background_process("prune_cache", self._prune_cache)
 
-        self._clock.looping_call(f, self._expiry_ms / 2)
+        self._clock.looping_call(f, Duration(milliseconds=self._expiry_ms / 2))
 
     def __setitem__(self, key: KT, value: VT) -> None:
         now = self._clock.time_msec()

@@ -111,7 +111,38 @@ def get_synapse_source_directory() -> str | None:
     # c.f. https://packaging.python.org/en/latest/specifications/direct-url/
     direct_url_json = package.read_text("direct_url.json")
     if direct_url_json is None:
-        return None
+        # No direct url metadata. Check if this is an egg-info install.
+        #
+        # An egg-info install is when there exists a `matrix_synapse.egg-info`
+        # directory alongside the source tree, containing the package metadata.
+        # This allows discovering packages in the current directory, without
+        # installing them properly to the environment wide `site-packages`
+        # directory.
+        #
+        # When searching for a package, Python will look for `.egg-info` files
+        # in the current working directory before looking in `site-packages`.
+        # This means that when running Synapse (or the tests) from the source
+        # tree Python will pick up the synapse package from the egg-info
+        # install.
+        #
+        # Poetry will create an egg-info install when running `poetry install`.
+        #
+        # The combination of the above means that it is very common for
+        # developers (e.g. running tests) to encounter egg-info installs.
+        #
+        # In this case we can find the source tree by looking for the
+        # `matrix_synapse.egg-info/PKG-INFO` file, and going up two directories
+        # from there.
+
+        metadata_path = package.locate_file("matrix_synapse.egg-info/PKG-INFO")
+        if not os.path.exists(str(metadata_path)):
+            # Not an egg-info install.
+            return None
+
+        # `metadata_path` points to the egg-info/PKG-INFO file, so go up two
+        # directories to get the root of the source tree.
+        source_dir = metadata_path.parent.parent
+        return os.fspath(source_dir)
 
     # c.f. https://packaging.python.org/en/latest/specifications/direct-url/ for
     # the format
