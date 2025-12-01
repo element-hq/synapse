@@ -174,7 +174,7 @@ class SynapseRequest(Request):
                 if content_length > self._max_request_body_size:
                     self.method, self.uri = command, path
                     self.clientproto = version
-                    logger.warning(
+                    logger.info(
                         "Rejecting request from %s because Content-Length %d exceeds maximum size %d: %s %s",
                         self.client,
                         content_length,
