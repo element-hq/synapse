@@ -2737,7 +2737,9 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
 
         # Create a background job for removing expired login tokens
         if hs.config.worker.run_background_tasks:
-            self.clock.looping_call(self._delete_expired_login_tokens, Duration(minutes=30))
+            self.clock.looping_call(
+                self._delete_expired_login_tokens, Duration(minutes=30)
+            )
 
     async def add_access_token_to_user(
         self,
