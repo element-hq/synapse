@@ -93,7 +93,7 @@ class TaskScheduler:
     """
 
     # Precision of the scheduler, evaluation of tasks to run will only happen
-    # every `SCHEDULE_INTERVAL` ms
+    # every `SCHEDULE_INTERVAL`
     SCHEDULE_INTERVAL = Duration(minutes=1)
     # How often to clean up old tasks.
     CLEANUP_INTERVAL_MS = 30 * 60 * 1000
