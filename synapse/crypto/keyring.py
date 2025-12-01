@@ -21,7 +21,8 @@
 
 import abc
 import logging
-from typing import TYPE_CHECKING, Callable, Iterable, Sequence
+from contextlib import ExitStack
+from typing import TYPE_CHECKING, Callable, Iterable
 
 import attr
 from signedjson.key import (
@@ -152,7 +153,7 @@ class Keyring:
     def __init__(
         self,
         hs: "HomeServer",
-        test_only_key_fetchers: "Sequence[KeyFetcher] | None" = None,
+        test_only_key_fetchers: "list[KeyFetcher] | None" = None,
     ):
         """
         Args:
@@ -160,20 +161,28 @@ class Keyring:
             test_only_key_fetchers: Dependency injection for tests only. If provided,
                 these key fetchers will be used instead of the default ones.
         """
-
-        try:
+        # Clean-up to avoid partial initialization leaving behind references.
+        with ExitStack() as exit:
             self.server_name = hs.hostname
 
-            self._key_fetchers: Sequence[KeyFetcher] = []
+            self._key_fetchers: list[KeyFetcher] = []
             if test_only_key_fetchers is None:
                 # Always fetch keys from the database.
-                self._key_fetchers.append(StoreKeyFetcher(hs))
+                store_key_fetcher = StoreKeyFetcher(hs)
+                exit.callback(store_key_fetcher.shutdown)
+                self._key_fetchers.append(store_key_fetcher)
+
                 # Fetch keys from configured trusted key servers, if any exist.
                 key_servers = hs.config.key.key_servers
                 if key_servers:
-                    self._key_fetchers.append(PerspectivesKeyFetcher(hs))
+                    perspectives_key_fetcher = PerspectivesKeyFetcher(hs)
+                    exit.callback(perspectives_key_fetcher.shutdown)
+                    self._key_fetchers.append(perspectives_key_fetcher)
+
                 # Finally, fetch keys from the origin server directly.
-                self._key_fetchers.append(ServerKeyFetcher(hs))
+                server_key_fetcher = ServerKeyFetcher(hs)
+                exit.callback(server_key_fetcher.shutdown)
+                self._key_fetchers.append(server_key_fetcher)
             else:
                 self._key_fetchers = test_only_key_fetchers
 
@@ -186,6 +195,7 @@ class Keyring:
                 # The method called to fetch each key
                 process_batch_callback=self._inner_fetch_key_requests,
             )
+            exit.callback(self._fetch_keys_queue.shutdown)
 
             self._is_mine_server_name = hs.is_mine_server_name
 
@@ -202,25 +212,20 @@ class Keyring:
                 verify_key=vk,
                 valid_until_ts=2**63,  # fake future timestamp
             )
-        except Exception:
-            self.shutdown()
-            raise
+
+            # We reached the end of the block which means everything was successful, so
+            # no exit handlers are needed (remove them all).
+            exit.pop_all()
 
     def shutdown(self) -> None:
         """
         Prepares the KeyRing for garbage collection by shutting down it's queues.
-
-        This needs to be robust enough to be called even if `__init__` failed partway
-        through.
         """
-        _fetch_keys_queue = getattr(self, "_fetch_keys_queue", None)
-        if _fetch_keys_queue:
-            _fetch_keys_queue.shutdown()
+        self._fetch_keys_queue.shutdown()
 
-        _key_fetchers = getattr(self, "_key_fetchers", None)
-        if _key_fetchers:
-            for key_fetcher in _key_fetchers:
-                key_fetcher.shutdown()
+        for key_fetcher in self._key_fetchers:
+            key_fetcher.shutdown()
+        self._key_fetchers.clear()
 
     async def verify_json_for_server(
         self,
@@ -515,13 +520,8 @@ class KeyFetcher(metaclass=abc.ABCMeta):
     def shutdown(self) -> None:
         """
         Prepares the KeyFetcher for garbage collection by shutting down it's queue.
-
-        This needs to be robust enough to be called even if `__init__` failed partway
-        through.
         """
-        _queue = getattr(self, "_queue", None)
-        if _queue:
-            _queue.shutdown()
+        self._queue.shutdown()
 
     async def get_keys(
         self, server_name: str, key_ids: list[str], minimum_valid_until_ts: int
@@ -546,24 +546,21 @@ class StoreKeyFetcher(KeyFetcher):
     """KeyFetcher impl which fetches keys from our data store"""
 
     def __init__(self, hs: "HomeServer"):
-        try:
+        # Clean-up to avoid partial initialization leaving behind references.
+        with ExitStack() as exit:
             super().__init__(hs)
+            # `KeyFetcher` keeps a reference to `hs` which we need to clean up if
+            # something goes wrong so we can cleanly shutdown the homeserver.
+            exit.callback(super().shutdown)
 
+            # An error can be raised here if someone tried to create a `StoreKeyFetcher`
+            # before the homeserver is fully set up (`HomeServerNotSetupException:
+            # HomeServer.setup must be called before getting datastores`).
             self.store = hs.get_datastores().main
 
-        # `KeyFetcher` keeps a reference to `hs` which we need to clean up if something
-        # goes wrong so we can cleanly shutdown the homeserver.
-        #
-        # If something goes wrong while initializing the `KeyFetcher`, the caller won't
-        # be able to call shutdown on it because there won't be a reference to the
-        # `KeyFetcher`.
-        #
-        # An error can occur here if someone tries to create a `KeyFetcher` before the
-        # homeserver is fully set up (`HomeServerNotSetupException: HomeServer.setup
-        # must be called before getting datastores`).
-        except Exception:
-            self.shutdown()
-            raise
+            # We reached the end of the block which means everything was successful, so
+            # no exit handlers are needed (remove them all).
+            exit.pop_all()
 
     async def _fetch_keys(
         self, keys_to_fetch: list[_FetchKeyRequest]
@@ -583,24 +580,21 @@ class StoreKeyFetcher(KeyFetcher):
 
 class BaseV2KeyFetcher(KeyFetcher):
     def __init__(self, hs: "HomeServer"):
-        try:
+        # Clean-up to avoid partial initialization leaving behind references.
+        with ExitStack() as exit:
             super().__init__(hs)
+            # `KeyFetcher` keeps a reference to `hs` which we need to clean up if
+            # something goes wrong so we can cleanly shutdown the homeserver.
+            exit.callback(super().shutdown)
 
+            # An error can be raised here if someone tried to create a `StoreKeyFetcher`
+            # before the homeserver is fully set up (`HomeServerNotSetupException:
+            # HomeServer.setup must be called before getting datastores`).
             self.store = hs.get_datastores().main
 
-        # `KeyFetcher` keeps a reference to `hs` which we need to clean up if something
-        # goes wrong so we can cleanly shutdown the homeserver.
-        #
-        # If something goes wrong while initializing the `KeyFetcher`, the caller won't
-        # be able to call shutdown on it because there won't be a reference to the
-        # `KeyFetcher`.
-        #
-        # An error can occur here if someone tries to create a `KeyFetcher` before the
-        # homeserver is fully set up (`HomeServerNotSetupException: HomeServer.setup
-        # must be called before getting datastores`).
-        except Exception:
-            self.shutdown()
-            raise
+            # We reached the end of the block which means everything was successful, so
+            # no exit handlers are needed (remove them all).
+            exit.pop_all()
 
     async def process_v2_response(
         self, from_server: str, response_json: JsonDict, time_added_ms: int

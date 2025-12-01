@@ -63,6 +63,7 @@ from synapse.types import (
     get_domain_from_id,
 )
 from synapse.util.caches.descriptors import _CacheContext, cached, cachedList
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.metrics import Measure
 
@@ -110,10 +111,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             self._known_servers_count = 1
             self.hs.get_clock().looping_call(
                 self._count_known_servers,
-                60 * 1000,
+                Duration(minutes=1),
             )
             self.hs.get_clock().call_later(
-                1,
+                Duration(seconds=1),
                 self._count_known_servers,
             )
             federation_known_servers_gauge.register_hook(

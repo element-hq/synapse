@@ -46,6 +46,7 @@ from synapse.types import (
 )
 from synapse.util.async_helpers import Linearizer, concurrently_execute
 from synapse.util.cancellation import cancellable
+from synapse.util.duration import Duration
 from synapse.util.json import json_decoder
 from synapse.util.retryutils import (
     NotRetryingDestination,
@@ -1634,7 +1635,7 @@ class E2eKeysHandler:
             # matrix.org has about 15M users in the e2e_one_time_keys_json table
             # (comprising 20M devices). We want this to take about a week, so we need
             # to do about one batch of 100 users every 4 seconds.
-            await self.clock.sleep(4)
+            await self.clock.sleep(Duration(seconds=4))
 
 
 def _check_cross_signing_key(

@@ -259,7 +259,7 @@ class DelayedEventsStore(SQLBaseStore):
         ]
 
     async def process_timeout_delayed_events(
-        self, current_ts: Timestamp
+        self, current_ts: Timestamp, reprocess_events: bool = False
     ) -> tuple[
         list[DelayedEventDetails],
         Timestamp | None,
@@ -267,6 +267,16 @@ class DelayedEventsStore(SQLBaseStore):
         """
         Marks for processing all delayed events that should have been sent prior to the provided time
         that haven't already been marked as such.
+
+        Args:
+            current_ts: The current timestamp.
+            reprocess_events: Whether to reprocess already-processed delayed
+                events. If set to True, events which are marked as processed
+                will have their `send_ts` re-checked.
+
+                This is mainly useful for recovering from a server restart;
+                which could have occurred between an event being marked as
+                processed and the event actually being sent.
 
         Returns: The details of all newly-processed delayed events,
             and the send time of the next delayed event to be sent, if any.
@@ -292,7 +302,12 @@ class DelayedEventsStore(SQLBaseStore):
                 )
             )
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
-            sql_where = "WHERE send_ts <= ? AND NOT is_processed"
+            sql_where = "WHERE send_ts <= ?"
+
+            if not reprocess_events:
+                # Skip already-processed events.
+                sql_where += " AND NOT is_processed"
+
             sql_args = (current_ts,)
             sql_order = "ORDER BY send_ts"
             if isinstance(self.database_engine, PostgresEngine):

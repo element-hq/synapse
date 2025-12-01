@@ -40,6 +40,7 @@ from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import UserID
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import non_null_str_or_none
@@ -52,7 +53,7 @@ logger = logging.getLogger(__name__)
 # Don't refresh a stale user directory entry, using a Federation /profile request,
 # for 60 seconds. This gives time for other state events to arrive (which will
 # then be coalesced such that only one /profile request is made).
-USER_DIRECTORY_STALE_REFRESH_TIME_MS = 60 * 1000
+USER_DIRECTORY_STALE_REFRESH_TIME = Duration(minutes=1)
 
 # Maximum number of remote servers that we will attempt to refresh profiles for
 # in one go.
@@ -60,7 +61,7 @@ MAX_SERVERS_TO_REFRESH_PROFILES_FOR_IN_ONE_GO = 5
 
 # As long as we have servers to refresh (without backoff), keep adding more
 # every 15 seconds.
-INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES = 15
+INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES = Duration(seconds=15)
 
 
 def calculate_time_of_next_retry(now_ts: int, retry_count: int) -> int:
@@ -137,13 +138,13 @@ class UserDirectoryHandler(StateDeltasHandler):
             # We kick this off so that we don't have to wait for a change before
             # we start populating the user directory
             self.clock.call_later(
-                0,
+                Duration(seconds=0),
                 self.notify_new_event,
             )
 
             # Kick off the profile refresh process on startup
             self._refresh_remote_profiles_call_later = self.clock.call_later(
-                10,
+                Duration(seconds=10),
                 self.kick_off_remote_profile_refresh_process,
             )
 
@@ -550,7 +551,7 @@ class UserDirectoryHandler(StateDeltasHandler):
             now_ts = self.clock.time_msec()
             await self.store.set_remote_user_profile_in_user_dir_stale(
                 user_id,
-                next_try_at_ms=now_ts + USER_DIRECTORY_STALE_REFRESH_TIME_MS,
+                next_try_at_ms=now_ts + USER_DIRECTORY_STALE_REFRESH_TIME.as_millis(),
                 retry_counter=0,
             )
             # Schedule a wake-up to refresh the user directory for this server.
@@ -558,13 +559,13 @@ class UserDirectoryHandler(StateDeltasHandler):
             # other servers ahead of it in the queue to get in the way of updating
             # the profile if the server only just sent us an event.
             self.clock.call_later(
-                USER_DIRECTORY_STALE_REFRESH_TIME_MS // 1000 + 1,
+                USER_DIRECTORY_STALE_REFRESH_TIME + Duration(seconds=1),
                 self.kick_off_remote_profile_refresh_process_for_remote_server,
                 UserID.from_string(user_id).domain,
             )
             # Schedule a wake-up to handle any backoffs that may occur in the future.
             self.clock.call_later(
-                2 * USER_DIRECTORY_STALE_REFRESH_TIME_MS // 1000 + 1,
+                USER_DIRECTORY_STALE_REFRESH_TIME * 2 + Duration(seconds=1),
                 self.kick_off_remote_profile_refresh_process,
             )
             return
@@ -656,7 +657,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 if not users:
                     return
                 _, _, next_try_at_ts = users[0]
-                delay = ((next_try_at_ts - self.clock.time_msec()) // 1000) + 2
+                delay = Duration(
+                    milliseconds=next_try_at_ts - self.clock.time_msec()
+                ) + Duration(seconds=2)
                 self._refresh_remote_profiles_call_later = self.clock.call_later(
                     delay,
                     self.kick_off_remote_profile_refresh_process,
