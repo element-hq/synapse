@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 # Don't refresh a stale user directory entry, using a Federation /profile request,
 # for 60 seconds. This gives time for other state events to arrive (which will
 # then be coalesced such that only one /profile request is made).
-USER_DIRECTORY_STALE_REFRESH_TIME = Duration(seconds=60)
+USER_DIRECTORY_STALE_REFRESH_TIME = Duration(minutes=1)
 
 # Maximum number of remote servers that we will attempt to refresh profiles for
 # in one go.

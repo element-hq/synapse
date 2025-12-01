@@ -61,7 +61,7 @@ class RoomMember:
 
 
 # How often we expect remote servers to resend us presence.
-FEDERATION_TIMEOUT = Duration(seconds=60)
+FEDERATION_TIMEOUT = Duration(minutes=1)
 
 # How often to resend typing across federation.
 FEDERATION_PING_INTERVAL = Duration(seconds=40)

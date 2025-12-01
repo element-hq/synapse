@@ -872,7 +872,7 @@ class PresenceHandler(BasePresenceHandler):
         # internally.
         if self._presence_enabled:
             self.clock.call_later(
-                Duration(seconds=60),
+                Duration(minutes=1),
                 self.clock.looping_call,
                 self._persist_unpersisted_changes,
                 Duration(minutes=1),
