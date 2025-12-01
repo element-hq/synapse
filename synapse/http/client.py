@@ -161,8 +161,9 @@ def _is_ip_blocked(
             return True
     return False
 
-
-_EPSILON = 0.00000001
+# The delay used by the scheduler to schedule tasks "as soon as possible", while
+# still allowing other tasks to run between runs.
+_EPSILON = Duration(microseconds=1)
 
 
 def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCall]:
@@ -173,7 +174,7 @@ def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCa
 
     def _scheduler(x: Callable[[], object]) -> IDelayedCall:
         return clock.call_later(
-            Duration(seconds=_EPSILON),
+            _EPSILON,
             x,
         )
 
