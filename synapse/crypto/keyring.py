@@ -22,7 +22,7 @@
 import abc
 import logging
 from contextlib import ExitStack
-from typing import TYPE_CHECKING, Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Callable, Iterable
 
 import attr
 from signedjson.key import (
@@ -153,7 +153,7 @@ class Keyring:
     def __init__(
         self,
         hs: "HomeServer",
-        test_only_key_fetchers: "Sequence[KeyFetcher] | None" = None,
+        test_only_key_fetchers: "list[KeyFetcher] | None" = None,
     ):
         """
         Args:
@@ -164,7 +164,7 @@ class Keyring:
         with ExitStack() as exit:
             self.server_name = hs.hostname
 
-            self._key_fetchers: Sequence[KeyFetcher] = []
+            self._key_fetchers: list[KeyFetcher] = []
             if test_only_key_fetchers is None:
                 # Always fetch keys from the database.
                 store_key_fetcher = StoreKeyFetcher(hs)
@@ -227,6 +227,7 @@ class Keyring:
 
         for key_fetcher in self._key_fetchers:
             key_fetcher.shutdown()
+        self._key_fetchers.clear()
 
     async def verify_json_for_server(
         self,
