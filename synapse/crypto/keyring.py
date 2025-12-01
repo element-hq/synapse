@@ -161,6 +161,7 @@ class Keyring:
             test_only_key_fetchers: Dependency injection for tests only. If provided,
                 these key fetchers will be used instead of the default ones.
         """
+        # Clean-up to avoid partial initialization leaving behind references.
         with ExitStack() as exit:
             self.server_name = hs.hostname
 
@@ -545,6 +546,7 @@ class StoreKeyFetcher(KeyFetcher):
     """KeyFetcher impl which fetches keys from our data store"""
 
     def __init__(self, hs: "HomeServer"):
+        # Clean-up to avoid partial initialization leaving behind references.
         with ExitStack() as exit:
             super().__init__(hs)
             # `KeyFetcher` keeps a reference to `hs` which we need to clean up if
@@ -578,6 +580,7 @@ class StoreKeyFetcher(KeyFetcher):
 
 class BaseV2KeyFetcher(KeyFetcher):
     def __init__(self, hs: "HomeServer"):
+        # Clean-up to avoid partial initialization leaving behind references.
         with ExitStack() as exit:
             super().__init__(hs)
             # `KeyFetcher` keeps a reference to `hs` which we need to clean up if
