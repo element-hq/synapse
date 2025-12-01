@@ -129,9 +129,7 @@ class Clock:
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
-        return self._looping_call_common(
-            f, duration.as_millis(), False, *args, **kwargs
-        )
+        return self._looping_call_common(f, duration, False, *args, **kwargs)
 
     def looping_call_now(
         self,
@@ -155,12 +153,12 @@ class Clock:
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
-        return self._looping_call_common(f, duration.as_millis(), True, *args, **kwargs)
+        return self._looping_call_common(f, duration, True, *args, **kwargs)
 
     def _looping_call_common(
         self,
         f: Callable[P, object],
-        msec: float,
+        duration: Duration,
         now: bool,
         *args: P.args,
         **kwargs: P.kwargs,
@@ -220,7 +218,7 @@ class Clock:
         # We want to start the task in the `sentinel` logcontext, to avoid leaking the
         # current context into the reactor after the function finishes.
         with context.PreserveLoggingContext():
-            d = call.start(msec / 1000.0, now=now)
+            d = call.start(duration.as_secs(), now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
         self._looping_calls.append(call)
 
@@ -228,7 +226,7 @@ class Clock:
             "%s(%s): Scheduled looping call every %sms later",
             looping_call_context_string,
             instance_id,
-            msec,
+            duration.as_millis(),
             # Find out who is scheduling the call which makes it easy to follow in the
             # logs.
             stack_info=True,
