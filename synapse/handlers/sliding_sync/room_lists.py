@@ -39,7 +39,7 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.events import StrippedStateEvent
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import start_active_span, trace
-from synapse.storage.databases.main.sliding_sync import UPDATE_INTERVAL_LAST_USED_TS_MS
+from synapse.storage.databases.main.sliding_sync import UPDATE_INTERVAL_LAST_USED_TS
 from synapse.storage.databases.main.state import (
     ROOM_UNKNOWN_SENTINEL,
     Sentinel as StateSentinel,
@@ -70,7 +70,7 @@ from synapse.types.handlers.sliding_sync import (
 )
 from synapse.types.state import StateFilter
 from synapse.util import MutableOverlayMapping
-from synapse.util.constants import MILLISECONDS_PER_SECOND, ONE_HOUR_SECONDS
+from synapse.util.duration import Duration
 from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ logger = logging.getLogger(__name__)
 # tight loops with clients that request lots of data at once.
 #
 # c.f. `NUM_ROOMS_THRESHOLD`. These values are somewhat arbitrary picked.
-MINIMUM_NOT_USED_AGE_EXPIRY_MS = ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND
+MINIMUM_NOT_USED_AGE_EXPIRY = Duration(hours=1)
 
 # How many rooms with updates we allow before we consider the connection expired
 # due to too many rooms to send.
@@ -99,7 +99,7 @@ NUM_ROOMS_THRESHOLD = 100
 # connection even if it is actively being used (and we're just not updating the
 # DB frequently enough). We arbitrarily double the update interval to give some
 # wiggle room.
-assert 2 * UPDATE_INTERVAL_LAST_USED_TS_MS < MINIMUM_NOT_USED_AGE_EXPIRY_MS
+assert 2 * UPDATE_INTERVAL_LAST_USED_TS < MINIMUM_NOT_USED_AGE_EXPIRY
 
 # Helper definition for the types that we might return. We do this to avoid
 # copying data between types (which can be expensive for many rooms).
@@ -913,7 +913,7 @@ class SlidingSyncRoomLists:
                         if (
                             last_sync_ts is not None
                             and (self._clock.time_msec() - last_sync_ts)
-                            > MINIMUM_NOT_USED_AGE_EXPIRY_MS
+                            > MINIMUM_NOT_USED_AGE_EXPIRY.as_millis()
                         ):
                             raise SlidingSyncUnknownPosition()
 

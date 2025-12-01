@@ -35,6 +35,7 @@ from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -92,8 +93,8 @@ class TaskScheduler:
     """
 
     # Precision of the scheduler, evaluation of tasks to run will only happen
-    # every `SCHEDULE_INTERVAL_MS` ms
-    SCHEDULE_INTERVAL_MS = 1 * 60 * 1000  # 1mn
+    # every `SCHEDULE_INTERVAL`
+    SCHEDULE_INTERVAL = Duration(minutes=1)
     # How often to clean up old tasks.
     CLEANUP_INTERVAL_MS = 30 * 60 * 1000
     # Time before a complete or failed task is deleted from the DB
@@ -103,7 +104,7 @@ class TaskScheduler:
     # Time from the last task update after which we will log a warning
     LAST_UPDATE_BEFORE_WARNING_MS = 24 * 60 * 60 * 1000  # 24hrs
     # Report a running task's status and usage every so often.
-    OCCASIONAL_REPORT_INTERVAL_MS = 5 * 60 * 1000  # 5 minutes
+    OCCASIONAL_REPORT_INTERVAL = Duration(minutes=5)
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs  # nb must be called this for @wrap_as_background_process
@@ -127,11 +128,11 @@ class TaskScheduler:
         if self._run_background_tasks:
             self._clock.looping_call(
                 self._launch_scheduled_tasks,
-                TaskScheduler.SCHEDULE_INTERVAL_MS,
+                TaskScheduler.SCHEDULE_INTERVAL,
             )
             self._clock.looping_call(
                 self._clean_scheduled_tasks,
-                TaskScheduler.SCHEDULE_INTERVAL_MS,
+                TaskScheduler.SCHEDULE_INTERVAL,
             )
 
         running_tasks_gauge.register_hook(
@@ -433,7 +434,7 @@ class TaskScheduler:
                 start_time = self._clock.time()
                 occasional_status_call = self._clock.looping_call(
                     _occasional_report,
-                    TaskScheduler.OCCASIONAL_REPORT_INTERVAL_MS,
+                    TaskScheduler.OCCASIONAL_REPORT_INTERVAL,
                     log_context,
                     start_time,
                 )
@@ -468,7 +469,7 @@ class TaskScheduler:
 
             # Try launch a new task since we've finished with this one.
             self._clock.call_later(
-                0.1,
+                Duration(milliseconds=100),
                 self._launch_scheduled_tasks,
             )
 

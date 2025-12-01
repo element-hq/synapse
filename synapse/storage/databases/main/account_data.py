@@ -40,7 +40,12 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.push_rule import PushRulesWorkerStore
-from synapse.storage.invite_rule import InviteRulesConfig
+from synapse.storage.invite_rule import (
+    AllowAllInviteRulesConfig,
+    InviteRulesConfig,
+    MSC4155InviteRulesConfig,
+    MSC4380InviteRulesConfig,
+)
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonMapping
 from synapse.util.caches.descriptors import cached
@@ -104,6 +109,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         )
 
         self._msc4155_enabled = hs.config.experimental.msc4155_enabled
+        self._msc4380_enabled = hs.config.experimental.msc4380_enabled
 
     def get_max_account_data_stream_id(self) -> int:
         """Get the current max stream ID for account data stream
@@ -562,20 +568,28 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_invite_config_for_user(self, user_id: str) -> InviteRulesConfig:
         """
-        Get the invite configuration for the current user.
+        Get the invite configuration for the given user.
 
         Args:
-            user_id:
+            user_id: The user whose invite configuration should be returned.
         """
+        if self._msc4380_enabled:
+            data = await self.get_global_account_data_by_type_for_user(
+                user_id, AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG
+            )
+            # If the user has an MSC4380-style config setting, prioritise that
+            # above an MSC4155 one
+            if data is not None:
+                return MSC4380InviteRulesConfig.from_account_data(data)
 
-        if not self._msc4155_enabled:
-            # This equates to allowing all invites, as if the setting was off.
-            return InviteRulesConfig(None)
+        if self._msc4155_enabled:
+            data = await self.get_global_account_data_by_type_for_user(
+                user_id, AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG
+            )
+            if data is not None:
+                return MSC4155InviteRulesConfig(data)
 
-        data = await self.get_global_account_data_by_type_for_user(
-            user_id, AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG
-        )
-        return InviteRulesConfig(data)
+        return AllowAllInviteRulesConfig()
 
     async def get_admin_client_config_for_user(self, user_id: str) -> AdminClientConfig:
         """

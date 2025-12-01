@@ -47,6 +47,7 @@ from synapse.media.preview_html import decode_body, parse_html_to_open_graph
 from synapse.types import JsonDict, UserID
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import random_string
 
@@ -208,7 +209,9 @@ class UrlPreviewer:
         )
 
         if self._worker_run_media_background_jobs:
-            self.clock.looping_call(self._start_expire_url_cache_data, 10 * 1000)
+            self.clock.looping_call(
+                self._start_expire_url_cache_data, Duration(seconds=10)
+            )
 
     async def preview(self, url: str, user: UserID, ts: int) -> bytes:
         # the in-memory cache:

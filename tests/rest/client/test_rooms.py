@@ -3880,9 +3880,11 @@ class RoomCanonicalAliasTestCase(unittest.HomeserverTestCase):
         self._set_canonical_alias({"alt_aliases": False}, expected_code=400)
         self._set_canonical_alias({"alt_aliases": True}, expected_code=400)
         self._set_canonical_alias({"alt_aliases": {}}, expected_code=400)
+        self._set_canonical_alias({"alt_aliases": [0]}, expected_code=400)
 
     def test_bad_alias(self) -> None:
         """An alias which does not point to the room raises a SynapseError."""
+        self._set_canonical_alias({"alias": {"@unknown:test": "a"}}, expected_code=400)
         self._set_canonical_alias({"alias": "@unknown:test"}, expected_code=400)
         self._set_canonical_alias({"alt_aliases": ["@unknown:test"]}, expected_code=400)
 

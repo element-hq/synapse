@@ -50,6 +50,7 @@ from synapse.util.caches.treecache import (
     iterate_tree_cache_items,
 )
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.linked_list import ListNode
 
 if TYPE_CHECKING:
@@ -202,9 +203,9 @@ def _expire_old_entries(
             if (i + 1) % 10000 == 0:
                 logger.debug("Waiting during drop")
                 if node.last_access_ts_secs > now - expiry_seconds:
-                    await clock.sleep(0.5)
+                    await clock.sleep(Duration(milliseconds=500))
                 else:
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                 logger.debug("Waking during drop")
 
             node = next_node
@@ -248,7 +249,7 @@ def setup_expire_lru_cache_entries(hs: "HomeServer") -> None:
     clock = hs.get_clock()
     clock.looping_call(
         _expire_old_entries,
-        30 * 1000,
+        Duration(seconds=30),
         server_name,
         hs,
         clock,

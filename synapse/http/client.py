@@ -87,6 +87,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, StrSequence
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
@@ -161,7 +162,9 @@ def _is_ip_blocked(
     return False
 
 
-_EPSILON = 0.00000001
+# The delay used by the scheduler to schedule tasks "as soon as possible", while
+# still allowing other tasks to run between runs.
+_EPSILON = Duration(microseconds=1)
 
 
 def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCall]:

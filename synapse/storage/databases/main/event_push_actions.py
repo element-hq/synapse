@@ -105,6 +105,7 @@ from synapse.storage.databases.main.receipts import ReceiptsWorkerStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.types import JsonDict, StrCollection
 from synapse.util.caches.descriptors import cached
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -270,15 +271,17 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         self._find_stream_orderings_for_times_txn(cur)
         cur.close()
 
-        self.clock.looping_call(self._find_stream_orderings_for_times, 10 * 60 * 1000)
+        self.clock.looping_call(
+            self._find_stream_orderings_for_times, Duration(minutes=10)
+        )
 
         self._rotate_count = 10000
         self._doing_notif_rotation = False
         if hs.config.worker.run_background_tasks:
-            self.clock.looping_call(self._rotate_notifs, 30 * 1000)
+            self.clock.looping_call(self._rotate_notifs, Duration(seconds=30))
 
             self.clock.looping_call(
-                self._clear_old_push_actions_staging, 30 * 60 * 1000
+                self._clear_old_push_actions_staging, Duration(minutes=30)
             )
 
         self.db_pool.updates.register_background_index_update(
@@ -1817,7 +1820,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 return
 
             # We sleep to ensure that we don't overwhelm the DB.
-            await self.clock.sleep(1.0)
+            await self.clock.sleep(Duration(seconds=1))
 
     async def get_push_actions_for_user(
         self,
