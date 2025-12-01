@@ -45,6 +45,7 @@ from synapse.types import (
 from synapse.types.handlers import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import ReadWriteLock
+from synapse.util.duration import Duration
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
@@ -169,7 +170,7 @@ class PaginationHandler:
 
                 self.clock.looping_call(
                     self.hs.run_as_background_process,
-                    job.interval,
+                    Duration(milliseconds=job.interval),
                     "purge_history_for_rooms_in_range",
                     self.purge_history_for_rooms_in_range,
                     job.shortest_max_lifetime,

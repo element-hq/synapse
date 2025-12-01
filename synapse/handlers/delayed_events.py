@@ -42,6 +42,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
+from synapse.util.duration import Duration
 from synapse.util.events import generate_fake_event_id
 from synapse.util.metrics import Measure
 from synapse.util.sentinel import Sentinel
@@ -92,20 +93,22 @@ class DelayedEventsHandler:
                 # Kick off again (without blocking) to catch any missed notifications
                 # that may have fired before the callback was added.
                 self._clock.call_later(
-                    0,
+                    Duration(seconds=0),
                     self.notify_new_event,
                 )
 
-                # Delayed events that are already marked as processed on startup might not have been
-                # sent properly on the last run of the server, so unmark them to send them again.
+                # Now process any delayed events that are due to be sent.
+                #
+                # We set `reprocess_events` to True in case any events had been
+                # marked as processed, but had not yet actually been sent,
+                # before the homeserver stopped.
+                #
                 # Caveat: this will double-send delayed events that successfully persisted, but failed
                 # to be removed from the DB table of delayed events.
                 # TODO: To avoid double-sending, scan the timeline to find which of these events were
                 # already sent. To do so, must store delay_ids in sent events to retrieve them later.
-                await self._store.unprocess_delayed_events()
-
                 events, next_send_ts = await self._store.process_timeout_delayed_events(
-                    self._get_current_ts()
+                    self._get_current_ts(), reprocess_events=True
                 )
 
                 if next_send_ts:
@@ -423,18 +426,23 @@ class DelayedEventsHandler:
         Raises:
             NotFoundError: if no matching delayed event could be found.
         """
-        assert self._is_master
         await self._delayed_event_mgmt_ratelimiter.ratelimit(
             None, request.getClientAddress().host
         )
-        await make_deferred_yieldable(self._initialized_from_db)
+
+        # Note: We don't need to wait on `self._initialized_from_db` here as the
+        # events that deals with are already marked as processed.
+        #
+        # `restart_delayed_events` will skip over such events entirely.
 
         next_send_ts = await self._store.restart_delayed_event(
             delay_id, self._get_current_ts()
         )
 
-        if self._next_send_ts_changed(next_send_ts):
-            self._schedule_next_at(next_send_ts)
+        # Only the main process handles sending delayed events.
+        if self._is_master:
+            if self._next_send_ts_changed(next_send_ts):
+                self._schedule_next_at(next_send_ts)
 
     async def send(self, request: SynapseRequest, delay_id: str) -> None:
         """
@@ -501,17 +509,17 @@ class DelayedEventsHandler:
 
     def _schedule_next_at(self, next_send_ts: Timestamp) -> None:
         delay = next_send_ts - self._get_current_ts()
-        delay_sec = delay / 1000 if delay > 0 else 0
+        delay_duration = Duration(milliseconds=max(delay, 0))
 
         if self._next_delayed_event_call is None:
             self._next_delayed_event_call = self._clock.call_later(
-                delay_sec,
+                delay_duration,
                 self.hs.run_as_background_process,
                 "_send_on_timeout",
                 self._send_on_timeout,
             )
         else:
-            self._next_delayed_event_call.reset(delay_sec)
+            self._next_delayed_event_call.reset(delay_duration.as_secs())
 
     async def get_all_for_user(self, requester: Requester) -> list[JsonDict]:
         """Return all pending delayed events requested by the given user."""

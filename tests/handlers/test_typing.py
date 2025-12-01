@@ -544,7 +544,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(rows, [(2, [ROOM_ID, []])])
 
-        self.reactor.advance(FORGET_TIMEOUT)
+        self.reactor.advance(FORGET_TIMEOUT.as_secs())
 
         rows, _, _ = self.get_success(
             self.handler.get_all_typing_updates(
