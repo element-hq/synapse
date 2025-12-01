@@ -351,6 +351,42 @@ class SlidingSyncThreadSubscriptionsExtensionTestCase(SlidingSyncBase):
             len(thread_subscriptions["subscribed"][room_id]), 3, thread_subscriptions
         )
 
+    def test_limit_defaults_to_100(self) -> None:
+        """
+        Test that the limit parameter defaults to 100 when not specified.
+
+        This test verifies that:
+        1. When 'limit' is omitted from the request, it defaults to 100
+        2. All subscriptions (less than 100) are returned in the response
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create 5 thread roots and subscribe to each
+        thread_root_ids = []
+        for i in range(5):
+            thread_root_resp = self.helper.send(
+                room_id, body=f"Thread root {i}", tok=user1_tok
+            )
+            thread_root_ids.append(thread_root_resp["event_id"])
+            self._subscribe_to_thread(user1_id, room_id, thread_root_ids[-1])
+
+        # Sync without specifying 'limit' - it should default to 100
+        sync_body = {
+            "lists": {},
+            "extensions": {EXT_NAME: {"enabled": True}},
+        }
+
+        # Sync
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Assert: All 5 subscriptions should be returned since the default limit is 100
+        thread_subscriptions = response_body["extensions"][EXT_NAME]
+        self.assertEqual(
+            len(thread_subscriptions["subscribed"][room_id]), 5, thread_subscriptions
+        )
+
     def test_limit_and_companion_backpagination(self) -> None:
         """
         Create 1 thread subscription, do a sync, create 4 more,
