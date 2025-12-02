@@ -970,9 +970,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             # We order by quarantined timestamp *and* media ID (including origin, when
             # known) to ensure there's stable ordering for established servers.
             if local:
-                sql = "SELECT '' as media_origin, media_id FROM local_media_repository ORDER BY quarantined_ts, media_id ASC LIMIT ? OFFSET ?"
+                sql = "SELECT '' as media_origin, media_id FROM local_media_repository WHERE quarantined_by IS NOT NULL ORDER BY quarantined_ts, media_id ASC LIMIT ? OFFSET ?"
             else:
-                sql = "SELECT media_origin, media_id FROM remote_media_cache ORDER BY quarantined_ts, media_origin, media_id ASC LIMIT ? OFFSET ?"
+                sql = "SELECT media_origin, media_id FROM remote_media_cache WHERE quarantined_by IS NOT NULL ORDER BY quarantined_ts, media_origin, media_id ASC LIMIT ? OFFSET ?"
             txn.execute(sql, (index_limit, index_start))
 
             mxcs = []
@@ -1191,7 +1191,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             The total number of media items quarantined
         """
         total_media_quarantined = 0
-        now_ts = self.clock.time_msec()
+        now_ts: int | None = self.clock.time_msec()
 
         if quarantined_by is None:
             now_ts = None
@@ -1250,7 +1250,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             The total number of media items quarantined
         """
         total_media_quarantined = 0
-        now_ts = int(time.time())
+        now_ts: int | None = self.clock.time_msec()
+
+        if quarantined_by is None:
+            now_ts = None
 
         if media:
             sql_in_list_clause, sql_args = make_tuple_in_list_sql_clause(
