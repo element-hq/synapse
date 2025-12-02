@@ -21,7 +21,6 @@
 #
 
 import logging
-from datetime import time
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
