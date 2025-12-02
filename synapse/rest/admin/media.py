@@ -303,7 +303,8 @@ class ListQuarantinedMedia(RestServlet):
         self.auth = hs.get_auth()
 
     async def on_GET(
-        self, request: SynapseRequest,
+        self,
+        request: SynapseRequest,
     ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
@@ -313,10 +314,13 @@ class ListQuarantinedMedia(RestServlet):
 
         if local_or_remote not in ["local", "remote"]:
             raise SynapseError(
-                HTTPStatus.BAD_REQUEST, "Query parameter kind must be either 'local' or 'remote'."
+                HTTPStatus.BAD_REQUEST,
+                "Query parameter kind must be either 'local' or 'remote'.",
             )
 
-        mxcs = await self.store.get_quarantined_media_mxcs(start, limit, local_or_remote == "local")
+        mxcs = await self.store.get_quarantined_media_mxcs(
+            start, limit, local_or_remote == "local"
+        )
 
         return HTTPStatus.OK, {"media": mxcs}
 

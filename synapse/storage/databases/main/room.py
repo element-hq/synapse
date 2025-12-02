@@ -946,7 +946,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             max_lifetime=max_lifetime,
         )
 
-    async def get_quarantined_media_mxcs(self, index_start: int, index_limit: int, local: bool) -> list[str]:
+    async def get_quarantined_media_mxcs(
+        self, index_start: int, index_limit: int, local: bool
+    ) -> list[str]:
         """Retrieves all the quarantined media MXC URIs starting from the given position,
         ordered by quarantined timestamp.
 
@@ -983,7 +985,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             return mxcs
 
         return await self.db_pool.runInteraction(
-            "get_quarantined_media_mxcs", _get_quarantined_media_mxcs_txn,
+            "get_quarantined_media_mxcs",
+            _get_quarantined_media_mxcs_txn,
         )
 
     async def get_media_mxcs_in_room(self, room_id: str) -> tuple[list[str], list[str]]:
@@ -1014,7 +1017,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction(
             "get_media_ids_in_room", _get_media_mxcs_in_room_txn
         )
-
 
     async def quarantine_media_ids_in_room(
         self, room_id: str, quarantined_by: str
