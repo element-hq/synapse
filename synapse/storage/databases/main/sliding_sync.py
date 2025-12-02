@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 # How often to update the last seen timestamp for lazy members. We don't want to
 # update it too often as that causes DB writes.
-LAZY_MEMBERS_UPDATE_INTERVAL_MS = ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND
+LAZY_MEMBERS_UPDATE_INTERVAL = Duration(hours=1)
 
 # How often to update the `last_used_ts` column on
 # `sliding_sync_connection_positions` when the client uses a connection
@@ -635,9 +635,9 @@ class SlidingSyncStore(SQLBaseStore):
                     # We've never sent this user before, so we need to record that
                     # we've sent it at the new connection position.
                     to_update.append((room_id, user_id))
-                elif last_seen_ts + LAZY_MEMBERS_UPDATE_INTERVAL_MS < now:
+                elif last_seen_ts + LAZY_MEMBERS_UPDATE_INTERVAL.as_millis() < now:
                     # We last saw this user over
-                    # `LAZY_MEMBERS_UPDATE_INTERVAL_MS` ago, so we update the
+                    # `LAZY_MEMBERS_UPDATE_INTERVAL` ago, so we update the
                     # timestamp (c.f. comment above).
                     to_update.append((room_id, user_id))
 

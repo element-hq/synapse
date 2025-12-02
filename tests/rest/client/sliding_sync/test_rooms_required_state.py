@@ -24,10 +24,9 @@ from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import knock, login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events import DeltaState, SlidingSyncTableChanges
-from synapse.storage.databases.main.sliding_sync import LAZY_MEMBERS_UPDATE_INTERVAL_MS
+from synapse.storage.databases.main.sliding_sync import LAZY_MEMBERS_UPDATE_INTERVAL
 from synapse.types import SlidingSyncStreamToken
 from synapse.util.clock import Clock
-from synapse.util.constants import MILLISECONDS_PER_SECOND
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.test_utils.event_injection import mark_event_as_partial_state
@@ -2021,9 +2020,9 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         # The timestamp should be unchanged.
         self.assertEqual(lazy_member_entries[user1_id], prev_timestamp)
 
-        # Now advance the time by `LAZY_MEMBERS_UPDATE_INTERVAL_MS` so that we
+        # Now advance the time by `LAZY_MEMBERS_UPDATE_INTERVAL` so that we
         # would update the timestamp.
-        self.reactor.advance(LAZY_MEMBERS_UPDATE_INTERVAL_MS / MILLISECONDS_PER_SECOND)
+        self.reactor.advance(LAZY_MEMBERS_UPDATE_INTERVAL.as_secs())
 
         # Send a message from user2
         self.helper.send(room_id, "msg3", tok=user2_tok)
