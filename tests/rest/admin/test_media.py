@@ -799,15 +799,15 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         """
         self.admin_user = self.register_user("admin", "pass", admin=True)
         self.admin_user_tok = self.login("admin", "pass")
-        self.media_id_1 = self.helper.upload_media(
-            SMALL_PNG, tok=self.admin_user_tok, expect_code=200
-        )
-        self.media_id_2 = self.helper.upload_media(
-            SMALL_PNG, tok=self.admin_user_tok, expect_code=200
-        )
-        self.media_id_3 = self.helper.upload_media(
-            SMALL_PNG, tok=self.admin_user_tok, expect_code=200
-        )
+
+        def _upload() -> str:
+            return self.helper.upload_media(
+                SMALL_PNG, tok=self.admin_user_tok, expect_code=200
+            )[6:].split("/")[1]  # Cut off 'mxc://' and domain
+
+        self.media_id_1 = _upload()
+        self.media_id_2 = _upload()
+        self.media_id_3 = _upload()
 
         def _quarantine(media_id: str) -> None:
             channel = self.make_request(
