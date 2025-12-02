@@ -29,6 +29,7 @@ such as [Github][github-idp].
 [keycloak-idp]: https://www.keycloak.org/docs/latest/server_admin/#sso-protocols
 [hydra]: https://www.ory.sh/docs/hydra/
 [github-idp]: https://developer.github.com/apps/building-oauth-apps/authorizing-oauth-apps
+[infomaniak]: https://www.infomaniak.com
 
 ## Preparing Synapse
 
@@ -698,6 +699,81 @@ oidc_providers:
         display_name_template: "{{ user.name }}"
         email_template: "{{ user.email }}"
 ```
+
+### Infomaniak
+
+[Infomaniak](https://www.infomaniak.com/) Infomaniak is a Swiss hosting provider offering cloud, web, email, and streaming services, with a focus on privacy and sustainability.
+
+#### Creating an OAuth2 Application on Infomaniak
+
+Infomaniak allows you to create OAuth2 applications either at the **organization level** or **user level**, depending on your needs.
+
+---
+
+##### Organization-level Application
+
+Create an OAuth2 app that can be managed by all administrators of your organization.
+
+[Create organization-level app](https://manager.infomaniak.com/v3/ng/products/cloud/ik-auth)
+
+### Advantages
+- Shared management across your team
+- Ideal for company-wide integrations
+
+---
+
+##### User-level Application
+
+Create an OAuth2 app that is **only visible and manageable by your personal Infomaniak user account**.
+
+[Create user-level app](https://manager.infomaniak.com/v3/ng/accounts/applications/list)
+
+### Use case
+- Personal tools
+- Development or testing purposes
+
+---
+
+## Synapse OIDC Configuration
+
+Update your `homeserver.yaml` with the following configuration:
+
+```yaml
+oidc_providers:
+  #Infomaniak
+  - idp_id: infomaniak
+    idp_name: Infomaniak
+    idp_brand: "infomaniak"
+    discover: true
+    client_auth_method: "client_secret_post"
+    user_profile_method: "userinfo_endpoint"
+    issuer: "https://login.infomaniak.com/"
+    client_id: "YOUR_CLIENT_ID"
+    client_secret: "YOUR_CLIENT_SECRET"
+    authorization_endpoint: "https://login.infomaniak.com/authorize"
+    token_endpoint: "https://login.infomaniak.com/token"
+    userinfo_endpoint: "https://login.infomaniak.com/oauth2/userinfo"
+    redirect_uri: "https://YOUR_DOMAIN.FR/_synapse/client/oidc/callback"
+    scopes: ["openid","profile","email"]
+    enable_registration: false
+    allow_existing_users: true
+    user_mapping_provider:
+      config:
+        subject_claim: "{{ user.sub }}"
+        subject_template: "{{ user.sub }}"
+        display_name_template: "{{ user.given_name }}"
+        email_template: "{{ user.email }}"
+        picture_template: "{{ user.picture }}"
+```
+
+### Replace the following:
+
+| Key | Description |
+|-----|-------------|
+| `YOUR_CLIENT_ID` | From Infomaniak's OAuth2 app dashboard |
+| `YOUR_CLIENT_SECRET` | Same as above |
+| `YOUR_DOMAIN.FR` | Your Matrix domain, e.g. `matrix.example.com` |
+
 
 ### Twitch
 
