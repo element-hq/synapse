@@ -5,28 +5,44 @@
 
 |support| |development| |documentation| |license| |pypi| |python|
 
-Synapse is an open source `Matrix <https://matrix.org>`__ homeserver implementation, written and maintained by `Element <https://element.io>`_. `Matrix <https://github.com/matrix-org>`__ is the open standard for secure and interoperable real-time communications. You can directly run and manage the source code in this repository, available under an AGPL license (or alternatively under a commercial license from Element).
+Synapse is an open source `Matrix <https://matrix.org>`__ homeserver
+implementation, written and maintained by `Element <https://element.io>`_.
+`Matrix <https://github.com/matrix-org>`__ is the open standard for secure and
+interoperable real-time communications. You can directly run and manage the
+source code in this repository, available under an AGPL license (or
+alternatively under a commercial license from Element).
 
-There is no support provided by Element unless you have a subscription from Element.
+There is no support provided by Element unless you have a subscription from
+Element.
 
 🚀 Getting started
 ==================
 
-This component is developed and maintained by `Element <https://element.io>`_. It gets shipped as part of the **Element Server Suite (ESS)** which provides the official means of deployment.
+This component is developed and maintained by `Element <https://element.io>`_.
+It gets shipped as part of the **Element Server Suite (ESS)** which provides the
+official means of deployment.
 
-ESS is a Matrix distribution from Element with focus on quality and ease of use. It ships a full Matrix stack tailored to the respective use case.
+ESS is a Matrix distribution from Element with focus on quality and ease of use.
+It ships a full Matrix stack tailored to the respective use case.
 
 There are three editions of ESS:
 
-- `ESS Community <https://github.com/element-hq/ess-helm>`_ - the free Matrix distribution from Element tailored to small-/mid-scale, non-commercial community use cases  
-- `ESS Pro <https://element.io/server-suite>`_ - the commercial Matrix distribution from Element for professional use  
-- `ESS TI-M <https://element.io/server-suite/ti-messenger>`_ - a special version of ESS Pro focused on the requirements of TI-Messenger Pro and ePA as specified by the German National Digital Health Agency Gematik
+- `ESS Community <https://github.com/element-hq/ess-helm>`_ - the free Matrix
+  distribution from Element tailored to small-/mid-scale, non-commercial
+  community use cases
+- `ESS Pro <https://element.io/server-suite>`_ - the commercial Matrix
+  distribution from Element for professional use
+- `ESS TI-M <https://element.io/server-suite/ti-messenger>`_ - a special version
+  of ESS Pro focused on the requirements of TI-Messenger Pro and ePA as
+  specified by the German National Digital Health Agency Gematik
 
 
 🛠️ Standalone installation and configuration
 ============================================
 
-The Synapse documentation describes `options for installing Synapse standalone <https://element-hq.github.io/synapse/latest/setup/installation.html>`_. See below for more useful documenation links.
+The Synapse documentation describes `options for installing Synapse standalone
+<https://element-hq.github.io/synapse/latest/setup/installation.html>`_. See
+below for more useful documenation links.
 
 - `Synapse configuration options <https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html>`_
 - `Synapse configuration for federation <https://element-hq.github.io/synapse/latest/federate.html>`_
@@ -36,7 +52,10 @@ The Synapse documentation describes `options for installing Synapse standalone <
 Platform dependencies
 ---------------------
 
-Synapse uses a number of platform dependencies such as Python and PostgreSQL, and aims to follow supported upstream versions. See the `deprecation policy <https://element-hq.github.io/synapse/latest/deprecation_policy.html>`_ for more details.
+Synapse uses a number of platform dependencies such as Python and PostgreSQL,
+and aims to follow supported upstream versions. See the `deprecation policy
+<https://element-hq.github.io/synapse/latest/deprecation_policy.html>`_ for more
+details.
 
 
 Security note
@@ -135,15 +154,24 @@ Copyright and Licensing
 | Copyright 2017-2025 New Vector Ltd
 | Copyright 2025 Element Creations Ltd
 
-This software is dual-licensed by Element Creations Ltd (Element). It can be used either:
+This software is dual-licensed by Element Creations Ltd (Element). It can be
+used either:
 
-(1) for free under the terms of the GNU Affero General Public License (as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version); OR
+(1) for free under the terms of the GNU Affero General Public License (as
+    published by the Free Software Foundation, either version 3 of the License,
+    or (at your option) any later version); OR
 
-(2) under the terms of a paid-for Element Commercial License agreement between you and Element (the terms of which may vary depending on what you and Element have agreed to).
+(2) under the terms of a paid-for Element Commercial License agreement between
+    you and Element (the terms of which may vary depending on what you and
+    Element have agreed to).
 
-Unless required by applicable law or agreed to in writing, software distributed under the Licenses is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the Licenses for the specific language governing permissions and limitations under the Licenses.
+Unless required by applicable law or agreed to in writing, software distributed
+under the Licenses is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the Licenses for the
+specific language governing permissions and limitations under the Licenses.
 
-Please contact `licensing@element.io <mailto:licensing@element.io>`_ to purchase an Element commercial license for this software.
+Please contact `licensing@element.io <mailto:licensing@element.io>`_ to purchase
+an Element commercial license for this software.
 
 
 .. |support| image:: https://img.shields.io/badge/matrix-community%20support-success
