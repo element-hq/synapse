@@ -1190,6 +1190,86 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             exact=True,
         )
 
+    def test_lazy_members_explicit_membership_removed(self) -> None:
+        """Test the case where we requested explicit memberships and then later
+        changed to lazy loading."""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        self.helper.send(room_id1, "1", tok=user2_tok)
+
+        # Make a sync with lazy loading for the room members to establish
+        # a position
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Member, StateValues.ME],
+                    ],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # We expect to see only user1's membership in the room
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+            exact=True,
+        )
+
+        # Now change to lazy loading...
+        sync_body["lists"]["foo-list"]["required_state"] = [
+            [EventTypes.Member, StateValues.LAZY],
+        ]
+
+        # Send a message in room1 from user2
+        self.helper.send(room_id1, "2", tok=user2_tok)
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # We should see user2's membership as it's in the timeline
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user2_id)],
+            },
+            exact=True,
+        )
+
+        # Now send a message in room1 from user1
+        self.helper.send(room_id1, "3", tok=user1_tok)
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # We should not see any memberships as we've already seen user1's
+        # membership.
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1].get("required_state", []),
+            [],
+            exact=True,
+        )
+
     def test_rooms_required_state_me(self) -> None:
         """
         Test `rooms.required_state` correctly handles $ME.

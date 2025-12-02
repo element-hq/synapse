@@ -4542,6 +4542,113 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 ),
             ),
             (
+                "state_key_expand_lazy_keep_previous_explicit_memberships",
+                """
+                Test removing explicit memberships from the `required_state`
+                when lazy-loading room members tracks previously sent
+                memberships.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    previously_returned_lazy_user_ids=frozenset(),
+                    lazy_load_user_ids={"@user3:test"},
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
+                        # Since an explicit membership was removed we record the
+                        # new required state config and move them to lazy
+                        # members.
+                        {EventTypes.Member: {StateValues.LAZY}},
+                        # We have already sent @user3 down before.
+                        #
+                        # `@user3:test` is required for lazy loading, but we've
+                        # already sent it down before, so we don't need to
+                        # request it again.
+                        StateFilter.none(),
+                        # Remember the fact that we've sent @user3 down before,
+                        # but not @user2 as that has been invalidated.
+                        lazy_members_previously_returned={"@user3:test"},
+                        # Nothing to invalidate as there are no existing lazy members.
+                        lazy_members_invalidated=frozenset(),
+                    ),
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
+                        # While some explicit memberships were removed, there were no
+                        # state changes, so we don't need to persist the new required
+                        # state config yet.
+                        None,
+                        # We have already sent @user3 down before.
+                        #
+                        # `@user3:test` is required for lazy loading, but we've
+                        # already sent it down before, so we don't need to
+                        # request it again.
+                        StateFilter.none(),
+                        # Remember the fact that we've sent the users down before.
+                        lazy_members_previously_returned=frozenset(),
+                        # Nothing to invalidate as there are no existing lazy members.
+                        lazy_members_invalidated=frozenset(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_expand_lazy_keep_previous_explicit_me_memberships",
+                """
+                Test removing explicit $ME memberships from the `required_state`
+                when lazy-loading room members tracks previously sent
+                memberships.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "$ME",
+                        }
+                    },
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    previously_returned_lazy_user_ids=frozenset(),
+                    lazy_load_user_ids={"@user:test"},
+                    state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
+                        # Since an explicit membership was removed we record the
+                        # new required state config and move them to lazy
+                        # members.
+                        {EventTypes.Member: {StateValues.LAZY}},
+                        # We have already sent @user3 down before.
+                        #
+                        # `@user3:test` is required for lazy loading, but we've
+                        # already sent it down before, so we don't need to
+                        # request it again.
+                        StateFilter.none(),
+                        # Remember the fact that we've sent @user down before,
+                        # but not @user2 as that has been invalidated.
+                        lazy_members_previously_returned={"@user:test"},
+                        # Nothing to invalidate as there are no existing lazy members.
+                        lazy_members_invalidated=frozenset(),
+                    ),
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
+                        # While some explicit memberships were removed, there were no
+                        # state changes, so we don't need to persist the new required
+                        # state config yet.
+                        None,
+                        # We have already sent @user3 down before.
+                        #
+                        # `@user3:test` is required for lazy loading, but we've
+                        # already sent it down before, so we don't need to
+                        # request it again.
+                        StateFilter.none(),
+                        # Remember the fact that we've sent the users down before.
+                        lazy_members_previously_returned=frozenset(),
+                        # Nothing to invalidate as there are no existing lazy members.
+                        lazy_members_invalidated=frozenset(),
+                    ),
+                ),
+            ),
+            (
                 "state_key_retract_lazy_keep_previous_memberships_with_new_memberships",
                 """
                 Test retracting the `required_state` to no longer lazy-loading room members.

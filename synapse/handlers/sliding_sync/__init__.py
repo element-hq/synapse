@@ -1254,6 +1254,16 @@ class SlidingSyncHandler:
                     room_id
                 ].invalidated_user_ids = changes_return.lazy_members_invalidated
 
+                # Add any previously returned explicit memberships to the lazy
+                # loaded table. This happens when a client requested explicit
+                # members and then converted them to lazy loading.
+                for user_id in changes_return.lazy_members_previously_returned:
+                    # We don't know the right timestamp to use here, as we don't
+                    # know the last time we would have sent the membership down.
+                    # So we don't overwrite it if we have a timestamp already,
+                    # and fallback to `None` (which means now) if we don't.
+                    returned_user_id_to_last_seen_ts_map.setdefault(user_id, None)
+
                 if changes_return.added_state_filter:
                     # Some state entries got added, so we pull out the current
                     # state for them. If we don't do this we'd only send down new deltas.
@@ -1722,36 +1732,12 @@ def _required_state_changes(
             # Nothing *added*, so we skip. Removals happen below.
             continue
 
-        # Handle the special case of adding LAZY membership, where we want to
-        # remember what explicit members we've previously sent down.
+        # Handle the special case of adding `$LAZY` membership, where we want to
+        # always record the change to be lazy loading.
         if event_type == EventTypes.Member:
             old_state_key_lazy = StateValues.LAZY in old_state_keys
             request_state_key_lazy = StateValues.LAZY in request_state_keys
             if not old_state_key_lazy and request_state_key_lazy:
-                # We're adding a LAZY flag. We therefore add any previously
-                # explicit members we've sent down to lazy cache.
-                for state_key in old_state_keys:
-                    if (
-                        state_key == StateValues.WILDCARD
-                        or state_key == StateValues.LAZY
-                    ):
-                        # Ignore non-user IDs.
-                        continue
-
-                    if state_key == StateValues.ME:
-                        # Normalize to proper user ID
-                        state_key = user_id
-
-                    # We remember the user if either a) they haven't been
-                    # invalidated...
-                    if (EventTypes.Member, state_key) not in state_deltas:
-                        lazy_members_previously_returned.add(state_key)
-
-                    # ...or b) if we are going to send the delta down in this
-                    # sync.
-                    if state_key in lazy_load_user_ids:
-                        lazy_members_previously_returned.add(state_key)
-
                 changes[event_type] = request_state_keys
                 continue
 
@@ -1833,12 +1819,20 @@ def _required_state_changes(
                 else:
                     added.append((event_type, state_key))
 
+    previously_required_state_members = set(
+        prev_required_state_map.get(EventTypes.Member, ())
+    )
+    if StateValues.ME in previously_required_state_members:
+        previously_required_state_members.add(user_id)
+
     # We also need to pull out any lazy members that are now required but
     # haven't previously been returned.
     for required_user_id in (
         lazy_load_user_ids
+        # Remove previously returned users
         - previously_returned_lazy_user_ids
-        - lazy_members_previously_returned
+        # Exclude previously explicitly requested members.
+        - previously_required_state_members
     ):
         added.append((EventTypes.Member, required_user_id))
 
@@ -1882,13 +1876,24 @@ def _required_state_changes(
             changes[event_type] = request_state_keys
             continue
 
+        # When handling $LAZY membership, we want to either a) not update the
+        # state or b) update it to match the request. This is to avoid churn of
+        # the effective required state for rooms (we deduplicate required state
+        # between rooms), and because we can store the previously returned
+        # explicit memberships with the lazy loaded memberships.
         if event_type == EventTypes.Member:
             old_state_key_lazy = StateValues.LAZY in old_state_keys
             request_state_key_lazy = StateValues.LAZY in request_state_keys
+            has_lazy = old_state_key_lazy or request_state_key_lazy
 
+            # If a "$LAZY" has been added or removed we always update.
             if old_state_key_lazy != request_state_key_lazy:
-                # If a "$LAZY" has been added or removed we always update the effective room
-                # required state config to match the request.
+                changes[event_type] = request_state_keys
+                continue
+
+            # Or if we have lazy membership and there are invalidated
+            # explicit memberships.
+            if has_lazy and invalidated_state_keys:
                 changes[event_type] = request_state_keys
                 continue
 
@@ -1902,6 +1907,31 @@ def _required_state_changes(
         # sending down the same event twice).
         if invalidated_state_keys:
             changes[event_type] = old_state_keys - invalidated_state_keys
+
+    # Check for any explicit membership changes that were removed that we can
+    # add to the lazy members previously returned. This is so that we don't
+    # return a user due to lazy loading if they were previously returned as an
+    # explicit membership.
+    membership_changes = changes.get(EventTypes.Member, set())
+    if membership_changes and StateValues.LAZY in request_state_keys:
+        for state_key in prev_required_state_map.get(EventTypes.Member, set()):
+            if state_key == StateValues.WILDCARD or state_key == StateValues.LAZY:
+                # Ignore non-user IDs.
+                continue
+
+            if state_key == StateValues.ME:
+                # Normalize to proper user ID
+                state_key = user_id
+
+            # We remember the user if either a) they haven't been
+            # invalidated...
+            if (EventTypes.Member, state_key) not in state_deltas:
+                lazy_members_previously_returned.add(state_key)
+
+            # ...or b) if we are going to send the delta down in this
+            # sync.
+            if state_key in lazy_load_user_ids:
+                lazy_members_previously_returned.add(state_key)
 
     if changes:
         # Update the required state config based on the changes.
