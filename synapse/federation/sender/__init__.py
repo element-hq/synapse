@@ -174,6 +174,7 @@ from synapse.types import (
     get_domain_from_id,
 )
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import filter_destinations_by_retry_limiter
 
@@ -218,12 +219,12 @@ transaction_queue_pending_edus_gauge = LaterGauge(
 # Please note that rate limiting still applies, so while the loop is
 # executed every X seconds the destinations may not be woken up because
 # they are being rate limited following previous attempt failures.
-WAKEUP_RETRY_PERIOD_SEC = 60
+WAKEUP_RETRY_PERIOD = Duration(minutes=1)
 
-# Time (in s) to wait in between waking up each destination, i.e. one destination
+# Time to wait in between waking up each destination, i.e. one destination
 # will be woken up every <x> seconds until we have woken every destination
 # has outstanding catch-up.
-WAKEUP_INTERVAL_BETWEEN_DESTINATIONS_SEC = 5
+WAKEUP_INTERVAL_BETWEEN_DESTINATIONS = Duration(seconds=5)
 
 
 class AbstractFederationSender(metaclass=abc.ABCMeta):
@@ -379,7 +380,7 @@ class _DestinationWakeupQueue:
 
                 queue.attempt_new_transaction()
 
-                await self.clock.sleep(current_sleep_seconds)
+                await self.clock.sleep(Duration(seconds=current_sleep_seconds))
 
                 if not self.queue:
                     break
@@ -468,7 +469,7 @@ class FederationSender(AbstractFederationSender):
         # Regularly wake up destinations that have outstanding PDUs to be caught up
         self.clock.looping_call_now(
             self.hs.run_as_background_process,
-            WAKEUP_RETRY_PERIOD_SEC * 1000.0,
+            WAKEUP_RETRY_PERIOD,
             "wake_destinations_needing_catchup",
             self._wake_destinations_needing_catchup,
         )
@@ -1161,4 +1162,4 @@ class FederationSender(AbstractFederationSender):
                     last_processed,
                 )
                 self.wake_destination(destination)
-                await self.clock.sleep(WAKEUP_INTERVAL_BETWEEN_DESTINATIONS_SEC)
+                await self.clock.sleep(WAKEUP_INTERVAL_BETWEEN_DESTINATIONS)

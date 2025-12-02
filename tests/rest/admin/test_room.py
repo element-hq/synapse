@@ -44,6 +44,7 @@ from synapse.storage.databases.main.purge_events import (
 )
 from synapse.types import UserID
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests import unittest
@@ -1161,7 +1162,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
         # Mock PaginationHandler.purge_room to sleep for 100s, so we have time to do a second call
         # before the purge is over. Note that it doesn't purge anymore, but we don't care.
         async def purge_room(room_id: str, force: bool) -> None:
-            await self.hs.get_clock().sleep(100)
+            await self.hs.get_clock().sleep(Duration(seconds=100))
 
         self.pagination_handler.purge_room = AsyncMock(side_effect=purge_room)  # type: ignore[method-assign]
 
@@ -1464,7 +1465,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
             self._is_purged(room_id)
 
         # Wait for next scheduler run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         self._is_purged(room_id)
 
@@ -1501,7 +1502,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
             self._is_purged(room_id)
 
         # Wait for next scheduler run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         # Test that all users has been kicked (room is shutdown)
         self._has_no_members(room_id)

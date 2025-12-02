@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 import attr
 
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -70,7 +71,7 @@ class CommonUsageMetricsManager:
         )
         self._clock.looping_call(
             self._hs.run_as_background_process,
-            5 * 60 * 1000,
+            Duration(minutes=5),
             desc="common_usage_metrics_update_gauges",
             func=self._update_gauges,
         )

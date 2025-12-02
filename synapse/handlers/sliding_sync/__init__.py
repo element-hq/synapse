@@ -763,8 +763,6 @@ class SlidingSyncHandler:
                 != Membership.JOIN,
                 filter_send_to_client=True,
             )
-            # TODO: Filter out `EventTypes.CallInvite` in public rooms,
-            # see https://github.com/element-hq/synapse/issues/17359
 
             # TODO: Handle timeline gaps (`get_timeline_gaps()`)
 

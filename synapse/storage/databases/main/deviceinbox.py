@@ -48,9 +48,9 @@ from synapse.storage.database import (
 )
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, StrCollection
-from synapse.util import Duration
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import parse_and_validate_server_name
@@ -62,10 +62,10 @@ logger = logging.getLogger(__name__)
 
 
 # How long to keep messages in the device federation inbox before deleting them.
-DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS = 7 * Duration.DAY_MS
+DEVICE_FEDERATION_INBOX_CLEANUP_DELAY = Duration(days=7)
 
 # How often to run the task to clean up old device_federation_inbox rows.
-DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS = 5 * Duration.MINUTE_MS
+DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL = Duration(minutes=5)
 
 # Update name for the device federation inbox received timestamp index.
 DEVICE_FEDERATION_INBOX_RECEIVED_INDEX_UPDATE = (
@@ -152,7 +152,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         if hs.config.worker.run_background_tasks:
             self.clock.looping_call(
                 run_as_background_process,
-                DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS,
+                DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL,
                 "_delete_old_federation_inbox_rows",
                 self.server_name,
                 self._delete_old_federation_inbox_rows,
@@ -996,9 +996,10 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         def _delete_old_federation_inbox_rows_txn(txn: LoggingTransaction) -> bool:
             # We delete at most 100 rows that are older than
-            # DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS
+            # DEVICE_FEDERATION_INBOX_CLEANUP_DELAY
             delete_before_ts = (
-                self.clock.time_msec() - DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS
+                self.clock.time_msec()
+                - DEVICE_FEDERATION_INBOX_CLEANUP_DELAY.as_millis()
             )
             sql = """
                 WITH to_delete AS (
@@ -1028,7 +1029,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
             # We sleep a bit so that we don't hammer the database in a tight
             # loop first time we run this.
-            await self.clock.sleep(1)
+            await self.clock.sleep(Duration(seconds=1))
 
     async def get_devices_with_messages(
         self, user_id: str, device_ids: StrCollection

@@ -672,7 +672,8 @@ class RootConfig:
             action="append",
             metavar="CONFIG_FILE",
             help="Specify config file. Can be given multiple times and"
-            " may specify directories containing *.yaml files.",
+            " may specify directories containing *.yaml files."
+            " Top-level keys in later files overwrite ones in earlier files.",
         )
         parser.add_argument(
             "--no-secrets-in-config",

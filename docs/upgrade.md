@@ -117,6 +117,25 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.144.0
+
+## Worker support for unstable MSC4140 `/restart` endpoint
+
+The following unstable endpoint pattern may now be routed to worker processes:
+
+```
+^/_matrix/client/unstable/org.matrix.msc4140/delayed_events/.*/restart$
+```
+
+## Unstable mutual rooms endpoint is now behind an experimental feature flag
+
+The unstable mutual rooms endpoint from
+[MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666)
+(`/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`) is now
+disabled by default.  If you rely on this unstable endpoint, you must now set
+`experimental_features.msc2666_enabled: true` in your configuration to keep
+using it.
+
 # Upgrading to v1.143.0
 
 ## Dropping support for PostgreSQL 13

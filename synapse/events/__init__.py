@@ -548,7 +548,7 @@ class FrozenEventV4(FrozenEventV3):
         assert create_event_id not in self._dict["auth_events"]
         if self.type == EventTypes.Create and self.get_state_key() == "":
             return self._dict["auth_events"]  # should be []
-        return self._dict["auth_events"] + [create_event_id]
+        return [*self._dict["auth_events"], create_event_id]
 
 
 def _event_type_from_format_version(

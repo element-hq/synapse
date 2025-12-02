@@ -38,6 +38,7 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.types import JsonDict
 from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.http.server._base import test_disconnect
@@ -406,11 +407,11 @@ class CancellableDirectServeJsonResource(DirectServeJsonResource):
 
     @cancellable
     async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        await self.clock.sleep(1.0)
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, {"result": True}
 
     async def _async_render_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        await self.clock.sleep(1.0)
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, {"result": True}
 
 
@@ -423,11 +424,11 @@ class CancellableDirectServeHtmlResource(DirectServeHtmlResource):
 
     @cancellable
     async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, bytes]:
-        await self.clock.sleep(1.0)
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, b"ok"
 
     async def _async_render_POST(self, request: SynapseRequest) -> tuple[int, bytes]:
-        await self.clock.sleep(1.0)
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, b"ok"
 
 
