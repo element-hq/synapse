@@ -150,7 +150,7 @@ class SynapseRequest(Request):
     # been received, to dispatch the request to a resource.
     def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
         # In the case of a Content-Length header being present, and it's value being too
-        # large, this will make debugging issues due to overly large requests much
+        # large, throw a proper error to make debugging issues due to overly large requests much
         # easier. Currently we handle such cases in `handleContentChunk` and abort the
         # connection without providing a proper HTTP response.
         #
