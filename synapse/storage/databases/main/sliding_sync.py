@@ -581,13 +581,24 @@ class SlidingSyncStore(SQLBaseStore):
                 txn.database_engine, "user_id", user_ids
             )
 
+            # Fetch all the lazy membership entries for the given connection,
+            # room and user IDs. We don't have the `connection_key` here, so we
+            # join against `sliding_sync_connection_positions` to get it.
+            #
+            # Beware that there are two `connection_position` columns in the
+            # query which are different, the one in
+            # `sliding_sync_connection_positions` is the one we match to get the
+            # connection_key, whereas the one in
+            # `sliding_sync_connection_lazy_members` is what we filter against
+            # (it may be null or the same as the one passed in).
             sql = f"""
-                SELECT user_id, connection_position, last_seen_ts
-                FROM sliding_sync_connection_lazy_members AS pos
-                WHERE room_id = ? AND {user_clause}
+                SELECT user_id, mem.connection_position, last_seen_ts
+                FROM sliding_sync_connection_lazy_members AS mem
+                INNER JOIN sliding_sync_connection_positions AS pos USING (connection_key)
+                WHERE pos.connection_position = ? AND room_id = ? AND {user_clause}
             """
 
-            txn.execute(sql, (room_id, *user_args))
+            txn.execute(sql, (connection_position, room_id, *user_args))
 
             # Filter out any cache entries that only apply to forked connection
             # positions. Entries with `NULL` connection position apply to all

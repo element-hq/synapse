@@ -1018,6 +1018,106 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             exact=True,
         )
 
+    def test_lazy_members_across_multiple_connections(self) -> None:
+        """Test that lazy loading room members are tracked per-connection
+        correctly.
+
+        This catches bugs where if a membership got sent down one connection,
+        it would incorrectly assume it was sent down another connection.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        self.helper.send(room_id1, "1", tok=user2_tok)
+
+        # Make a sync with lazy loading for the room members to establish
+        # a position
+        sync_body1 = {
+            "conn_id": "first-connection",
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Member, StateValues.LAZY],
+                    ],
+                    "timeline_limit": 1,
+                }
+            },
+        }
+        response_body, from_token1 = self.do_sync(sync_body1, tok=user1_tok)
+
+        # We expect to see only user2's membership in the room
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user2_id)],
+            },
+            exact=True,
+        )
+
+        # Now make a new connection
+        sync_body2 = {
+            "conn_id": "second-connection",
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Member, StateValues.LAZY],
+                    ],
+                    "timeline_limit": 1,
+                }
+            },
+        }
+        response_body, from_token2 = self.do_sync(sync_body2, tok=user1_tok)
+
+        # We should see user2's membership as this is a new connection
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user2_id)],
+            },
+            exact=True,
+        )
+
+        # If we send a message from user1 and sync again on the first connection,
+        # we should get user1's membership
+        self.helper.send(room_id1, "2", tok=user1_tok)
+        response_body, from_token1 = self.do_sync(
+            sync_body1, since=from_token1, tok=user1_tok
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+            exact=True,
+        )
+
+        # We sync again on the first connection to "ack" the position. This
+        # triggers the `sliding_sync_connection_lazy_members` to set its
+        # connection_position to null.
+        self.do_sync(sync_body1, since=from_token1, tok=user1_tok)
+
+        # If we sync again on the second connection, we should also get user1's
+        # membership
+        response_body, _ = self.do_sync(sync_body2, since=from_token2, tok=user1_tok)
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+            exact=True,
+        )
+
     def test_lazy_members_forked_position(self) -> None:
         """Test that lazy loading room members are tracked correctly when a
         connection position is reused"""
