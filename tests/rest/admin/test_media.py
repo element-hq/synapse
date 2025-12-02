@@ -803,7 +803,7 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         def _upload() -> str:
             return self.helper.upload_media(
                 SMALL_PNG, tok=self.admin_user_tok, expect_code=200
-            )[6:].split("/")[1]  # Cut off 'mxc://' and domain
+            )["content_uri"][6:].split("/")[1]  # Cut off 'mxc://' and domain
 
         self.media_id_1 = _upload()
         self.media_id_2 = _upload()
