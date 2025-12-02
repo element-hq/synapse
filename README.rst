@@ -12,7 +12,7 @@ There is no support provided by Element unless you have a subscription from Elem
 Getting started
 ===============
 
-This component is developed and maintained by `Element <https://element.io>`_. It gets shipped as part of the Element Server Suite (ESS) which provides the official way for deploying.
+This component is developed and maintained by `Element <https://element.io>`_. It gets shipped as part of the Element Server Suite (ESS) which provides the official means of deployment.
 
 There are three editions of ESS:
 
