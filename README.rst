@@ -25,8 +25,7 @@ There are three editions of ESS:
 🛠️ Standalone installation and configuration
 ============================================
 
-The Synapse documentation describes `options for installing Synapse standalone <https://element-hq.github.io/synapse/latest/setup/installation.html>`_. If you intend to run Synapse standalone, we recommend using
-`Docker images <https://element-hq.github.io/synapse/latest/setup/installation.html#docker-images-and-ansible-playbooks>`_. See below for more useful documenation links.
+The Synapse documentation describes `options for installing Synapse standalone <https://element-hq.github.io/synapse/latest/setup/installation.html>`_. See below for more useful documenation links.
 
 - `Synapse configuration options <https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html>`_
 - `Synapse configuration for federation <https://element-hq.github.io/synapse/latest/federate.html>`_
