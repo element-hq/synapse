@@ -1,8 +1,12 @@
 version: 2
+# As dependabot is currently only run on a weekly basis, we raise the
+# open-pull-requests-limit to 10 (from the default of 5) to better ensure we
+# don't continuously grow a backlog of updates.
 updates:
   - # "pip" is the correct setting for poetry, per https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
     package-ecosystem: "pip"
     directory: "/"
+    open-pull-requests-limit: 10
     schedule:
       interval: "weekly"
     # Prevent pulling packages that were recently updated to help mitigate
@@ -18,6 +22,7 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/docker"
+    open-pull-requests-limit: 10
     schedule:
       interval: "weekly"
     cooldown:
@@ -25,6 +30,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    open-pull-requests-limit: 10
     schedule:
       interval: "weekly"
     cooldown:
@@ -32,6 +38,7 @@ updates:
 
   - package-ecosystem: "cargo"
     directory: "/"
+    open-pull-requests-limit: 10
     versioning-strategy: "lockfile-only"
     schedule:
       interval: "weekly"
