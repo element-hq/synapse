@@ -61,7 +61,7 @@ details.
 Security note
 -------------
 
-Matrix serves raw, user-supplied data in some APIs -- specifically the `content
+Matrix serves raw, user-supplied data in some APIs — specifically the `content
 repository endpoints`_.
 
 .. _content repository endpoints: https://matrix.org/docs/spec/client_server/latest.html#get-matrix-media-r0-download-servername-mediaid
@@ -149,9 +149,9 @@ Alongside all that, join our developer community on Matrix:
 Copyright and Licensing
 =======================
 
-  | Copyright 2014-2017 OpenMarket Ltd
+  | Copyright 2014–2017 OpenMarket Ltd
   | Copyright 2017 Vector Creations Ltd
-  | Copyright 2017-2025 New Vector Ltd
+  | Copyright 2017–2025 New Vector Ltd
   | Copyright 2025 Element Creations Ltd
 
 This software is dual-licensed by Element Creations Ltd (Element). It can be
