@@ -114,19 +114,12 @@ jobs:
         os:
           - ubuntu-24.04
           - ubuntu-24.04-arm
-          - macos-14 # This uses arm64
-          - macos-15-intel # This uses x86-64
         # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
         # It is not read by the rest of the workflow.
         is_pr:
           - ${{ startsWith(github.ref, 'refs/pull/') }}
 
         exclude:
-          # Don't build macos wheels on PR CI.
-          - is_pr: true
-            os: "macos-15-intel"
-          - is_pr: true
-            os: "macos-14"
           # Don't build aarch64 wheels on PR CI.
           - is_pr: true
             os: "ubuntu-24.04-arm"
