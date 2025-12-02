@@ -42,7 +42,7 @@ There are three editions of ESS:
 
 The Synapse documentation describes `options for installing Synapse standalone
 <https://element-hq.github.io/synapse/latest/setup/installation.html>`_. See
-below for more useful documenation links.
+below for more useful documentation links.
 
 - `Synapse configuration options <https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html>`_
 - `Synapse configuration for federation <https://element-hq.github.io/synapse/latest/federate.html>`_
