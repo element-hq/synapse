@@ -1,3 +1,63 @@
+# synapse 1.144.0rc1 (2025-12-02)
+
+Admins using the unstable [MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666) endpoint (`/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`), please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11440) as this release contains changes that disable that endpoint by default.
+
+## Features
+
+- Add experimentatal implememntation of [MSC4380](https://github.com/matrix-org/matrix-spec-proposals/pull/4380) (invite blocking). ([\#19203](https://github.com/element-hq/synapse/issues/19203))
+- Allow restarting delayed event timeouts on workers. ([\#19207](https://github.com/element-hq/synapse/issues/19207))
+
+## Bugfixes
+
+- Fix a bug in the database function for fetching state deltas that could result in unnecessarily long query times. ([\#18960](https://github.com/element-hq/synapse/issues/18960))
+- Fix v12 rooms when running with `use_frozen_dicts: True`. ([\#19235](https://github.com/element-hq/synapse/issues/19235))
+- Fix bug where invalid `canonical_alias` content would return 500 instead of 400. ([\#19240](https://github.com/element-hq/synapse/issues/19240))
+
+## Improved Documentation
+
+- Document in the `--config-path` help how multiple files are merged - by merging them shallowly. ([\#19243](https://github.com/element-hq/synapse/issues/19243))
+
+## Deprecations and Removals
+
+- Stop building release wheels for MacOS. ([\#19225](https://github.com/element-hq/synapse/issues/19225))
+
+## Internal Changes
+
+- Improve event filtering for Simplified Sliding Sync. ([\#17782](https://github.com/element-hq/synapse/issues/17782))
+- Export `SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES` environment variable from `scripts-dev/complement.sh`. ([\#19208](https://github.com/element-hq/synapse/issues/19208))
+- Refactor `scripts-dev/complement.sh` logic to avoid `exit` to facilitate being able to source it from other scripts (composable). ([\#19209](https://github.com/element-hq/synapse/issues/19209))
+- Expire sliding sync connections that are too old or have too much pending data. ([\#19211](https://github.com/element-hq/synapse/issues/19211))
+- Require an experimental feature flag to be enabled in order for the unstable [MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666) endpoint (`/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`) to be available. ([\#19219](https://github.com/element-hq/synapse/issues/19219))
+- Prevent changelog check CI running on @dependabot's PRs even when a human has modified the branch. ([\#19220](https://github.com/element-hq/synapse/issues/19220))
+- Auto-fix trailing spaces in multi-line strings and comments when running the lint script. ([\#19221](https://github.com/element-hq/synapse/issues/19221))
+- Move towards using a dedicated `Duration` type. ([\#19223](https://github.com/element-hq/synapse/issues/19223), [\#19229](https://github.com/element-hq/synapse/issues/19229))
+- Improve robustness of the SQL schema linting in CI. ([\#19224](https://github.com/element-hq/synapse/issues/19224))
+- Add log to determine whether clients are using `/messages` as expected. ([\#19226](https://github.com/element-hq/synapse/issues/19226))
+- Simplify README and add ESS Getting started section. ([\#19228](https://github.com/element-hq/synapse/issues/19228), [\#19259](https://github.com/element-hq/synapse/issues/19259))
+- Add a unit test for ensuring associated refresh tokens are erased when a device is deleted. ([\#19230](https://github.com/element-hq/synapse/issues/19230))
+- Prompt user to consider adding future deprecations to the changelog in release script. ([\#19239](https://github.com/element-hq/synapse/issues/19239))
+- Fix check of the Rust compiled code being outdated when using source checkout and `.egg-info`. ([\#19251](https://github.com/element-hq/synapse/issues/19251))
+- Stop building macos wheels in CI pipeline. ([\#19263](https://github.com/element-hq/synapse/issues/19263))
+
+
+
+### Updates to locked dependencies
+
+* Bump Swatinem/rust-cache from 2.8.1 to 2.8.2. ([\#19244](https://github.com/element-hq/synapse/issues/19244))
+* Bump actions/checkout from 5.0.0 to 6.0.0. ([\#19213](https://github.com/element-hq/synapse/issues/19213))
+* Bump actions/setup-go from 6.0.0 to 6.1.0. ([\#19214](https://github.com/element-hq/synapse/issues/19214))
+* Bump actions/setup-python from 6.0.0 to 6.1.0. ([\#19245](https://github.com/element-hq/synapse/issues/19245))
+* Bump attrs from 25.3.0 to 25.4.0. ([\#19215](https://github.com/element-hq/synapse/issues/19215))
+* Bump docker/metadata-action from 5.9.0 to 5.10.0. ([\#19246](https://github.com/element-hq/synapse/issues/19246))
+* Bump http from 1.3.1 to 1.4.0. ([\#19249](https://github.com/element-hq/synapse/issues/19249))
+* Bump pydantic from 2.12.4 to 2.12.5. ([\#19250](https://github.com/element-hq/synapse/issues/19250))
+* Bump pyopenssl from 25.1.0 to 25.3.0. ([\#19248](https://github.com/element-hq/synapse/issues/19248))
+* Bump rpds-py from 0.28.0 to 0.29.0. ([\#19216](https://github.com/element-hq/synapse/issues/19216))
+* Bump rpds-py from 0.29.0 to 0.30.0. ([\#19247](https://github.com/element-hq/synapse/issues/19247))
+* Bump sentry-sdk from 2.44.0 to 2.46.0. ([\#19218](https://github.com/element-hq/synapse/issues/19218))
+* Bump types-bleach from 6.2.0.20250809 to 6.3.0.20251115. ([\#19217](https://github.com/element-hq/synapse/issues/19217))
+* Bump types-jsonschema from 4.25.1.20250822 to 4.25.1.20251009. ([\#19252](https://github.com/element-hq/synapse/issues/19252))
+
 # Synapse 1.143.0 (2025-11-25)
 
 ## Dropping support for PostgreSQL 13
