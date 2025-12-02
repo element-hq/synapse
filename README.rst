@@ -20,7 +20,6 @@ There are three editions of ESS:
 - `ESS Pro <https://element.io/server-suite>`_ - the commercial Matrix distribution from Element for professional use  
 - `ESS TI-M <https://element.io/server-suite/ti-messenger>`_ - a special version of ESS Pro focused on the requirements of TI-Messenger Pro and ePA as specified by the German National Digital Health Agency Gematik
 
-.. contents::
 
 🛠️ Standalone installation and configuration
 ============================================
