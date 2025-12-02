@@ -61,6 +61,7 @@ class LocalMedia:
     url_cache: str | None
     last_access_ts: int
     quarantined_by: str | None
+    quarantined_ts: int | None
     safe_from_quarantine: bool
     user_id: str | None
     authenticated: bool | None
@@ -78,6 +79,7 @@ class RemoteMedia:
     created_ts: int
     last_access_ts: int
     quarantined_by: str | None
+    quarantined_ts: int | None
     authenticated: bool | None
     sha256: str | None
 

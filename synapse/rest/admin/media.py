@@ -293,6 +293,34 @@ class ListMediaInRoom(RestServlet):
         return HTTPStatus.OK, {"local": local_mxcs, "remote": remote_mxcs}
 
 
+class ListQuarantinedMedia(RestServlet):
+    """Lists all quarantined media on the server."""
+
+    PATTERNS = admin_patterns("/media/quarantined$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        self.auth = hs.get_auth()
+
+    async def on_GET(
+        self, request: SynapseRequest,
+    ) -> tuple[int, JsonDict]:
+        await assert_requester_is_admin(self.auth, request)
+
+        start = parse_integer(request, "from", default=0)
+        limit = parse_integer(request, "limit", default=100)
+        local_or_remote = parse_string(request, "kind", required=True)
+
+        if local_or_remote not in ["local", "remote"]:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "Query parameter kind must be either 'local' or 'remote'."
+            )
+
+        mxcs = await self.store.get_quarantined_media_mxcs(start, limit, local_or_remote == "local")
+
+        return HTTPStatus.OK, {"media": mxcs}
+
+
 class PurgeMediaCacheRestServlet(RestServlet):
     PATTERNS = admin_patterns("/purge_media_cache$")
 

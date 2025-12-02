@@ -21,6 +21,7 @@
 #
 
 import logging
+from datetime import time
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
@@ -945,6 +946,46 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             max_lifetime=max_lifetime,
         )
 
+    async def get_quarantined_media_mxcs(self, index_start: int, index_limit: int, local: bool) -> list[str]:
+        """Retrieves all the quarantined media MXC URIs starting from the given position,
+        ordered by quarantined timestamp.
+
+        Note that on established servers the "quarantined timestamp" may be zero due to
+        being introduced after the quarantine state was introduced.
+
+        Args:
+            index_start: The position to start from.
+            index_limit: The maximum number of results to return.
+            local: When true, only local media will be returned. When false, only remote media will be returned.
+
+        Returns:
+            The quarantined media as a list of media IDs.
+        """
+
+        def _get_quarantined_media_mxcs_txn(
+            txn: LoggingTransaction,
+        ) -> list[str]:
+            # We order by quarantined timestamp *and* media ID (including origin, when
+            # known) to ensure there's stable ordering for established servers.
+            if local:
+                sql = "SELECT '' as media_origin, media_id FROM local_media_repository ORDER BY quarantined_ts, media_id ASC LIMIT ? OFFSET ?"
+            else:
+                sql = "SELECT media_origin, media_id FROM remote_media_cache ORDER BY quarantined_ts, media_origin, media_id ASC LIMIT ? OFFSET ?"
+            txn.execute(sql, (index_limit, index_start))
+
+            mxcs = []
+
+            for media_origin, media_id in txn:
+                if local:
+                    media_origin = self.hs.hostname
+                mxcs.append(f"mxc://{media_origin}/{media_id}")
+
+            return mxcs
+
+        return await self.db_pool.runInteraction(
+            "get_quarantined_media_mxcs", _get_quarantined_media_mxcs_txn,
+        )
+
     async def get_media_mxcs_in_room(self, room_id: str) -> tuple[list[str], list[str]]:
         """Retrieves all the local and remote media MXC URIs in a given room
 
@@ -952,7 +993,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             room_id
 
         Returns:
-            The local and remote media as a lists of the media IDs.
+            The local and remote media as lists of the media IDs.
         """
 
         def _get_media_mxcs_in_room_txn(
@@ -973,6 +1014,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction(
             "get_media_ids_in_room", _get_media_mxcs_in_room_txn
         )
+
 
     async def quarantine_media_ids_in_room(
         self, room_id: str, quarantined_by: str
@@ -1147,6 +1189,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             The total number of media items quarantined
         """
         total_media_quarantined = 0
+        now_ts = self.clock.time_msec()
+
+        if quarantined_by is None:
+            now_ts = None
 
         # Effectively a legacy path, update any media that was explicitly named.
         if media_ids:
@@ -1155,13 +1201,13 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             )
             sql = f"""
                 UPDATE local_media_repository
-                SET quarantined_by = ?
+                SET quarantined_by = ?, quarantined_ts = ?
                 WHERE {sql_many_clause_sql}"""
 
             if quarantined_by is not None:
                 sql += " AND safe_from_quarantine = FALSE"
 
-            txn.execute(sql, [quarantined_by] + sql_many_clause_args)
+            txn.execute(sql, [quarantined_by, now_ts] + sql_many_clause_args)
             # Note that a rowcount of -1 can be used to indicate no rows were affected.
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
@@ -1172,13 +1218,13 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             )
             sql = f"""
                 UPDATE local_media_repository
-                SET quarantined_by = ?
+                SET quarantined_by = ?, quarantined_ts = ?
                 WHERE {sql_many_clause_sql}"""
 
             if quarantined_by is not None:
                 sql += " AND safe_from_quarantine = FALSE"
 
-            txn.execute(sql, [quarantined_by] + sql_many_clause_args)
+            txn.execute(sql, [quarantined_by, now_ts] + sql_many_clause_args)
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
         return total_media_quarantined
@@ -1202,6 +1248,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             The total number of media items quarantined
         """
         total_media_quarantined = 0
+        now_ts = int(time.time())
 
         if media:
             sql_in_list_clause, sql_args = make_tuple_in_list_sql_clause(
@@ -1211,10 +1258,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             )
             sql = f"""
                 UPDATE remote_media_cache
-                SET quarantined_by = ?
+                SET quarantined_by = ?, quarantined_ts = ?
                 WHERE {sql_in_list_clause}"""
 
-            txn.execute(sql, [quarantined_by] + sql_args)
+            txn.execute(sql, [quarantined_by, now_ts] + sql_args)
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
         total_media_quarantined = 0
@@ -1224,9 +1271,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             )
             sql = f"""
                 UPDATE remote_media_cache
-                SET quarantined_by = ?
+                SET quarantined_by = ?, quarantined_ts = ?
                 WHERE {sql_many_clause_sql}"""
-            txn.execute(sql, [quarantined_by] + sql_many_clause_args)
+            txn.execute(sql, [quarantined_by, now_ts] + sql_many_clause_args)
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
         return total_media_quarantined

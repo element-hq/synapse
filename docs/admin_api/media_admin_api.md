@@ -73,6 +73,33 @@ Response:
 }
 ```
 
+## Listing all quarantined media
+
+This API returns a list of all quarantined media on the server. It is paginated, and can be scoped to either local or
+remote media. Note that the pagination values are also scoped to whether the media is local or remote. For example, 
+providing values from a local result set to a request for remote media will return unexpected results.
+
+Request:
+```http
+GET /_synapse/admin/v1/media/quarantined?from=0&limit=100&kind=local
+```
+
+`from` and `limit` are optional parameters, and default to `0` and `100` respectively. They are the row index and number
+of rows to return - they are not timestamps.
+
+`kind` *MUST* either be `local` or `remote`.
+
+The API returns a JSON body containing MXC URIs for the quarantined media, like the following:
+
+```json
+{
+  "media": [
+    "mxc://localhost/xwvutsrqponmlkjihgfedcba",
+    "mxc://localhost/abcdefghijklmnopqrstuvwx"
+  ]
+}
+```
+
 # Quarantine media
 
 Quarantining media means that it is marked as inaccessible by users. It applies
