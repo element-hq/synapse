@@ -16,7 +16,14 @@ that your email address is probably `user@example.com` rather than
 `user@email.example.com`) - but doing so may require more advanced setup: see
 [Setting up Federation](../federate.md).
 
+⚠️ Before setting up Synapse please consult the [security page](security.md) for
+best practices. ⚠️
+
 ## Installing Synapse
+
+Note: Synapse uses a number of platform dependencies such as Python and PostgreSQL,
+and aims to follow supported upstream versions. See the [deprecation
+policy](../deprecation_policy.md) for more details.
 
 ### Prebuilt packages
 
