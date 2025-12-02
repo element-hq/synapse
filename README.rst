@@ -49,14 +49,6 @@ below for more useful documenation links.
 - `Using a reverse proxy with Synapse <https://element-hq.github.io/synapse/latest/reverse_proxy.html>`_
 - `Upgrading Synapse <https://element-hq.github.io/synapse/develop/upgrade.html>`_
 
-Platform dependencies
----------------------
-
-Synapse uses a number of platform dependencies such as Python and PostgreSQL,
-and aims to follow supported upstream versions. See the `deprecation policy
-<https://element-hq.github.io/synapse/latest/deprecation_policy.html>`_ for more
-details.
-
 
 🎯 Troubleshooting and support
 ==============================

@@ -23,6 +23,12 @@ that your email address is probably `user@example.com` rather than
 
 ## Installing Synapse
 
+> [!IMPORTANT]
+>
+> Synapse uses a number of platform dependencies such as Python and PostgreSQL,
+> and aims to follow supported upstream versions. See the [deprecation
+> policy](../deprecation_policy.md) for more details.
+
 ### Prebuilt packages
 
 Prebuilt packages are available for a number of platforms. These are recommended
