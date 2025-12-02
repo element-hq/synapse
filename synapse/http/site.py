@@ -171,6 +171,38 @@ class SynapseRequest(Request):
 
             try:
                 content_length = int(content_length_headers[0])
+                if content_length < self.content.tell():
+                    self.method, self.uri = command, path
+                    self.clientproto = version
+                    logger.info(
+                        "Rejecting request from %s because Content-Length %d is smaller than the request content size %d: %s %s",
+                        self.client,
+                        content_length,
+                        self.content.tell(),
+                        self.get_method(),
+                        self.get_redacted_uri(),
+                    )
+
+                    self.code = HTTPStatus.BAD_REQUEST.value
+                    self.code_message = bytes(
+                        HTTPStatus.BAD_REQUEST.phrase, "ascii"
+                    )
+
+                    error_response_json = {
+                        "errcode": Codes.UNKNOWN,
+                        "error": "Request content is too small",
+                    }
+                    error_response_bytes = (json.dumps(error_response_json)).encode()
+
+                    self.responseHeaders.setRawHeaders(
+                        b"Content-Type", [b"application/json"]
+                    )
+                    self.responseHeaders.setRawHeaders(
+                        b"content-length", [f"{len(error_response_bytes)}"]
+                    )
+                    self.write(error_response_bytes)
+                    self.loseConnection()
+                    return
                 if content_length > self._max_request_body_size:
                     self.method, self.uri = command, path
                     self.clientproto = version

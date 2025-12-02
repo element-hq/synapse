@@ -24,6 +24,7 @@ from twisted.internet.testing import MemoryReactor, StringTransport
 
 from synapse.app._base import max_request_body_size
 from synapse.app.homeserver import SynapseHomeServer
+from synapse.rest.client import capabilities, versions
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
@@ -31,6 +32,11 @@ from tests.unittest import HomeserverTestCase
 
 
 class SynapseRequestTestCase(HomeserverTestCase):
+    servlets = [
+        versions.register_servlets,
+        capabilities.register_servlets,
+    ]
+
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         return self.setup_test_homeserver(homeserver_to_use=SynapseHomeServer)
 
