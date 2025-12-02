@@ -505,6 +505,39 @@ with a body of:
 }
 ```
 
+## List room memberships of a user
+
+Gets a list of room memberships for a specific `user_id`.
+
+The API is:
+
+```
+GET /_synapse/admin/v1/users/<user_id>/memberships
+```
+
+A response body like the following is returned:
+
+```json
+    {
+        "!DuGcnbhHGaSZQoNQR:matrix.org": "join",
+        "!ZtSaPCawyWtxfWiIy:matrix.org": "leave",
+    }
+```
+
+The server returns the list of memberships for rooms of which the server
+are member. If the user is local, all the room memberships of the user
+are returned.
+
+**Parameters**
+
+The following parameters should be set in the URL:
+
+- `user_id` - fully qualified: for example, `@user:server.com`.
+
+**Response**
+
+A map of `room_id` to `membership` state.
+
 ## List joined rooms of a user
 
 Gets a list of all `room_id` that a specific `user_id` is joined to and is a member of (participating in).
