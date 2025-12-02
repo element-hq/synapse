@@ -1,4 +1,4 @@
-# synapse 1.144.0rc1 (2025-12-02)
+# Synapse 1.144.0rc1 (2025-12-02)
 
 Admins using the unstable [MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666) endpoint (`/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`), please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11440) as this release contains changes that disable that endpoint by default.
 
@@ -12,6 +12,7 @@ Admins using the unstable [MSC2666](https://github.com/matrix-org/matrix-spec-pr
 - Fix a bug in the database function for fetching state deltas that could result in unnecessarily long query times. ([\#18960](https://github.com/element-hq/synapse/issues/18960))
 - Fix v12 rooms when running with `use_frozen_dicts: True`. ([\#19235](https://github.com/element-hq/synapse/issues/19235))
 - Fix bug where invalid `canonical_alias` content would return 500 instead of 400. ([\#19240](https://github.com/element-hq/synapse/issues/19240))
+- Fix bug where `Duration` was logged incorrectly. ([\#19267](https://github.com/element-hq/synapse/issues/19267))
 
 ## Improved Documentation
 
