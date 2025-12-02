@@ -9,10 +9,12 @@ Synapse is an open source `Matrix <https://matrix.org>`__ homeserver implementat
 
 There is no support provided by Element unless you have a subscription from Element.
 
-Getting started
-===============
+🚀 Getting started
+==================
 
-This component is developed and maintained by `Element <https://element.io>`_. It gets shipped as part of the Element Server Suite (ESS) which provides the official means of deployment.
+This component is developed and maintained by `Element <https://element.io>`_. It gets shipped as part of the **Element Server Suite (ESS)** which provides the official means of deployment.
+
+ESS is a Matrix distribution from Element with focus on quality and ease of use. It ships a full Matrix stack tailored to the respective use case.
 
 There are three editions of ESS:
 
