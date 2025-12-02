@@ -16,6 +16,11 @@ that your email address is probably `user@example.com` rather than
 `user@email.example.com`) - but doing so may require more advanced setup: see
 [Setting up Federation](../federate.md).
 
+> [!CAUTION]
+>
+> Before setting up Synapse please consult the [security page](security.md) for
+> best practices.
+
 ## Installing Synapse
 
 ### Prebuilt packages
