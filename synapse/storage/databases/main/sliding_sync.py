@@ -462,7 +462,7 @@ class SlidingSyncStore(SQLBaseStore):
 
         # Move any lazy membership entries for this connection position to have
         # `NULL` connection position, indicating that it applies to all future
-        # positions on this connecetion.
+        # positions on this connection.
         self.db_pool.simple_update_txn(
             txn,
             table="sliding_sync_connection_lazy_members",
