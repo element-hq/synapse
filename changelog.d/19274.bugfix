@@ -1,0 +1,1 @@
+Fix bug introduced in 1.143.0 that broke support for older versions of zope-interface.
