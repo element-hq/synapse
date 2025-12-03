@@ -829,7 +829,7 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/media/quarantined?kind=local&from=0&limit=1",
-                access_token=self.admin_user_tok,
+            access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(1, len(channel.json_body["media"]))
@@ -846,7 +846,7 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/media/quarantined?kind=local&from=1&limit=1",
-                access_token=self.admin_user_tok,
+            access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(1, len(channel.json_body["media"]))
@@ -863,7 +863,7 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/media/quarantined?kind=local&from=2&limit=1",
-                access_token=self.admin_user_tok,
+            access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(1, len(channel.json_body["media"]))
@@ -880,7 +880,7 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/media/quarantined?kind=local&from=3&limit=1",
-                access_token=self.admin_user_tok,
+            access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(0, len(channel.json_body["media"]))
