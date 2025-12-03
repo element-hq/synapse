@@ -1705,11 +1705,6 @@ def _required_state_changes(
     # client. Passed to `StateFilter.from_types(...)`
     added: list[tuple[str, str | None]] = []
 
-    # Record any members that were previously explicitly tracked and should now
-    # be tracked as lazy members. This handles the case of membership changing
-    # from e.g. `{@alice:example.com}` to `{LAZY}`.
-    lazy_members_previously_returned: set[str] = set()
-
     # Convert the list of state deltas to map from type to state_keys that have
     # changed.
     changed_types_to_state_keys: dict[str, set[str]] = {}
@@ -1912,6 +1907,8 @@ def _required_state_changes(
     # add to the lazy members previously returned. This is so that we don't
     # return a user due to lazy loading if they were previously returned as an
     # explicit membership.
+    lazy_members_previously_returned: set[str] = set()
+
     membership_changes = changes.get(EventTypes.Member, set())
     if membership_changes and StateValues.LAZY in request_state_keys:
         for state_key in prev_required_state_map.get(EventTypes.Member, set()):
