@@ -2246,6 +2246,10 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         """Test that when using lazy-loaded members, if a membership state is
         reset to a previous state and the sync is not limited, then we send down
         the state reset.
+
+        Regression test as previously we only returned membership relevant to
+        the timeline and so did not tell clients about state resets for
+        users who did not send any timeline events.
         """
 
         user1_id = self.register_user("user1", "pass")
