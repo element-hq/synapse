@@ -40,6 +40,14 @@ dependencies = [
     # lives hard (as of 2025-07, distro support is Ubuntu LTS: 22.1, Debian stable: 22.4,
     # RHEL 9: 22.10)
     "Twisted[tls]>=21.2.0",
+    # We don't explicitly depend on zope-interface. Twisted pulls it in implicitly as a dependency.
+    # We add an explicit dependency here to ensure the versions of zope-interface Synapse supports
+    # includes those which are available on our supported platforms.
+    # Specifying the dependency explicitly will ensure we test with the lowest version during the
+    # olddeps CI tests.
+    # 5.2 is the current version in Debian oldstable. If we don't care to support that, then 5.4 is
+    # the minimum version from Ubuntu 22.04 and RHEL 9. (as of 2025-12)
+    "zope-interface>=5.2",
     "treq>=21.5.0",
     # Twisted has required pyopenssl 16.0 since about Twisted 16.6.
     "pyOpenSSL>=16.0.0",
@@ -260,15 +268,10 @@ select = [
     "G",
     # pyupgrade
     "UP006",
-    "UP007",
-    "UP045",
 ]
 extend-safe-fixes = [
     # pyupgrade rules compatible with Python >= 3.9
     "UP006",
-    "UP007",
-    # pyupgrade rules compatible with Python >= 3.10
-    "UP045",
     # Allow ruff to automatically fix trailing spaces within a multi-line string/comment.
     "W293"
 ]

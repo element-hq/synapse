@@ -133,6 +133,8 @@ class DelayedEventsStore(SQLBaseStore):
         delay_id = _generate_delay_id()
         send_ts = Timestamp(creation_ts + delay)
 
+        logger.error("Content: %s", content)
+
         def add_delayed_event_txn(txn: LoggingTransaction) -> Timestamp:
             self.db_pool.simple_insert_txn(
                 txn,
