@@ -1920,14 +1920,8 @@ def _required_state_changes(
                 # Normalize to proper user ID
                 state_key = user_id
 
-            # We remember the user if either a) they haven't been
-            # invalidated...
+            # We remember the user if either they haven't been invalidated
             if (EventTypes.Member, state_key) not in state_deltas:
-                lazy_members_previously_returned.add(state_key)
-
-            # ...or b) if we are going to send the delta down in this
-            # sync.
-            if state_key in lazy_load_user_ids:
                 lazy_members_previously_returned.add(state_key)
 
     if changes:
