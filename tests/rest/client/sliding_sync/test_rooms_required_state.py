@@ -2169,8 +2169,11 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
 
         prev_timestamp = lazy_member_entries[user1_id]
 
-        # If user1 is sent down again, the last_seen_ts should NOT be updated as
-        # not enough time has passed.
+        # If user1 sends a message then we consider it for lazy loading. We have
+        # previously returned it so we don't send the state down again, but it
+        # is still eligible for updating the timestamp. Since we last updated
+        # the timestamp within the last `LAZY_MEMBERS_UPDATE_INTERVAL`, we do not
+        # update it.
         self.helper.send(room_id, "msg2", tok=user1_tok)
 
         response_body, from_token = self.do_sync(
@@ -2224,7 +2227,9 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         # The timestamp for user1 should be unchanged, as they were not sent down.
         self.assertEqual(lazy_member_entries[user1_id], prev_timestamp)
 
-        # If user1 sends a message, then the timestamp should be updated.
+        # Now if user1 sends a message, then the timestamp should be updated as
+        # its been over `LAZY_MEMBERS_UPDATE_INTERVAL` since we last updated it.
+        # (Even though we don't send the state down again).
         self.helper.send(room_id, "msg4", tok=user1_tok)
 
         response_body, from_token = self.do_sync(
