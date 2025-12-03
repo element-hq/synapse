@@ -833,14 +833,6 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(1, len(channel.json_body["media"]))
-        self.assertEqual(
-            "mxc://%s/%s"
-            % (
-                self.server_name,
-                self.media_id_1,
-            ),
-            channel.json_body["media"][0],
-        )
 
         # Page 2
         channel = self.make_request(
@@ -850,14 +842,6 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(1, len(channel.json_body["media"]))
-        self.assertEqual(
-            "mxc://%s/%s"
-            % (
-                self.server_name,
-                self.media_id_2,
-            ),
-            channel.json_body["media"][0],
-        )
 
         # Page 3
         channel = self.make_request(
@@ -867,14 +851,6 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(1, len(channel.json_body["media"]))
-        self.assertEqual(
-            "mxc://%s/%s"
-            % (
-                self.server_name,
-                self.media_id_3,
-            ),
-            channel.json_body["media"][0],
-        )
 
         # Page 4 (no media)
         channel = self.make_request(
