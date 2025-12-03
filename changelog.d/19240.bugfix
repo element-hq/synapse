@@ -1,1 +1,0 @@
-Fix bug where invalid `canonical_alias` content would return 500 instead of 400.
