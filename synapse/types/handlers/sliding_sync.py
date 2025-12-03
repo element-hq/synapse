@@ -49,11 +49,20 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.rest.client import SlidingSyncBody
+from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
 
 logger = logging.getLogger(__name__)
+
+# How often to update the last seen timestamp for lazy members.
+#
+# We don't update the timestamp every time to avoid hammering the DB with
+# writes, and we don't need the timestamp to be precise (as it is used to evict
+# old entries that haven't been used in a while).
+LAZY_MEMBERS_UPDATE_INTERVAL = Duration(hours=1)
 
 
 class SlidingSyncConfig(SlidingSyncBody):
@@ -917,10 +926,29 @@ class RoomLazyMembershipChanges:
 
     invalidated_user_ids: AbstractSet[str] = attr.Factory(set)
 
-    def __bool__(self) -> bool:
-        return bool(
-            self.returned_user_id_to_last_seen_ts_map or self.invalidated_user_ids
-        )
+    def has_updates(self, clock: Clock) -> bool:
+        """Check if there are any updates to the lazy membership changes."""
+
+        # We consider there to be updates if there are any invalidated user
+        # IDs...
+        if self.invalidated_user_ids:
+            return True
+
+        # ...or if any of the returned user IDs have a last seen timestamp older
+        # than the lazy membership expiry time or is None.
+        now_ms = clock.time_msec()
+        for last_seen_ts in self.returned_user_id_to_last_seen_ts_map.values():
+            if last_seen_ts is None:
+                # We need to record that we're sending this membership for the first
+                # time.
+                return True
+
+            if now_ms - last_seen_ts >= LAZY_MEMBERS_UPDATE_INTERVAL.as_millis():
+                # The last seen timestamp is old enough that we need to refresh
+                # it.
+                return True
+
+        return False
 
 
 @attr.s(auto_attribs=True)
@@ -939,13 +967,16 @@ class MutablePerConnectionState(PerConnectionState):
     # request in that room.
     room_lazy_membership: dict[str, RoomLazyMembershipChanges] = attr.Factory(dict)
 
-    def has_updates(self) -> bool:
+    def has_updates(self, clock: Clock) -> bool:
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
             or bool(self.account_data.get_updates())
             or bool(self.get_room_config_updates())
-            or bool(self.room_lazy_membership)
+            or any(
+                change.has_updates(clock)
+                for change in self.room_lazy_membership.values()
+            )
         )
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:

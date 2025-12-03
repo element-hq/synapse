@@ -108,7 +108,7 @@ class SlidingSyncHandler:
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
 
-        self.connection_store = SlidingSyncConnectionStore(self.store)
+        self.connection_store = SlidingSyncConnectionStore(self.clock, self.store)
         self.extensions = SlidingSyncExtensionHandler(hs)
         self.room_lists = SlidingSyncRoomLists(hs)
 
@@ -1233,7 +1233,9 @@ class SlidingSyncHandler:
                     # users' membership (and so can evict old membership state
                     # from the DB tables).
                     returned_user_id_to_last_seen_ts_map.update(
-                        previously_returned_user_to_last_seen
+                        (user_id, timestamp)
+                        for user_id, timestamp in previously_returned_user_to_last_seen.items()
+                        if user_id in lazy_load_user_ids
                     )
                 else:
                     previously_returned_user_to_last_seen = {}

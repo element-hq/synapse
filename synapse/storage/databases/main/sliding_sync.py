@@ -31,6 +31,7 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.types import MultiWriterStreamToken, RoomStreamToken
 from synapse.types.handlers.sliding_sync import (
+    LAZY_MEMBERS_UPDATE_INTERVAL,
     HaveSentRoom,
     HaveSentRoomFlag,
     MutablePerConnectionState,
@@ -49,13 +50,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-# How often to update the last seen timestamp for lazy members.
-#
-# We don't update the timestamp every time to avoid hammering the DB with
-# writes, and we don't need the timestamp to be precise (as it is used to evict
-# old entries that haven't been used in a while).
-LAZY_MEMBERS_UPDATE_INTERVAL = Duration(hours=1)
 
 # How often to update the `last_used_ts` column on
 # `sliding_sync_connection_positions` when the client uses a connection
