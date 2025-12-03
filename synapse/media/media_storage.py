@@ -332,21 +332,32 @@ class MediaStorage:
         return None
 
     @trace
-    async def ensure_media_is_in_local_cache(self, file_info: FileInfo) -> str:
-        """Ensures that the given file is in the local cache. Attempts to
-        download it from storage providers if it isn't.
+    @contextlib.asynccontextmanager
+    async def ensure_media_is_in_local_cache(
+        self, file_info: FileInfo
+    ) -> AsyncIterator[str]:
+        """Async context manager that ensures the given file is in the local cache.
+        Attempts to download it from storage providers if it isn't.
+
+        When no local provider is configured, the file is downloaded to a temporary
+        location and automatically cleaned up when the context manager exits.
 
         Args:
             file_info
 
-        Returns:
+        Yields:
             Full path to local file
+
+        Example:
+            async with media_storage.ensure_media_is_in_local_cache(file_info) as path:
+                # use path to read the file
         """
         path = self._file_info_to_path(file_info)
         if self.local_provider:
             local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
             if os.path.exists(local_path):
-                return local_path
+                yield local_path
+                return
 
             # Fallback for paths without method names
             # Should be removed in the future
@@ -363,7 +374,8 @@ class MediaStorage:
                     legacy_path,
                 )
                 if os.path.exists(legacy_local_path):
-                    return legacy_local_path
+                    yield legacy_local_path
+                    return
 
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
@@ -376,23 +388,35 @@ class MediaStorage:
                         )
                         await remote_res.write_to_consumer(consumer)
                         await consumer.wait()
-                    return local_path
+                    yield local_path
+                    return
 
             raise NotFoundError()
         else:
-            # No local provider, download to temp
+            # No local provider, download to temp file and clean up after use
             for provider in self.storage_providers:
                 res: Any = await provider.fetch(path, file_info)
                 if res:
-                    temp_dir = tempfile.gettempdir()
-                    temp_path = os.path.join(temp_dir, os.path.basename(path))
-                    with res:
-                        consumer = BackgroundFileConsumer(
-                            open(temp_path, "wb"), self.reactor
-                        )
-                        await res.write_to_consumer(consumer)
-                        await consumer.wait()
-                    return temp_path
+                    temp_path = None
+                    try:
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=os.path.splitext(path)[1]
+                        ) as tmp:
+                            temp_path = tmp.name
+                        with res:
+                            consumer = BackgroundFileConsumer(
+                                open(temp_path, "wb"), self.reactor
+                            )
+                            await res.write_to_consumer(consumer)
+                            await consumer.wait()
+                        yield temp_path
+                    finally:
+                        if temp_path:
+                            try:
+                                os.remove(temp_path)
+                            except Exception:
+                                pass
+                    return
 
             raise NotFoundError()
 
