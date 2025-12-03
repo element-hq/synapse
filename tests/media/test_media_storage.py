@@ -80,13 +80,8 @@ class MediaStorageTests(unittest.HomeserverTestCase):
 
         hs.config.media.media_store_path = self.primary_base_path
 
+        local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
         storage_providers = [
-            StorageProviderWrapper(
-                FileStorageProviderBackend(hs, self.primary_base_path),
-                store_local=True,
-                store_remote=False,
-                store_synchronous=True,
-            ),
             StorageProviderWrapper(
                 FileStorageProviderBackend(hs, self.secondary_base_path),
                 store_local=True,
@@ -96,7 +91,9 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         ]
 
         self.filepaths = MediaFilePaths(self.primary_base_path)
-        self.media_storage = MediaStorage(hs, self.filepaths, storage_providers)
+        self.media_storage = MediaStorage(
+            hs, self.filepaths, storage_providers, local_provider
+        )
 
     def test_ensure_media_is_in_local_cache(self) -> None:
         media_id = "some_media_id"

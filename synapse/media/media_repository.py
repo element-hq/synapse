@@ -144,19 +144,13 @@ class MediaRepository:
             )
             storage_providers.append(provider)
 
-        # If we have a local media directory, add it as a storage provider
-        if self.primary_base_path:
-            backend = FileStorageProviderBackend(hs, self.primary_base_path)
-            local_wrapper = StorageProviderWrapper(
-                backend,
-                store_local=True,
-                store_remote=False,
-                store_synchronous=True,
-            )
-            storage_providers.insert(0, local_wrapper)
+        # If local media storage is enabled, create the local provider
+        local_provider: FileStorageProviderBackend | None = None
+        if hs.config.media.enable_local_media_storage and self.primary_base_path:
+            local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
 
         self.media_storage: MediaStorage = MediaStorage(
-            self.hs, self.filepaths, storage_providers
+            self.hs, self.filepaths, storage_providers, local_provider
         )
 
         self.clock.looping_call(

@@ -49,6 +49,7 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
         hs.config.media.media_store_path = self.primary_base_path
 
+        local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
         storage_providers = [
             StorageProviderWrapper(
                 FileStorageProviderBackend(hs, self.secondary_base_path),
@@ -59,7 +60,9 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
         ]
 
         self.filepaths = MediaFilePaths(self.primary_base_path)
-        self.media_storage = MediaStorage(hs, self.filepaths, storage_providers)
+        self.media_storage = MediaStorage(
+            hs, self.filepaths, storage_providers, local_provider
+        )
         self.media_repo = hs.get_media_repository()
 
     def test_file_download(self) -> None:
@@ -195,6 +198,7 @@ class FederationMediaTest(unittest.FederatingHomeserverTestCase):
 
         hs.config.media.media_store_path = self.primary_base_path
 
+        local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
         storage_providers = [
             StorageProviderWrapper(
                 FileStorageProviderBackend(hs, self.secondary_base_path),
@@ -205,7 +209,9 @@ class FederationMediaTest(unittest.FederatingHomeserverTestCase):
         ]
 
         self.filepaths = MediaFilePaths(self.primary_base_path)
-        self.media_storage = MediaStorage(hs, self.filepaths, storage_providers)
+        self.media_storage = MediaStorage(
+            hs, self.filepaths, storage_providers, local_provider
+        )
         self.media_repo = hs.get_media_repository()
 
     def test_thumbnail_download_scaled(self) -> None:
@@ -301,6 +307,7 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
 
         hs.config.media.media_store_path = self.primary_base_path
 
+        local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
         storage_providers = [
             StorageProviderWrapper(
                 FileStorageProviderBackend(hs, self.secondary_base_path),
@@ -311,7 +318,9 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
         ]
 
         self.filepaths = MediaFilePaths(self.primary_base_path)
-        self.media_storage = MediaStorage(hs, self.filepaths, storage_providers)
+        self.media_storage = MediaStorage(
+            hs, self.filepaths, storage_providers, local_provider
+        )
         self.media_repo = hs.get_media_repository()
 
     def test_thumbnail_download_scaled(self) -> None:

@@ -59,7 +59,7 @@ from ._base import FileInfo, Responder, ThreadedFileSender
 from .filepath import MediaFilePaths
 
 if TYPE_CHECKING:
-    from synapse.media.storage_provider import StorageProviderWrapper
+    from synapse.media.storage_provider import StorageProvider
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -156,25 +156,24 @@ class MediaStorage:
         hs
         filepaths
         storage_providers: List of StorageProvider that are used to fetch and store files.
+        local_provider: Optional local file storage provider for caching media on disk.
     """
 
     def __init__(
         self,
         hs: "HomeServer",
         filepaths: MediaFilePaths,
-        storage_providers: Sequence["StorageProviderWrapper"],
+        storage_providers: Sequence["StorageProvider"],
+        local_provider: "FileStorageProviderBackend | None" = None,
     ):
         self.hs = hs
         self.reactor = hs.get_reactor()
         self.filepaths = filepaths
-        self.storage_providers = list(storage_providers)
-        self.local_provider = None
-        self.local_media_directory = None
-        for provider in self.storage_providers:
-            if isinstance(provider.backend, FileStorageProviderBackend):
-                self.local_provider = provider
-                self.local_media_directory = provider.backend.base_directory
-                break
+        self.storage_providers = storage_providers
+        self.local_provider = local_provider
+        self.local_media_directory: str | None = None
+        if local_provider is not None:
+            self.local_media_directory = local_provider.base_directory
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.clock = hs.get_clock()
 
@@ -209,11 +208,11 @@ class MediaStorage:
         """Async Context manager used to get a file like object to write into, as
         described by file_info.
 
-        Actually yields a 2-tuple (file, fname,), where file is a file
-        like object that can be written to and fname is the absolute path of file
-        on disk.
+        Actually yields a 2-tuple (file, media_filepath,), where file is a file
+        like object that can be written to and media_filepath is the absolute path
+        of file on disk.
 
-        fname can be used to read the contents from after upload, e.g. to
+        media_filepath can be used to read the contents from after upload, e.g. to
         generate thumbnails.
 
         Args:
@@ -221,77 +220,62 @@ class MediaStorage:
 
         Example:
 
-            async with media_storage.store_into_file(info) as (f, fname,):
+            async with media_storage.store_into_file(info) as (f, media_filepath,):
                 # .. write into f ...
         """
 
         path = self._file_info_to_path(file_info)
+        is_temp_file = False
 
         if self.local_provider:
-            fname = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
-            dirname = os.path.dirname(fname)
-            os.makedirs(dirname, exist_ok=True)
+            media_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+            os.makedirs(os.path.dirname(media_filepath), exist_ok=True)
 
-            try:
-                with start_active_span("writing to main media repo"):
-                    with open(fname, "wb") as f:
-                        yield f, fname
-
-                with start_active_span(
-                    "spam checking and writing to other storage providers"
-                ):
-                    spam_check = await self._spam_checker_module_callbacks.check_media_file_for_spam(
-                        ReadableFileWrapper(self.clock, fname), file_info
-                    )
-                    if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
-                        logger.info("Blocking media due to spam checker")
-                        # Note that we'll delete the stored media, due to the
-                        # try/except below. The media also won't be stored in
-                        # the DB.
-                        # We currently ignore any additional field returned by
-                        # the spam-check API.
-                        raise SpamMediaException(errcode=spam_check[0])
-
-                    for provider in self.storage_providers:
-                        if provider is not self.local_provider:
-                            with start_active_span(str(provider)):
-                                await provider.store_file(path, file_info)
-
-            except Exception as e:
-                try:
-                    os.remove(fname)
-                except Exception:
-                    pass
-
-                raise e from None
+            with start_active_span("writing to main media repo"):
+                with open(media_filepath, "wb") as f:
+                    yield f, media_filepath
         else:
             # No local provider, write to temp file
+            is_temp_file = True
             with tempfile.NamedTemporaryFile(delete=False) as f:
-                fname = f.name
-                yield cast(BinaryIO, f), fname
+                media_filepath = f.name
+                yield cast(BinaryIO, f), media_filepath
 
-            try:
-                with start_active_span(
-                    "spam checking and writing to storage providers"
-                ):
-                    spam_check = await self._spam_checker_module_callbacks.check_media_file_for_spam(
-                        ReadableFileWrapper(self.clock, fname), file_info
+        # Spam check and store to other providers (runs for both local and temp file cases)
+        try:
+            with start_active_span("spam checking and writing to storage providers"):
+                spam_check = (
+                    await self._spam_checker_module_callbacks.check_media_file_for_spam(
+                        ReadableFileWrapper(self.clock, media_filepath), file_info
                     )
-                    if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
-                        logger.info("Blocking media due to spam checker")
-                        raise SpamMediaException(errcode=spam_check[0])
+                )
+                if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                    logger.info("Blocking media due to spam checker")
+                    # Note that we'll delete the stored media, due to the
+                    # try/except below. The media also won't be stored in
+                    # the DB.
+                    # We currently ignore any additional field returned by
+                    # the spam-check API.
+                    raise SpamMediaException(errcode=spam_check[0])
 
-                    for provider in self.storage_providers:
-                        with start_active_span(str(provider)):
-                            await provider.store_file(path, file_info)
+                for provider in self.storage_providers:
+                    with start_active_span(str(provider)):
+                        await provider.store_file(path, file_info)
 
-            except Exception as e:
-                try:
-                    os.remove(fname)
-                except Exception:
-                    pass
+                # If using a temp file, delete it after uploading to storage providers
+                if is_temp_file:
+                    try:
+                        os.remove(media_filepath)
+                    except Exception:
+                        pass
 
-                raise e from None
+        except Exception as e:
+            try:
+                os.remove(media_filepath)
+            except Exception:
+                pass
+
+            raise e from None
 
     async def fetch_media(self, file_info: FileInfo) -> Responder | None:
         """Attempts to fetch media described by file_info from the configured storage providers.
@@ -328,9 +312,18 @@ class MediaStorage:
                 )
             )
 
+        # Check local provider first, then other storage providers
+        if self.local_provider:
+            for path in paths:
+                res: Any = await self.local_provider.fetch(path, file_info)
+                if res:
+                    logger.debug("Streaming %s from %s", path, self.local_provider)
+                    return res
+                logger.debug("%s not found on %s", path, self.local_provider)
+
         for provider in self.storage_providers:
             for path in paths:
-                res: Any = await provider.fetch(path, file_info)
+                res = await provider.fetch(path, file_info)
                 if res:
                     logger.debug("Streaming %s from %s", path, provider)
                     return res
@@ -372,12 +365,9 @@ class MediaStorage:
                 if os.path.exists(legacy_local_path):
                     return legacy_local_path
 
-            dirname = os.path.dirname(local_path)
-            os.makedirs(dirname, exist_ok=True)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
             for provider in self.storage_providers:
-                if provider is self.local_provider:
-                    continue
                 remote_res: Any = await provider.fetch(path, file_info)
                 if remote_res:
                     with remote_res:
