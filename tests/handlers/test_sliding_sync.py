@@ -4697,7 +4697,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     previous_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     request_required_state_map={EventTypes.Member: {"@user4:test"}},
                     previously_returned_lazy_user_ids={"@user2:test", "@user3:test"},
-                    lazy_load_user_ids={"@user4:test"},
+                    lazy_load_user_ids=frozenset(),
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
                         # Since "@user4:test" was added, we should persist the changed
