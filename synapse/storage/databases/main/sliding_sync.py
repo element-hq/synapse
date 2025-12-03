@@ -50,8 +50,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# How often to update the last seen timestamp for lazy members. We don't want to
-# update it too often as that causes DB writes.
+# How often to update the last seen timestamp for lazy members.
+#
+# We don't update the timestamp every time to avoid hammering the DB with
+# writes, and we don't need the timestamp to be precise (as it is used to evict
+# old entries that haven't been used in a while).
 LAZY_MEMBERS_UPDATE_INTERVAL = Duration(hours=1)
 
 # How often to update the `last_used_ts` column on
