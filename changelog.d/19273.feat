@@ -1,0 +1,1 @@
+Support for stable MSC4312 m.oauth UIA stage for resetting cross-signing identity with the OAuth 2.0 API.
