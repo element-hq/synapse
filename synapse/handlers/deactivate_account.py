@@ -20,12 +20,13 @@
 #
 import itertools
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
-from synapse.handlers.device import DeviceHandler
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.replication.http.deactivate_account import (
+    ReplicationNotifyAccountDeactivatedServlet,
+)
 from synapse.types import Codes, Requester, UserID, create_requester
 
 if TYPE_CHECKING:
@@ -40,11 +41,13 @@ class DeactivateAccountHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.hs = hs
+        self.server_name = hs.hostname
         self._auth_handler = hs.get_auth_handler()
         self._device_handler = hs.get_device_handler()
         self._room_member_handler = hs.get_room_member_handler()
         self._identity_handler = hs.get_identity_handler()
         self._profile_handler = hs.get_profile_handler()
+        self._pusher_pool = hs.get_pusherpool()
         self.user_directory_handler = hs.get_user_directory_handler()
         self._server_name = hs.hostname
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
@@ -53,10 +56,16 @@ class DeactivateAccountHandler:
         self._user_parter_running = False
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
+        self._notify_account_deactivated_client = None
+
         # Start the user parter loop so it can resume parting users from rooms where
         # it left off (if it has work left to do).
-        if hs.config.worker.run_background_tasks:
-            hs.get_reactor().callWhenRunning(self._start_user_parting)
+        if hs.config.worker.worker_app is None:
+            hs.get_clock().call_when_running(self._start_user_parting)
+        else:
+            self._notify_account_deactivated_client = (
+                ReplicationNotifyAccountDeactivatedServlet.make_client(hs)
+            )
 
         self._account_validity_enabled = (
             hs.config.account_validity.account_validity_enabled
@@ -67,7 +76,7 @@ class DeactivateAccountHandler:
         user_id: str,
         erase_data: bool,
         requester: Requester,
-        id_server: Optional[str] = None,
+        id_server: str | None = None,
         by_admin: bool = False,
     ) -> bool:
         """Deactivate a user's account
@@ -84,10 +93,6 @@ class DeactivateAccountHandler:
         Returns:
             True if identity server supports removing threepids, otherwise False.
         """
-
-        # This can only be called on the main process.
-        assert isinstance(self._device_handler, DeviceHandler)
-
         # Check if this user can be deactivated
         if not await self._third_party_rules.check_can_deactivate_user(
             user_id, by_admin
@@ -95,6 +100,14 @@ class DeactivateAccountHandler:
             raise SynapseError(
                 403, "Deactivation of this user is forbidden", Codes.FORBIDDEN
             )
+
+        logger.info(
+            "%s requested deactivation of %s erase_data=%s id_server=%s",
+            requester.user,
+            user_id,
+            erase_data,
+            id_server,
+        )
 
         # FIXME: Theoretically there is a race here wherein user resets
         # password using threepid.
@@ -142,7 +155,7 @@ class DeactivateAccountHandler:
         # Most of the pushers will have been deleted when we logged out the
         # associated devices above, but we still need to delete pushers not
         # associated with devices, e.g. email pushers.
-        await self.store.delete_all_pushers_for_user(user_id)
+        await self._pusher_pool.delete_all_pushers_for_user(user_id)
 
         # Add the user to a table of users pending deactivation (ie.
         # removal from all the rooms they're a member of)
@@ -166,10 +179,6 @@ class DeactivateAccountHandler:
             logger.info("Marking %s as erased", user_id)
             await self.store.mark_user_erased(user_id)
 
-        # Now start the process that goes through that list and
-        # parts users from rooms (if it isn't already running)
-        self._start_user_parting()
-
         # Reject all pending invites and knocks for the user, so that the
         # user doesn't show up in the "invited" section of rooms' members list.
         await self._reject_pending_invites_and_knocks_for_user(user_id)
@@ -184,17 +193,42 @@ class DeactivateAccountHandler:
         # Remove account data (including ignored users and push rules).
         await self.store.purge_account_data_for_user(user_id)
 
+        # Remove thread subscriptions for the user
+        await self.store.purge_thread_subscription_settings_for_user(user_id)
+
         # Delete any server-side backup keys
         await self.store.bulk_delete_backup_keys_and_versions_for_user(user_id)
+
+        # Notify modules and start the room parting process.
+        await self.notify_account_deactivated(user_id, by_admin=by_admin)
+
+        return identity_server_supports_unbinding
+
+    async def notify_account_deactivated(
+        self,
+        user_id: str,
+        by_admin: bool = False,
+    ) -> None:
+        """Notify modules and start the room parting process.
+        Goes through replication if this is not the main process.
+        """
+        if self._notify_account_deactivated_client is not None:
+            await self._notify_account_deactivated_client(
+                user_id=user_id,
+                by_admin=by_admin,
+            )
+            return
+
+        # Now start the process that goes through that list and
+        # parts users from rooms (if it isn't already running)
+        self._start_user_parting()
 
         # Let modules know the user has been deactivated.
         await self._third_party_rules.on_user_deactivation_status_changed(
             user_id,
             True,
-            by_admin,
+            by_admin=by_admin,
         )
-
-        return identity_server_supports_unbinding
 
     async def _reject_pending_invites_and_knocks_for_user(self, user_id: str) -> None:
         """Reject pending invites and knocks addressed to a given user ID.
@@ -237,7 +271,9 @@ class DeactivateAccountHandler:
         pending deactivation, if it isn't already running.
         """
         if not self._user_parter_running:
-            run_as_background_process("user_parter_loop", self._user_parter_loop)
+            self.hs.run_as_background_process(
+                "user_parter_loop", self._user_parter_loop
+            )
 
     async def _user_parter_loop(self) -> None:
         """Loop that parts deactivated users from rooms"""

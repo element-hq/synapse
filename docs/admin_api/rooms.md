@@ -794,6 +794,7 @@ A response body like the following is returned:
     "results": [
         {
             "delete_id": "delete_id1",
+            "room_id": "!roomid:example.com",
             "status": "failed",
             "error": "error message",
             "shutdown_room": {
@@ -804,7 +805,8 @@ A response body like the following is returned:
             }
         }, {
             "delete_id": "delete_id2",
-            "status": "purging",
+            "room_id": "!roomid:example.com",
+            "status": "active",
             "shutdown_room": {
                 "kicked_users": [
                     "@foobar:example.com"
@@ -841,7 +843,9 @@ A response body like the following is returned:
 
 ```json
 {
-    "status": "purging",
+    "status": "active",
+    "delete_id": "bHkCNQpHqOaFhPtK",
+    "room_id": "!roomid:example.com",
     "shutdown_room": {
         "kicked_users": [
             "@foobar:example.com"
@@ -869,10 +873,11 @@ The following fields are returned in the JSON response body:
 - `results` - An array of objects, each containing information about one task.
   This field is omitted from the result when you query by `delete_id`.
   Task objects contain the following fields:
-  - `delete_id` - The ID for this purge if you query by `room_id`.
+  - `delete_id` - The ID for this purge
+  - `room_id` - The ID of the room being deleted
   - `status` - The status will be one of:
-    - `shutting_down` - The process is removing users from the room.
-    - `purging` - The process is purging the room and event data from database.
+    - `scheduled` - The deletion is waiting to be started
+    - `active` - The process is purging the room and event data from database.
     - `complete` - The process has completed successfully.
     - `failed` - The process is aborted, an error has occurred.
   - `error` - A string that shows an error message if `status` is `failed`.
@@ -1108,5 +1113,78 @@ Example response:
       "state_key": "@alice:example.org"
     }
   ]
+}
+```
+
+# Admin Space Hierarchy Endpoint
+
+This API allows an admin to fetch the space/room hierarchy for a given space, 
+returning details about that room and any children the room may have, paginating
+over the space tree in a depth-first manner to locate child rooms. This is
+functionally similar to the [CS Hierarchy](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1roomsroomidhierarchy) endpoint but does not check for
+room membership when returning room summaries.
+
+The endpoint does not query other servers over federation about remote rooms
+that the server has not joined. This is a deliberate trade-off: while this
+means it will leave some holes in the hierarchy that we could otherwise
+sometimes fill in, it significantly improves the endpoint's response time and
+the admin endpoint is designed for managing rooms local to the homeserver
+anyway.
+
+**Parameters**
+
+The following query parameters are available:
+
+* `from` - An optional pagination token, provided when there are more rooms to 
+    return than the limit. 
+* `limit` - Maximum amount of rooms to return. Must be a non-negative integer,
+   defaults to `50`.
+* `max_depth` - The maximum depth in the tree to explore, must be a non-negative
+   integer. 0 would correspond to just the root room, 1 would include just the
+   root room's children, etc.  If not provided will recurse into the space tree without limit.
+
+Request:
+
+```http
+GET /_synapse/admin/v1/rooms/<room_id>/hierarchy
+```
+
+Response:
+
+```json
+{
+  "rooms":
+      [
+        { "children_state": [
+            {
+              "content": {
+                "via": ["local_test_server"]
+              },
+              "origin_server_ts": 1500,
+              "sender": "@user:test",
+              "state_key": "!QrMkkqBSwYRIFNFCso:test",
+              "type": "m.space.child"
+            }
+        ],
+        "name": "space room",
+        "guest_can_join": false,
+        "join_rule": "public",
+        "num_joined_members": 1,
+        "room_id": "!sPOpNyMHbZAoAOsOFL:test",
+        "room_type": "m.space",
+        "world_readable": false
+      },
+
+      {
+        "children_state": [],
+        "guest_can_join": true,
+        "join_rule": "invite",
+        "name": "nefarious",
+        "num_joined_members": 1,
+        "room_id": "!QrMkkqBSwYRIFNFCso:test",
+        "topic": "being bad",
+        "world_readable": false}
+    ],
+  "next_batch": "KUYmRbeSpAoaAIgOKGgyaCEn"
 }
 ```

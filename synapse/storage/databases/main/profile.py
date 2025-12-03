@@ -19,7 +19,7 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, Dict, Optional, Tuple, cast
+from typing import TYPE_CHECKING, cast
 
 from canonicaljson import encode_canonical_json
 
@@ -75,7 +75,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
         lower_bound_id = progress.get("lower_bound_id", "")
 
-        def _get_last_id(txn: LoggingTransaction) -> Optional[str]:
+        def _get_last_id(txn: LoggingTransaction) -> str | None:
             sql = """
                     SELECT user_id FROM profiles
                     WHERE user_id > ?
@@ -176,7 +176,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
         return ProfileInfo(avatar_url=profile[1], display_name=profile[0])
 
-    async def get_profile_displayname(self, user_id: UserID) -> Optional[str]:
+    async def get_profile_displayname(self, user_id: UserID) -> str | None:
         """
         Fetch the display name of a user.
 
@@ -193,7 +193,7 @@ class ProfileWorkerStore(SQLBaseStore):
             desc="get_profile_displayname",
         )
 
-    async def get_profile_avatar_url(self, user_id: UserID) -> Optional[str]:
+    async def get_profile_avatar_url(self, user_id: UserID) -> str | None:
         """
         Fetch the avatar URL of a user.
 
@@ -240,7 +240,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
                 # Test exists first since value being None is used for both
                 # missing and a null JSON value.
-                exists, value = cast(Tuple[bool, JsonValue], txn.fetchone())
+                exists, value = cast(tuple[bool, JsonValue], txn.fetchone())
                 if not exists:
                     raise StoreError(404, "No row found")
                 return value
@@ -257,9 +257,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 )
 
                 # If value_type is None, then the value did not exist.
-                value_type, value = cast(
-                    Tuple[Optional[str], JsonValue], txn.fetchone()
-                )
+                value_type, value = cast(tuple[str | None, JsonValue], txn.fetchone())
                 if not value_type:
                     raise StoreError(404, "No row found")
                 # If value_type is object or array, then need to deserialize the JSON.
@@ -271,7 +269,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
         return await self.db_pool.runInteraction("get_profile_field", get_profile_field)
 
-    async def get_profile_fields(self, user_id: UserID) -> Dict[str, str]:
+    async def get_profile_fields(self, user_id: UserID) -> dict[str, str]:
         """
         Get all custom profile fields for a user.
 
@@ -346,7 +344,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 # possible due to the grammar.
                 (f'$."{new_field_name}"', user_id.localpart),
             )
-        row = cast(Tuple[Optional[int], Optional[int], Optional[int]], txn.fetchone())
+        row = cast(tuple[int | None, int | None, int | None], txn.fetchone())
 
         # The values return null if the column is null.
         total_bytes = (
@@ -373,7 +371,7 @@ class ProfileWorkerStore(SQLBaseStore):
             raise StoreError(400, "Profile too large", Codes.PROFILE_TOO_LARGE)
 
     async def set_profile_displayname(
-        self, user_id: UserID, new_displayname: Optional[str]
+        self, user_id: UserID, new_displayname: str | None
     ) -> None:
         """
         Set the display name of a user.
@@ -406,7 +404,7 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
     async def set_profile_avatar_url(
-        self, user_id: UserID, new_avatar_url: Optional[str]
+        self, user_id: UserID, new_avatar_url: str | None
     ) -> None:
         """
         Set the avatar of a user.

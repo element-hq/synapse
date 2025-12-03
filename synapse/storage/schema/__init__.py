@@ -19,7 +19,7 @@
 #
 #
 
-SCHEMA_VERSION = 91  # remember to update the list below when updating
+SCHEMA_VERSION = 93  # remember to update the list below when updating
 """Represents the expectations made by the codebase about the database schema
 
 This should be incremented whenever the codebase changes its requirements on the
@@ -162,11 +162,21 @@ Changes in SCHEMA_VERSION = 89
 Changes in SCHEMA_VERSION = 90
     - Add a column `participant` to `room_memberships` table
     - Add background update to delete unreferenced state groups.
+
+Changes in SCHEMA_VERSION = 91
+    - Add a `sha256` column to the `local_media_repository` and `remote_media_cache` tables.
+
+Changes in SCHEMA_VERSION = 92
+    - Cleaned up a trigger that was added in #18260 and then reverted.
+
+Changes in SCHEMA_VERSION = 93
+    - MSC4140: Set delayed events to be uniquely identifiable by their delay ID.
 """
 
 
 SCHEMA_COMPAT_VERSION = (
     # Transitive links are no longer written to `event_auth_chain_links`
+    # TODO: On the next compat bump, update the primary key of `delayed_events`
     84
 )
 """Limit on how far the synapse codebase can be rolled back without breaking db compat

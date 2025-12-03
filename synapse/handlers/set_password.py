@@ -18,10 +18,9 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import Codes, StoreError, SynapseError
-from synapse.handlers.device import DeviceHandler
 from synapse.types import Requester
 
 if TYPE_CHECKING:
@@ -36,30 +35,17 @@ class SetPasswordHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self._auth_handler = hs.get_auth_handler()
-
-        # We don't need the device handler if password changing is disabled.
-        # This allows us to instantiate the SetPasswordHandler on the workers
-        # that have admin APIs for MAS
-        if self._auth_handler.can_change_password():
-            # This can only be instantiated on the main process.
-            device_handler = hs.get_device_handler()
-            assert isinstance(device_handler, DeviceHandler)
-            self._device_handler: Optional[DeviceHandler] = device_handler
-        else:
-            self._device_handler = None
+        self._device_handler = hs.get_device_handler()
 
     async def set_password(
         self,
         user_id: str,
         password_hash: str,
         logout_devices: bool,
-        requester: Optional[Requester] = None,
+        requester: Requester | None = None,
     ) -> None:
         if not self._auth_handler.can_change_password():
             raise SynapseError(403, "Password change disabled", errcode=Codes.FORBIDDEN)
-
-        # We should have this available only if password changing is enabled.
-        assert self._device_handler is not None
 
         try:
             await self.store.user_set_password_hash(user_id, password_hash)

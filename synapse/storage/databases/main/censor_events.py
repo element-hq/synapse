@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.events.utils import prune_event_dict
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -32,7 +32,8 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
-from synapse.util import json_encoder
+from synapse.util.duration import Duration
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -54,7 +55,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
             hs.config.worker.run_background_tasks
             and self.hs.config.server.redaction_retention_period is not None
         ):
-            hs.get_clock().looping_call(self._censor_redactions, 5 * 60 * 1000)
+            hs.get_clock().looping_call(self._censor_redactions, Duration(minutes=5))
 
     @wrap_as_background_process("_censor_redactions")
     async def _censor_redactions(self) -> None:
@@ -77,7 +78,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
             return
 
         before_ts = (
-            self._clock.time_msec() - self.hs.config.server.redaction_retention_period
+            self.clock.time_msec() - self.hs.config.server.redaction_retention_period
         )
 
         # We fetch all redactions that:
@@ -121,7 +122,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
                 and original_event.internal_metadata.is_redacted()
             ):
                 # Redaction was allowed
-                pruned_json: Optional[str] = json_encoder.encode(
+                pruned_json: str | None = json_encoder.encode(
                     prune_event_dict(
                         original_event.room_version, original_event.get_dict()
                     )

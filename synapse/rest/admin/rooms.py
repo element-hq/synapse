@@ -20,7 +20,7 @@
 #
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, cast
 
 import attr
 from immutabledict import immutabledict
@@ -28,9 +28,13 @@ from immutabledict import immutabledict
 from synapse.api.constants import Direction, EventTypes, JoinRules, Membership
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.api.filtering import Filter
+from synapse.events.utils import (
+    SerializeEventConfig,
+)
 from synapse.handlers.pagination import (
     PURGE_ROOM_ACTION_NAME,
     SHUTDOWN_AND_PURGE_ROOM_ACTION_NAME,
+    GetMessagesResult,
 )
 from synapse.http.servlet import (
     ResolveRoomIdMixin,
@@ -44,11 +48,13 @@ from synapse.http.servlet import (
     parse_string,
 )
 from synapse.http.site import SynapseRequest
+from synapse.logging.opentracing import trace
 from synapse.rest.admin._base import (
     admin_patterns,
     assert_requester_is_admin,
     assert_user_is_admin,
 )
+from synapse.rest.client.room import SerializeMessagesDeps, encode_messages_response
 from synapse.storage.databases.main.room import RoomSortOrder
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, RoomID, ScheduledTask, UserID, create_requester
@@ -61,6 +67,50 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class AdminRoomHierarchy(RestServlet):
+    """
+    Given a room, returns room details on that room and any space children of
+    the provided room. Does not reach out over federation to fetch information about
+    any remote rooms which the server is not currently participating in
+    """
+
+    PATTERNS = admin_patterns("/rooms/(?P<room_id>[^/]*)/hierarchy$")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self._room_summary_handler = hs.get_room_summary_handler()
+        self._store = hs.get_datastores().main
+        self._storage_controllers = hs.get_storage_controllers()
+
+    async def on_GET(
+        self, request: SynapseRequest, room_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self._auth.get_user_by_req(request)
+        await assert_user_is_admin(self._auth, requester)
+
+        max_depth = parse_integer(request, "max_depth")
+        limit = parse_integer(request, "limit")
+
+        room_entry_summary = await self._room_summary_handler.get_room_hierarchy(
+            requester,
+            room_id,
+            # We omit details about remote rooms because we only care
+            # about managing rooms local to the homeserver. This
+            # also immensely helps with the response time of the
+            # endpoint since we don't need to reach out over federation.
+            # There is a trade-off as this will leave holes where
+            # information about public/peekable remote rooms the
+            # server is not participating in will be omitted.
+            omit_remote_room_hierarchy=True,
+            admin_skip_room_visibility_check=True,
+            max_depth=max_depth,
+            limit=limit,
+            from_token=parse_string(request, "from"),
+        )
+
+        return HTTPStatus.OK, room_entry_summary
 
 
 class RoomRestV2Servlet(RestServlet):
@@ -88,7 +138,7 @@ class RoomRestV2Servlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self._auth.get_user_by_req(request)
         await assert_user_is_admin(self._auth, requester)
 
@@ -150,6 +200,7 @@ class RoomRestV2Servlet(RestServlet):
 def _convert_delete_task_to_response(task: ScheduledTask) -> JsonDict:
     return {
         "delete_id": task.id,
+        "room_id": task.resource_id,
         "status": task.status,
         "shutdown_room": task.result,
     }
@@ -166,7 +217,7 @@ class DeleteRoomStatusByRoomIdRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         if not RoomID.is_valid(room_id):
@@ -197,7 +248,7 @@ class DeleteRoomStatusByDeleteIdRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, delete_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         delete_task = await self._pagination_handler.get_delete_task(delete_id)
@@ -223,7 +274,7 @@ class ListRoomRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.admin_handler = hs.get_admin_handler()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         # Extract query parameters
@@ -318,7 +369,7 @@ class RoomRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         ret = await self.store.get_room_with_stats(room_id)
@@ -336,7 +387,7 @@ class RoomRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         return await self._delete_room(
             request,
             room_id,
@@ -352,7 +403,7 @@ class RoomRestServlet(RestServlet):
         auth: "Auth",
         room_shutdown_handler: "RoomShutdownHandler",
         pagination_handler: "PaginationHandler",
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await auth.get_user_by_req(request)
         await assert_user_is_admin(auth, requester)
 
@@ -428,7 +479,7 @@ class RoomMembersRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         room = await self.store.get_room(room_id)
@@ -457,7 +508,7 @@ class RoomStateRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         room = await self.store.get_room(room_id)
@@ -497,7 +548,7 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, room_identifier: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None
 
@@ -520,7 +571,7 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, RestServlet):
 
         # Get the room ID from the identifier.
         try:
-            remote_room_hosts: Optional[List[str]] = [
+            remote_room_hosts: list[str] | None = [
                 x.decode("ascii") for x in request.args[b"server_name"]
             ]
         except Exception:
@@ -590,7 +641,7 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, room_identifier: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
         content = parse_json_object_from_request(request, allow_empty_body=True)
@@ -625,6 +676,15 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
                 user_id for user_id in user_power if self.is_mine_id(user_id)
             ]
             admin_users.sort(key=lambda user: user_power[user])
+
+            if create_event.room_version.msc4289_creator_power_enabled:
+                creators = create_event.content.get("additional_creators", []) + [
+                    create_event.sender
+                ]
+                for creator in creators:
+                    if self.is_mine_id(creator):
+                        # include the creator as they won't be in the PL users map.
+                        admin_users.append(creator)
 
             if not admin_users:
                 raise SynapseError(
@@ -665,7 +725,11 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
         # updated power level event.
         new_pl_content = dict(pl_content)
         new_pl_content["users"] = dict(pl_content.get("users", {}))
-        new_pl_content["users"][user_to_add] = new_pl_content["users"][admin_user_id]
+        # give the new user the same PL as the admin, default to 100 in case there is no PL event.
+        # This means in v12+ rooms we get PL100 if the creator promotes us.
+        new_pl_content["users"][user_to_add] = new_pl_content["users"].get(
+            admin_user_id, 100
+        )
 
         fake_requester = create_requester(
             admin_user_id,
@@ -742,7 +806,7 @@ class ForwardExtremitiesRestServlet(ResolveRoomIdMixin, RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, room_identifier: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         room_id, _ = await self.resolve_room_id(room_identifier)
@@ -752,7 +816,7 @@ class ForwardExtremitiesRestServlet(ResolveRoomIdMixin, RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_identifier: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         room_id, _ = await self.resolve_room_id(room_identifier)
@@ -791,7 +855,7 @@ class RoomEventContextServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str, event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=False)
         await assert_user_is_admin(self.auth, requester)
 
@@ -857,7 +921,7 @@ class BlockRoomRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         if not RoomID.is_valid(room_id):
@@ -877,7 +941,7 @@ class BlockRoomRestServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self._auth.get_user_by_req(request)
         await assert_user_is_admin(self._auth, requester)
 
@@ -918,10 +982,11 @@ class RoomMessagesRestServlet(RestServlet):
         self._pagination_handler = hs.get_pagination_handler()
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
+        self._event_serializer = hs.get_event_client_serializer()
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self._auth.get_user_by_req(request)
         await assert_user_is_admin(self._auth, requester)
 
@@ -941,7 +1006,11 @@ class RoomMessagesRestServlet(RestServlet):
         ):
             as_client_event = False
 
-        msgs = await self._pagination_handler.get_messages(
+        serialize_options = SerializeEventConfig(
+            as_client_event=as_client_event, requester=requester
+        )
+
+        get_messages_result = await self._pagination_handler.get_messages(
             room_id=room_id,
             requester=requester,
             pagin_config=pagination_config,
@@ -950,7 +1019,27 @@ class RoomMessagesRestServlet(RestServlet):
             use_admin_priviledge=True,
         )
 
-        return HTTPStatus.OK, msgs
+        response_content = await self.encode_response(
+            get_messages_result, serialize_options
+        )
+
+        return HTTPStatus.OK, response_content
+
+    @trace
+    async def encode_response(
+        self,
+        get_messages_result: GetMessagesResult,
+        serialize_options: SerializeEventConfig,
+    ) -> JsonDict:
+        return await encode_messages_response(
+            get_messages_result=get_messages_result,
+            serialize_options=serialize_options,
+            serialize_deps=SerializeMessagesDeps(
+                clock=self._clock,
+                event_serializer=self._event_serializer,
+                store=self._store,
+            ),
+        )
 
 
 class RoomTimestampToEventRestServlet(RestServlet):
@@ -983,7 +1072,7 @@ class RoomTimestampToEventRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self._auth.get_user_by_req(request)
         await assert_user_is_admin(self._auth, requester)
 

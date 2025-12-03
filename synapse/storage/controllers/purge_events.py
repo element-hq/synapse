@@ -25,8 +25,6 @@ from typing import (
     TYPE_CHECKING,
     Collection,
     Mapping,
-    Optional,
-    Set,
 )
 
 from synapse.logging.context import nested_logging_context
@@ -34,6 +32,8 @@ from synapse.metrics.background_process_metrics import wrap_as_background_proces
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases import Databases
 from synapse.types.storage import _BackgroundUpdates
+from synapse.util.duration import Duration
+from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -45,11 +45,13 @@ class PurgeEventsStorageController:
     """High level interface for purging rooms and event history."""
 
     def __init__(self, hs: "HomeServer", stores: Databases):
+        self.hs = hs  # nb must be called this for @wrap_as_background_process
+        self.server_name = hs.hostname
         self.stores = stores
 
         if hs.config.worker.run_background_tasks:
             self._delete_state_loop_call = hs.get_clock().looping_call(
-                self._delete_state_groups_loop, 60 * 1000
+                self._delete_state_groups_loop, Duration(minutes=1)
             )
 
         self.stores.state.db_pool.updates.register_background_update_handler(
@@ -96,7 +98,7 @@ class PurgeEventsStorageController:
     async def _find_unreferenced_groups(
         self,
         state_groups: Collection[int],
-    ) -> Set[int]:
+    ) -> set[int]:
         """Used when purging history to figure out which state groups can be
         deleted.
 
@@ -167,6 +169,12 @@ class PurgeEventsStorageController:
                 break
 
             (room_id, groups_to_sequences) = next_to_delete
+
+            logger.info(
+                "[purge] deleting state groups for room %s: %s",
+                room_id,
+                shortstr(groups_to_sequences.keys(), maxitems=10),
+            )
             made_progress = await self._delete_state_groups(
                 room_id, groups_to_sequences
             )
@@ -307,7 +315,7 @@ class PurgeEventsStorageController:
         self,
         last_checked_state_group: int,
         batch_size: int,
-    ) -> tuple[Set[int], int, bool]:
+    ) -> tuple[set[int], int, bool]:
         """Used when deleting unreferenced state groups in the background to figure out
         which state groups can be deleted.
         To avoid increased DB usage due to de-deltaing state groups, this returns only
@@ -437,7 +445,7 @@ class PurgeEventsStorageController:
 
         # Remove state groups from deletion_candidates which are directly referenced or share a
         # future edge with a referenced state group within this batch.
-        def filter_reference_chains(group: Optional[int]) -> None:
+        def filter_reference_chains(group: int | None) -> None:
             while group is not None:
                 deletion_candidates.discard(group)
                 group = state_group_edges.get(group)

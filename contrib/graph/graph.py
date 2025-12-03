@@ -24,7 +24,6 @@ import datetime
 import html
 import json
 import urllib.request
-from typing import List
 
 import pydot
 
@@ -33,7 +32,7 @@ def make_name(pdu_id: str, origin: str) -> str:
     return f"{pdu_id}@{origin}"
 
 
-def make_graph(pdus: List[dict], filename_prefix: str) -> None:
+def make_graph(pdus: list[dict], filename_prefix: str) -> None:
     """
     Generate a dot and SVG file for a graph of events in the room based on the
     topological ordering by querying a homeserver.
@@ -45,6 +44,10 @@ def make_graph(pdus: List[dict], filename_prefix: str) -> None:
     colors = {"red", "green", "blue", "yellow", "purple"}
 
     for pdu in pdus:
+        # TODO: The "origin" field has since been removed from events generated
+        # by Synapse. We should consider removing it here as well but since this
+        # is part of `contrib/`, it is left for the community to revise and ensure things
+        # still work correctly.
         origins.add(pdu.get("origin"))
 
     color_map = {color: color for color in colors if color in origins}
@@ -123,7 +126,7 @@ def make_graph(pdus: List[dict], filename_prefix: str) -> None:
     graph.write_svg("%s.svg" % filename_prefix, prog="dot")
 
 
-def get_pdus(host: str, room: str) -> List[dict]:
+def get_pdus(host: str, room: str) -> list[dict]:
     transaction = json.loads(
         urllib.request.urlopen(
             f"http://{host}/_matrix/federation/v1/context/{room}/"

@@ -17,10 +17,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Tuple
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, LimitBlockingTypes, ServerNoticeMsgType
 from synapse.api.errors import ResourceLimitError
@@ -32,7 +31,7 @@ from synapse.server_notices.resource_limits_server_notices import (
 )
 from synapse.server_notices.server_notices_sender import ServerNoticesSender
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -363,7 +362,7 @@ class TestResourceLimitsServerNoticesWithRealRooms(unittest.HomeserverTestCase):
 
         self.assertTrue(notice_in_room, "No server notice in room")
 
-    def _trigger_notice_and_join(self) -> Tuple[str, str, str]:
+    def _trigger_notice_and_join(self) -> tuple[str, str, str]:
         """Creates enough active users to hit the MAU limit and trigger a system notice
         about it, then joins the system notices room with one of the users created.
 

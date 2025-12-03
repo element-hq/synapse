@@ -30,7 +30,8 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.types import JsonDict
-from synapse.util import json_encoder
+from synapse.util.duration import Duration
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -55,7 +56,7 @@ class SessionStore(SQLBaseStore):
 
         # Create a background job for culling expired sessions.
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(self._delete_expired_sessions, 30 * 60 * 1000)
+            self.clock.looping_call(self._delete_expired_sessions, Duration(minutes=30))
 
     async def create_session(
         self, session_type: str, value: JsonDict, expiry_ms: int
@@ -133,7 +134,7 @@ class SessionStore(SQLBaseStore):
             _get_session,
             session_type,
             session_id,
-            self._clock.time_msec(),
+            self.clock.time_msec(),
         )
 
     @wrap_as_background_process("delete_expired_sessions")
@@ -147,5 +148,5 @@ class SessionStore(SQLBaseStore):
         await self.db_pool.runInteraction(
             "delete_expired_sessions",
             _delete_expired_sessions_txn,
-            self._clock.time_msec(),
+            self.clock.time_msec(),
         )

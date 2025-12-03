@@ -19,7 +19,7 @@
 #
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, MSC3244_CAPABILITIES
 from synapse.http.server import HttpServer
@@ -48,7 +48,7 @@ class CapabilitiesRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await self.auth.get_user_by_req(request, allow_guest=True)
         change_password = self.auth_handler.can_change_password()
 
@@ -92,22 +92,27 @@ class CapabilitiesRestServlet(RestServlet):
                 "enabled": self.config.experimental.msc3664_enabled,
             }
 
-        if self.config.experimental.msc4133_enabled:
-            response["capabilities"]["uk.tcpip.msc4133.profile_fields"] = {
-                "enabled": True,
-            }
+        disallowed_profile_fields = []
+        response["capabilities"]["m.profile_fields"] = {"enabled": True}
+        if not self.config.registration.enable_set_displayname:
+            disallowed_profile_fields.append("displayname")
+        if not self.config.registration.enable_set_avatar_url:
+            disallowed_profile_fields.append("avatar_url")
+        if disallowed_profile_fields:
+            response["capabilities"]["m.profile_fields"]["disallowed"] = (
+                disallowed_profile_fields
+            )
 
-            # Ensure this is consistent with the legacy m.set_displayname and
-            # m.set_avatar_url.
-            disallowed = []
-            if not self.config.registration.enable_set_displayname:
-                disallowed.append("displayname")
-            if not self.config.registration.enable_set_avatar_url:
-                disallowed.append("avatar_url")
-            if disallowed:
-                response["capabilities"]["uk.tcpip.msc4133.profile_fields"][
-                    "disallowed"
-                ] = disallowed
+        # For transition from unstable to stable identifiers.
+        if self.config.experimental.msc4133_enabled:
+            response["capabilities"]["uk.tcpip.msc4133.profile_fields"] = response[
+                "capabilities"
+            ]["m.profile_fields"]
+
+        if self.config.experimental.msc4267_enabled:
+            response["capabilities"]["org.matrix.msc4267.forget_forced_upon_leave"] = {
+                "enabled": self.config.room.forget_on_leave,
+            }
 
         return HTTPStatus.OK, response
 

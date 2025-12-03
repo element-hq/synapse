@@ -19,7 +19,7 @@
 #
 #
 import itertools
-from typing import Optional, cast
+from typing import cast
 from unittest.mock import Mock, call
 
 from parameterized import parameterized
@@ -29,7 +29,7 @@ from signedjson.key import (
     get_verify_key,
 )
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, PresenceState
 from synapse.api.presence import UserDevicePresenceState, UserPresenceState
@@ -57,7 +57,7 @@ from synapse.server import HomeServer
 from synapse.storage.database import LoggingDatabaseConnection
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict, UserID, get_domain_from_id
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -90,6 +90,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -137,6 +138,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -187,6 +189,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -235,6 +238,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -275,6 +279,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=False,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -314,6 +319,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -341,6 +347,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -431,6 +438,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=True,
@@ -494,6 +502,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -1641,7 +1650,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(state.state, PresenceState.ONLINE)
 
     def _set_presencestate_with_status_msg(
-        self, state: str, status_msg: Optional[str]
+        self, state: str, status_msg: str | None
     ) -> None:
         """Set a PresenceState and status_msg and check the result.
 

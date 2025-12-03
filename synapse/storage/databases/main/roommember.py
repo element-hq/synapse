@@ -24,16 +24,9 @@ from typing import (
     TYPE_CHECKING,
     AbstractSet,
     Collection,
-    Dict,
-    FrozenSet,
     Iterable,
-    List,
     Mapping,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
-    Union,
     cast,
 )
 
@@ -43,7 +36,7 @@ from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.logging.opentracing import trace
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -53,6 +46,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
+from synapse.storage.databases.main.stream import _filter_results_by_stream
 from synapse.storage.engines import Sqlite3Engine
 from synapse.storage.roommember import (
     MemberSummary,
@@ -65,9 +59,11 @@ from synapse.types import (
     PersistedEventPosition,
     StateMap,
     StrCollection,
+    StreamToken,
     get_domain_from_id,
 )
 from synapse.util.caches.descriptors import _CacheContext, cached, cachedList
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.metrics import Measure
 
@@ -80,6 +76,13 @@ logger = logging.getLogger(__name__)
 _MEMBERSHIP_PROFILE_UPDATE_NAME = "room_membership_profile_update"
 _CURRENT_STATE_MEMBERSHIP_UPDATE_NAME = "current_state_events_membership"
 _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE = 1000
+
+
+federation_known_servers_gauge = LaterGauge(
+    name="synapse_federation_known_servers",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
 
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)
@@ -108,17 +111,15 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             self._known_servers_count = 1
             self.hs.get_clock().looping_call(
                 self._count_known_servers,
-                60 * 1000,
+                Duration(minutes=1),
             )
             self.hs.get_clock().call_later(
-                1,
+                Duration(seconds=1),
                 self._count_known_servers,
             )
-            LaterGauge(
-                "synapse_federation_known_servers",
-                "",
-                [],
-                lambda: self._known_servers_count,
+            federation_known_servers_gauge.register_hook(
+                homeserver_instance_id=hs.get_instance_id(),
+                hook=lambda: {(self.server_name,): self._known_servers_count},
             )
 
     @wrap_as_background_process("_count_known_servers")
@@ -180,7 +181,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             desc="get_users_in_room",
         )
 
-    def get_users_in_room_txn(self, txn: LoggingTransaction, room_id: str) -> List[str]:
+    def get_users_in_room_txn(self, txn: LoggingTransaction, room_id: str) -> list[str]:
         """Returns a list of users in the room."""
 
         return self.db_pool.simple_select_onecol_txn(
@@ -192,6 +193,19 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 "membership": Membership.JOIN,
             },
             retcol="state_key",
+        )
+
+    async def get_invited_users_in_room(self, room_id: str) -> StrCollection:
+        """Returns a list of users invited to the room."""
+        return await self.db_pool.simple_select_onecol(
+            table="current_state_events",
+            keyvalues={
+                "type": EventTypes.Member,
+                "room_id": room_id,
+                "membership": Membership.INVITE,
+            },
+            retcol="state_key",
+            desc="get_invited_users_in_room",
         )
 
     @cached()
@@ -222,7 +236,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         def _get_subset_users_in_room_with_profiles(
             txn: LoggingTransaction,
-        ) -> Dict[str, ProfileInfo]:
+        ) -> dict[str, ProfileInfo]:
             clause, ids = make_in_list_sql_clause(
                 self.database_engine, "c.state_key", user_ids
             )
@@ -267,7 +281,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         def _get_users_in_room_with_profiles(
             txn: LoggingTransaction,
-        ) -> Dict[str, ProfileInfo]:
+        ) -> dict[str, ProfileInfo]:
             sql = """
                 SELECT state_key, display_name, avatar_url FROM room_memberships as m
                 INNER JOIN current_state_events as c
@@ -308,14 +322,14 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         def _get_room_summary_txn(
             txn: LoggingTransaction,
-        ) -> Dict[str, MemberSummary]:
+        ) -> dict[str, MemberSummary]:
             # first get counts.
             # We do this all in one transaction to keep the cache small.
             # FIXME: get rid of this when we have room_stats
 
             counts = self._get_member_counts_txn(txn, room_id)
 
-            res: Dict[str, MemberSummary] = {}
+            res: dict[str, MemberSummary] = {}
             for membership, count in counts.items():
                 res.setdefault(membership, MemberSummary([], count))
 
@@ -372,7 +386,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     def _get_member_counts_txn(
         self, txn: LoggingTransaction, room_id: str
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Get a mapping of number of users by membership"""
 
         # Note, rejected events will have a null membership field, so
@@ -431,7 +445,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_invite_for_local_user_in_room(
         self, user_id: str, room_id: str
-    ) -> Optional[RoomsForUser]:
+    ) -> RoomsForUser | None:
         """Gets the invite for the given *local* user and room.
 
         Args:
@@ -453,7 +467,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         user_id: str,
         membership_list: Collection[str],
         excluded_rooms: StrCollection = (),
-    ) -> List[RoomsForUser]:
+    ) -> list[RoomsForUser]:
         """Get all the rooms for this *local* user where the membership for this user
         matches one in the membership list.
 
@@ -516,8 +530,8 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         self,
         txn: LoggingTransaction,
         user_id: str,
-        membership_list: List[str],
-    ) -> List[RoomsForUser]:
+        membership_list: list[str],
+    ) -> list[RoomsForUser]:
         """Get all the rooms for this *local* user where the membership for this user
         matches one in the membership list.
 
@@ -583,12 +597,12 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_local_users_related_to_room(
         self, room_id: str
-    ) -> List[Tuple[str, str]]:
+    ) -> list[tuple[str, str]]:
         """
         Retrieves a list of the current roommembers who are local to the server and their membership status.
         """
         return cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="local_current_membership",
                 keyvalues={"room_id": room_id},
@@ -640,7 +654,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_local_current_membership_for_user_in_room(
         self, user_id: str, room_id: str
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> tuple[str | None, str | None]:
         """Retrieve the current local membership state and event ID for a user in a room.
 
         Args:
@@ -657,7 +671,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.BAD_JSON)
 
         results = cast(
-            Optional[Tuple[str, str]],
+            tuple[str, str] | None,
             await self.db_pool.simple_select_one(
                 "local_current_membership",
                 {"room_id": room_id, "user_id": user_id},
@@ -673,7 +687,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_users_server_still_shares_room_with(
         self, user_ids: Collection[str]
-    ) -> Set[str]:
+    ) -> set[str]:
         """Given a list of users return the set that the server still share a
         room with.
         """
@@ -691,7 +705,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         self,
         txn: LoggingTransaction,
         user_ids: Collection[str],
-    ) -> Set[str]:
+    ) -> set[str]:
         if not user_ids:
             return set()
 
@@ -714,7 +728,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_rooms_user_currently_banned_from(
         self, user_id: str
-    ) -> FrozenSet[str]:
+    ) -> frozenset[str]:
         """Returns a set of room_ids the user is currently banned from.
 
         If a remote user only returns rooms this server is currently
@@ -734,7 +748,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         return frozenset(room_ids)
 
     @cached(max_entries=500000, iterable=True)
-    async def get_rooms_for_user(self, user_id: str) -> FrozenSet[str]:
+    async def get_rooms_for_user(self, user_id: str) -> frozenset[str]:
         """Returns a set of room_ids the user is currently joined to.
 
         If a remote user only returns rooms this server is currently
@@ -760,7 +774,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     )
     async def _get_rooms_for_users(
         self, user_ids: Collection[str]
-    ) -> Mapping[str, FrozenSet[str]]:
+    ) -> Mapping[str, frozenset[str]]:
         """A batched version of `get_rooms_for_user`.
 
         Returns:
@@ -768,7 +782,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
 
         rows = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_many_batch(
                 table="current_state_events",
                 column="state_key",
@@ -785,7 +799,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             ),
         )
 
-        user_rooms: Dict[str, Set[str]] = {user_id: set() for user_id in user_ids}
+        user_rooms: dict[str, set[str]] = {user_id: set() for user_id in user_ids}
 
         for state_key, room_id in rows:
             user_rooms[state_key].add(room_id)
@@ -794,11 +808,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_rooms_for_users(
         self, user_ids: Collection[str]
-    ) -> Dict[str, FrozenSet[str]]:
+    ) -> dict[str, frozenset[str]]:
         """A batched wrapper around `_get_rooms_for_users`, to prevent locking
         other calls to `get_rooms_for_user` for large user lists.
         """
-        all_user_rooms: Dict[str, FrozenSet[str]] = {}
+        all_user_rooms: dict[str, frozenset[str]] = {}
 
         # 250 users is pretty arbitrary but the data can be quite large if users
         # are in many rooms.
@@ -818,7 +832,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     )
     async def _do_users_share_a_room(
         self, user_id: str, other_user_ids: Collection[str]
-    ) -> Mapping[str, Optional[bool]]:
+    ) -> Mapping[str, bool | None]:
         """Return mapping from user ID to whether they share a room with the
         given user.
 
@@ -828,7 +842,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         def do_users_share_a_room_txn(
             txn: LoggingTransaction, user_ids: Collection[str]
-        ) -> Dict[str, bool]:
+        ) -> dict[str, bool]:
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "state_key", user_ids
             )
@@ -862,18 +876,85 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def do_users_share_a_room(
         self, user_id: str, other_user_ids: Collection[str]
-    ) -> Set[str]:
+    ) -> set[str]:
         """Return the set of users who share a room with the first users"""
 
         user_dict = await self._do_users_share_a_room(user_id, other_user_ids)
 
         return {u for u, share_room in user_dict.items() if share_room}
 
-    async def get_users_who_share_room_with_user(self, user_id: str) -> Set[str]:
+    @cached(max_entries=10000)
+    async def does_pair_of_users_share_a_room_joined_or_invited(
+        self, user_id: str, other_user_id: str
+    ) -> bool:
+        raise NotImplementedError()
+
+    @cachedList(
+        cached_method_name="does_pair_of_users_share_a_room_joined_or_invited",
+        list_name="other_user_ids",
+    )
+    async def _do_users_share_a_room_joined_or_invited(
+        self, user_id: str, other_user_ids: Collection[str]
+    ) -> Mapping[str, bool | None]:
+        """Return mapping from user ID to whether they share a room with the
+        given user via being either joined or invited.
+
+        Note: `None` and `False` are equivalent and mean they don't share a
+        room.
+        """
+
+        def do_users_share_a_room_joined_or_invited_txn(
+            txn: LoggingTransaction, user_ids: Collection[str]
+        ) -> dict[str, bool]:
+            clause, args = make_in_list_sql_clause(
+                self.database_engine, "state_key", user_ids
+            )
+
+            # This query works by fetching both the list of rooms for the target
+            # user and the set of other users, and then checking if there is any
+            # overlap.
+            sql = f"""
+                SELECT DISTINCT b.state_key
+                FROM (
+                    SELECT room_id FROM current_state_events
+                    WHERE type = 'm.room.member' AND (membership = 'join' OR membership = 'invite') AND state_key = ?
+                ) AS a
+                INNER JOIN (
+                    SELECT room_id, state_key FROM current_state_events
+                    WHERE type = 'm.room.member' AND (membership = 'join' OR membership = 'invite') AND {clause}
+                ) AS b using (room_id)
+            """
+
+            txn.execute(sql, (user_id, *args))
+            return {u: True for (u,) in txn}
+
+        to_return = {}
+        for batch_user_ids in batch_iter(other_user_ids, 1000):
+            res = await self.db_pool.runInteraction(
+                "do_users_share_a_room_joined_or_invited",
+                do_users_share_a_room_joined_or_invited_txn,
+                batch_user_ids,
+            )
+            to_return.update(res)
+
+        return to_return
+
+    async def do_users_share_a_room_joined_or_invited(
+        self, user_id: str, other_user_ids: Collection[str]
+    ) -> set[str]:
+        """Return the set of users who share a room with the first users via being either joined or invited"""
+
+        user_dict = await self._do_users_share_a_room_joined_or_invited(
+            user_id, other_user_ids
+        )
+
+        return {u for u, share_room in user_dict.items() if share_room}
+
+    async def get_users_who_share_room_with_user(self, user_id: str) -> set[str]:
         """Returns the set of users who share a room with `user_id`"""
         room_ids = await self.get_rooms_for_user(user_id)
 
-        user_who_share_room: Set[str] = set()
+        user_who_share_room: set[str] = set()
         for room_id in room_ids:
             user_ids = await self.get_users_in_room(room_id)
             user_who_share_room.update(user_ids)
@@ -882,8 +963,8 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     @cached(cache_context=True, iterable=True)
     async def get_mutual_rooms_between_users(
-        self, user_ids: FrozenSet[str], cache_context: _CacheContext
-    ) -> FrozenSet[str]:
+        self, user_ids: frozenset[str], cache_context: _CacheContext
+    ) -> frozenset[str]:
         """
         Returns the set of rooms that all users in `user_ids` share.
 
@@ -892,7 +973,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
               overlapping joined rooms for.
             cache_context
         """
-        shared_room_ids: Optional[FrozenSet[str]] = None
+        shared_room_ids: frozenset[str] | None = None
         for user_id in user_ids:
             room_ids = await self.get_rooms_for_user(
                 user_id, on_invalidate=cache_context.invalidate
@@ -906,7 +987,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_joined_user_ids_from_state(
         self, room_id: str, state: StateMap[str]
-    ) -> Set[str]:
+    ) -> set[str]:
         """
         For a given set of state IDs, get a set of user IDs in the room.
 
@@ -914,7 +995,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         `_get_user_ids_from_membership_event_ids` for any uncached events.
         """
 
-        with Measure(self._clock, "get_joined_user_ids_from_state"):
+        with Measure(
+            self.clock,
+            name="get_joined_user_ids_from_state",
+            server_name=self.server_name,
+        ):
             users_in_room = set()
             member_event_ids = [
                 e_id for key, e_id in state.items() if key[0] == EventTypes.Member
@@ -959,7 +1044,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     )
     def _get_user_id_from_membership_event_id(
         self, event_id: str
-    ) -> Optional[Tuple[str, ProfileInfo]]:
+    ) -> tuple[str, ProfileInfo] | None:
         raise NotImplementedError()
 
     @cachedList(
@@ -968,7 +1053,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     )
     async def _get_user_ids_from_membership_event_ids(
         self, event_ids: Iterable[str]
-    ) -> Mapping[str, Optional[str]]:
+    ) -> Mapping[str, str | None]:
         """For given set of member event_ids check if they point to a join
         event.
 
@@ -980,7 +1065,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
 
         rows = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_many_batch(
                 table="room_memberships",
                 column="event_id",
@@ -1057,7 +1142,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         # For PostgreSQL we can use a regex to pull out the domains from the
         # joined users in `current_state_events` via regex.
 
-        def get_current_hosts_in_room_txn(txn: LoggingTransaction) -> Set[str]:
+        def get_current_hosts_in_room_txn(txn: LoggingTransaction) -> set[str]:
             sql = """
                 SELECT DISTINCT substring(state_key FROM '@[^:]*:(.*)$')
                 FROM current_state_events
@@ -1074,7 +1159,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         )
 
     @cached(iterable=True, max_entries=10000)
-    async def get_current_hosts_in_room_ordered(self, room_id: str) -> Tuple[str, ...]:
+    async def get_current_hosts_in_room_ordered(self, room_id: str) -> tuple[str, ...]:
         """
         Get current hosts in room based on current state.
 
@@ -1110,7 +1195,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         def get_current_hosts_in_room_ordered_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[str, ...]:
+        ) -> tuple[str, ...]:
             # Returns a list of servers currently joined in the room sorted by
             # longest in the room first (aka. with the lowest depth). The
             # heuristic of sorting by servers who have been in the room the
@@ -1143,7 +1228,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def _get_approximate_current_memberships_in_room(
         self, room_id: str
-    ) -> Mapping[str, Optional[str]]:
+    ) -> Mapping[str, str | None]:
         """Build a map from event id to membership, for all events in the current state.
 
         The event ids of non-memberships events (e.g. `m.room.power_levels`) are present
@@ -1154,7 +1239,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
 
         rows = cast(
-            List[Tuple[str, Optional[str]]],
+            list[tuple[str, str | None]],
             await self.db_pool.simple_select_list(
                 "current_state_events",
                 keyvalues={"room_id": room_id},
@@ -1206,7 +1291,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             The forgotten rooms.
         """
 
-        def _get_forgotten_rooms_for_user_txn(txn: LoggingTransaction) -> Set[str]:
+        def _get_forgotten_rooms_for_user_txn(txn: LoggingTransaction) -> set[str]:
             # This is a slightly convoluted query that first looks up all rooms
             # that the user has forgotten in the past, then rechecks that list
             # to see if any have subsequently been updated. This is done so that
@@ -1257,7 +1342,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         # If any rows still exist it means someone has not forgotten this room yet
         return not rows[0][0]
 
-    async def get_rooms_user_has_been_in(self, user_id: str) -> Set[str]:
+    async def get_rooms_user_has_been_in(self, user_id: str) -> set[str]:
         """Get all rooms that the user has ever been in.
 
         Args:
@@ -1278,7 +1363,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_membership_event_ids_for_user(
         self, user_id: str, room_id: str
-    ) -> Set[str]:
+    ) -> set[str]:
         """Get all event_ids for the given user and room.
 
         Args:
@@ -1301,7 +1386,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     @cached(max_entries=5000)
     async def _get_membership_from_event_id(
         self, member_event_id: str
-    ) -> Optional[EventIdMembership]:
+    ) -> EventIdMembership | None:
         raise NotImplementedError()
 
     @cachedList(
@@ -1309,7 +1394,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     )
     async def get_membership_from_event_ids(
         self, member_event_ids: Iterable[str]
-    ) -> Mapping[str, Optional[EventIdMembership]]:
+    ) -> Mapping[str, EventIdMembership | None]:
         """Get user_id and membership of a set of event IDs.
 
         Returns:
@@ -1318,7 +1403,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
 
         rows = cast(
-            List[Tuple[str, str, str]],
+            list[tuple[str, str, str]],
             await self.db_pool.simple_select_many_batch(
                 table="room_memberships",
                 column="event_id",
@@ -1389,7 +1474,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 txn, self.get_forgotten_rooms_for_user, (user_id,)
             )
             self._invalidate_cache_and_stream(
-                txn, self.get_sliding_sync_rooms_for_user, (user_id,)
+                txn,
+                self.get_sliding_sync_rooms_for_user_from_membership_snapshots,
+                (user_id,),
             )
 
         await self.db_pool.runInteraction("forget_membership", f)
@@ -1421,25 +1508,30 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         )
 
     @cached(iterable=True, max_entries=10000)
-    async def get_sliding_sync_rooms_for_user(
-        self,
-        user_id: str,
+    async def get_sliding_sync_rooms_for_user_from_membership_snapshots(
+        self, user_id: str
     ) -> Mapping[str, RoomsForUserSlidingSync]:
-        """Get all the rooms for a user to handle a sliding sync request.
+        """
+        Get all the rooms for a user to handle a sliding sync request from the
+        `sliding_sync_membership_snapshots` table. These will be current memberships and
+        need to be rewound to the token range.
 
         Ignores forgotten rooms and rooms that the user has left themselves.
+
+        Args:
+            user_id: The user ID to get the rooms for.
 
         Returns:
             Map from room ID to membership info
         """
 
-        def get_sliding_sync_rooms_for_user_txn(
+        def _txn(
             txn: LoggingTransaction,
-        ) -> Dict[str, RoomsForUserSlidingSync]:
+        ) -> dict[str, RoomsForUserSlidingSync]:
             # XXX: If you use any new columns that can change (like from
             # `sliding_sync_joined_rooms` or `forgotten`), make sure to bust the
-            # `get_sliding_sync_rooms_for_user` cache in the appropriate places (and add
-            # tests).
+            # `get_sliding_sync_rooms_for_user_from_membership_snapshots` cache in the
+            # appropriate places (and add tests).
             sql = """
                 SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
                     r.room_version,
@@ -1455,6 +1547,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     AND (m.membership != 'leave' OR m.user_id != m.sender)
             """
             txn.execute(sql, (user_id,))
+
             return {
                 row[0]: RoomsForUserSlidingSync(
                     room_id=row[0],
@@ -1475,18 +1568,123 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             }
 
         return await self.db_pool.runInteraction(
-            "get_sliding_sync_rooms_for_user",
-            get_sliding_sync_rooms_for_user_txn,
+            "get_sliding_sync_rooms_for_user_from_membership_snapshots",
+            _txn,
+        )
+
+    async def get_sliding_sync_self_leave_rooms_after_to_token(
+        self,
+        user_id: str,
+        to_token: StreamToken,
+    ) -> dict[str, RoomsForUserSlidingSync]:
+        """
+        Get all the self-leave rooms for a user after the `to_token` (outside the token
+        range) that are potentially relevant[1] and needed to handle a sliding sync
+        request. The results are from the `sliding_sync_membership_snapshots` table and
+        will be current memberships and need to be rewound to the token range.
+
+        [1] If a leave happens after the token range, we may have still been joined (or
+        any non-self-leave which is relevant to sync) to the room before so we need to
+        include it in the list of potentially relevant rooms and apply
+        our rewind logic (outside of this function) to see if it's actually relevant.
+
+        This is basically a sister-function to
+        `get_sliding_sync_rooms_for_user_from_membership_snapshots`. We could
+        alternatively incorporate this logic into
+        `get_sliding_sync_rooms_for_user_from_membership_snapshots` but those results
+        are cached and the `to_token` isn't very cache friendly (people are constantly
+        requesting with new tokens) so we separate it out here.
+
+        Args:
+            user_id: The user ID to get the rooms for.
+            to_token: Any self-leave memberships after this position will be returned.
+
+        Returns:
+            Map from room ID to membership info
+        """
+        # TODO: Potential to check
+        # `self._membership_stream_cache.has_entity_changed(...)` as an early-return
+        # shortcut.
+
+        def _txn(
+            txn: LoggingTransaction,
+        ) -> dict[str, RoomsForUserSlidingSync]:
+            sql = """
+                SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
+                    r.room_version,
+                    m.event_instance_name, m.event_stream_ordering,
+                    m.has_known_state,
+                    m.room_type,
+                    m.is_encrypted
+                FROM sliding_sync_membership_snapshots AS m
+                INNER JOIN rooms AS r USING (room_id)
+                WHERE user_id = ?
+                    AND m.forgotten = 0
+                    AND m.membership = 'leave'
+                    AND m.user_id = m.sender
+                    AND (m.event_stream_ordering > ?)
+            """
+            # If a leave happens after the token range, we may have still been joined
+            # (or any non-self-leave which is relevant to sync) to the room before so we
+            # need to include it in the list of potentially relevant rooms and apply our
+            # rewind logic (outside of this function).
+            #
+            # To handle tokens with a non-empty instance_map we fetch more
+            # results than necessary and then filter down
+            min_to_token_position = to_token.room_key.stream
+            txn.execute(sql, (user_id, min_to_token_position))
+
+            # Map from room_id to membership info
+            room_membership_for_user_map: dict[str, RoomsForUserSlidingSync] = {}
+            for row in txn:
+                room_for_user = RoomsForUserSlidingSync(
+                    room_id=row[0],
+                    sender=row[1],
+                    membership=row[2],
+                    event_id=row[3],
+                    room_version_id=row[4],
+                    event_pos=PersistedEventPosition(row[5], row[6]),
+                    has_known_state=bool(row[7]),
+                    room_type=row[8],
+                    is_encrypted=bool(row[9]),
+                )
+
+                # We filter out unknown room versions proactively. They shouldn't go
+                # down sync and their metadata may be in a broken state (causing
+                # errors).
+                if row[4] not in KNOWN_ROOM_VERSIONS:
+                    continue
+
+                # We only want to include the self-leave membership if it happened after
+                # the token range.
+                #
+                # Since the database pulls out more than necessary, we need to filter it
+                # down here.
+                if _filter_results_by_stream(
+                    lower_token=None,
+                    upper_token=to_token.room_key,
+                    instance_name=room_for_user.event_pos.instance_name,
+                    stream_ordering=room_for_user.event_pos.stream,
+                ):
+                    continue
+
+                room_membership_for_user_map[room_for_user.room_id] = room_for_user
+
+            return room_membership_for_user_map
+
+        return await self.db_pool.runInteraction(
+            "get_sliding_sync_self_leave_rooms_after_to_token",
+            _txn,
         )
 
     async def get_sliding_sync_room_for_user(
         self, user_id: str, room_id: str
-    ) -> Optional[RoomsForUserSlidingSync]:
+    ) -> RoomsForUserSlidingSync | None:
         """Get the sliding sync room entry for the given user and room."""
 
         def get_sliding_sync_room_for_user_txn(
             txn: LoggingTransaction,
-        ) -> Optional[RoomsForUserSlidingSync]:
+        ) -> RoomsForUserSlidingSync | None:
             sql = """
                 SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
                     r.room_version,
@@ -1524,7 +1722,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_sliding_sync_room_for_user_batch(
         self, user_id: str, room_ids: StrCollection
-    ) -> Dict[str, RoomsForUserSlidingSync]:
+    ) -> dict[str, RoomsForUserSlidingSync]:
         """Get the sliding sync room entry for the given user and rooms."""
 
         if not room_ids:
@@ -1532,7 +1730,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         def get_sliding_sync_room_for_user_batch_txn(
             txn: LoggingTransaction,
-        ) -> Dict[str, RoomsForUserSlidingSync]:
+        ) -> dict[str, RoomsForUserSlidingSync]:
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "m.room_id", room_ids
             )
@@ -1575,7 +1773,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_rooms_for_user_by_date(
         self, user_id: str, from_ts: int
-    ) -> FrozenSet[str]:
+    ) -> frozenset[str]:
         """
         Fetch a list of rooms that the user has joined at or after the given timestamp, including
         those they subsequently have left/been banned from.
@@ -1663,6 +1861,19 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             "_get_room_participation_txn", _get_room_participation_txn, user_id, room_id
         )
 
+    async def get_ban_event_ids_in_room(self, room_id: str) -> StrCollection:
+        """Get all event IDs for ban events in the given room."""
+        return await self.db_pool.simple_select_onecol(
+            table="current_state_events",
+            keyvalues={
+                "room_id": room_id,
+                "type": EventTypes.Member,
+                "membership": Membership.BAN,
+            },
+            retcol="event_id",
+            desc="get_ban_event_ids_in_room",
+        )
+
 
 class RoomMemberBackgroundUpdateStore(SQLBaseStore):
     def __init__(
@@ -1692,93 +1903,6 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
             table="room_memberships",
             columns=["user_id", "room_id"],
         )
-
-        self.db_pool.updates.register_background_update_handler(
-            "populate_participant_bg_update", self._populate_participant
-        )
-
-    async def _populate_participant(self, progress: JsonDict, batch_size: int) -> int:
-        """
-        Background update to populate column `participant` on `room_memberships` table
-
-        A 'participant' is someone who is currently joined to a room and has sent at least
-        one `m.room.message` or `m.room.encrypted` event.
-
-        This background update will set the `participant` column across all rows in
-        `room_memberships` based on the user's *current* join status, and if
-        they've *ever* sent a message or encrypted event. Therefore one should
-        never assume the `participant` column's value is based solely on whether
-        the user participated in a previous "session" (where a "session" is defined
-        as a period between the user joining and leaving). See
-        https://github.com/element-hq/synapse/pull/18068#discussion_r1931070291
-        for further detail.
-        """
-        stream_token = progress.get("last_stream_token", None)
-
-        def _get_max_stream_token_txn(txn: LoggingTransaction) -> int:
-            sql = """
-                SELECT event_stream_ordering from room_memberships
-                ORDER BY event_stream_ordering DESC
-                LIMIT 1;
-            """
-            txn.execute(sql)
-            res = txn.fetchone()
-            if not res or not res[0]:
-                return 0
-            return res[0]
-
-        def _background_populate_participant_txn(
-            txn: LoggingTransaction, stream_token: str
-        ) -> None:
-            sql = """
-                UPDATE room_memberships
-                SET participant = True
-                FROM (
-                    SELECT DISTINCT c.state_key, e.room_id
-                    FROM current_state_events AS c
-                    INNER JOIN events AS e ON c.room_id = e.room_id
-                    WHERE c.membership = 'join'
-                        AND c.state_key = e.sender
-                        AND (
-                            e.type = 'm.room.message'
-                            OR e.type = 'm.room.encrypted'
-                        )
-                ) AS subquery
-                WHERE room_memberships.user_id = subquery.state_key
-                    AND room_memberships.room_id = subquery.room_id
-                    AND room_memberships.event_stream_ordering <= ?
-                    AND room_memberships.event_stream_ordering > ?;
-            """
-            batch = int(stream_token) - _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
-            txn.execute(sql, (stream_token, batch))
-
-        if stream_token is None:
-            stream_token = await self.db_pool.runInteraction(
-                "_get_max_stream_token", _get_max_stream_token_txn
-            )
-
-        if stream_token < 0:
-            await self.db_pool.updates._end_background_update(
-                "populate_participant_bg_update"
-            )
-            return _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
-
-        await self.db_pool.runInteraction(
-            "_background_populate_participant_txn",
-            _background_populate_participant_txn,
-            stream_token,
-        )
-
-        progress["last_stream_token"] = (
-            stream_token - _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
-        )
-        await self.db_pool.runInteraction(
-            "populate_participant_bg_update",
-            self.db_pool.updates._background_update_progress_txn,
-            "populate_participant_bg_update",
-            progress,
-        )
-        return _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
 
     async def _background_add_membership_profile(
         self, progress: JsonDict, batch_size: int
@@ -1863,7 +1987,7 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
 
         def _background_current_state_membership_txn(
             txn: LoggingTransaction, last_processed_room: str
-        ) -> Tuple[int, bool]:
+        ) -> tuple[int, bool]:
             processed = 0
             while processed < batch_size:
                 txn.execute(
@@ -1933,7 +2057,7 @@ class RoomMemberStore(
 
 def extract_heroes_from_room_summary(
     details: Mapping[str, MemberSummary], me: str
-) -> List[str]:
+) -> list[str]:
     """Determine the users that represent a room, from the perspective of the `me` user.
 
     This function expects `MemberSummary.members` to already be sorted by
@@ -1975,13 +2099,13 @@ class _JoinedHostsCache:
     """The cached data used by the `_get_joined_hosts_cache`."""
 
     # Dict of host to the set of their users in the room at the state group.
-    hosts_to_joined_users: Dict[str, Set[str]] = attr.Factory(dict)
+    hosts_to_joined_users: dict[str, set[str]] = attr.Factory(dict)
 
     # The state group `hosts_to_joined_users` is derived from. Will be an object
     # if the instance is newly created or if the state is not based on a state
     # group. (An object is used as a sentinel value to ensure that it never is
     # equal to anything else).
-    state_group: Union[object, int] = attr.Factory(object)
+    state_group: object | int = attr.Factory(object)
 
     def __len__(self) -> int:
         return sum(len(v) for v in self.hosts_to_joined_users.values())

@@ -1,1 +1,0 @@
-Add `/_matrix/federation/v1/version` to list of federation endpoints that can be handled by workers.

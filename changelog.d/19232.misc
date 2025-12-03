@@ -1,0 +1,1 @@
+Fix `HomeServer.shutdown()` failing if the homeserver failed to `start`.

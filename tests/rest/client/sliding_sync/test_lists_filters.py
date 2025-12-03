@@ -15,7 +15,7 @@ import logging
 
 from parameterized import parameterized_class
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
@@ -28,7 +28,7 @@ from synapse.events import StrippedStateEvent
 from synapse.rest.client import login, room, sync, tags
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 

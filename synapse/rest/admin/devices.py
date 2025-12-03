@@ -20,10 +20,9 @@
 #
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import NotFoundError, SynapseError
-from synapse.handlers.device import DeviceHandler
 from synapse.http.servlet import (
     RestServlet,
     assert_params_in_dict,
@@ -51,15 +50,13 @@ class DeviceRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.auth = hs.get_auth()
-        handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
-        self.device_handler = handler
+        self.device_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
         self.is_mine = hs.is_mine
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, device_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
@@ -79,7 +76,7 @@ class DeviceRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str, device_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
@@ -95,7 +92,7 @@ class DeviceRestServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, device_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
@@ -113,7 +110,7 @@ class DeviceRestServlet(RestServlet):
         return HTTPStatus.OK, {}
 
 
-class DevicesGetRestServlet(RestServlet):
+class DevicesRestServlet(RestServlet):
     """
     Retrieve the given user's devices
 
@@ -131,7 +128,7 @@ class DevicesGetRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
@@ -145,24 +142,22 @@ class DevicesGetRestServlet(RestServlet):
         devices = await self.device_worker_handler.get_devices_by_user(
             target_user.to_string()
         )
+
+        # mark the dehydrated device by adding a "dehydrated" flag
+        dehydrated_device_info = await self.device_worker_handler.get_dehydrated_device(
+            target_user.to_string()
+        )
+        if dehydrated_device_info:
+            dehydrated_device_id = dehydrated_device_info[0]
+            for device in devices:
+                is_dehydrated = device["device_id"] == dehydrated_device_id
+                device["dehydrated"] = is_dehydrated
+
         return HTTPStatus.OK, {"devices": devices, "total": len(devices)}
-
-
-class DevicesRestServlet(DevicesGetRestServlet):
-    """
-    Retrieve the given user's devices
-    """
-
-    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/devices$", "v2")
-
-    def __init__(self, hs: "HomeServer"):
-        super().__init__(hs)
-        assert isinstance(self.device_worker_handler, DeviceHandler)
-        self.device_handler = self.device_worker_handler
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """Creates a new device for the user."""
         await assert_requester_is_admin(self.auth, request)
 
@@ -183,7 +178,7 @@ class DevicesRestServlet(DevicesGetRestServlet):
         if not isinstance(device_id, str):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "device_id must be a string")
 
-        await self.device_handler.check_device_registered(
+        await self.device_worker_handler.check_device_registered(
             user_id=user_id, device_id=device_id
         )
 
@@ -200,15 +195,13 @@ class DeleteDevicesRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         self.auth = hs.get_auth()
-        handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
-        self.device_handler = handler
+        self.device_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
         self.is_mine = hs.is_mine
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)

@@ -20,7 +20,6 @@
 #
 
 from http import HTTPStatus
-from typing import Tuple
 
 from twisted.web.server import Request
 
@@ -31,6 +30,7 @@ from synapse.replication.http._base import ReplicationEndpoint
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.cancellation import cancellable
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.http.server._base import test_disconnect
@@ -52,8 +52,8 @@ class CancellableReplicationEndpoint(ReplicationEndpoint):
     @cancellable
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
-        await self.clock.sleep(1.0)
+    ) -> tuple[int, JsonDict]:
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, {"result": True}
 
 
@@ -73,8 +73,8 @@ class UncancellableReplicationEndpoint(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
-        await self.clock.sleep(1.0)
+    ) -> tuple[int, JsonDict]:
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, {"result": True}
 
 

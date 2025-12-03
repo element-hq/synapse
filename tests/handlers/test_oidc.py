@@ -19,19 +19,19 @@
 #
 #
 import os
-from typing import Any, Awaitable, ContextManager, Dict, Optional, Tuple
+from typing import Any, Awaitable, ContextManager
 from unittest.mock import ANY, AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pymacaroons
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.handlers.sso import MappingException
 from synapse.http.site import SynapseRequest
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.macaroons import get_value_from_macaroon
 from synapse.util.stringutils import random_string
 
@@ -152,7 +152,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
     if not HAS_OIDC:
         skip = "requires OIDC"
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
         return config
@@ -204,7 +204,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
         client_redirect_url: str = "http://client/redirect",
         scope: str = "openid",
         with_sid: bool = False,
-    ) -> Tuple[SynapseRequest, FakeAuthorizationGrant]:
+    ) -> tuple[SynapseRequest, FakeAuthorizationGrant]:
         """Start an authorization request, and get the callback request back."""
         nonce = random_string(10)
         state = random_string(10)
@@ -221,8 +221,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
         return _build_callback_request(code, state, session), grant
 
     def assertRenderedError(
-        self, error: str, error_description: Optional[str] = None
-    ) -> Tuple[Any, ...]:
+        self, error: str, error_description: str | None = None
+    ) -> tuple[Any, ...]:
         self.render_error.assert_called_once()
         args = self.render_error.call_args[0]
         self.assertEqual(args[1], error)
@@ -1453,13 +1453,88 @@ class OidcHandlerTestCase(HomeserverTestCase):
             }
         }
     )
-    def test_attribute_requirements_one_of(self) -> None:
+    def test_attribute_requirements_one_of_succeeds(self) -> None:
         """Test that auth succeeds if userinfo attribute has multiple values and CONTAINS required value"""
         # userinfo with "test": ["bar"] attribute should succeed.
         userinfo = {
             "sub": "tester",
             "username": "tester",
             "test": ["bar"],
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+
+        # check that the auth handler got called as expected
+        self.complete_sso_login.assert_called_once_with(
+            "@tester:test",
+            self.provider.idp_id,
+            request,
+            ANY,
+            None,
+            new_user=True,
+            auth_provider_session_id=None,
+        )
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "attribute_requirements": [
+                    {"attribute": "test", "one_of": ["foo", "bar"]}
+                ],
+            }
+        }
+    )
+    def test_attribute_requirements_one_of_fails(self) -> None:
+        """Test that auth fails if userinfo attribute has multiple values yet
+        DOES NOT CONTAIN a required value
+        """
+        # userinfo with "test": ["something else"] attribute should fail.
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+            "test": ["something else"],
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+        self.complete_sso_login.assert_not_called()
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "attribute_requirements": [{"attribute": "test"}],
+            }
+        }
+    )
+    def test_attribute_requirements_does_not_exist(self) -> None:
+        """OIDC login fails if the required attribute does not exist in the OIDC userinfo response."""
+        # userinfo lacking "test" attribute should fail.
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+        self.complete_sso_login.assert_not_called()
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "attribute_requirements": [{"attribute": "test"}],
+            }
+        }
+    )
+    def test_attribute_requirements_exist(self) -> None:
+        """OIDC login succeeds if the required attribute exist (regardless of value)
+        in the OIDC userinfo response.
+        """
+        # userinfo with "test" attribute and random value should succeed.
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+            "test": random_string(5),  # value does not matter
         }
         request, _ = self.start_authorization(userinfo)
         self.get_success(self.handler.handle_oidc_callback(request))

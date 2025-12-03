@@ -19,10 +19,10 @@
 #
 #
 
-from typing import Any, Collection, List, Optional, Tuple
+from typing import Any, Collection
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.constants import UserTypes
@@ -43,7 +43,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import override_config
 from tests.utils import mock_getRawHeaders
@@ -63,10 +63,10 @@ class TestSpamChecker:
 
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
-        auth_provider_id: Optional[str],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
+        auth_provider_id: str | None,
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.ALLOW
 
@@ -74,10 +74,10 @@ class TestSpamChecker:
 class DenyAll(TestSpamChecker):
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
-        auth_provider_id: Optional[str],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
+        auth_provider_id: str | None,
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.DENY
 
@@ -85,10 +85,10 @@ class DenyAll(TestSpamChecker):
 class BanAll(TestSpamChecker):
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
-        auth_provider_id: Optional[str],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
+        auth_provider_id: str | None,
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.SHADOW_BAN
 
@@ -96,10 +96,10 @@ class BanAll(TestSpamChecker):
 class BanBadIdPUser(TestSpamChecker):
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
-        auth_provider_id: Optional[str] = None,
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
+        auth_provider_id: str | None = None,
     ) -> RegistrationBehaviour:
         # Reject any user coming from CAS and whose username contains profanity
         if auth_provider_id == "cas" and username and "flimflob" in username:
@@ -113,9 +113,9 @@ class TestLegacyRegistrationSpamChecker:
 
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.ALLOW
 
@@ -123,9 +123,9 @@ class TestLegacyRegistrationSpamChecker:
 class LegacyAllowAll(TestLegacyRegistrationSpamChecker):
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.ALLOW
 
@@ -133,9 +133,9 @@ class LegacyAllowAll(TestLegacyRegistrationSpamChecker):
 class LegacyDenyAll(TestLegacyRegistrationSpamChecker):
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.DENY
 
@@ -588,6 +588,29 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
         d = self.store.is_support_user(user_id)
         self.assertFalse(self.get_success(d))
 
+    def test_underscore_localpart_rejected_by_default(self) -> None:
+        for invalid_user_id in ("_", "_prefixed"):
+            with self.subTest(invalid_user_id=invalid_user_id):
+                self.get_failure(
+                    self.handler.register_user(localpart=invalid_user_id),
+                    SynapseError,
+                )
+
+    @override_config(
+        {
+            "allow_underscore_prefixed_localpart": True,
+        }
+    )
+    def test_underscore_localpart_allowed_if_configured(self) -> None:
+        for valid_user_id in ("_", "_prefixed"):
+            with self.subTest(valid_user_id=valid_user_id):
+                user_id = self.get_success(
+                    self.handler.register_user(
+                        localpart=valid_user_id,
+                    ),
+                )
+                self.assertEqual(user_id, f"@{valid_user_id}:test")
+
     def test_invalid_user_id(self) -> None:
         invalid_user_id = "^abcd"
         self.get_failure(
@@ -715,13 +738,48 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
             self.handler.register_user(localpart="bobflimflob", auth_provider_id="saml")
         )
 
+    def test_register_default_user_type(self) -> None:
+        """Test that the default user type is none when registering a user."""
+        user_id = self.get_success(self.handler.register_user(localpart="user"))
+        user_info = self.get_success(self.store.get_user_by_id(user_id))
+        assert user_info is not None
+        self.assertEqual(user_info.user_type, None)
+
+    def test_register_extra_user_types_valid(self) -> None:
+        """
+        Test that the specified user type is set correctly when registering a user.
+        n.b. No validation is done on the user type, so this test
+        is only to ensure that the user type can be set to any value.
+        """
+        user_id = self.get_success(
+            self.handler.register_user(localpart="user", user_type="anyvalue")
+        )
+        user_info = self.get_success(self.store.get_user_by_id(user_id))
+        assert user_info is not None
+        self.assertEqual(user_info.user_type, "anyvalue")
+
+    @override_config(
+        {
+            "user_types": {
+                "extra_user_types": ["extra1", "extra2"],
+                "default_user_type": "extra1",
+            }
+        }
+    )
+    def test_register_extra_user_types_with_default(self) -> None:
+        """Test that the default_user_type in config is set correctly when registering a user."""
+        user_id = self.get_success(self.handler.register_user(localpart="user"))
+        user_info = self.get_success(self.store.get_user_by_id(user_id))
+        assert user_info is not None
+        self.assertEqual(user_info.user_type, "extra1")
+
     async def get_or_create_user(
         self,
         requester: Requester,
         localpart: str,
-        displayname: Optional[str],
-        password_hash: Optional[str] = None,
-    ) -> Tuple[str, str]:
+        displayname: str | None,
+        password_hash: str | None = None,
+    ) -> tuple[str, str]:
         """Creates a new user if the user does not exist,
         else revokes all previous access tokens and generates a new one.
 
@@ -784,7 +842,7 @@ class RemoteAutoJoinTestCase(unittest.HomeserverTestCase):
 
         async def lookup_room_alias(
             *args: Any, **kwargs: Any
-        ) -> Tuple[RoomID, List[str]]:
+        ) -> tuple[RoomID, list[str]]:
             return RoomID.from_string(self.room_id), ["remotetest"]
 
         self.room_member_handler = Mock(spec=["update_membership", "lookup_room_alias"])

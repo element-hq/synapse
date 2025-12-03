@@ -65,13 +65,9 @@ from itertools import chain
 from pathlib import Path
 from typing import (
     Any,
-    Dict,
-    List,
     Mapping,
     MutableMapping,
     NoReturn,
-    Optional,
-    Set,
     SupportsIndex,
 )
 
@@ -96,7 +92,7 @@ WORKER_PLACEHOLDER_NAME = "placeholder_name"
 # Watching /_matrix/media and related needs a "media" listener
 # Stream Writers require "client" and "replication" listeners because they
 #   have to attach by instance_map to the master process and have client endpoints.
-WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
+WORKERS_CONFIG: dict[str, dict[str, Any]] = {
     "pusher": {
         "app": "synapse.app.generic_worker",
         "listener_resources": [],
@@ -178,6 +174,9 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/login$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/account/3pid$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/account/whoami$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/account/deactivate$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)",
+            "^/_matrix/client/(r0|v3)/delete_devices$",
             "^/_matrix/client/versions$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/voip/turnServer$",
             "^/_matrix/client/(r0|v3|unstable)/register$",
@@ -194,6 +193,10 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$",
             "^/_matrix/client/(r0|v3|unstable)/capabilities$",
             "^/_matrix/client/(r0|v3|unstable)/notifications$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$",
+            "^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/.*/restart)?$",
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
@@ -265,13 +268,6 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
-    "frontend_proxy": {
-        "app": "synapse.app.generic_worker",
-        "listener_resources": ["client", "replication"],
-        "endpoint_patterns": ["^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload"],
-        "shared_extra_conf": {},
-        "worker_extra_conf": "",
-    },
     "account_data": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -306,6 +302,13 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
+    "device_lists": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
     "typing": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -319,6 +322,15 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
         "endpoint_patterns": ["^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/"],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
+    "thread_subscriptions": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [
+            "^/_matrix/client/unstable/io.element.msc4306/.*",
+        ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
@@ -352,6 +364,11 @@ def error(txt: str) -> NoReturn:
 
 
 def flush_buffers() -> None:
+    """
+    Python's `print()` buffers output by default, typically waiting until ~8KB
+    accumulates. This method can be used to flush the buffers so we can see the output
+    of any print statements so far.
+    """
     sys.stdout.flush()
     sys.stderr.flush()
 
@@ -388,7 +405,7 @@ def convert(src: str, dst: str, **template_vars: object) -> None:
 
 def add_worker_roles_to_shared_config(
     shared_config: dict,
-    worker_types_set: Set[str],
+    worker_types_set: set[str],
     worker_name: str,
     worker_port: int,
 ) -> None:
@@ -407,16 +424,18 @@ def add_worker_roles_to_shared_config(
     # streams
     instance_map = shared_config.setdefault("instance_map", {})
 
-    # This is a list of the stream_writers that there can be only one of. Events can be
-    # sharded, and therefore doesn't belong here.
-    singular_stream_writers = [
+    # This is a list of the stream_writers.
+    stream_writers = {
         "account_data",
+        "events",
+        "device_lists",
         "presence",
         "receipts",
         "to_device",
         "typing",
         "push_rules",
-    ]
+        "thread_subscriptions",
+    }
 
     # Worker-type specific sharding config. Now a single worker can fulfill multiple
     # roles, check each.
@@ -426,28 +445,11 @@ def add_worker_roles_to_shared_config(
     if "federation_sender" in worker_types_set:
         shared_config.setdefault("federation_sender_instances", []).append(worker_name)
 
-    if "event_persister" in worker_types_set:
-        # Event persisters write to the events stream, so we need to update
-        # the list of event stream writers
-        shared_config.setdefault("stream_writers", {}).setdefault("events", []).append(
-            worker_name
-        )
-
-        # Map of stream writer instance names to host/ports combos
-        if os.environ.get("SYNAPSE_USE_UNIX_SOCKET", False):
-            instance_map[worker_name] = {
-                "path": f"/run/worker.{worker_port}",
-            }
-        else:
-            instance_map[worker_name] = {
-                "host": "localhost",
-                "port": worker_port,
-            }
     # Update the list of stream writers. It's convenient that the name of the worker
     # type is the same as the stream to write. Iterate over the whole list in case there
     # is more than one.
     for worker in worker_types_set:
-        if worker in singular_stream_writers:
+        if worker in stream_writers:
             shared_config.setdefault("stream_writers", {}).setdefault(
                 worker, []
             ).append(worker_name)
@@ -466,9 +468,9 @@ def add_worker_roles_to_shared_config(
 
 
 def merge_worker_template_configs(
-    existing_dict: Optional[Dict[str, Any]],
-    to_be_merged_dict: Dict[str, Any],
-) -> Dict[str, Any]:
+    existing_dict: dict[str, Any] | None,
+    to_be_merged_dict: dict[str, Any],
+) -> dict[str, Any]:
     """When given an existing dict of worker template configuration consisting with both
         dicts and lists, merge new template data from WORKERS_CONFIG(or create) and
         return new dict.
@@ -479,7 +481,7 @@ def merge_worker_template_configs(
             existing_dict.
     Returns: The newly merged together dict values.
     """
-    new_dict: Dict[str, Any] = {}
+    new_dict: dict[str, Any] = {}
     if not existing_dict:
         # It doesn't exist yet, just use the new dict(but take a copy not a reference)
         new_dict = to_be_merged_dict.copy()
@@ -504,8 +506,8 @@ def merge_worker_template_configs(
 
 
 def insert_worker_name_for_worker_config(
-    existing_dict: Dict[str, Any], worker_name: str
-) -> Dict[str, Any]:
+    existing_dict: dict[str, Any], worker_name: str
+) -> dict[str, Any]:
     """Insert a given worker name into the worker's configuration dict.
 
     Args:
@@ -521,7 +523,7 @@ def insert_worker_name_for_worker_config(
     return dict_to_edit
 
 
-def apply_requested_multiplier_for_worker(worker_types: List[str]) -> List[str]:
+def apply_requested_multiplier_for_worker(worker_types: list[str]) -> list[str]:
     """
     Apply multiplier(if found) by returning a new expanded list with some basic error
     checking.
@@ -582,7 +584,7 @@ def is_sharding_allowed_for_worker_type(worker_type: str) -> bool:
 
 def split_and_strip_string(
     given_string: str, split_char: str, max_split: SupportsIndex = -1
-) -> List[str]:
+) -> list[str]:
     """
     Helper to split a string on split_char and strip whitespace from each end of each
         element.
@@ -611,8 +613,8 @@ def generate_base_homeserver_config() -> None:
 
 
 def parse_worker_types(
-    requested_worker_types: List[str],
-) -> Dict[str, Set[str]]:
+    requested_worker_types: list[str],
+) -> dict[str, set[str]]:
     """Read the desired list of requested workers and prepare the data for use in
         generating worker config files while also checking for potential gotchas.
 
@@ -628,14 +630,14 @@ def parse_worker_types(
     # A counter of worker_base_name -> int. Used for determining the name for a given
     # worker when generating its config file, as each worker's name is just
     # worker_base_name followed by instance number
-    worker_base_name_counter: Dict[str, int] = defaultdict(int)
+    worker_base_name_counter: dict[str, int] = defaultdict(int)
 
     # Similar to above, but more finely grained. This is used to determine we don't have
     # more than a single worker for cases where multiples would be bad(e.g. presence).
-    worker_type_shard_counter: Dict[str, int] = defaultdict(int)
+    worker_type_shard_counter: dict[str, int] = defaultdict(int)
 
     # The final result of all this processing
-    dict_to_return: Dict[str, Set[str]] = {}
+    dict_to_return: dict[str, set[str]] = {}
 
     # Handle any multipliers requested for given workers.
     multiple_processed_worker_types = apply_requested_multiplier_for_worker(
@@ -679,7 +681,7 @@ def parse_worker_types(
 
         # Split the worker_type_string on "+", remove whitespace from ends then make
         # the list a set so it's deduplicated.
-        worker_types_set: Set[str] = set(
+        worker_types_set: set[str] = set(
             split_and_strip_string(worker_type_string, "+")
         )
 
@@ -738,7 +740,7 @@ def generate_worker_files(
     environ: Mapping[str, str],
     config_path: str,
     data_dir: str,
-    requested_worker_types: Dict[str, Set[str]],
+    requested_worker_types: dict[str, set[str]],
 ) -> None:
     """Read the desired workers(if any) that is passed in and generate shared
         homeserver, nginx and supervisord configs.
@@ -759,7 +761,7 @@ def generate_worker_files(
     # First read the original config file and extract the listeners block. Then we'll
     # add another listener for replication. Later we'll write out the result to the
     # shared config file.
-    listeners: List[Any]
+    listeners: list[Any]
     if using_unix_sockets:
         listeners = [
             {
@@ -787,12 +789,12 @@ def generate_worker_files(
     # base shared worker jinja2 template. This config file will be passed to all
     # workers, included Synapse's main process. It is intended mainly for disabling
     # functionality when certain workers are spun up, and adding a replication listener.
-    shared_config: Dict[str, Any] = {"listeners": listeners}
+    shared_config: dict[str, Any] = {"listeners": listeners}
 
     # List of dicts that describe workers.
     # We pass this to the Supervisor template later to generate the appropriate
     # program blocks.
-    worker_descriptors: List[Dict[str, Any]] = []
+    worker_descriptors: list[dict[str, Any]] = []
 
     # Upstreams for load-balancing purposes. This dict takes the form of the worker
     # type to the ports of each worker. For example:
@@ -800,14 +802,14 @@ def generate_worker_files(
     #   worker_type: {1234, 1235, ...}}
     # }
     # and will be used to construct 'upstream' nginx directives.
-    nginx_upstreams: Dict[str, Set[int]] = {}
+    nginx_upstreams: dict[str, set[int]] = {}
 
     # A map of: {"endpoint": "upstream"}, where "upstream" is a str representing what
     # will be placed after the proxy_pass directive. The main benefit to representing
     # this data as a dict over a str is that we can easily deduplicate endpoints
     # across multiple instances of the same worker. The final rendering will be combined
     # with nginx_upstreams and placed in /etc/nginx/conf.d.
-    nginx_locations: Dict[str, str] = {}
+    nginx_locations: dict[str, str] = {}
 
     # Create the worker configuration directory if it doesn't already exist
     os.makedirs("/conf/workers", exist_ok=True)
@@ -841,7 +843,7 @@ def generate_worker_files(
     # yaml config file
     for worker_name, worker_types_set in requested_worker_types.items():
         # The collected and processed data will live here.
-        worker_config: Dict[str, Any] = {}
+        worker_config: dict[str, Any] = {}
 
         # Merge all worker config templates for this worker into a single config
         for worker_type in worker_types_set:
@@ -870,6 +872,13 @@ def generate_worker_files(
             )
         else:
             healthcheck_urls.append("http://localhost:%d/health" % (worker_port,))
+
+        # Special case for event_persister: those are just workers that write to
+        # the `events` stream. For other workers, the worker name is the same
+        # name of the stream they write to, but for some reason it is not the
+        # case for event_persister.
+        if "event_persister" in worker_types_set:
+            worker_types_set.add("events")
 
         # Update the shared config with sharding-related options if necessary
         add_worker_roles_to_shared_config(
@@ -1017,7 +1026,7 @@ def generate_worker_log_config(
     Returns: the path to the generated file
     """
     # Check whether we should write worker logs to disk, in addition to the console
-    extra_log_template_args: Dict[str, Optional[str]] = {}
+    extra_log_template_args: dict[str, str | None] = {}
     if environ.get("SYNAPSE_WORKERS_WRITE_LOGS_TO_DISK"):
         extra_log_template_args["LOG_FILE_PATH"] = f"{data_dir}/logs/{worker_name}.log"
 
@@ -1041,7 +1050,7 @@ def generate_worker_log_config(
     return log_config_filepath
 
 
-def main(args: List[str], environ: MutableMapping[str, str]) -> None:
+def main(args: list[str], environ: MutableMapping[str, str]) -> None:
     parser = ArgumentParser()
     parser.add_argument(
         "--generate-only",
@@ -1075,7 +1084,7 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
         if not worker_types_env:
             # No workers, just the main process
             worker_types = []
-            requested_worker_types: Dict[str, Any] = {}
+            requested_worker_types: dict[str, Any] = {}
         else:
             # Split type names by comma, ignoring whitespace.
             worker_types = split_and_strip_string(worker_types_env, ",")

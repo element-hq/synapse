@@ -14,12 +14,13 @@
 
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Set, cast
+from typing import TYPE_CHECKING, Mapping, cast
 
 import attr
 
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.logging.opentracing import log_kv
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
     DatabasePool,
@@ -35,14 +36,30 @@ from synapse.types.handlers.sliding_sync import (
     RoomStatusMap,
     RoomSyncConfig,
 )
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
+from synapse.util.duration import Duration
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
     from synapse.storage.databases.main import DataStore
 
 logger = logging.getLogger(__name__)
+
+
+# How often to update the `last_used_ts` column on
+# `sliding_sync_connection_positions` when the client uses a connection
+# position. We don't want to update it on every use to avoid excessive
+# writes, but we want it to be reasonably up-to-date to help with
+# cleaning up old connection positions.
+UPDATE_INTERVAL_LAST_USED_TS = Duration(minutes=5)
+
+# Time in milliseconds the connection hasn't been used before we consider it
+# expired and delete it.
+CONNECTION_EXPIRY = Duration(days=7)
+
+# How often we run the background process to delete old sliding sync connections.
+CONNECTION_EXPIRY_FREQUENCY = Duration(hours=1)
 
 
 class SlidingSyncStore(SQLBaseStore):
@@ -68,10 +85,24 @@ class SlidingSyncStore(SQLBaseStore):
             columns=("membership_event_id",),
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
+            index_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
+            table="sliding_sync_membership_snapshots",
+            columns=("user_id", "event_stream_ordering"),
+            replaces_index="sliding_sync_membership_snapshots_user_id",
+        )
+
+        if self.hs.config.worker.run_background_tasks:
+            self.clock.looping_call(
+                self.delete_old_sliding_sync_connections,
+                CONNECTION_EXPIRY_FREQUENCY,
+            )
+
     async def get_latest_bump_stamp_for_room(
         self,
         room_id: str,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Get the `bump_stamp` for the room.
 
@@ -91,7 +122,7 @@ class SlidingSyncStore(SQLBaseStore):
         """
 
         return cast(
-            Optional[int],
+            int | None,
             await self.db_pool.simple_select_one_onecol(
                 table="sliding_sync_joined_rooms",
                 keyvalues={"room_id": room_id},
@@ -113,7 +144,7 @@ class SlidingSyncStore(SQLBaseStore):
         user_id: str,
         device_id: str,
         conn_id: str,
-        previous_connection_position: Optional[int],
+        previous_connection_position: int | None,
         per_connection_state: "MutablePerConnectionState",
     ) -> int:
         """Persist updates to the per-connection state for a sliding sync
@@ -146,7 +177,7 @@ class SlidingSyncStore(SQLBaseStore):
         user_id: str,
         device_id: str,
         conn_id: str,
-        previous_connection_position: Optional[int],
+        previous_connection_position: int | None,
         per_connection_state: "PerConnectionStateDB",
     ) -> int:
         # First we fetch (or create) the connection key associated with the
@@ -193,7 +224,8 @@ class SlidingSyncStore(SQLBaseStore):
                     "user_id": user_id,
                     "effective_device_id": device_id,
                     "conn_id": conn_id,
-                    "created_ts": self._clock.time_msec(),
+                    "created_ts": self.clock.time_msec(),
+                    "last_used_ts": self.clock.time_msec(),
                 },
                 returning=("connection_key",),
             )
@@ -204,7 +236,7 @@ class SlidingSyncStore(SQLBaseStore):
             table="sliding_sync_connection_positions",
             values={
                 "connection_key": connection_key,
-                "created_ts": self._clock.time_msec(),
+                "created_ts": self.clock.time_msec(),
             },
             returning=("connection_position",),
         )
@@ -214,7 +246,7 @@ class SlidingSyncStore(SQLBaseStore):
         # with the updates to `required_state`
 
         # Dict from required state json -> required state ID
-        required_state_to_id: Dict[str, int] = {}
+        required_state_to_id: dict[str, int] = {}
         if previous_connection_position is not None:
             rows = self.db_pool.simple_select_list_txn(
                 txn,
@@ -225,8 +257,8 @@ class SlidingSyncStore(SQLBaseStore):
             for required_state_id, required_state in rows:
                 required_state_to_id[required_state] = required_state_id
 
-        room_to_state_ids: Dict[str, int] = {}
-        unique_required_state: Dict[str, List[str]] = {}
+        room_to_state_ids: dict[str, int] = {}
+        unique_required_state: dict[str, list[str]] = {}
         for room_id, room_state in per_connection_state.room_configs.items():
             serialized_state = json_encoder.encode(
                 # We store the required state as a sorted list of event type /
@@ -376,7 +408,7 @@ class SlidingSyncStore(SQLBaseStore):
         # The `previous_connection_position` is a user-supplied value, so we
         # need to make sure that the one they supplied is actually theirs.
         sql = """
-            SELECT connection_key
+            SELECT connection_key, last_used_ts
             FROM sliding_sync_connection_positions
             INNER JOIN sliding_sync_connections USING (connection_key)
             WHERE
@@ -388,7 +420,23 @@ class SlidingSyncStore(SQLBaseStore):
         if row is None:
             raise SlidingSyncUnknownPosition()
 
-        (connection_key,) = row
+        (connection_key, last_used_ts) = row
+
+        # Update the `last_used_ts` if it's due to be updated. We don't update
+        # every time to avoid excessive writes.
+        now = self.clock.time_msec()
+        if (
+            last_used_ts is None
+            or now - last_used_ts > UPDATE_INTERVAL_LAST_USED_TS.as_millis()
+        ):
+            self.db_pool.simple_update_txn(
+                txn,
+                table="sliding_sync_connections",
+                keyvalues={
+                    "connection_key": connection_key,
+                },
+                updatevalues={"last_used_ts": now},
+            )
 
         # Now that we have seen the client has received and used the connection
         # position, we can delete all the other connection positions.
@@ -410,7 +458,7 @@ class SlidingSyncStore(SQLBaseStore):
             ),
         )
 
-        required_state_map: Dict[int, Dict[str, Set[str]]] = {}
+        required_state_map: dict[int, dict[str, set[str]]] = {}
         for row in rows:
             state = required_state_map[row[0]] = {}
             for event_type, state_key in db_to_json(row[1]):
@@ -429,7 +477,7 @@ class SlidingSyncStore(SQLBaseStore):
             ),
         )
 
-        room_configs: Dict[str, RoomSyncConfig] = {}
+        room_configs: dict[str, RoomSyncConfig] = {}
         for (
             room_id,
             timeline_limit,
@@ -441,9 +489,9 @@ class SlidingSyncStore(SQLBaseStore):
             )
 
         # Now look up the per-room stream data.
-        rooms: Dict[str, HaveSentRoom[str]] = {}
-        receipts: Dict[str, HaveSentRoom[str]] = {}
-        account_data: Dict[str, HaveSentRoom[str]] = {}
+        rooms: dict[str, HaveSentRoom[str]] = {}
+        receipts: dict[str, HaveSentRoom[str]] = {}
+        account_data: dict[str, HaveSentRoom[str]] = {}
 
         receipt_rows = self.db_pool.simple_select_list_txn(
             txn,
@@ -472,10 +520,28 @@ class SlidingSyncStore(SQLBaseStore):
                 logger.warning("Unrecognized sliding sync stream in DB %r", stream)
 
         return PerConnectionStateDB(
+            last_used_ts=last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             room_configs=room_configs,
+        )
+
+    @wrap_as_background_process("delete_old_sliding_sync_connections")
+    async def delete_old_sliding_sync_connections(self) -> None:
+        """Delete sliding sync connections that have not been used for a long time."""
+        cutoff_ts = self.clock.time_msec() - CONNECTION_EXPIRY.as_millis()
+
+        def delete_old_sliding_sync_connections_txn(txn: LoggingTransaction) -> None:
+            sql = """
+                DELETE FROM sliding_sync_connections
+                WHERE last_used_ts IS NOT NULL AND last_used_ts < ?
+            """
+            txn.execute(sql, (cutoff_ts,))
+
+        await self.db_pool.runInteraction(
+            "delete_old_sliding_sync_connections",
+            delete_old_sliding_sync_connections_txn,
         )
 
 
@@ -484,11 +550,13 @@ class PerConnectionStateDB:
     """An equivalent to `PerConnectionState` that holds data in a format stored
     in the DB.
 
-    The principle difference is that the tokens for the different streams are
+    The principal difference is that the tokens for the different streams are
     serialized to strings.
 
     When persisting this *only* contains updates to the state.
     """
+
+    last_used_ts: int | None
 
     rooms: "RoomStatusMap[str]"
     receipts: "RoomStatusMap[str]"
@@ -545,6 +613,7 @@ class PerConnectionStateDB:
         )
 
         return PerConnectionStateDB(
+            last_used_ts=per_connection_state.last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
@@ -588,6 +657,7 @@ class PerConnectionStateDB:
         }
 
         return PerConnectionState(
+            last_used_ts=self.last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),

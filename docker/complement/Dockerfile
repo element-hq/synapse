@@ -9,24 +9,24 @@
 ARG SYNAPSE_VERSION=latest
 # This is an intermediate image, to be built locally (not pulled from a registry).
 ARG FROM=matrixdotorg/synapse-workers:$SYNAPSE_VERSION
-ARG DEBIAN_VERSION=bookworm
+ARG DEBIAN_VERSION=trixie
 
-FROM docker.io/library/postgres:13-${DEBIAN_VERSION} AS postgres_base
+FROM docker.io/library/postgres:14-${DEBIAN_VERSION} AS postgres_base
 
 FROM $FROM
 # First of all, we copy postgres server from the official postgres image,
 # since for repeated rebuilds, this is much faster than apt installing
 # postgres each time.
 
-# This trick only works because (a) the Synapse image happens to have all the
-# shared libraries that postgres wants, (b) we use a postgres image based on
-# the same debian version as Synapse's docker image (so the versions of the
-# shared libraries match).
+# This trick only works because we use a postgres image based on the same
+# debian version as Synapse's docker image (so the versions of the shared
+# libraries match). Any missing libraries need to be added to either the
+# Synapse image or docker/Dockerfile-workers.
 RUN adduser --system --uid 999 postgres --home /var/lib/postgresql
 COPY --from=postgres_base /usr/lib/postgresql /usr/lib/postgresql
 COPY --from=postgres_base /usr/share/postgresql /usr/share/postgresql
 COPY --from=postgres_base --chown=postgres /var/run/postgresql /var/run/postgresql
-ENV PATH="${PATH}:/usr/lib/postgresql/13/bin"
+ENV PATH="${PATH}:/usr/lib/postgresql/14/bin"
 ENV PGDATA=/var/lib/postgresql/data
 
 # We also initialize the database at build time, rather than runtime, so that it's faster to spin up the image.

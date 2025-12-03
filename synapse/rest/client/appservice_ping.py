@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2023 Tulir Asokan
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023, 2025 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -22,7 +22,7 @@
 import logging
 import time
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, Tuple
+from typing import TYPE_CHECKING, Any
 
 from synapse.api.errors import (
     CodeMessageException,
@@ -53,11 +53,12 @@ class AppservicePingRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.as_api = hs.get_application_service_api()
+        self.scheduler = hs.get_application_service_scheduler()
         self.auth = hs.get_auth()
 
     async def on_POST(
         self, request: SynapseRequest, appservice_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         if not requester.app_service:
@@ -85,6 +86,10 @@ class AppservicePingRestServlet(RestServlet):
         start = time.monotonic()
         try:
             await self.as_api.ping(requester.app_service, txn_id)
+
+            # We got a OK response, so if the AS needs to be recovered then lets recover it now.
+            # This sets off a task in the background and so is safe to execute and forget.
+            self.scheduler.txn_ctrl.force_retry(requester.app_service)
         except RequestTimedOutError as e:
             raise SynapseError(
                 HTTPStatus.GATEWAY_TIMEOUT,
@@ -92,7 +97,7 @@ class AppservicePingRestServlet(RestServlet):
                 Codes.AS_PING_CONNECTION_TIMEOUT,
             )
         except CodeMessageException as e:
-            additional_fields: Dict[str, Any] = {"status": e.code}
+            additional_fields: dict[str, Any] = {"status": e.code}
             if isinstance(e, HttpResponseException):
                 try:
                     additional_fields["body"] = e.response.decode("utf-8")

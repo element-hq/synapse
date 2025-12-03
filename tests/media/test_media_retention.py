@@ -20,24 +20,23 @@
 #
 
 import io
-from typing import Iterable, Optional
+from typing import Iterable
 
 from matrix_common.types.mxc_uri import MXCUri
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import (
     random_string,
 )
 
 from tests import unittest
 from tests.unittest import override_config
-from tests.utils import MockClock
 
 
 class MediaRetentionTestCase(unittest.HomeserverTestCase):
@@ -50,12 +49,6 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
         register.register_servlets,
         admin.register_servlets_for_client_rest_resource,
     ]
-
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        # We need to be able to test advancing time in the homeserver, so we
-        # replace the test homeserver's default clock with a MockClock, which
-        # supports advancing time.
-        return self.setup_test_homeserver(clock=MockClock())
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.remote_server_name = "remote.homeserver"
@@ -70,15 +63,15 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
         media_repository = hs.get_media_repository()
 
         def _create_media_and_set_attributes(
-            last_accessed_ms: Optional[int],
-            is_quarantined: Optional[bool] = False,
-            is_protected: Optional[bool] = False,
+            last_accessed_ms: int | None,
+            is_quarantined: bool | None = False,
+            is_protected: bool | None = False,
         ) -> MXCUri:
             # "Upload" some media to the local media store
             # If the meda
             random_content = bytes(random_string(24), "utf-8")
             mxc_uri: MXCUri = self.get_success(
-                media_repository.create_content(
+                media_repository.create_or_update_content(
                     media_type="text/plain",
                     upload_name=None,
                     content=io.BytesIO(random_content),
@@ -120,8 +113,8 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
 
         def _cache_remote_media_and_set_attributes(
             media_id: str,
-            last_accessed_ms: Optional[int],
-            is_quarantined: Optional[bool] = False,
+            last_accessed_ms: int | None,
+            is_quarantined: bool | None = False,
         ) -> MXCUri:
             # Pretend to cache some remote media
             self.get_success(

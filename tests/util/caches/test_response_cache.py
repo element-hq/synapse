@@ -26,6 +26,7 @@ from parameterized import parameterized
 from twisted.internet import defer
 
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+from synapse.util.duration import Duration
 
 from tests.server import get_clock
 from tests.unittest import TestCase
@@ -46,14 +47,16 @@ class ResponseCacheTestCase(TestCase):
         self.reactor, self.clock = get_clock()
 
     def with_cache(self, name: str, ms: int = 0) -> ResponseCache:
-        return ResponseCache(self.clock, name, timeout_ms=ms)
+        return ResponseCache(
+            clock=self.clock, name=name, server_name="test_server", timeout_ms=ms
+        )
 
     @staticmethod
     async def instant_return(o: str) -> str:
         return o
 
     async def delayed_return(self, o: str) -> str:
-        await self.clock.sleep(1)
+        await self.clock.sleep(Duration(seconds=1))
         return o
 
     def test_cache_hit(self) -> None:
@@ -180,7 +183,7 @@ class ResponseCacheTestCase(TestCase):
         async def non_caching(o: str, cache_context: ResponseCacheContext[int]) -> str:
             nonlocal call_count
             call_count += 1
-            await self.clock.sleep(1)
+            await self.clock.sleep(Duration(seconds=1))
             cache_context.should_cache = should_cache
             return o
 

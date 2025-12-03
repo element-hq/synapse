@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple, cast
+from typing import TYPE_CHECKING, cast
 
 from twisted.web.server import Request
 
@@ -50,13 +50,13 @@ class RegisterDeviceReplicationServlet(ReplicationEndpoint):
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
         user_id: str,
-        device_id: Optional[str],
-        initial_display_name: Optional[str],
+        device_id: str | None,
+        initial_display_name: str | None,
         is_guest: bool,
         is_appservice_ghost: bool,
         should_issue_refresh_token: bool,
-        auth_provider_id: Optional[str],
-        auth_provider_session_id: Optional[str],
+        auth_provider_id: str | None,
+        auth_provider_session_id: str | None,
     ) -> JsonDict:
         """
         Args:
@@ -79,7 +79,7 @@ class RegisterDeviceReplicationServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         device_id = content["device_id"]
         initial_display_name = content["initial_display_name"]
         is_guest = content["is_guest"]

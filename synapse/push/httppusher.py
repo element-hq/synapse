@@ -21,7 +21,7 @@
 import logging
 import random
 import urllib.parse
-from typing import TYPE_CHECKING, Dict, List, Optional, Union
+from typing import TYPE_CHECKING
 
 from prometheus_client import Counter
 
@@ -31,7 +31,7 @@ from twisted.internet.interfaces import IDelayedCall
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.logging import opentracing
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.storage.databases.main.event_push_actions import HttpPushAction
 from synapse.types import JsonDict, JsonMapping
@@ -40,31 +40,36 @@ from . import push_tools
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+from synapse.util.duration import Duration
 
 logger = logging.getLogger(__name__)
 
 http_push_processed_counter = Counter(
     "synapse_http_httppusher_http_pushes_processed",
     "Number of push notifications successfully sent",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 http_push_failed_counter = Counter(
     "synapse_http_httppusher_http_pushes_failed",
     "Number of push notifications which failed",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 http_badges_processed_counter = Counter(
     "synapse_http_httppusher_badge_updates_processed",
     "Number of badge updates successfully sent",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 http_badges_failed_counter = Counter(
     "synapse_http_httppusher_badge_updates_failed",
     "Number of badge updates which failed",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
-def tweaks_for_actions(actions: List[Union[str, Dict]]) -> JsonMapping:
+def tweaks_for_actions(actions: list[str | dict]) -> JsonMapping:
     """
     Converts a list of actions into a `tweaks` dict (which can then be passed to
         the push gateway).
@@ -106,6 +111,7 @@ class HttpPusher(Pusher):
 
     def __init__(self, hs: "HomeServer", pusher_config: PusherConfig):
         super().__init__(hs, pusher_config)
+        self.server_name = hs.hostname
         self._storage_controllers = self.hs.get_storage_controllers()
         self.app_display_name = pusher_config.app_display_name
         self.device_display_name = pusher_config.device_display_name
@@ -114,7 +120,7 @@ class HttpPusher(Pusher):
         self.data = pusher_config.data
         self.backoff_delay = HttpPusher.INITIAL_BACKOFF_SEC
         self.failing_since = pusher_config.failing_since
-        self.timed_call: Optional[IDelayedCall] = None
+        self.timed_call: IDelayedCall | None = None
         self._is_processing = False
         self._group_unread_count_by_room = (
             hs.config.push.push_group_unread_count_by_room
@@ -158,7 +164,7 @@ class HttpPusher(Pusher):
         self.data_minus_url = {}
         self.data_minus_url.update(self.data)
         del self.data_minus_url["url"]
-        self.badge_count_last_call: Optional[int] = None
+        self.badge_count_last_call: int | None = None
 
     def on_started(self, should_check_for_notifs: bool) -> None:
         """Called when this pusher has been started.
@@ -176,7 +182,9 @@ class HttpPusher(Pusher):
 
         # We could check the receipts are actually m.read receipts here,
         # but currently that's the only type of receipt anyway...
-        run_as_background_process("http_pusher.on_new_receipts", self._update_badge)
+        self.hs.run_as_background_process(
+            "http_pusher.on_new_receipts", self._update_badge
+        )
 
     async def _update_badge(self) -> None:
         # XXX as per https://github.com/matrix-org/matrix-doc/issues/2627, this seems
@@ -211,7 +219,7 @@ class HttpPusher(Pusher):
         if self.failing_since and self.timed_call and self.timed_call.active():
             return
 
-        run_as_background_process("httppush.process", self._process)
+        self.hs.run_as_background_process("httppush.process", self._process)
 
     async def _process(self) -> None:
         # we should never get here if we are already processing
@@ -265,7 +273,9 @@ class HttpPusher(Pusher):
                 processed = await self._process_one(push_action)
 
             if processed:
-                http_push_processed_counter.inc()
+                http_push_processed_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
                 self.backoff_delay = HttpPusher.INITIAL_BACKOFF_SEC
                 self.last_stream_ordering = push_action.stream_ordering
                 pusher_still_exists = (
@@ -289,7 +299,9 @@ class HttpPusher(Pusher):
                         self.app_id, self.pushkey, self.user_id, self.failing_since
                     )
             else:
-                http_push_failed_counter.inc()
+                http_push_failed_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
                 if not self.failing_since:
                     self.failing_since = self.clock.time_msec()
                     await self.store.update_pusher_failing_since(
@@ -324,8 +336,9 @@ class HttpPusher(Pusher):
                     )
                 else:
                     logger.info("Push failed: delaying for %ds", self.backoff_delay)
-                    self.timed_call = self.hs.get_reactor().callLater(
-                        self.backoff_delay, self.on_timer
+                    self.timed_call = self.hs.get_clock().call_later(
+                        Duration(seconds=self.backoff_delay),
+                        self.on_timer,
                     )
                     self.backoff_delay = min(
                         self.backoff_delay * 2, self.MAX_BACKOFF_SEC
@@ -359,7 +372,7 @@ class HttpPusher(Pusher):
             delay_ms = random.randint(1, self.push_jitter_delay_ms)
             diff_ms = event.origin_server_ts + delay_ms - self.clock.time_msec()
             if diff_ms > 0:
-                await self.clock.sleep(diff_ms / 1000)
+                await self.clock.sleep(Duration(milliseconds=diff_ms))
 
         rejected = await self.dispatch_push_event(event, tweaks, badge)
         if rejected is False:
@@ -382,9 +395,9 @@ class HttpPusher(Pusher):
     async def dispatch_push(
         self,
         content: JsonDict,
-        tweaks: Optional[JsonMapping] = None,
-        default_payload: Optional[JsonMapping] = None,
-    ) -> Union[bool, List[str]]:
+        tweaks: JsonMapping | None = None,
+        default_payload: JsonMapping | None = None,
+    ) -> bool | list[str]:
         """Send a notification to the registered push gateway, with `content` being
         the content of the `notification` top property specified in the spec.
         Note that the `devices` property will be added with device-specific
@@ -441,7 +454,7 @@ class HttpPusher(Pusher):
         event: EventBase,
         tweaks: JsonMapping,
         badge: int,
-    ) -> Union[bool, List[str]]:
+    ) -> bool | list[str]:
         """Send a notification to the registered push gateway by building it
         from an event.
 
@@ -540,9 +553,13 @@ class HttpPusher(Pusher):
         }
         try:
             await self.http_client.post_json_get_json(self.url, d)
-            http_badges_processed_counter.inc()
+            http_badges_processed_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
         except Exception as e:
             logger.warning(
                 "Failed to send badge count to %s: %s %s", self.name, type(e), e
             )
-            http_badges_failed_counter.inc()
+            http_badges_failed_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()

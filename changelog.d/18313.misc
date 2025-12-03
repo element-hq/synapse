@@ -1,1 +1,0 @@
-Allow a few admin APIs used by matrix-authentication-service to run on workers.

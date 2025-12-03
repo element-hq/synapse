@@ -20,12 +20,12 @@
 #
 from urllib.parse import quote
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.rest.client import login, mutual_rooms, room
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeChannel
@@ -43,6 +43,12 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         mutual_rooms.register_servlets,
     ]
 
+    def default_config(self) -> dict:
+        config = super().default_config()
+        experimental = config.setdefault("experimental_features", {})
+        experimental.setdefault("msc2666_enabled", True)
+        return config
+
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
         return self.setup_test_homeserver(config=config)
@@ -57,6 +63,21 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
             f"?user_id={quote(other_user)}",
             access_token=token,
         )
+
+    @unittest.override_config({"experimental_features": {"msc2666_enabled": False}})
+    def test_mutual_rooms_no_experimental_flag(self) -> None:
+        """
+        The endpoint should 404 if the experimental flag is not enabled.
+        """
+        # Register a user.
+        u1 = self.register_user("user1", "pass")
+        u1_token = self.login(u1, "pass")
+
+        # Check that we're unable to query the endpoint due to the endpoint
+        # being unrecognised.
+        channel = self._get_mutual_rooms(u1_token, "@not-used:test")
+        self.assertEqual(404, channel.code, channel.result)
+        self.assertEqual("M_UNRECOGNIZED", channel.json_body["errcode"], channel.result)
 
     def test_shared_room_list_public(self) -> None:
         """

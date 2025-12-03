@@ -1,7 +1,9 @@
 from synapse.api.ratelimiting import LimitExceededError, Ratelimiter
 from synapse.appservice import ApplicationService
 from synapse.config.ratelimiting import RatelimitSettings
-from synapse.types import create_requester
+from synapse.module_api import RatelimitOverride
+from synapse.module_api.callbacks.ratelimit_callbacks import RatelimitModuleApiCallbacks
+from synapse.types import UserID, create_requester
 
 from tests import unittest
 
@@ -36,7 +38,7 @@ class TestRatelimiter(unittest.HomeserverTestCase):
             token="fake_token",
             id="foo",
             rate_limited=True,
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
         )
         as_requester = create_requester("@user:example.com", app_service=appservice)
 
@@ -72,7 +74,7 @@ class TestRatelimiter(unittest.HomeserverTestCase):
             token="fake_token",
             id="foo",
             rate_limited=False,
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
         )
         as_requester = create_requester("@user:example.com", app_service=appservice)
 
@@ -217,6 +219,21 @@ class TestRatelimiter(unittest.HomeserverTestCase):
         self.get_success_or_raise(
             limiter.can_do_action(None, key="test_id_1", _time_now_s=0)
         )
+
+        self.assertIn("test_id_1", limiter.actions)
+
+        self.reactor.advance(60)
+
+        self.assertNotIn("test_id_1", limiter.actions)
+
+    def test_pruning_record_action(self) -> None:
+        """Test that entries added by record_action also get pruned."""
+        limiter = Ratelimiter(
+            store=self.hs.get_datastores().main,
+            clock=self.clock,
+            cfg=RatelimitSettings(key="", per_second=0.1, burst_count=1),
+        )
+        limiter.record_action(None, key="test_id_1", n_actions=1, _time_now_s=0)
 
         self.assertIn("test_id_1", limiter.actions)
 
@@ -438,5 +455,51 @@ class TestRatelimiter(unittest.HomeserverTestCase):
         # action.
         success, _ = self.get_success_or_raise(
             limiter.can_do_action(requester=None, key="a", _time_now_s=20.0)
+        )
+        self.assertTrue(success)
+
+    def test_get_ratelimit_override_for_user_callback(self) -> None:
+        test_user_id = "@user:test"
+        test_limiter_name = "name"
+        callbacks = RatelimitModuleApiCallbacks(self.hs)
+        requester = create_requester(test_user_id)
+        limiter = Ratelimiter(
+            store=self.hs.get_datastores().main,
+            clock=self.clock,
+            cfg=RatelimitSettings(
+                test_limiter_name,
+                per_second=0.1,
+                burst_count=3,
+            ),
+            ratelimit_callbacks=callbacks,
+        )
+
+        # Observe four actions, exceeding the burst_count.
+        limiter.record_action(requester=requester, n_actions=4, _time_now_s=0.0)
+
+        # We should be prevented from taking a new action now.
+        success, _ = self.get_success_or_raise(
+            limiter.can_do_action(requester=requester, _time_now_s=0.0)
+        )
+        self.assertFalse(success)
+
+        # Now register a callback that overrides the ratelimit for this user
+        # and limiter name.
+        async def get_ratelimit_override_for_user(
+            user_id: str, limiter_name: str
+        ) -> RatelimitOverride | None:
+            if user_id == test_user_id:
+                return RatelimitOverride(
+                    per_second=0.1,
+                    burst_count=10,
+                )
+            return None
+
+        callbacks.register_callbacks(
+            get_ratelimit_override_for_user=get_ratelimit_override_for_user
+        )
+
+        success, _ = self.get_success_or_raise(
+            limiter.can_do_action(requester=requester, _time_now_s=0.0)
         )
         self.assertTrue(success)

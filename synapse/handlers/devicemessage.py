@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
 from synapse.api.constants import EduTypes, EventContentFields, ToDeviceEventTypes
 from synapse.api.errors import Codes, SynapseError
@@ -33,11 +33,8 @@ from synapse.logging.opentracing import (
     log_kv,
     set_tag,
 )
-from synapse.replication.http.devices import (
-    ReplicationMultiUserDevicesResyncRestServlet,
-)
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, get_domain_from_id
-from synapse.util import json_encoder
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -56,9 +53,9 @@ class DeviceMessageHandler:
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
         self.is_mine = hs.is_mine
+        self.device_handler = hs.get_device_handler()
         if hs.config.experimental.msc3814_enabled:
             self.event_sources = hs.get_event_sources()
-            self.device_handler = hs.get_device_handler()
 
         # We only need to poke the federation sender explicitly if its on the
         # same instance. Other federation sender instances will get notified by
@@ -78,18 +75,6 @@ class DeviceMessageHandler:
             hs.get_federation_registry().register_instances_for_edu(
                 EduTypes.DIRECT_TO_DEVICE,
                 hs.config.worker.writers.to_device,
-            )
-
-        # The handler to call when we think a user's device list might be out of
-        # sync. We do all device list resyncing on the master instance, so if
-        # we're on a worker we hit the device resync replication API.
-        if hs.config.worker.worker_app is None:
-            self._multi_user_device_resync = (
-                hs.get_device_handler().device_list_updater.multi_user_device_resync
-            )
-        else:
-            self._multi_user_device_resync = (
-                ReplicationMultiUserDevicesResyncRestServlet.make_client(hs)
             )
 
         # a rate limiter for room key requests.  The keys are
@@ -173,7 +158,7 @@ class DeviceMessageHandler:
         self,
         message_type: str,
         sender_user_id: str,
-        by_device: Dict[str, Dict[str, Any]],
+        by_device: dict[str, dict[str, Any]],
     ) -> None:
         """Checks inbound device messages for unknown remote devices, and if
         found marks the remote cache for the user as stale.
@@ -213,13 +198,16 @@ class DeviceMessageHandler:
             await self.store.mark_remote_users_device_caches_as_stale((sender_user_id,))
 
             # Immediately attempt a resync in the background
-            run_in_background(self._multi_user_device_resync, user_ids=[sender_user_id])
+            run_in_background(
+                self.device_handler.device_list_updater.multi_user_device_resync,
+                user_ids=[sender_user_id],
+            )
 
     async def send_device_message(
         self,
         requester: Requester,
         message_type: str,
-        messages: Dict[str, Dict[str, JsonDict]],
+        messages: dict[str, dict[str, JsonDict]],
     ) -> None:
         """
         Handle a request from a user to send to-device message(s).
@@ -234,7 +222,7 @@ class DeviceMessageHandler:
         set_tag(SynapseTags.TO_DEVICE_TYPE, message_type)
         set_tag(SynapseTags.TO_DEVICE_SENDER, sender_user_id)
         local_messages = {}
-        remote_messages: Dict[str, Dict[str, Dict[str, JsonDict]]] = {}
+        remote_messages: dict[str, dict[str, dict[str, JsonDict]]] = {}
         for user_id, by_device in messages.items():
             if not UserID.is_valid(user_id):
                 logger.warning(
@@ -327,7 +315,7 @@ class DeviceMessageHandler:
         self,
         requester: Requester,
         device_id: str,
-        since_token: Optional[str],
+        since_token: str | None,
         limit: int,
     ) -> JsonDict:
         """Fetches up to `limit` events sent to `device_id` starting from `since_token`

@@ -22,25 +22,28 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from prometheus_client import Counter
 
 from twisted.internet.interfaces import IAddress
 from twisted.internet.protocol import ServerFactory
 
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.replication.tcp.commands import PositionCommand
 from synapse.replication.tcp.protocol import ServerReplicationStreamProtocol
 from synapse.replication.tcp.streams import EventsStream
 from synapse.replication.tcp.streams._base import CachesStream, StreamRow, Token
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 stream_updates_counter = Counter(
-    "synapse_replication_tcp_resource_stream_updates", "", ["stream_name"]
+    "synapse_replication_tcp_resource_stream_updates",
+    "",
+    labelnames=["stream_name", SERVER_NAME_LABEL],
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +55,7 @@ class ReplicationStreamProtocolFactory(ServerFactory):
     def __init__(self, hs: "HomeServer"):
         self.command_handler = hs.get_replication_command_handler()
         self.clock = hs.get_clock()
+        self.hs = hs
         self.server_name = hs.config.server.server_name
 
         # If we've created a `ReplicationStreamProtocolFactory` then we're
@@ -66,7 +70,7 @@ class ReplicationStreamProtocolFactory(ServerFactory):
 
     def buildProtocol(self, addr: IAddress) -> ServerReplicationStreamProtocol:
         return ServerReplicationStreamProtocol(
-            self.server_name, self.clock, self.command_handler
+            self.hs, self.server_name, self.clock, self.command_handler
         )
 
 
@@ -78,6 +82,8 @@ class ReplicationStreamer:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
+        self.hs = hs
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
         self.notifier = hs.get_notifier()
@@ -111,7 +117,7 @@ class ReplicationStreamer:
         #
         # Note that if the position hasn't advanced then we won't send anything.
         if any(EventsStream.NAME == s.NAME for s in self.streams):
-            self.clock.looping_call(self.on_notifier_poke, 1000)
+            self.clock.looping_call(self.on_notifier_poke, Duration(seconds=1))
 
     def on_notifier_poke(self) -> None:
         """Checks if there is actually any new data and sends it to the
@@ -143,7 +149,9 @@ class ReplicationStreamer:
             logger.debug("Notifier poke loop already running")
             return
 
-        run_as_background_process("replication_notifier", self._run_notifier_loop)
+        self.hs.run_as_background_process(
+            "replication_notifier", self._run_notifier_loop
+        )
 
     async def _run_notifier_loop(self) -> None:
         self.is_looping = True
@@ -155,7 +163,11 @@ class ReplicationStreamer:
             while self.pending_updates:
                 self.pending_updates = False
 
-                with Measure(self.clock, "repl.stream.get_updates"):
+                with Measure(
+                    self.clock,
+                    name="repl.stream.get_updates",
+                    server_name=self.server_name,
+                ):
                     all_streams = self.streams
 
                     if self._replication_torture_level is not None:
@@ -219,7 +231,10 @@ class ReplicationStreamer:
                                 len(updates),
                                 current_token,
                             )
-                            stream_updates_counter.labels(stream.NAME).inc(len(updates))
+                            stream_updates_counter.labels(
+                                stream_name=stream.NAME,
+                                **{SERVER_NAME_LABEL: self.server_name},
+                            ).inc(len(updates))
 
                         else:
                             # The token has advanced but there is no data to
@@ -306,8 +321,8 @@ class ReplicationStreamer:
 
 
 def _batch_updates(
-    updates: List[Tuple[Token, StreamRow]],
-) -> List[Tuple[Optional[Token], StreamRow]]:
+    updates: list[tuple[Token, StreamRow]],
+) -> list[tuple[Token | None, StreamRow]]:
     """Takes a list of updates of form [(token, row)] and sets the token to
     None for all rows where the next row has the same token. This is used to
     implement batching.
@@ -323,7 +338,7 @@ def _batch_updates(
     if not updates:
         return []
 
-    new_updates: List[Tuple[Optional[Token], StreamRow]] = []
+    new_updates: list[tuple[Token | None, StreamRow]] = []
     for i, update in enumerate(updates[:-1]):
         if update[0] == updates[i + 1][0]:
             new_updates.append((None, update[1]))

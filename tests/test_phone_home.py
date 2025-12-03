@@ -22,14 +22,14 @@
 import resource
 from unittest import mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.app.phone_stats_home import phone_stats_home
 from synapse.rest import admin
 from synapse.rest.client import login, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -75,7 +75,7 @@ class CommonMetricsTestCase(HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.metrics_manager = hs.get_common_usage_metrics_manager()
-        self.get_success(self.metrics_manager.setup())
+        self.metrics_manager.setup()
 
     def test_dau(self) -> None:
         """Tests that the daily active users count is correctly updated."""

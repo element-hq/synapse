@@ -20,6 +20,8 @@
 #
 
 import os
+import tempfile
+from pathlib import Path
 from unittest.mock import Mock
 
 from synapse.config import ConfigError
@@ -230,9 +232,184 @@ class MSC3861OAuthDelegation(TestCase):
         reactor, clock = get_clock()
         with self.assertRaises(ConfigError):
             setup_test_homeserver(
-                self.addCleanup, reactor=reactor, clock=clock, config=config
+                cleanup_func=self.addCleanup,
+                config=config,
+                reactor=reactor,
+                clock=clock,
             )
 
+    def test_jwt_auth_cannot_be_enabled(self) -> None:
+        self.config_dict["jwt_config"] = {
+            "enabled": True,
+            "secret": "my-secret-token",
+            "algorithm": "HS256",
+        }
+
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_login_via_existing_session_cannot_be_enabled(self) -> None:
+        self.config_dict["login_via_existing_session"] = {"enabled": True}
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_captcha_cannot_be_enabled(self) -> None:
+        self.config_dict.update(
+            enable_registration_captcha=True,
+            recaptcha_public_key="test",
+            recaptcha_private_key="test",
+        )
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_refreshable_tokens_cannot_be_enabled(self) -> None:
+        self.config_dict.update(
+            refresh_token_lifetime="24h",
+            refreshable_access_token_lifetime="10m",
+            nonrefreshable_access_token_lifetime="24h",
+        )
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_session_lifetime_cannot_be_set(self) -> None:
+        self.config_dict["session_lifetime"] = "24h"
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_enable_3pid_changes_cannot_be_enabled(self) -> None:
+        self.config_dict["enable_3pid_changes"] = True
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+
+class MasAuthDelegation(TestCase):
+    """Test that the Homeserver fails to initialize if the config is invalid."""
+
+    def setUp(self) -> None:
+        self.config_dict: JsonDict = {
+            **default_config("test"),
+            "public_baseurl": BASE_URL,
+            "enable_registration": False,
+            "matrix_authentication_service": {
+                "enabled": True,
+                "endpoint": "http://localhost:1324/",
+                "secret": "verysecret",
+            },
+        }
+
+    def parse_config(self) -> HomeServerConfig:
+        config = HomeServerConfig()
+        config.parse_config_dict(self.config_dict, "", "")
+        return config
+
+    def test_endpoint_has_to_be_a_url(self) -> None:
+        self.config_dict["matrix_authentication_service"]["endpoint"] = "not a url"
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_secret_and_secret_path_are_mutually_exclusive(self) -> None:
+        with tempfile.NamedTemporaryFile() as f:
+            self.config_dict["matrix_authentication_service"]["secret"] = "verysecret"
+            self.config_dict["matrix_authentication_service"]["secret_path"] = Path(
+                f.name
+            )
+            with self.assertRaises(ConfigError):
+                self.parse_config()
+
+    def test_secret_path_loads_secret(self) -> None:
+        with tempfile.NamedTemporaryFile(buffering=0) as f:
+            f.write(b"53C237")
+            del self.config_dict["matrix_authentication_service"]["secret"]
+            self.config_dict["matrix_authentication_service"]["secret_path"] = Path(
+                f.name
+            )
+            config = self.parse_config()
+            self.assertEqual(config.mas.secret(), "53C237")
+
+    def test_secret_path_must_exist(self) -> None:
+        del self.config_dict["matrix_authentication_service"]["secret"]
+        self.config_dict["matrix_authentication_service"]["secret_path"] = Path(
+            "/not/a/valid/file"
+        )
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_registration_cannot_be_enabled(self) -> None:
+        self.config_dict["enable_registration"] = True
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_user_consent_cannot_be_enabled(self) -> None:
+        tmpdir = self.mktemp()
+        os.mkdir(tmpdir)
+        self.config_dict["user_consent"] = {
+            "require_at_registration": True,
+            "version": "1",
+            "template_dir": tmpdir,
+            "server_notice_content": {
+                "msgtype": "m.text",
+                "body": "foo",
+            },
+        }
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_password_config_cannot_be_enabled(self) -> None:
+        self.config_dict["password_config"] = {"enabled": True}
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    @skip_unless(HAS_AUTHLIB, "requires authlib")
+    def test_oidc_sso_cannot_be_enabled(self) -> None:
+        self.config_dict["oidc_providers"] = [
+            {
+                "idp_id": "microsoft",
+                "idp_name": "Microsoft",
+                "issuer": "https://login.microsoftonline.com/<tenant id>/v2.0",
+                "client_id": "<client id>",
+                "client_secret": "<client secret>",
+                "scopes": ["openid", "profile"],
+                "authorization_endpoint": "https://login.microsoftonline.com/<tenant id>/oauth2/v2.0/authorize",
+                "token_endpoint": "https://login.microsoftonline.com/<tenant id>/oauth2/v2.0/token",
+                "userinfo_endpoint": "https://graph.microsoft.com/oidc/userinfo",
+            }
+        ]
+
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_cas_sso_cannot_be_enabled(self) -> None:
+        self.config_dict["cas_config"] = {
+            "enabled": True,
+            "server_url": "https://cas-server.com",
+            "displayname_attribute": "name",
+            "required_attributes": {"userGroup": "staff", "department": "None"},
+        }
+
+        with self.assertRaises(ConfigError):
+            self.parse_config()
+
+    def test_auth_providers_cannot_be_enabled(self) -> None:
+        self.config_dict["modules"] = [
+            {
+                "module": f"{__name__}.{CustomAuthModule.__qualname__}",
+                "config": {},
+            }
+        ]
+
+        # This requires actually setting up an HS, as the module will be run on setup,
+        # which should raise as the module tries to register an auth provider
+        config = self.parse_config()
+        reactor, clock = get_clock()
+        with self.assertRaises(ConfigError):
+            setup_test_homeserver(
+                cleanup_func=self.addCleanup,
+                config=config,
+                reactor=reactor,
+                clock=clock,
+            )
+
+    @skip_unless(HAS_AUTHLIB, "requires authlib")
     def test_jwt_auth_cannot_be_enabled(self) -> None:
         self.config_dict["jwt_config"] = {
             "enabled": True,

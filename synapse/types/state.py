@@ -25,13 +25,8 @@ from typing import (
     Any,
     Callable,
     Collection,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Set,
-    Tuple,
     TypeVar,
 )
 
@@ -42,7 +37,7 @@ from synapse.api.constants import EventTypes
 from synapse.types import MutableStateMap, StateKey, StateMap
 
 if TYPE_CHECKING:
-    from typing import FrozenSet  # noqa: used within quoted type hint; flake8 sad
+    pass  # noqa: used within quoted type hint; flake8 sad
 
 
 logger = logging.getLogger(__name__)
@@ -64,7 +59,7 @@ class StateFilter:
             appear in `types`.
     """
 
-    types: "immutabledict[str, Optional[FrozenSet[str]]]"
+    types: "immutabledict[str, frozenset[str] | None]"
     include_others: bool = False
 
     def __attrs_post_init__(self) -> None:
@@ -105,7 +100,7 @@ class StateFilter:
         return _NONE_STATE_FILTER
 
     @staticmethod
-    def from_types(types: Iterable[Tuple[str, Optional[str]]]) -> "StateFilter":
+    def from_types(types: Iterable[tuple[str, str | None]]) -> "StateFilter":
         """Creates a filter that only fetches the given types
 
         Args:
@@ -115,7 +110,7 @@ class StateFilter:
         Returns:
             The new state filter.
         """
-        type_dict: Dict[str, Optional[Set[str]]] = {}
+        type_dict: dict[str, set[str] | None] = {}
         for typ, s in types:
             if typ in type_dict:
                 if type_dict[typ] is None:
@@ -134,7 +129,7 @@ class StateFilter:
             )
         )
 
-    def to_types(self) -> Iterable[Tuple[str, Optional[str]]]:
+    def to_types(self) -> Iterable[tuple[str, str | None]]:
         """The inverse to `from_types`."""
         for event_type, state_keys in self.types.items():
             if state_keys is None:
@@ -161,13 +156,13 @@ class StateFilter:
 
     @staticmethod
     def freeze(
-        types: Mapping[str, Optional[Collection[str]]], include_others: bool
+        types: Mapping[str, Collection[str] | None], include_others: bool
     ) -> "StateFilter":
         """
         Returns a (frozen) StateFilter with the same contents as the parameters
         specified here, which can be made of mutable types.
         """
-        types_with_frozen_values: Dict[str, Optional[FrozenSet[str]]] = {}
+        types_with_frozen_values: dict[str, frozenset[str] | None] = {}
         for state_types, state_keys in types.items():
             if state_keys is not None:
                 types_with_frozen_values[state_types] = frozenset(state_keys)
@@ -240,7 +235,7 @@ class StateFilter:
             # We want to return all non-members
             return _ALL_NON_MEMBER_STATE_FILTER
 
-    def make_sql_filter_clause(self) -> Tuple[str, List[str]]:
+    def make_sql_filter_clause(self) -> tuple[str, list[str]]:
         """Converts the filter to an SQL clause.
 
         For example:
@@ -257,7 +252,7 @@ class StateFilter:
         """
 
         where_clause = ""
-        where_args: List[str] = []
+        where_args: list[str] = []
 
         if self.is_full():
             return where_clause, where_args
@@ -293,7 +288,7 @@ class StateFilter:
 
         return where_clause, where_args
 
-    def max_entries_returned(self) -> Optional[int]:
+    def max_entries_returned(self) -> int | None:
         """Returns the maximum number of entries this filter will return if
         known, otherwise returns None.
 
@@ -353,7 +348,7 @@ class StateFilter:
             state_keys is None for state_keys in self.types.values()
         )
 
-    def concrete_types(self) -> List[Tuple[str, str]]:
+    def concrete_types(self) -> list[tuple[str, str]]:
         """Returns a list of concrete type/state_keys (i.e. not None) that
         will be fetched. This will be a complete list if `has_wildcards`
         returns False, but otherwise will be a subset (or even empty).
@@ -368,7 +363,7 @@ class StateFilter:
             for s in state_keys
         ]
 
-    def wildcard_types(self) -> List[str]:
+    def wildcard_types(self) -> list[str]:
         """Returns a list of event types which require us to fetch all state keys.
         This will be empty unless `has_wildcards` returns True.
 
@@ -377,7 +372,7 @@ class StateFilter:
         """
         return [t for t, state_keys in self.types.items() if state_keys is None]
 
-    def get_member_split(self) -> Tuple["StateFilter", "StateFilter"]:
+    def get_member_split(self) -> tuple["StateFilter", "StateFilter"]:
         """Return the filter split into two: one which assumes it's exclusively
         matching against member state, and one which assumes it's matching
         against non member state.
@@ -416,7 +411,7 @@ class StateFilter:
 
     def _decompose_into_four_parts(
         self,
-    ) -> Tuple[Tuple[bool, Set[str]], Tuple[Set[str], Set[StateKey]]]:
+    ) -> tuple[tuple[bool, set[str]], tuple[set[str], set[StateKey]]]:
         """
         Decomposes this state filter into 4 constituent parts, which can be
         thought of as this:
@@ -432,18 +427,18 @@ class StateFilter:
         correspondence.
         """
         is_all = self.include_others
-        excluded_types: Set[str] = {t for t in self.types if is_all}
-        wildcard_types: Set[str] = {t for t, s in self.types.items() if s is None}
-        concrete_keys: Set[StateKey] = set(self.concrete_types())
+        excluded_types: set[str] = {t for t in self.types if is_all}
+        wildcard_types: set[str] = {t for t, s in self.types.items() if s is None}
+        concrete_keys: set[StateKey] = set(self.concrete_types())
 
         return (is_all, excluded_types), (wildcard_types, concrete_keys)
 
     @staticmethod
     def _recompose_from_four_parts(
         all_part: bool,
-        minus_wildcards: Set[str],
-        plus_wildcards: Set[str],
-        plus_state_keys: Set[StateKey],
+        minus_wildcards: set[str],
+        plus_wildcards: set[str],
+        plus_state_keys: set[StateKey],
     ) -> "StateFilter":
         """
         Recomposes a state filter from 4 parts.
@@ -454,7 +449,7 @@ class StateFilter:
 
         # {state type -> set of state keys OR None for wildcard}
         # (The same structure as that of a StateFilter.)
-        new_types: Dict[str, Optional[Set[str]]] = {}
+        new_types: dict[str, set[str] | None] = {}
 
         # if we start with all, insert the excluded statetypes as empty sets
         # to prevent them from being included
@@ -462,7 +457,7 @@ class StateFilter:
             new_types.update({state_type: set() for state_type in minus_wildcards})
 
         # insert the plus wildcards
-        new_types.update({state_type: None for state_type in plus_wildcards})
+        new_types.update(dict.fromkeys(plus_wildcards))
 
         # insert the specific state keys
         for state_type, state_key in plus_state_keys:

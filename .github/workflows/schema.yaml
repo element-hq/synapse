@@ -1,0 +1,57 @@
+name: Schema
+
+on:
+  pull_request:
+    paths:
+      - schema/**
+      - docs/usage/configuration/config_documentation.md
+  push:
+    branches: ["develop", "release-*"]
+  workflow_dispatch:
+
+jobs:
+  validate-schema:
+    name: Ensure Synapse config schema is valid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: "3.x"
+      - name: Install check-jsonschema
+        run: pip install check-jsonschema==0.33.0
+
+      - name: Validate meta schema
+        run: check-jsonschema --check-metaschema schema/v*/meta.schema.json
+      - name: Validate schema
+        run: |-
+          # Please bump on introduction of a new meta schema.
+          LATEST_META_SCHEMA_VERSION=v1
+          check-jsonschema \
+            --schemafile="schema/$LATEST_META_SCHEMA_VERSION/meta.schema.json" \
+            schema/synapse-config.schema.yaml
+      - name: Validate default config
+      # Populates the empty instance with default values and checks against the schema.
+        run: |-
+          echo "{}" | check-jsonschema \
+            --fill-defaults --schemafile=schema/synapse-config.schema.yaml -
+
+  check-doc-generation:
+    name: Ensure generated documentation is up-to-date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: "3.x"
+      - name: Install PyYAML
+        run: pip install PyYAML==6.0.2
+
+      - name: Regenerate config documentation
+        run: |
+          scripts-dev/gen_config_documentation.py \
+            schema/synapse-config.schema.yaml \
+          > docs/usage/configuration/config_documentation.md
+      - name: Error in case of any differences
+      # Errors if there are now any modified files (untracked files are ignored).
+        run: 'git diff --exit-code'

@@ -79,17 +79,17 @@ phonenumbers = [
 We can see this pinned version inside the docker image for that release:
 
 ```
-$ docker pull vectorim/synapse:v1.97.0
+$ docker pull matrixdotorg/synapse:latest
 ...
-$ docker run --entrypoint pip vectorim/synapse:v1.97.0 show phonenumbers
+$ docker run --entrypoint pip matrixdotorg/synapse:latest show phonenumbers
 Name: phonenumbers
-Version: 8.12.44
+Version: 9.0.15
 Summary: Python version of Google's common library for parsing, formatting, storing and validating international phone numbers.
 Home-page: https://github.com/daviddrysdale/python-phonenumbers
 Author: David Drysdale
 Author-email: dmd@lurklurk.org
 License: Apache License 2.0
-Location: /usr/local/lib/python3.9/site-packages
+Location: /usr/local/lib/python3.12/site-packages
 Requires:
 Required-by: matrix-synapse
 ```
@@ -164,10 +164,7 @@ $ poetry cache clear --all .
 # including the wheel artifacts which is not covered by the above command
 # (see https://github.com/python-poetry/poetry/issues/10304)
 #
-# This is necessary in order to rebuild or fetch new wheels. For example, if you update
-# the `icu` library in on your system, you will need to rebuild the PyICU Python package
-# in order to incorporate the correct dynamically linked library locations otherwise you
-# will run into errors like: `ImportError: libicui18n.so.75: cannot open shared object file: No such file or directory`
+# This is necessary in order to rebuild or fetch new wheels.
 $ rm -rf $(poetry config cache-dir)
 ```
 

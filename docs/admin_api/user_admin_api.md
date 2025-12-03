@@ -163,7 +163,8 @@ Body parameters:
 - `locked` - **bool**, optional. If unspecified, locked state will be left unchanged.
 - `user_type` - **string** or null, optional. If not provided, the user type will be
   not be changed. If `null` is given, the user type will be cleared.
-  Other allowed options are: `bot` and `support`.
+  Other allowed options are: `bot` and `support` and any extra values defined in the homserver
+  [configuration](../usage/configuration/config_documentation.md#user_types).
 
 ## List Accounts
 ### List Accounts (V2)
@@ -954,7 +955,8 @@ A response body like the following is returned:
       "last_seen_ip": "1.2.3.4",
       "last_seen_user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
       "last_seen_ts": 1474491775024,
-      "user_id": "<user_id>"
+      "user_id": "<user_id>",
+      "dehydrated": false
     },
     {
       "device_id": "AUIECTSRND",
@@ -962,7 +964,8 @@ A response body like the following is returned:
       "last_seen_ip": "1.2.3.5",
       "last_seen_user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
       "last_seen_ts": 1474491775025,
-      "user_id": "<user_id>"
+      "user_id": "<user_id>",
+      "dehydrated": false
     }
   ],
   "total": 2
@@ -992,6 +995,7 @@ The following fields are returned in the JSON response body:
   - `last_seen_ts` - The timestamp (in milliseconds since the unix epoch) when this
     devices was last seen. (May be a few minutes out of date, for efficiency reasons).
   - `user_id` - Owner of  device.
+  - `dehydrated` - Whether the device is a dehydrated device.
 
 - `total` - Total number of user's devices.
 
@@ -1223,7 +1227,7 @@ See also the
 
 ## Controlling whether a user is shadow-banned
 
-Shadow-banning is a useful tool for moderating malicious or egregiously abusive users.
+Shadow-banning is a useful tool for moderating malicious or egregiously abusive users. 
 A shadow-banned users receives successful responses to their client-server API requests,
 but the events are not propagated into rooms. This can be an effective tool as it
 (hopefully) takes longer for the user to realise they are being moderated before
@@ -1460,8 +1464,11 @@ _Added in Synapse 1.72.0._
 
 ## Redact all the events of a user
 
-This endpoint allows an admin to redact the events of a given user. There are no restrictions on redactions for a 
-local user. By default, we puppet the user who sent the message to redact it themselves. Redactions for non-local users are issued using the admin user, and will fail in rooms where the admin user is not admin/does not have the specified power level to issue redactions. 
+This endpoint allows an admin to redact the events of a given user. There are no restrictions on
+redactions for a local user. By default, we puppet the user who sent the message to redact it themselves.
+Redactions for non-local users are issued using the admin user, and will fail in rooms where the
+admin user is not admin/does not have the specified power level to issue redactions. An option
+is provided to override the default and allow the admin to issue the redactions in all cases.  
 
 The API is 
 ```
@@ -1471,7 +1478,7 @@ POST /_synapse/admin/v1/user/$user_id/redact
   "rooms": ["!roomid1", "!roomid2"]
 }
 ```
-If an empty list is provided as the key for `rooms`, all events in all the rooms the user is member of will be redacted, 
+If an empty list is provided as the key for `rooms`, all events in all the rooms the user is member of will be redacted,
 otherwise all the events in the rooms provided in the request will be redacted. 
 
 The API starts redaction process running, and returns immediately with a JSON body with
@@ -1497,7 +1504,10 @@ The following JSON body parameter must be provided:
 The following JSON body parameters are optional:
 
 - `reason` - Reason the redaction is being requested, ie "spam", "abuse", etc. This will be included in each redaction event, and be visible to users.
-- `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided
+- `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided.
+- `use_admin` - If set to `true`, the admin user is used to issue the redactions, rather than puppeting the user. Useful
+ when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in rooms
+ where the admin does not have the sufficient power level to issue the redactions.  
 
 _Added in Synapse 1.116.0._
 

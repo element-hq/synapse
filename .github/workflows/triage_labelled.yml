@@ -6,39 +6,26 @@ on:
 
 jobs:
   move_needs_info:
-    name: Move X-Needs-Info on the triage board
     runs-on: ubuntu-latest
     if: >
       contains(github.event.issue.labels.*.name, 'X-Needs-Info')
+    permissions:
+      contents: read
+    env:
+      # This token must have the following scopes: ["repo:public_repo", "admin:org->read:org", "user->read:user", "project"]
+      GITHUB_TOKEN: ${{ secrets.ELEMENT_BOT_TOKEN }}
+      PROJECT_OWNER: matrix-org
+      # Backend issue triage board.
+      # https://github.com/orgs/matrix-org/projects/67/views/1
+      PROJECT_NUMBER: 67
+      ISSUE_URL: ${{ github.event.issue.html_url }}
+      # This field is case-sensitive.
+      TARGET_STATUS: Needs info
     steps:
-      - uses: actions/add-to-project@5b1a254a3546aef88e0a7724a77a623fa2e47c36 # main (v1.0.2 + 10 commits)
-        id: add_project
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
-          project-url: "https://github.com/orgs/matrix-org/projects/67"
-          github-token: ${{ secrets.ELEMENT_BOT_TOKEN }}
-      - name: Set status
-        env:
-          GITHUB_TOKEN: ${{ secrets.ELEMENT_BOT_TOKEN }}
-        run: |
-          gh api graphql -f query='
-          mutation(
-              $project: ID!
-              $item: ID!
-              $fieldid: ID!
-              $columnid: String!
-            )  {
-            updateProjectV2ItemFieldValue(
-              input: {
-               projectId: $project
-                itemId: $item
-                fieldId: $fieldid
-                value: { 
-                  singleSelectOptionId: $columnid
-                  }
-              }
-            ) {
-              projectV2Item {
-                id
-              }
-            }
-          }' -f project="PVT_kwDOAIB0Bs4AFDdZ" -f item=${{ steps.add_project.outputs.itemId }} -f fieldid="PVTSSF_lADOAIB0Bs4AFDdZzgC6ZA4" -f columnid=ba22e43c --silent
+          # Only clone the script file we care about, instead of the whole repo.
+          sparse-checkout: .ci/scripts/triage_labelled_issue.sh
+
+      - name: Ensure issue exists on the board, then set Status
+        run: .ci/scripts/triage_labelled_issue.sh

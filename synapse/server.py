@@ -28,10 +28,22 @@
 import abc
 import functools
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar, cast
+from threading import Thread
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    TypeVar,
+    cast,
+)
+from wsgiref.simple_server import WSGIServer
 
+from attr import dataclass
 from typing_extensions import TypeAlias
 
+from twisted.internet import defer
+from twisted.internet.base import _SystemEventID
 from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.tcp import Port
 from twisted.python.threadpool import ThreadPool
@@ -40,9 +52,13 @@ from twisted.web.resource import Resource
 
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.auth_blocking import AuthBlocking
+from synapse.api.errors import HomeServerNotSetupException
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
+from synapse.app._base import unregister_sighups
+from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.appservice.api import ApplicationServiceApi
 from synapse.appservice.scheduler import ApplicationServiceScheduler
 from synapse.config.homeserver import HomeServerConfig
@@ -69,7 +85,7 @@ from synapse.handlers.auth import AuthHandler, PasswordAuthProvider
 from synapse.handlers.cas import CasHandler
 from synapse.handlers.deactivate_account import DeactivateAccountHandler
 from synapse.handlers.delayed_events import DelayedEventsHandler
-from synapse.handlers.device import DeviceHandler, DeviceWorkerHandler
+from synapse.handlers.device import DeviceHandler, DeviceWriterHandler
 from synapse.handlers.devicemessage import DeviceMessageHandler
 from synapse.handlers.directory import DirectoryHandler
 from synapse.handlers.e2e_keys import E2eKeysHandler
@@ -94,6 +110,7 @@ from synapse.handlers.read_marker import ReadMarkerHandler
 from synapse.handlers.receipts import ReceiptsHandler
 from synapse.handlers.register import RegistrationHandler
 from synapse.handlers.relations import RelationsHandler
+from synapse.handlers.reports import ReportsHandler
 from synapse.handlers.room import (
     RoomContextHandler,
     RoomCreationHandler,
@@ -107,6 +124,7 @@ from synapse.handlers.room_member import (
     RoomMemberMasterHandler,
 )
 from synapse.handlers.room_member_worker import RoomMemberWorkerHandler
+from synapse.handlers.room_policy import RoomPolicyHandler
 from synapse.handlers.room_summary import RoomSummaryHandler
 from synapse.handlers.search import SearchHandler
 from synapse.handlers.send_email import SendEmailHandler
@@ -115,6 +133,7 @@ from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sso import SsoHandler
 from synapse.handlers.stats import StatsHandler
 from synapse.handlers.sync import SyncHandler
+from synapse.handlers.thread_subscriptions import ThreadSubscriptionsHandler
 from synapse.handlers.typing import FollowerTypingHandler, TypingWriterHandler
 from synapse.handlers.user_directory import UserDirectoryHandler
 from synapse.handlers.worker_lock import WorkerLocksHandler
@@ -124,8 +143,13 @@ from synapse.http.client import (
     SimpleHttpClient,
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
+from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
-from synapse.metrics import register_threadpool
+from synapse.metrics import (
+    all_later_gauges_to_clean_up_on_shutdown,
+    register_threadpool,
+)
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -149,7 +173,9 @@ from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
-from synapse.util import Clock
+from synapse.util import SYNAPSE_VERSION
+from synapse.util.caches import CACHE_METRIC_REGISTRY
+from synapse.util.clock import Clock
 from synapse.util.distributor import Distributor
 from synapse.util.macaroons import MacaroonGenerator
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -159,7 +185,9 @@ from synapse.util.task_scheduler import TaskScheduler
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    # Old Python versions don't have `LiteralString`
     from txredisapi import ConnectionHandler
+    from typing_extensions import LiteralString
 
     from synapse.handlers.jwt import JwtHandler
     from synapse.handlers.oidc import OidcHandler
@@ -189,6 +217,7 @@ if TYPE_CHECKING:
 
 T: TypeAlias = object
 F = TypeVar("F", bound=Callable[["HomeServer"], T])
+R = TypeVar("R")
 
 
 def cache_in_self(builder: F) -> F:
@@ -212,7 +241,8 @@ def cache_in_self(builder: F) -> F:
     @functools.wraps(builder)
     def _get(self: "HomeServer") -> T:
         try:
-            return getattr(self, depname)
+            dep = getattr(self, depname)
+            return dep
         except AttributeError:
             pass
 
@@ -230,6 +260,22 @@ def cache_in_self(builder: F) -> F:
         return dep
 
     return cast(F, _get)
+
+
+@dataclass
+class ShutdownInfo:
+    """Information for callable functions called at time of shutdown.
+
+    Attributes:
+        func: the object to call before shutdown.
+        trigger_id: an ID returned when registering this event trigger.
+        args: the arguments to call the function with.
+        kwargs: the keyword arguments to call the function with.
+    """
+
+    func: Callable[..., Any]
+    trigger_id: _SystemEventID
+    kwargs: dict[str, object]
 
 
 class HomeServer(metaclass=abc.ABCMeta):
@@ -264,7 +310,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def DATASTORE_CLASS(self) -> Type["SQLBaseStore"]:
+    def DATASTORE_CLASS(self) -> type["SQLBaseStore"]:
         # This is overridden in derived application classes
         # (such as synapse.app.homeserver.SynapseHomeServer) and gives the class to be
         # instantiated during setup() for future return by get_datastores()
@@ -274,14 +320,14 @@ class HomeServer(metaclass=abc.ABCMeta):
         self,
         hostname: str,
         config: HomeServerConfig,
-        reactor: Optional[ISynapseReactor] = None,
-        version_string: str = "Synapse",
+        reactor: ISynapseReactor | None = None,
     ):
         """
         Args:
             hostname : The hostname for the server.
             config: The full config for the homeserver.
         """
+
         if not reactor:
             from twisted.internet import reactor as _reactor
 
@@ -292,21 +338,246 @@ class HomeServer(metaclass=abc.ABCMeta):
         # the key we use to sign events and requests
         self.signing_key = config.key.signing_key[0]
         self.config = config
-        self._listening_services: List[Port] = []
-        self.start_time: Optional[int] = None
+        self._listening_services: list[Port] = []
+        self._metrics_listeners: list[tuple[WSGIServer, Thread]] = []
+        self.start_time: int | None = None
 
         self._instance_id = random_string(5)
         self._instance_name = config.worker.instance_name
 
-        self.version_string = version_string
+        self.version_string = f"Synapse/{SYNAPSE_VERSION}"
 
-        self.datastores: Optional[Databases] = None
+        self.datastores: Databases | None = None
 
-        self._module_web_resources: Dict[str, Resource] = {}
+        self._module_web_resources: dict[str, Resource] = {}
         self._module_web_resources_consumed = False
 
         # This attribute is set by the free function `refresh_certificate`.
-        self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
+        self.tls_server_context_factory: IOpenSSLContextFactory | None = None
+
+        self._is_shutdown = False
+        self._async_shutdown_handlers: list[ShutdownInfo] = []
+        self._sync_shutdown_handlers: list[ShutdownInfo] = []
+        self._background_processes: set[defer.Deferred[Any | None]] = set()
+
+    def run_as_background_process(
+        self,
+        desc: "LiteralString",
+        func: Callable[..., Awaitable[R | None]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> "defer.Deferred[R | None]":
+        """Run the given function in its own logcontext, with resource metrics
+
+        This should be used to wrap processes which are fired off to run in the
+        background, instead of being associated with a particular request.
+
+        It returns a Deferred which completes when the function completes, but it doesn't
+        follow the synapse logcontext rules, which makes it appropriate for passing to
+        clock.looping_call and friends (or for firing-and-forgetting in the middle of a
+        normal synapse async function).
+
+        Because the returned Deferred does not follow the synapse logcontext rules, awaiting
+        the result of this function will result in the log context being cleared (bad). In
+        order to properly await the result of this function and maintain the current log
+        context, use `make_deferred_yieldable`.
+
+        Args:
+            desc: a description for this background process type
+            server_name: The homeserver name that this background process is being run for
+                (this should be `hs.hostname`).
+            func: a function, which may return a Deferred or a coroutine
+            bg_start_span: Whether to start an opentracing span. Defaults to True.
+                Should only be disabled for processes that will not log to or tag
+                a span.
+            args: positional args for func
+            kwargs: keyword args for func
+
+        Returns:
+            Deferred which returns the result of func, or `None` if func raises.
+            Note that the returned Deferred does not follow the synapse logcontext
+            rules.
+        """
+        if self._is_shutdown:
+            raise Exception(
+                "Cannot start background process. HomeServer has been shutdown"
+            )
+
+        # Ignore linter error as this is the one location this should be called.
+        deferred = run_as_background_process(desc, self.hostname, func, *args, **kwargs)  # type: ignore[untracked-background-process]
+        self._background_processes.add(deferred)
+
+        def on_done(res: R) -> R:
+            try:
+                self._background_processes.remove(deferred)
+            except KeyError:
+                # If the background process isn't being tracked anymore we can just move on.
+                pass
+            return res
+
+        deferred.addBoth(on_done)
+        return deferred
+
+    async def shutdown(self) -> None:
+        """
+        Cleanly stops all aspects of the HomeServer and removes any references that
+        have been handed out in order to allow the HomeServer object to be garbage
+        collected.
+
+        You must ensure the HomeServer object to not be frozen in the garbage collector
+        in order for it to be cleaned up. By default, Synapse freezes the HomeServer
+        object in the garbage collector.
+        """
+
+        self._is_shutdown = True
+
+        logger.info(
+            "Received shutdown request for %s (%s).",
+            self.hostname,
+            self.get_instance_id(),
+        )
+
+        # Unregister sighups first. If a shutdown was requested we shouldn't be responding
+        # to things like config changes. So it would be best to stop listening to these first.
+        unregister_sighups(self._instance_id)
+
+        # TODO: It would be desireable to be able to report an error if the HomeServer
+        # object is frozen in the garbage collector as that would prevent it from being
+        # collected after being shutdown.
+        # In theory the following should work, but it doesn't seem to make a difference
+        # when I test it locally.
+        #
+        # if gc.is_tracked(self):
+        #    logger.error("HomeServer object is tracked by garbage collection so cannot be fully cleaned up")
+
+        for listener in self._listening_services:
+            # During unit tests, an incomplete `twisted.pair.testing._FakePort` is used
+            # for listeners so check listener type here to ensure shutdown procedure is
+            # only applied to actual `Port` instances.
+            if type(listener) is Port:
+                port_shutdown = listener.stopListening()
+                if port_shutdown is not None:
+                    await port_shutdown
+        self._listening_services.clear()
+
+        for server, thread in self._metrics_listeners:
+            server.shutdown()
+            thread.join()
+        self._metrics_listeners.clear()
+
+        # TODO: Cleanup replication pieces
+
+        keyring: Keyring | None = None
+        try:
+            keyring = self.get_keyring()
+        except HomeServerNotSetupException:
+            # If the homeserver wasn't fully setup, keyring won't have existed before
+            # this and will fail to be initialized but it cleans itself up for any
+            # partial initialization problem.
+            pass
+
+        if keyring:
+            keyring.shutdown()
+
+        # Cleanup metrics associated with the homeserver
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
+            later_gauge.unregister_hooks_for_homeserver_instance_id(
+                self.get_instance_id()
+            )
+
+        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver(
+            self.config.server.server_name
+        )
+
+        try:
+            for db in self.get_datastores().databases:
+                db.stop_background_updates()
+        except HomeServerNotSetupException:
+            # If the homeserver wasn't fully setup, the datastores won't exist
+            pass
+
+        if self.should_send_federation():
+            try:
+                self.get_federation_sender().shutdown()
+            except Exception:
+                pass
+
+        for shutdown_handler in self._async_shutdown_handlers:
+            try:
+                self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
+                defer.ensureDeferred(shutdown_handler.func(**shutdown_handler.kwargs))
+            except Exception as e:
+                logger.error("Error calling shutdown async handler: %s", e)
+        self._async_shutdown_handlers.clear()
+
+        for shutdown_handler in self._sync_shutdown_handlers:
+            try:
+                self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
+                shutdown_handler.func(**shutdown_handler.kwargs)
+            except Exception as e:
+                logger.error("Error calling shutdown sync handler: %s", e)
+        self._sync_shutdown_handlers.clear()
+
+        self.get_clock().shutdown()
+
+        for background_process in list(self._background_processes):
+            try:
+                with PreserveLoggingContext():
+                    background_process.cancel()
+            except Exception:
+                pass
+        self._background_processes.clear()
+
+        try:
+            for db in self.get_datastores().databases:
+                db._db_pool.close()
+        except HomeServerNotSetupException:
+            # If the homeserver wasn't fully setup, the datastores won't exist
+            pass
+
+    def register_async_shutdown_handler(
+        self,
+        *,
+        phase: str,
+        eventType: str,
+        shutdown_func: Callable[..., Any],
+        **kwargs: object,
+    ) -> None:
+        """
+        Register a system event trigger with the HomeServer so it can be cleanly
+        removed when the HomeServer is shutdown.
+        """
+        id = self.get_clock().add_system_event_trigger(
+            phase,
+            eventType,
+            shutdown_func,
+            **kwargs,
+        )
+        self._async_shutdown_handlers.append(
+            ShutdownInfo(func=shutdown_func, trigger_id=id, kwargs=kwargs)
+        )
+
+    def register_sync_shutdown_handler(
+        self,
+        *,
+        phase: str,
+        eventType: str,
+        shutdown_func: Callable[..., Any],
+        **kwargs: object,
+    ) -> None:
+        """
+        Register a system event trigger with the HomeServer so it can be cleanly
+        removed when the HomeServer is shutdown.
+        """
+        id = self.get_clock().add_system_event_trigger(
+            phase,
+            eventType,
+            shutdown_func,
+            **kwargs,
+        )
+        self._sync_shutdown_handlers.append(
+            ShutdownInfo(func=shutdown_func, trigger_id=id, kwargs=kwargs)
+        )
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.
@@ -359,11 +630,19 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.datastores = Databases(self.DATASTORE_CLASS, self)
         logger.info("Finished setting up.")
 
-        # Register background tasks required by this server. This must be done
-        # somewhat manually due to the background tasks not being registered
-        # unless handlers are instantiated.
-        if self.config.worker.run_background_tasks:
-            self.setup_background_tasks()
+    # def __del__(self) -> None:
+    #    """
+    #    Called when an the homeserver is garbage collected.
+    #
+    #    Make sure we actually do some clean-up, rather than leak data.
+    #    """
+    #
+    #    # NOTE: This is a chicken and egg problem.
+    #    # __del__ will never be called since the HomeServer cannot be garbage collected
+    #    # until the shutdown function has been called. So it makes no sense to call
+    #    # shutdown inside of __del__, even though that is a logical place to assume it
+    #    # should be called.
+    #    self.shutdown()
 
     def start_listening(self) -> None:  # noqa: B027 (no-op by design)
         """Start the HTTP, manhole, metrics, etc listeners
@@ -372,7 +651,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         appropriate listeners.
         """
 
-    def setup_background_tasks(self) -> None:
+    def start_background_tasks(self) -> None:
         """
         Some handlers have side effects on instantiation (like registering
         background updates). This function causes them to be fetched, and
@@ -381,6 +660,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         for i in self.REQUIRED_ON_BACKGROUND_TASK_STARTUP:
             getattr(self, "get_" + i + "_handler")()
         self.get_task_scheduler()
+        self.get_common_usage_metrics_manager().setup()
+        start_phone_stats_home(self)
 
     def get_reactor(self) -> ISynapseReactor:
         """
@@ -410,17 +691,20 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_clock(self) -> Clock:
-        return Clock(self._reactor)
+        # Ignore the linter error since this is the one place the `Clock` should be created.
+        return Clock(self._reactor, server_name=self.hostname)  # type: ignore[multiple-internal-clocks]
 
     def get_datastores(self) -> Databases:
         if not self.datastores:
-            raise Exception("HomeServer.setup must be called before getting datastores")
+            raise HomeServerNotSetupException(
+                "HomeServer.setup must be called before getting datastores"
+            )
 
         return self.datastores
 
     @cache_in_self
     def get_distributor(self) -> Distributor:
-        return Distributor()
+        return Distributor(hs=self)
 
     @cache_in_self
     def get_registration_ratelimiter(self) -> Ratelimiter:
@@ -448,6 +732,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_auth(self) -> Auth:
+        if self.config.mas.enabled:
+            return MasDelegatedAuth(self)
         if self.config.experimental.msc3861.enabled:
             from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 
@@ -584,11 +870,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
     @cache_in_self
-    def get_device_handler(self) -> DeviceWorkerHandler:
-        if self.config.worker.worker_app:
-            return DeviceWorkerHandler(self)
-        else:
-            return DeviceHandler(self)
+    def get_device_handler(self) -> DeviceHandler:
+        if self.get_instance_name() in self.config.worker.writers.device_lists:
+            return DeviceWriterHandler(self)
+
+        return DeviceHandler(self)
 
     @cache_in_self
     def get_device_message_handler(self) -> DeviceMessageHandler:
@@ -718,6 +1004,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return ReceiptsHandler(self)
 
     @cache_in_self
+    def get_reports_handler(self) -> ReportsHandler:
+        return ReportsHandler(self)
+
+    @cache_in_self
     def get_read_marker_handler(self) -> ReadMarkerHandler:
         return ReadMarkerHandler(self)
 
@@ -784,6 +1074,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return TimestampLookupHandler(self)
 
     @cache_in_self
+    def get_thread_subscriptions_handler(self) -> ThreadSubscriptionsHandler:
+        return ThreadSubscriptionsHandler(self)
+
+    @cache_in_self
     def get_registration_handler(self) -> RegistrationHandler:
         return RegistrationHandler(self)
 
@@ -808,6 +1102,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return OidcHandler(self)
 
     @cache_in_self
+    def get_room_policy_handler(self) -> RoomPolicyHandler:
+        return RoomPolicyHandler(self)
+
+    @cache_in_self
     def get_event_client_serializer(self) -> EventClientSerializer:
         return EventClientSerializer(self)
 
@@ -828,13 +1126,14 @@ class HomeServer(metaclass=abc.ABCMeta):
         return ReplicationDataHandler(self)
 
     @cache_in_self
-    def get_replication_streams(self) -> Dict[str, Stream]:
+    def get_replication_streams(self) -> dict[str, Stream]:
         return {stream.NAME: stream(self) for stream in STREAMS_MAP.values()}
 
     @cache_in_self
     def get_federation_ratelimiter(self) -> FederationRateLimiter:
         return FederationRateLimiter(
-            self.get_clock(),
+            our_server_name=self.hostname,
+            clock=self.get_clock(),
             config=self.config.ratelimiting.rc_federation,
             metrics_name="federation_servlets",
         )
@@ -960,12 +1259,17 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         media_threadpool.start()
-        self.get_reactor().addSystemEventTrigger(
-            "during", "shutdown", media_threadpool.stop
+        self.register_sync_shutdown_handler(
+            phase="during",
+            eventType="shutdown",
+            shutdown_func=media_threadpool.stop,
         )
 
         # Register the threadpool with our metrics.
-        register_threadpool("media", media_threadpool)
+        server_name = self.hostname
+        register_threadpool(
+            name="media", server_name=server_name, threadpool=media_threadpool
+        )
 
         return media_threadpool
 
