@@ -2242,7 +2242,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         # The timestamp for user1 should be updated.
         self.assertGreater(lazy_member_entries[user1_id], prev_timestamp)
 
-    def test_lazy_load_state_reset(self) -> None:
+    def test_lazy_loading_room_members_state_reset(self) -> None:
         """Test that when using lazy-loaded members, if a membership state is
         reset to a previous state and the sync is not limited, then we send down
         the state reset.
