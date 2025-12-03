@@ -1,0 +1,1 @@
+Fix the 'Login as a user' Admin API not checking if the user exists before issuing an access token.

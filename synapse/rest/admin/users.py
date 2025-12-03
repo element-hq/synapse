@@ -1116,6 +1116,7 @@ class UserTokenRestServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
+        self.admin_handler = hs.get_admin_handler()
         self.is_mine_id = hs.is_mine_id
 
     async def on_POST(
@@ -1129,6 +1130,12 @@ class UserTokenRestServlet(RestServlet):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Only local users can be logged in as"
             )
+
+        # Validate user_id
+        UserID.from_string(user_id)
+        _user_info_dict = await self.store.get_user_by_id(user_id)
+        if not _user_info_dict:
+            raise NotFoundError("User not found")
 
         body = parse_json_object_from_request(request, allow_empty_body=True)
 
