@@ -896,15 +896,15 @@ class RoomLazyMembershipChanges:
     """Changes to lazily-loaded room memberships for a given room.
 
     Attributes:
-        returned: Map from user ID to timestamp for users whose membership we
-            have lazily loaded. The timestamp indicates the time we previously
-            saw the membership if we have sent it down previously, or None if
-            we sent it down for the first time.
+        returned_user_id_to_last_seen_ts_map: Map from user ID to timestamp for
+            users whose membership we have lazily loaded. The timestamp
+            indicates the time we previously saw the membership if we have sent
+            it down previously, or None if we sent it down for the first time.
 
             Note: this will include users whose membership we would have sent
-                down but didn't due to us having previously sent them.
-        invalidated: Set of user IDs whose latest membership we have *not* sent
-            down
+            down but didn't due to us having previously sent them.
+        invalidated_user_ids: Set of user IDs whose latest membership we have
+            *not* sent down
     """
 
     # A map from user ID -> timestamp. Indicates that those memberships have
