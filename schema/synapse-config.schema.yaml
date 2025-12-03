@@ -2338,6 +2338,15 @@ properties:
     default: true
     examples:
       - false
+  enable_local_media_storage:
+    type: boolean
+    description: >-
+      Enable the local on-disk media storage provider. When disabled, media is
+      stored only in configured media_storage_providers and temporary files are
+      used for processing.
+    default: true
+    examples:
+      - false
   media_store_path:
     type: string
     description: Directory where uploaded images and attachments are stored.
