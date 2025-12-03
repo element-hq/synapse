@@ -4458,6 +4458,46 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     },
                     request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     previously_returned_lazy_user_ids=frozenset(),
+                    lazy_load_user_ids=frozenset(),
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=_RequiredStateChangesReturn(
+                        # Since `StateValues.LAZY` was added, we should persist the
+                        # changed required state config.
+                        {EventTypes.Member: {StateValues.LAZY}},
+                        # No users are being lazy loaded, so nothing to request.
+                        StateFilter.none(),
+                        # Remember the fact that we've sent @user3 down before,
+                        # but not @user2 as that has been invalidated.
+                        lazy_members_previously_returned={"@user3:test"},
+                        # Nothing to invalidate as there are no existing lazy members.
+                        lazy_members_invalidated=frozenset(),
+                    ),
+                    expected_without_state_deltas=_RequiredStateChangesReturn(
+                        # Since `StateValues.LAZY` was added, we should persist the
+                        # changed required state config.
+                        {EventTypes.Member: {StateValues.LAZY}},
+                        # No users are being lazy loaded, so nothing to request.
+                        StateFilter.none(),
+                        # Remember the fact that we've sent the users down before.
+                        lazy_members_previously_returned={"@user2:test", "@user3:test"},
+                        # Nothing to invalidate as there are no existing lazy members.
+                        lazy_members_invalidated=frozenset(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_expand_lazy_keep_previous_memberships_need_previous_sent",
+                """
+                Test expanding the `required_state` to lazy-loading room
+                members. If a previously explicit membership is requested then
+                we should not send it again (as it was already sent before).
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {"@user2:test", "@user3:test"}
+                    },
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    previously_returned_lazy_user_ids=frozenset(),
                     lazy_load_user_ids={"@user3:test"},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
