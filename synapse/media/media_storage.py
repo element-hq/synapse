@@ -52,6 +52,7 @@ from synapse.logging.context import defer_to_thread, run_in_background
 from synapse.logging.opentracing import start_active_span, trace, trace_with_opname
 from synapse.media.storage_provider import FileStorageProviderBackend
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.file_consumer import BackgroundFileConsumer
 
 from ..types import JsonDict
@@ -532,7 +533,7 @@ class ReadableFileWrapper:
                 callback(chunk)
 
                 # We yield to the reactor by sleeping for 0 seconds.
-                await self.clock.sleep(0)
+                await self.clock.sleep(Duration(seconds=0))
 
 
 @implementer(interfaces.IConsumer)
@@ -727,7 +728,7 @@ class MultipartFileConsumer:
         self.paused = False
         while not self.paused:
             producer.resumeProducing()
-            await self.clock.sleep(0)
+            await self.clock.sleep(Duration(seconds=0))
 
 
 class Header:

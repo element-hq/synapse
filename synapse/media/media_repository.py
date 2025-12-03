@@ -73,6 +73,7 @@ from synapse.media.url_previewer import UrlPreviewer
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
 from synapse.types import UserID
 from synapse.util.async_helpers import Linearizer
+from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import random_string
 
@@ -83,10 +84,10 @@ logger = logging.getLogger(__name__)
 
 # How often to run the background job to update the "recently accessed"
 # attribute of local and remote media.
-UPDATE_RECENTLY_ACCESSED_TS = 60 * 1000  # 1 minute
+UPDATE_RECENTLY_ACCESSED_TS = Duration(minutes=1)
 # How often to run the background job to check for local and remote media
 # that should be purged according to the configured media retention settings.
-MEDIA_RETENTION_CHECK_PERIOD_MS = 60 * 60 * 1000  # 1 hour
+MEDIA_RETENTION_CHECK_PERIOD = Duration(hours=1)
 
 
 class MediaRepository:
@@ -174,7 +175,7 @@ class MediaRepository:
             # with the duration between runs dictated by the homeserver config.
             self.clock.looping_call(
                 self._start_apply_media_retention_rules,
-                MEDIA_RETENTION_CHECK_PERIOD_MS,
+                MEDIA_RETENTION_CHECK_PERIOD,
             )
 
         if hs.config.media.url_preview_enabled:
@@ -493,7 +494,7 @@ class MediaRepository:
             if now >= wait_until:
                 break
 
-            await self.clock.sleep(0.5)
+            await self.clock.sleep(Duration(milliseconds=500))
 
         logger.info("Media %s has not yet been uploaded", media_id)
         self.respond_not_yet_uploaded(request)

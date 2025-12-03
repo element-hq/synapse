@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.143.0"
+version = "1.144.0rc1"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -370,6 +370,9 @@ towncrier = ">=18.6.0rc1"
 # Used for checking the Poetry lockfile
 tomli = ">=1.2.3"
 
+# Used for checking the schema delta files
+sqlglot = ">=28.0.0"
+
 
 [build-system]
 # The upper bounds here are defensive, intended to prevent situations like
@@ -421,7 +424,3 @@ test-command = "python -c 'from synapse.synapse_rust import sum_as_string; print
 [tool.cibuildwheel.linux]
 # Wrap the repair command to correctly rename the built cpython wheels as ABI3.
 repair-wheel-command = "./.ci/scripts/auditwheel_wrapper.py -w {dest_dir} {wheel}"
-
-[tool.cibuildwheel.macos]
-# Wrap the repair command to correctly rename the built cpython wheels as ABI3.
-repair-wheel-command = "./.ci/scripts/auditwheel_wrapper.py --require-archs {delocate_archs} -w {dest_dir} {wheel}"

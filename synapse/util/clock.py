@@ -31,6 +31,7 @@ from twisted.internet.task import LoopingCall
 from synapse.logging import context
 from synapse.types import ISynapseThreadlessReactor
 from synapse.util import log_failure
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string_insecure_fast
 
 P = ParamSpec("P")
@@ -84,14 +85,14 @@ class Clock:
         self.cancel_all_looping_calls()
         self.cancel_all_delayed_calls()
 
-    async def sleep(self, seconds: float) -> None:
+    async def sleep(self, duration: Duration) -> None:
         d: defer.Deferred[float] = defer.Deferred()
         # Start task in the `sentinel` logcontext, to avoid leaking the current context
         # into the reactor once it finishes.
         with context.PreserveLoggingContext():
             # We can ignore the lint here since this class is the one location callLater should
             # be called.
-            self._reactor.callLater(seconds, d.callback, seconds)  # type: ignore[call-later-not-tracked]
+            self._reactor.callLater(duration.as_secs(), d.callback, duration.as_secs())  # type: ignore[call-later-not-tracked]
             await d
 
     def time(self) -> float:
@@ -105,13 +106,13 @@ class Clock:
     def looping_call(
         self,
         f: Callable[P, object],
-        msec: float,
+        duration: Duration,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Call a function repeatedly.
 
-        Waits `msec` initially before calling `f` for the first time.
+        Waits `duration` initially before calling `f` for the first time.
 
         If the function given to `looping_call` returns an awaitable/deferred, the next
         call isn't scheduled until after the returned awaitable has finished. We get
@@ -124,16 +125,16 @@ class Clock:
 
         Args:
             f: The function to call repeatedly.
-            msec: How long to wait between calls in milliseconds.
+            duration: How long to wait between calls.
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
-        return self._looping_call_common(f, msec, False, *args, **kwargs)
+        return self._looping_call_common(f, duration, False, *args, **kwargs)
 
     def looping_call_now(
         self,
         f: Callable[P, object],
-        msec: float,
+        duration: Duration,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> LoopingCall:
@@ -148,16 +149,16 @@ class Clock:
 
         Args:
             f: The function to call repeatedly.
-            msec: How long to wait between calls in milliseconds.
+            duration: How long to wait between calls.
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
-        return self._looping_call_common(f, msec, True, *args, **kwargs)
+        return self._looping_call_common(f, duration, True, *args, **kwargs)
 
     def _looping_call_common(
         self,
         f: Callable[P, object],
-        msec: float,
+        duration: Duration,
         now: bool,
         *args: P.args,
         **kwargs: P.kwargs,
@@ -217,7 +218,7 @@ class Clock:
         # We want to start the task in the `sentinel` logcontext, to avoid leaking the
         # current context into the reactor after the function finishes.
         with context.PreserveLoggingContext():
-            d = call.start(msec / 1000.0, now=now)
+            d = call.start(duration.as_secs(), now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
         self._looping_calls.append(call)
 
@@ -225,7 +226,7 @@ class Clock:
             "%s(%s): Scheduled looping call every %sms later",
             looping_call_context_string,
             instance_id,
-            msec,
+            duration.as_millis(),
             # Find out who is scheduling the call which makes it easy to follow in the
             # logs.
             stack_info=True,
@@ -251,7 +252,7 @@ class Clock:
 
     def call_later(
         self,
-        delay: float,
+        delay: Duration,
         callback: Callable,
         *args: Any,
         call_later_cancel_on_shutdown: bool = True,
@@ -264,7 +265,7 @@ class Clock:
         `run_as_background_process` to give it more specific label and track metrics.
 
         Args:
-            delay: How long to wait in seconds.
+            delay: How long to wait.
             callback: Function to call
             *args: Postional arguments to pass to function.
             call_later_cancel_on_shutdown: Whether this call should be tracked for cleanup during
@@ -322,7 +323,9 @@ class Clock:
 
         # We can ignore the lint here since this class is the one location callLater should
         # be called.
-        call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
+        call = self._reactor.callLater(
+            delay.as_secs(), wrapped_callback, *args, **kwargs
+        )  # type: ignore[call-later-not-tracked]
 
         logger.debug(
             "call_later(%s): Scheduled call for %ss later (tracked for shutdown: %s)",
