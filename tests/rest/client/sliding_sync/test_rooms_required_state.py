@@ -2346,7 +2346,9 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             sync_body, since=from_token, tok=user1_tok
         )
 
-        # This should be a non-limited sync
+        # This should be a non-limited sync as there is only one timeline event.
+        # This is important as we don't send down state resets on limited
+        # timelines when using lazy loaded memberships.
         self.assertFalse(
             response_body["rooms"][room_id].get("limited", False),
             "Expected a non-limited timeline",
