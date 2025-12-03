@@ -731,7 +731,7 @@ class PerConnectionStateDB:
 
     When persisting this *only* contains updates to the state.
 
-    The `room_lazy_membership` field is only used when persisting.
+    The `room_lazy_membership` field is only used when persisting (not reading from the database).
     """
 
     last_used_ts: int | None
