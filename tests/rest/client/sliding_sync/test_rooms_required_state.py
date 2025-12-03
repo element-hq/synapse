@@ -2257,7 +2257,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         content = self.helper.join(room_id, user1_id, tok=user1_tok)
         first_event_id = content["event_id"]
 
-        # Send a message so that user1 comes down sync.
+        # Send a message so that the user1 membership comes down sync (because we're lazy-loading room members)
         self.helper.send(room_id, "msg", tok=user1_tok)
 
         sync_body = {
