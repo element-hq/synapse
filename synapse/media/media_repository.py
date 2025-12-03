@@ -1002,7 +1002,11 @@ class MediaRepository:
                 )
                 raise SynapseError(502, "Failed to fetch remote media")
 
-            if b"Content-Type" in headers:
+            if (
+                b"Content-Type" in headers
+                and len(headers[b"Content-Type"]) > 0
+                and headers[b"Content-Type"][0] is not None
+            ):
                 media_type = headers[b"Content-Type"][0].decode("ascii")
             else:
                 media_type = "application/octet-stream"
