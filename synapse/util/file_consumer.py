@@ -72,7 +72,7 @@ class BackgroundFileConsumer:
         self._write_exception: Exception | None = None
 
     def registerProducer(
-        self, producer: Optional[Union[IPushProducer, IPullProducer]], streaming: bool
+        self, producer: Union[IPushProducer, IPullProducer], streaming: bool
     ) -> None:
         """Part of IConsumer interface
 
@@ -96,7 +96,7 @@ class BackgroundFileConsumer:
             self._reactor.getThreadPool(),  # type: ignore[arg-type,unused-ignore]
             self._writer,  # type: ignore[arg-type,unused-ignore]
         )
-        if not streaming and self._producer:
+        if not streaming:
             self._producer.resumeProducing()
 
     def unregisterProducer(self) -> None:
