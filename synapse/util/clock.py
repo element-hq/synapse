@@ -453,7 +453,7 @@ class Clock:
         # callWhenRunning should be called.
         self._reactor.callWhenRunning(wrapped_callback, *args, **kwargs)  # type: ignore[prefer-synapse-clock-call-when-running]
 
-        logger.debug(
+        clock_debug_logger.debug(
             "call_when_running(%s): Scheduled call",
             instance_id,
             # Find out who is scheduling the call which makes it easy to follow in the
@@ -526,7 +526,7 @@ class Clock:
                 # logcontext to the reactor
                 context.run_in_background(callback, *args, **kwargs)
 
-        logger.debug(
+        clock_debug_logger.debug(
             "add_system_event_trigger(%s) for %s %s",
             instance_id,
             phase,
