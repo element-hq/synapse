@@ -29,6 +29,7 @@ from twisted.internet.interfaces import IDelayedCall
 from twisted.internet.task import LoopingCall
 
 from synapse.logging import context
+from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.types import ISynapseThreadlessReactor
 from synapse.util import log_failure
 from synapse.util.duration import Duration
@@ -38,6 +39,20 @@ P = ParamSpec("P")
 
 
 logger = logging.getLogger(__name__)
+
+original_logger_class = logging.getLoggerClass()
+logging.setLoggerClass(ExplicitlyConfiguredLogger)
+clock_debug_logger = logging.getLogger("synapse.util.clock.debug")
+"""
+A logger for debugging what is scheduling calls.
+
+Because this is very noisy and probably something only developers want to see when
+debugging call scheduling problems, we want people to explictly opt-in before seeing
+stack traces in the logs. Requires explicitly setting `synapse.util.clock.debug` in the
+logging configuration and does not inherit the log level from the parent logger.
+"""
+# Restore the original logger class
+logging.setLoggerClass(original_logger_class)
 
 
 class Clock:
@@ -227,6 +242,7 @@ class Clock:
             looping_call_context_string,
             instance_id,
             duration.as_millis(),
+            stack_info=clock_debug_logger.isEnabledFor(logging.DEBUG),
         )
 
         return call
@@ -331,7 +347,7 @@ class Clock:
             call_later_cancel_on_shutdown,
             # Find out who is scheduling the call which makes it easy to follow in the
             # logs.
-            stack_info=True,
+            stack_info=clock_debug_logger.isEnabledFor(logging.DEBUG),
         )
 
         wrapped_call = DelayedCallWrapper(call, call_id, self)
