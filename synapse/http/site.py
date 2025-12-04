@@ -264,6 +264,8 @@ class SynapseRequest(Request):
                     HTTPStatus.UNSUPPORTED_MEDIA_TYPE.phrase, "ascii"
                 )
 
+                # FIXME: Return a better error response here similar to the
+                # `error_response_json` returned in other code paths here.
                 self.responseHeaders.setRawHeaders(b"Content-Length", [b"0"])
                 self.write(b"")
                 self.loseConnection()
