@@ -171,7 +171,6 @@ class SynapseRequest(Request):
                         self.get_method(),
                         self.get_redacted_uri(),
                     )
-                    self.loseConnection()
                     raise SynapseError(
                         HTTPStatus.BAD_REQUEST, "Too many Content-Length headers."
                     )
@@ -186,8 +185,9 @@ class SynapseRequest(Request):
 
         try:
             content_length = get_content_length_from_headers(self.requestHeaders)
-        except Exception:
-            return
+        except Exception as e:
+            self.loseConnection()
+            raise e
         if content_length is not None:
             if content_length < self.content.tell():
                 logger.info(
