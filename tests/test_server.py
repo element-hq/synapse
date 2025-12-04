@@ -217,7 +217,9 @@ class JsonResourceTests(unittest.TestCase):
         HTTP requests with content size exceeding Content-Length should be rejected with 400.
         """
 
-        def _callback(request: SynapseRequest, **kwargs: object) -> tuple[int, JsonDict]:
+        def _callback(
+            request: SynapseRequest, **kwargs: object
+        ) -> tuple[int, JsonDict]:
             return 200, {}
 
         res = JsonResource(self.homeserver)
