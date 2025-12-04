@@ -442,7 +442,7 @@ def make_request(
 
     # If `Content-Length` was passed in as a custom header, don't automatically add it
     # here.
-    if custom_headers is not None and not any(
+    if custom_headers is None or not any(
         (k if isinstance(k, bytes) else k.encode("ascii")) == b"Content-Length"
         for k, _ in custom_headers
     ):
