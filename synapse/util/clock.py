@@ -227,9 +227,6 @@ class Clock:
             looping_call_context_string,
             instance_id,
             duration.as_millis(),
-            # Find out who is scheduling the call which makes it easy to follow in the
-            # logs.
-            stack_info=True,
         )
 
         return call
