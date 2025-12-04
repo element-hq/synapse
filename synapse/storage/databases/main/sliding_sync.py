@@ -20,6 +20,7 @@ import attr
 
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.logging.opentracing import log_kv
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
     DatabasePool,
@@ -36,6 +37,7 @@ from synapse.types.handlers.sliding_sync import (
     RoomSyncConfig,
 )
 from synapse.util.caches.descriptors import cached
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -43,6 +45,21 @@ if TYPE_CHECKING:
     from synapse.storage.databases.main import DataStore
 
 logger = logging.getLogger(__name__)
+
+
+# How often to update the `last_used_ts` column on
+# `sliding_sync_connection_positions` when the client uses a connection
+# position. We don't want to update it on every use to avoid excessive
+# writes, but we want it to be reasonably up-to-date to help with
+# cleaning up old connection positions.
+UPDATE_INTERVAL_LAST_USED_TS = Duration(minutes=5)
+
+# Time in milliseconds the connection hasn't been used before we consider it
+# expired and delete it.
+CONNECTION_EXPIRY = Duration(days=7)
+
+# How often we run the background process to delete old sliding sync connections.
+CONNECTION_EXPIRY_FREQUENCY = Duration(hours=1)
 
 
 class SlidingSyncStore(SQLBaseStore):
@@ -75,6 +92,12 @@ class SlidingSyncStore(SQLBaseStore):
             columns=("user_id", "event_stream_ordering"),
             replaces_index="sliding_sync_membership_snapshots_user_id",
         )
+
+        if self.hs.config.worker.run_background_tasks:
+            self.clock.looping_call(
+                self.delete_old_sliding_sync_connections,
+                CONNECTION_EXPIRY_FREQUENCY,
+            )
 
     async def get_latest_bump_stamp_for_room(
         self,
@@ -202,6 +225,7 @@ class SlidingSyncStore(SQLBaseStore):
                     "effective_device_id": device_id,
                     "conn_id": conn_id,
                     "created_ts": self.clock.time_msec(),
+                    "last_used_ts": self.clock.time_msec(),
                 },
                 returning=("connection_key",),
             )
@@ -384,7 +408,7 @@ class SlidingSyncStore(SQLBaseStore):
         # The `previous_connection_position` is a user-supplied value, so we
         # need to make sure that the one they supplied is actually theirs.
         sql = """
-            SELECT connection_key
+            SELECT connection_key, last_used_ts
             FROM sliding_sync_connection_positions
             INNER JOIN sliding_sync_connections USING (connection_key)
             WHERE
@@ -396,7 +420,23 @@ class SlidingSyncStore(SQLBaseStore):
         if row is None:
             raise SlidingSyncUnknownPosition()
 
-        (connection_key,) = row
+        (connection_key, last_used_ts) = row
+
+        # Update the `last_used_ts` if it's due to be updated. We don't update
+        # every time to avoid excessive writes.
+        now = self.clock.time_msec()
+        if (
+            last_used_ts is None
+            or now - last_used_ts > UPDATE_INTERVAL_LAST_USED_TS.as_millis()
+        ):
+            self.db_pool.simple_update_txn(
+                txn,
+                table="sliding_sync_connections",
+                keyvalues={
+                    "connection_key": connection_key,
+                },
+                updatevalues={"last_used_ts": now},
+            )
 
         # Now that we have seen the client has received and used the connection
         # position, we can delete all the other connection positions.
@@ -480,10 +520,28 @@ class SlidingSyncStore(SQLBaseStore):
                 logger.warning("Unrecognized sliding sync stream in DB %r", stream)
 
         return PerConnectionStateDB(
+            last_used_ts=last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             room_configs=room_configs,
+        )
+
+    @wrap_as_background_process("delete_old_sliding_sync_connections")
+    async def delete_old_sliding_sync_connections(self) -> None:
+        """Delete sliding sync connections that have not been used for a long time."""
+        cutoff_ts = self.clock.time_msec() - CONNECTION_EXPIRY.as_millis()
+
+        def delete_old_sliding_sync_connections_txn(txn: LoggingTransaction) -> None:
+            sql = """
+                DELETE FROM sliding_sync_connections
+                WHERE last_used_ts IS NOT NULL AND last_used_ts < ?
+            """
+            txn.execute(sql, (cutoff_ts,))
+
+        await self.db_pool.runInteraction(
+            "delete_old_sliding_sync_connections",
+            delete_old_sliding_sync_connections_txn,
         )
 
 
@@ -497,6 +555,8 @@ class PerConnectionStateDB:
 
     When persisting this *only* contains updates to the state.
     """
+
+    last_used_ts: int | None
 
     rooms: "RoomStatusMap[str]"
     receipts: "RoomStatusMap[str]"
@@ -553,6 +613,7 @@ class PerConnectionStateDB:
         )
 
         return PerConnectionStateDB(
+            last_used_ts=per_connection_state.last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
@@ -596,6 +657,7 @@ class PerConnectionStateDB:
         }
 
         return PerConnectionState(
+            last_used_ts=self.last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),

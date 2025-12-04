@@ -66,6 +66,7 @@ from synapse.types import (
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
 from synapse.util.distributor import user_left_room
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -642,7 +643,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         if action == Membership.INVITE and requester.shadow_banned:
             # We randomly sleep a bit just to annoy the requester.
-            await self.clock.sleep(random.randint(1, 10))
+            await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
             raise ShadowBanError()
 
         key = (room_id,)
@@ -1647,7 +1648,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         if requester.shadow_banned:
             # We randomly sleep a bit just to annoy the requester.
-            await self.clock.sleep(random.randint(1, 10))
+            await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
             raise ShadowBanError()
 
         # We need to rate limit *before* we send out any 3PID invites, so we
@@ -2190,7 +2191,7 @@ class RoomForgetterHandler(StateDeltasHandler):
 
             # We kick this off to pick up outstanding work from before the last restart.
             self._clock.call_later(
-                0,
+                Duration(seconds=0),
                 self.notify_new_event,
             )
 
@@ -2232,7 +2233,7 @@ class RoomForgetterHandler(StateDeltasHandler):
             #
             # We wait for a short time so that we don't "tight" loop just
             # keeping the table up to date.
-            await self._clock.sleep(0.5)
+            await self._clock.sleep(Duration(milliseconds=500))
 
             self.pos = self._store.get_room_max_stream_ordering()
             await self._store.update_room_forgetter_stream_pos(self.pos)

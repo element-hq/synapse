@@ -158,6 +158,7 @@ from synapse.types.state import StateFilter
 from synapse.util.async_helpers import maybe_awaitable
 from synapse.util.caches.descriptors import CachedFunction, cached as _cached
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze
 
 if TYPE_CHECKING:
@@ -1389,7 +1390,7 @@ class ModuleApi:
         if self._hs.config.worker.run_background_tasks or run_on_all_instances:
             self._clock.looping_call(
                 self._hs.run_as_background_process,
-                msec,
+                Duration(milliseconds=msec),
                 desc,
                 lambda: maybe_awaitable(f(*args, **kwargs)),
             )
@@ -1444,8 +1445,7 @@ class ModuleApi:
             desc = f.__name__
 
         return self._clock.call_later(
-            # convert ms to seconds as needed by call_later.
-            msec * 0.001,
+            Duration(milliseconds=msec),
             self._hs.run_as_background_process,
             desc,
             lambda: maybe_awaitable(f(*args, **kwargs)),
@@ -1457,7 +1457,7 @@ class ModuleApi:
         Added in Synapse v1.49.0.
         """
 
-        await self._clock.sleep(seconds)
+        await self._clock.sleep(Duration(seconds=seconds))
 
     async def send_http_push_notification(
         self,

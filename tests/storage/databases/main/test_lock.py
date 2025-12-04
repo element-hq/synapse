@@ -26,7 +26,7 @@ from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
-from synapse.storage.databases.main.lock import _LOCK_TIMEOUT_MS, _RENEWAL_INTERVAL_MS
+from synapse.storage.databases.main.lock import _LOCK_TIMEOUT_MS, _RENEWAL_INTERVAL
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -377,7 +377,7 @@ class ReadWriteLockTestCase(unittest.HomeserverTestCase):
 
         # Wait for ages with the lock, we should not be able to get the lock.
         for _ in range(10):
-            self.reactor.advance((_RENEWAL_INTERVAL_MS / 1000))
+            self.reactor.advance((_RENEWAL_INTERVAL.as_secs()))
 
         lock2 = self.get_success(
             self.store.try_acquire_read_write_lock("name", "key", write=True)

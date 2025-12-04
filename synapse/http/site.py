@@ -908,6 +908,13 @@ class SynapseSite(ProxySite):
                 protocol.transport.loseConnection()
         self.connections.clear()
 
+        # Replace the resource tree with an empty resource to break circular references
+        # to the resource tree which holds a bunch of homeserver references. This is
+        # important if we try to call `hs.shutdown()` after `start` fails. For some
+        # reason, this doesn't seem to be necessary in the normal case where `start`
+        # succeeds and we call `hs.shutdown()` later.
+        self.resource = Resource()
+
     def log(self, request: SynapseRequest) -> None:  # type: ignore[override]
         pass
 

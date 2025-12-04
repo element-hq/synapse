@@ -41,15 +41,6 @@ if typing.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class Duration:
-    """Helper class that holds constants for common time durations in
-    milliseconds."""
-
-    MINUTE_MS = 60 * 1000
-    HOUR_MS = 60 * MINUTE_MS
-    DAY_MS = 24 * HOUR_MS
-
-
 def unwrapFirstError(failure: Failure) -> Failure:
     # Deprecated: you probably just want to catch defer.FirstError and reraise
     # the subFailure's value, which will do a better job of preserving stacktraces.

@@ -76,6 +76,7 @@ from synapse.logging.opentracing import active_span, start_active_span, trace_se
 from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.iterutils import chunk_seq
 from synapse.util.json import json_encoder
 
@@ -334,7 +335,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
                     callback_return = await self._async_render(request)
                 except LimitExceededError as e:
                     if e.pause:
-                        await self._clock.sleep(e.pause)
+                        await self._clock.sleep(Duration(seconds=e.pause))
                     raise
 
                 if callback_return is not None:

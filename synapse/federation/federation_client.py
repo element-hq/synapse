@@ -75,6 +75,7 @@ from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 
 if TYPE_CHECKING:
@@ -132,7 +133,7 @@ class FederationClient(FederationBase):
         super().__init__(hs)
 
         self.pdu_destination_tried: dict[str, dict[str, int]] = {}
-        self._clock.looping_call(self._clear_tried_cache, 60 * 1000)
+        self._clock.looping_call(self._clear_tried_cache, Duration(minutes=1))
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
 
