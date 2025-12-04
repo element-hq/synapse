@@ -38,7 +38,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource, Resource
 from twisted.web.server import Request
 
-from synapse.api.errors import Codes, SynapseError
+from synapse.api.errors import Codes
 from synapse.config.server import ListenerConfig
 from synapse.http import get_request_user_agent, redact_uri
 from synapse.http.proxy import ProxySite
@@ -49,7 +49,7 @@ from synapse.logging.context import (
     PreserveLoggingContext,
 )
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.types import ISynapseReactor, Requester
+from synapse.types import ISynapseReactor, JsonDict, Requester
 
 if TYPE_CHECKING:
     import opentracing
@@ -175,24 +175,37 @@ class SynapseRequest(Request):
                         self.get_method(),
                         self.get_redacted_uri(),
                     )
-                    raise SynapseError(
-                        HTTPStatus.BAD_REQUEST, "Too many Content-Length headers."
-                    )
+                    raise Exception("Too many Content-Length headers.")
 
                 try:
                     content_length = int(content_length_headers[0])
                     return content_length
                 except Exception:
-                    raise SynapseError(
-                        HTTPStatus.BAD_REQUEST, "Content-Length value invalid."
-                    )
+                    raise Exception("Content-Length value invalid.")
             return None
+
+        def respond_with_error(error_code: HTTPStatus, error_json: JsonDict):
+            self.code = error_code.value
+            self.code_message = bytes(error_code.phrase, "ascii")
+            error_response_bytes = (json.dumps(error_json)).encode()
+
+            self.responseHeaders.setRawHeaders(b"Content-Type", [b"application/json"])
+            self.responseHeaders.setRawHeaders(
+                b"Content-Length", [f"{len(error_response_bytes)}"]
+            )
+            self.write(error_response_bytes)
 
         try:
             content_length = get_content_length_from_headers(self.requestHeaders)
         except Exception as e:
+            error_response_json = {
+                "errcode": Codes.UNKNOWN,
+                "error": f"{str(e)}",
+            }
+            respond_with_error(HTTPStatus.BAD_REQUEST, error_response_json)
             self.loseConnection()
-            raise e
+            return
+
         if content_length is not None and self.content is not None:
             if content_length < self.content.tell():
                 logger.info(
@@ -204,22 +217,11 @@ class SynapseRequest(Request):
                     self.get_redacted_uri(),
                 )
 
-                self.code = HTTPStatus.BAD_REQUEST.value
-                self.code_message = bytes(HTTPStatus.BAD_REQUEST.phrase, "ascii")
-
                 error_response_json = {
                     "errcode": Codes.UNKNOWN,
                     "error": "Request content is too small",
                 }
-                error_response_bytes = (json.dumps(error_response_json)).encode()
-
-                self.responseHeaders.setRawHeaders(
-                    b"Content-Type", [b"application/json"]
-                )
-                self.responseHeaders.setRawHeaders(
-                    b"Content-Length", [f"{len(error_response_bytes)}"]
-                )
-                self.write(error_response_bytes)
+                respond_with_error(HTTPStatus.BAD_REQUEST, error_response_json)
                 self.loseConnection()
                 return
 
@@ -233,24 +235,13 @@ class SynapseRequest(Request):
                     self.get_redacted_uri(),
                 )
 
-                self.code = HTTPStatus.REQUEST_ENTITY_TOO_LARGE.value
-                self.code_message = bytes(
-                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE.phrase, "ascii"
-                )
-
                 error_response_json = {
                     "errcode": Codes.TOO_LARGE,
                     "error": "Request content is too large",
                 }
-                error_response_bytes = (json.dumps(error_response_json)).encode()
-
-                self.responseHeaders.setRawHeaders(
-                    b"Content-Type", [b"application/json"]
+                respond_with_error(
+                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE, error_response_json
                 )
-                self.responseHeaders.setRawHeaders(
-                    b"Content-Length", [f"{len(error_response_bytes)}"]
-                )
-                self.write(error_response_bytes)
                 self.loseConnection()
                 return
 
