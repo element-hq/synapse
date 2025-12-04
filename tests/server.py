@@ -440,11 +440,17 @@ def make_request(
     # Twisted expects to be at the end of the content when parsing the request.
     req.content.seek(0, SEEK_END)
 
-    # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
-    # bodies if the Content-Length header is missing
-    req.requestHeaders.addRawHeader(
-        b"Content-Length", str(len(content)).encode("ascii")
-    )
+    # If `Content-Length` was passed in as a custom header, don't automatically add it
+    # here.
+    if custom_headers is not None and not any(
+        (k if isinstance(k, bytes) else k.encode("ascii")) == b"Content-Length"
+        for k, _ in custom_headers
+    ):
+        # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
+        # bodies if the Content-Length header is missing
+        req.requestHeaders.addRawHeader(
+            b"Content-Length", str(len(content)).encode("ascii")
+        )
 
     if access_token:
         req.requestHeaders.addRawHeader(

@@ -24,7 +24,6 @@ from twisted.internet.testing import MemoryReactor, StringTransport
 
 from synapse.app._base import max_request_body_size
 from synapse.app.homeserver import SynapseHomeServer
-from synapse.rest.client import capabilities, versions
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
@@ -32,11 +31,6 @@ from tests.unittest import HomeserverTestCase
 
 
 class SynapseRequestTestCase(HomeserverTestCase):
-    servlets = [
-        versions.register_servlets,
-        capabilities.register_servlets,
-    ]
-
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         return self.setup_test_homeserver(homeserver_to_use=SynapseHomeServer)
 
@@ -202,16 +196,13 @@ class SynapseRequestTestCase(HomeserverTestCase):
         transport = StringTransport()
         protocol.makeConnection(transport)
 
-        # Send a request with Content-Length header that exceeds the limit.
-        # Default max is 50MB (from media max_upload_size), so send something larger.
-        oversized_length = 1 + max_request_body_size(self.hs.config)
         protocol.dataReceived(
             b"POST / HTTP/1.1\r\n"
             b"Connection: close\r\n"
-            b"Content-Length: " + str(oversized_length).encode() + b"\r\n"
-            b"Content-Length: " + str(oversized_length).encode() + b"\r\n"
+            b"Content-Length: " + str(5).encode() + b"\r\n"
+            b"Content-Length: " + str(5).encode() + b"\r\n"
             b"\r\n"
-            b"" + b"x" * oversized_length + b"\r\n"
+            b"" + b"xxxxx" + b"\r\n"
             b"\r\n"
         )
 
@@ -223,7 +214,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         response = transport.value().decode()
         self.assertRegex(response, r"^HTTP/1\.1 400 ")
 
-    def test_invalide_content_length_headers(self) -> None:
+    def test_invalid_content_length_headers(self) -> None:
         """HTTP requests with invalid Content-Length header should be rejected with 400"""
         self.hs.start_listening()
 
@@ -238,15 +229,12 @@ class SynapseRequestTestCase(HomeserverTestCase):
         transport = StringTransport()
         protocol.makeConnection(transport)
 
-        # Send a request with Content-Length header that exceeds the limit.
-        # Default max is 50MB (from media max_upload_size), so send something larger.
-        oversized_length = 1 + max_request_body_size(self.hs.config)
         protocol.dataReceived(
             b"POST / HTTP/1.1\r\n"
             b"Connection: close\r\n"
             b"Content-Length: eight\r\n"
             b"\r\n"
-            b"" + b"x" * oversized_length + b"\r\n"
+            b"" + b"xxxxx" + b"\r\n"
             b"\r\n"
         )
 

@@ -212,6 +212,34 @@ class JsonResourceTests(unittest.TestCase):
         self.assertEqual(channel.code, 200)
         self.assertNotIn("body", channel.result)
 
+    def test_content_too_large(self) -> None:
+        """
+        HTTP requests with content size exceeding Content-Length should be rejected with 400.
+        """
+
+        def _callback(request: SynapseRequest, **kwargs: object) -> tuple[int, JsonDict]:
+            return 200, {}
+
+        res = JsonResource(self.homeserver)
+        res.register_paths(
+            "POST", [re.compile("^/_matrix/foo$")], _callback, "test_servlet"
+        )
+
+        channel = make_request(
+            self.reactor,
+            FakeSite(res, self.reactor),
+            b"POST",
+            b"/_matrix/foo",
+            {},
+            # Set the `Content-Length` value to be smaller than the actual content size
+            custom_headers=[("Content-Length", "1")],
+            # The request should disconnect early so don't await the result
+            await_result=False,
+        )
+
+        self.reactor.advance(0.1)
+        self.assertEqual(channel.code, 400)
+
 
 class OptionsResourceTests(unittest.TestCase):
     def setUp(self) -> None:
