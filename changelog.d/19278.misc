@@ -1,1 +1,1 @@
-Turn off log stack traces in `clock.looping_call`.
+Turn off log stack traces in `clock.looping_call` and `clock.call_later`.
