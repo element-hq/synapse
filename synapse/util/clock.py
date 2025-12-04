@@ -46,10 +46,14 @@ clock_debug_logger = logging.getLogger("synapse.util.clock.debug")
 """
 A logger for debugging what is scheduling calls.
 
-Because this is very noisy and probably something only developers want to see when
-debugging call scheduling problems, we want people to explictly opt-in before seeing
-stack traces in the logs. Requires explicitly setting `synapse.util.clock.debug` in the
-logging configuration and does not inherit the log level from the parent logger.
+The logs gated by this logger would be nice to include in order to know when things are
+being scheduled. But in order for the logs to be of any meaning, a stack trace has to
+also be logged to determine what scheduled the call in the first place.
+
+Because this is so noisy that the logs become difficult to read unless you are specifically
+debugging call scheduling problems, we want people to explictly opt-in before seeing stack
+traces in the logs. Requires explicitly setting `synapse.util.clock.debug` in the logging
+configuration and does not inherit the log level from the parent logger.
 """
 # Restore the original logger class
 logging.setLoggerClass(original_logger_class)
