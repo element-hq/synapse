@@ -439,7 +439,11 @@ class MediaRepository:
         return await self.store.get_cached_remote_media(origin, media_id)
 
     async def get_local_media_info(
-        self, request: SynapseRequest, media_id: str, max_timeout_ms: int, bypass_quarantine: bool = False
+        self,
+        request: SynapseRequest,
+        media_id: str,
+        max_timeout_ms: int,
+        bypass_quarantine: bool = False,
     ) -> LocalMedia | None:
         """Gets the info dictionary for given local media ID. If the media has
         not been uploaded yet, this function will wait up to ``max_timeout_ms``
@@ -520,7 +524,9 @@ class MediaRepository:
         Returns:
             Resolves once a response has successfully been written to request
         """
-        media_info = await self.get_local_media_info(request, media_id, max_timeout_ms, bypass_quarantine=bypass_quarantine)
+        media_info = await self.get_local_media_info(
+            request, media_id, max_timeout_ms, bypass_quarantine=bypass_quarantine
+        )
         if not media_info:
             return
 

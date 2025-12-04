@@ -71,7 +71,10 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         return resources
 
     def _ensure_quarantined(
-        self, user_tok: str, server_and_media_id: str, include_bypass_param: bool = False,
+        self,
+        user_tok: str,
+        server_and_media_id: str,
+        include_bypass_param: bool = False,
     ) -> None:
         """Ensure a piece of media is quarantined when trying to access it.
 
@@ -135,7 +138,9 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, msg=channel.json_body)
 
         # Now access it *without* the bypass parameter - this should fail (as expected).
-        self._ensure_quarantined(admin_user_tok, server_name_and_media_id, include_bypass_param=False)
+        self._ensure_quarantined(
+            admin_user_tok, server_name_and_media_id, include_bypass_param=False
+        )
 
         # Now access it *with* the bypass parameter - this should work
         channel = self.make_request(
@@ -218,8 +223,12 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
 
         # Attempt to access the media (and ensure non-admins can't download it, even
         # with a bypass parameter). Admins cannot download it without the bypass param.
-        self._ensure_quarantined(non_admin_user_tok, server_name_and_media_id, include_bypass_param=True)
-        self._ensure_quarantined(admin_user_tok, server_name_and_media_id, include_bypass_param=False)
+        self._ensure_quarantined(
+            non_admin_user_tok, server_name_and_media_id, include_bypass_param=True
+        )
+        self._ensure_quarantined(
+            admin_user_tok, server_name_and_media_id, include_bypass_param=False
+        )
 
     @parameterized.expand(
         [
@@ -281,10 +290,18 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         # Test that we cannot download any of the media anymore, especially with the
         # bypass parameter set. Admins cannot download the media without supplying the
         # bypass parameter, so we check that too.
-        self._ensure_quarantined(non_admin_user_tok, server_and_media_id_1, include_bypass_param=True)
-        self._ensure_quarantined(non_admin_user_tok, server_and_media_id_2, include_bypass_param=True)
-        self._ensure_quarantined(admin_user_tok, server_and_media_id_1, include_bypass_param=False)
-        self._ensure_quarantined(admin_user_tok, server_and_media_id_2, include_bypass_param=False)
+        self._ensure_quarantined(
+            non_admin_user_tok, server_and_media_id_1, include_bypass_param=True
+        )
+        self._ensure_quarantined(
+            non_admin_user_tok, server_and_media_id_2, include_bypass_param=True
+        )
+        self._ensure_quarantined(
+            admin_user_tok, server_and_media_id_1, include_bypass_param=False
+        )
+        self._ensure_quarantined(
+            admin_user_tok, server_and_media_id_2, include_bypass_param=False
+        )
 
     def test_quarantine_all_media_by_user(self) -> None:
         self.register_user("user_admin", "pass", admin=True)
@@ -334,12 +351,24 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         # Attempt to access each piece of media, ensuring that it can't be downloaded
         # even with a bypass parameter. Admins should not be able to download the media
         # either when not supplying the bypass parameter, so we check that too.
-        self._ensure_quarantined(non_admin_user_tok, server_and_media_id_1, include_bypass_param=True)
-        self._ensure_quarantined(non_admin_user_tok, server_and_media_id_2, include_bypass_param=True)
-        self._ensure_quarantined(non_admin_user_tok, server_and_media_id_3, include_bypass_param=True)
-        self._ensure_quarantined(admin_user_tok, server_and_media_id_1, include_bypass_param=False)
-        self._ensure_quarantined(admin_user_tok, server_and_media_id_2, include_bypass_param=False)
-        self._ensure_quarantined(admin_user_tok, server_and_media_id_3, include_bypass_param=False)
+        self._ensure_quarantined(
+            non_admin_user_tok, server_and_media_id_1, include_bypass_param=True
+        )
+        self._ensure_quarantined(
+            non_admin_user_tok, server_and_media_id_2, include_bypass_param=True
+        )
+        self._ensure_quarantined(
+            non_admin_user_tok, server_and_media_id_3, include_bypass_param=True
+        )
+        self._ensure_quarantined(
+            admin_user_tok, server_and_media_id_1, include_bypass_param=False
+        )
+        self._ensure_quarantined(
+            admin_user_tok, server_and_media_id_2, include_bypass_param=False
+        )
+        self._ensure_quarantined(
+            admin_user_tok, server_and_media_id_3, include_bypass_param=False
+        )
 
     def test_cannot_quarantine_safe_media(self) -> None:
         self.register_user("user_admin", "pass", admin=True)
@@ -382,8 +411,12 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         # Attempt to access each piece of media, the first should fail, the
         # second should succeed. We check both the non-admin user with a bypass
         # parameter, and the admin user without.
-        self._ensure_quarantined(non_admin_user_tok, server_and_media_id_1, include_bypass_param=True)
-        self._ensure_quarantined(admin_user_tok, server_and_media_id_2, include_bypass_param=False)
+        self._ensure_quarantined(
+            non_admin_user_tok, server_and_media_id_1, include_bypass_param=True
+        )
+        self._ensure_quarantined(
+            admin_user_tok, server_and_media_id_2, include_bypass_param=False
+        )
 
         # Attempt to access each piece of media
         channel = self.make_request(
