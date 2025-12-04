@@ -186,13 +186,14 @@ class SynapseRequest(Request):
                     raise SynapseError(
                         HTTPStatus.BAD_REQUEST, "Content-Length value invalid."
                     )
+            return None
 
         try:
             content_length = get_content_length_from_headers(self.requestHeaders)
         except Exception as e:
             self.loseConnection()
             raise e
-        if content_length is not None:
+        if content_length is not None and self.content is not None:
             if content_length < self.content.tell():
                 logger.info(
                     "Rejecting request from %s because Content-Length %d is smaller than the request content size %d: %s %s",
