@@ -1,1 +1,1 @@
-Add HTTP 413 response when incoming request is too large.
+Respond with useful error codes with `Content-Length` header/s are invalid.
