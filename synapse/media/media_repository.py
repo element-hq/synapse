@@ -1318,7 +1318,11 @@ class MediaRepository:
                 for requirement in requirements:
                     if requirement.method == "crop":
                         thumbnails.setdefault(
-                            (requirement.width, requirement.height, requirement.media_type),
+                            (
+                                requirement.width,
+                                requirement.height,
+                                requirement.media_type,
+                            ),
                             requirement.method,
                         )
                     elif requirement.method == "scale":
@@ -1370,7 +1374,10 @@ class MediaRepository:
                         ),
                     )
 
-                    async with self.media_storage.store_into_file(file_info) as (f, fname):
+                    async with self.media_storage.store_into_file(file_info) as (
+                        f,
+                        fname,
+                    ):
                         try:
                             await self.media_storage.write_to_file(t_byte_source, f)
                         finally:
