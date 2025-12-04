@@ -193,7 +193,7 @@ class Clock:
             looping_call_context_string = "looping_call_now"
 
         def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> Deferred:
-            logger.debug(
+            clock_debug_logger.debug(
                 "%s(%s): Executing callback", looping_call_context_string, instance_id
             )
 
@@ -302,7 +302,7 @@ class Clock:
             raise Exception("Cannot start delayed call. Clock has been shutdown")
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            logger.debug("call_later(%s): Executing callback", call_id)
+            clock_debug_logger.debug("call_later(%s): Executing callback", call_id)
 
             assert context.current_context() is context.SENTINEL_CONTEXT, (
                 "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
@@ -366,7 +366,7 @@ class Clock:
         self, wrapped_call: "DelayedCallWrapper", ignore_errs: bool = False
     ) -> None:
         try:
-            logger.debug(
+            clock_debug_logger.debug(
                 "cancel_call_later: cancelling scheduled call %s", wrapped_call.call_id
             )
             wrapped_call.delayed_call.cancel()
@@ -386,7 +386,7 @@ class Clock:
         # will result in the call removing itself from the map mid-iteration.
         for call_id, call in list(self._call_id_to_delayed_call.items()):
             try:
-                logger.debug(
+                clock_debug_logger.debug(
                     "cancel_all_delayed_calls: cancelling scheduled call %s", call_id
                 )
                 call.cancel()
@@ -415,7 +415,9 @@ class Clock:
         instance_id = random_string_insecure_fast(5)
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            logger.debug("call_when_running(%s): Executing callback", instance_id)
+            clock_debug_logger.debug(
+                "call_when_running(%s): Executing callback", instance_id
+            )
 
             # Since this callback can be invoked immediately if the reactor is already
             # running, we can't always assume that we're running in the sentinel
@@ -491,7 +493,7 @@ class Clock:
         instance_id = random_string_insecure_fast(5)
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            logger.debug(
+            clock_debug_logger.debug(
                 "add_system_event_trigger(%s): Executing %s %s callback",
                 instance_id,
                 phase,
