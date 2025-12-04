@@ -415,7 +415,7 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
             non_admin_user_tok, server_and_media_id_1, include_bypass_param=True
         )
         self._ensure_quarantined(
-            admin_user_tok, server_and_media_id_2, include_bypass_param=False
+            admin_user_tok, server_and_media_id_1, include_bypass_param=False
         )
 
         # Attempt to access each piece of media
