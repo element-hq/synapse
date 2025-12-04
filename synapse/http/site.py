@@ -158,12 +158,13 @@ class SynapseRequest(Request):
         # work, so the code here has been added to at least provide a response in the
         # case of the Content-Length header being present.
         content_length_headers = self.requestHeaders.getRawHeaders(b"Content-Length")
+        self.method, self.uri = command, path
         if content_length_headers is not None:
             if len(content_length_headers) != 1:
                 logger.warning(
                     "Dropping request from %s because it contains multiple Content-Length headers: %s %s",
                     self.client,
-                    command.decode("ascii", errors="replace"),
+                    self.get_method(),
                     self.get_redacted_uri(),
                 )
                 self.loseConnection()
@@ -172,7 +173,6 @@ class SynapseRequest(Request):
             try:
                 content_length = int(content_length_headers[0])
                 if content_length < self.content.tell():
-                    self.method, self.uri = command, path
                     self.clientproto = version
                     logger.info(
                         "Rejecting request from %s because Content-Length %d is smaller than the request content size %d: %s %s",
@@ -184,9 +184,7 @@ class SynapseRequest(Request):
                     )
 
                     self.code = HTTPStatus.BAD_REQUEST.value
-                    self.code_message = bytes(
-                        HTTPStatus.BAD_REQUEST.phrase, "ascii"
-                    )
+                    self.code_message = bytes(HTTPStatus.BAD_REQUEST.phrase, "ascii")
 
                     error_response_json = {
                         "errcode": Codes.UNKNOWN,
@@ -198,7 +196,7 @@ class SynapseRequest(Request):
                         b"Content-Type", [b"application/json"]
                     )
                     self.responseHeaders.setRawHeaders(
-                        b"content-length", [f"{len(error_response_bytes)}"]
+                        b"Content-Length", [f"{len(error_response_bytes)}"]
                     )
                     self.write(error_response_bytes)
                     self.loseConnection()
@@ -230,7 +228,7 @@ class SynapseRequest(Request):
                         b"Content-Type", [b"application/json"]
                     )
                     self.responseHeaders.setRawHeaders(
-                        b"content-length", [f"{len(error_response_bytes)}"]
+                        b"Content-Length", [f"{len(error_response_bytes)}"]
                     )
                     self.write(error_response_bytes)
                     self.loseConnection()
@@ -266,7 +264,7 @@ class SynapseRequest(Request):
                     HTTPStatus.UNSUPPORTED_MEDIA_TYPE.phrase, "ascii"
                 )
 
-                self.responseHeaders.setRawHeaders(b"content-length", [b"0"])
+                self.responseHeaders.setRawHeaders(b"Content-Length", [b"0"])
                 self.write(b"")
                 self.loseConnection()
                 return
