@@ -184,7 +184,7 @@ class SynapseRequest(Request):
                     raise Exception("Content-Length value invalid.")
             return None
 
-        def respond_with_error(error_code: HTTPStatus, error_json: JsonDict):
+        def respond_with_error(error_code: HTTPStatus, error_json: JsonDict) -> None:
             self.code = error_code.value
             self.code_message = bytes(error_code.phrase, "ascii")
             error_response_bytes = (json.dumps(error_json)).encode()
