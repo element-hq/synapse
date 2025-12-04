@@ -169,12 +169,6 @@ class SynapseRequest(Request):
                 # as we could run into problems similar to request smuggling vulnerabilities
                 # which rely on the mismatch of how different systems interpret information.
                 if len(content_length_headers) != 1:
-                    logger.warning(
-                        "Dropping request from %s because it contains multiple Content-Length headers: %s %s",
-                        self.client,
-                        self.get_method(),
-                        self.get_redacted_uri(),
-                    )
                     raise Exception("Too many Content-Length headers.")
 
                 try:
@@ -198,6 +192,12 @@ class SynapseRequest(Request):
         try:
             content_length = get_content_length_from_headers(self.requestHeaders)
         except Exception as e:
+            logger.warning(
+                f"Rejecting request from %s because: {str(e)}",
+                self.client,
+                self.get_method(),
+                self.get_redacted_uri(),
+            )
             error_response_json = {
                 "errcode": Codes.UNKNOWN,
                 "error": f"{str(e)}",
