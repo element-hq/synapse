@@ -428,7 +428,6 @@ def make_request(
 
     channel = FakeChannel(site, reactor, ip=client_ip)
 
-    # `max_request_body_size` copied from `synapse/app/_base.py -> max_request_body_size()`
     req = request(
         channel,
         site,
