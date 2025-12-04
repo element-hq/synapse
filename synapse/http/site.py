@@ -164,6 +164,10 @@ class SynapseRequest(Request):
         def get_content_length_from_headers(headers: Headers) -> int | None:
             content_length_headers = headers.getRawHeaders(b"Content-Length")
             if content_length_headers is not None:
+                # If there are multiple `Content-Length` headers return an error.
+                # We don't want to even try to pick the right one if there are multiple
+                # as we could run into problems similar to request smuggling vulnerabilities
+                # which rely on the mismatch of how different systems interpret information.
                 if len(content_length_headers) != 1:
                     logger.warning(
                         "Dropping request from %s because it contains multiple Content-Length headers: %s %s",
