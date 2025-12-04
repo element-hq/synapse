@@ -34,10 +34,11 @@ from twisted.internet.interfaces import IAddress
 from twisted.internet.protocol import Protocol
 from twisted.python.failure import Failure
 from twisted.web.http import HTTPChannel
+from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource, Resource
 from twisted.web.server import Request
 
-from synapse.api.errors import Codes
+from synapse.api.errors import Codes, SynapseError
 from synapse.config.server import ListenerConfig
 from synapse.http import get_request_user_agent, redact_uri
 from synapse.http.proxy import ProxySite
@@ -157,85 +158,96 @@ class SynapseRequest(Request):
         # Attempting to write an HTTP response from within `handleContentChunk` does not
         # work, so the code here has been added to at least provide a response in the
         # case of the Content-Length header being present.
-        content_length_headers = self.requestHeaders.getRawHeaders(b"Content-Length")
         self.method, self.uri = command, path
-        if content_length_headers is not None:
-            if len(content_length_headers) != 1:
-                logger.warning(
-                    "Dropping request from %s because it contains multiple Content-Length headers: %s %s",
+        self.clientproto = version
+
+        def get_content_length_from_headers(headers: Headers) -> int | None:
+            content_length_headers = headers.getRawHeaders(b"Content-Length")
+            if content_length_headers is not None:
+                if len(content_length_headers) != 1:
+                    logger.warning(
+                        "Dropping request from %s because it contains multiple Content-Length headers: %s %s",
+                        self.client,
+                        self.get_method(),
+                        self.get_redacted_uri(),
+                    )
+                    self.loseConnection()
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST, "Too many Content-Length headers."
+                    )
+
+                try:
+                    content_length = int(content_length_headers[0])
+                    return content_length
+                except Exception:
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST, "Content-Length value invalid."
+                    )
+
+        try:
+            content_length = get_content_length_from_headers(self.requestHeaders)
+        except Exception:
+            return
+        if content_length is not None:
+            if content_length < self.content.tell():
+                logger.info(
+                    "Rejecting request from %s because Content-Length %d is smaller than the request content size %d: %s %s",
                     self.client,
+                    content_length,
+                    self.content.tell(),
                     self.get_method(),
                     self.get_redacted_uri(),
                 )
+
+                self.code = HTTPStatus.BAD_REQUEST.value
+                self.code_message = bytes(HTTPStatus.BAD_REQUEST.phrase, "ascii")
+
+                error_response_json = {
+                    "errcode": Codes.UNKNOWN,
+                    "error": "Request content is too small",
+                }
+                error_response_bytes = (json.dumps(error_response_json)).encode()
+
+                self.responseHeaders.setRawHeaders(
+                    b"Content-Type", [b"application/json"]
+                )
+                self.responseHeaders.setRawHeaders(
+                    b"Content-Length", [f"{len(error_response_bytes)}"]
+                )
+                self.write(error_response_bytes)
                 self.loseConnection()
                 return
 
-            try:
-                content_length = int(content_length_headers[0])
-                if content_length < self.content.tell():
-                    self.clientproto = version
-                    logger.info(
-                        "Rejecting request from %s because Content-Length %d is smaller than the request content size %d: %s %s",
-                        self.client,
-                        content_length,
-                        self.content.tell(),
-                        self.get_method(),
-                        self.get_redacted_uri(),
-                    )
+            if content_length > self._max_request_body_size:
+                logger.info(
+                    "Rejecting request from %s because Content-Length %d exceeds maximum size %d: %s %s",
+                    self.client,
+                    content_length,
+                    self._max_request_body_size,
+                    self.get_method(),
+                    self.get_redacted_uri(),
+                )
 
-                    self.code = HTTPStatus.BAD_REQUEST.value
-                    self.code_message = bytes(HTTPStatus.BAD_REQUEST.phrase, "ascii")
+                self.code = HTTPStatus.REQUEST_ENTITY_TOO_LARGE.value
+                self.code_message = bytes(
+                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE.phrase, "ascii"
+                )
 
-                    error_response_json = {
-                        "errcode": Codes.UNKNOWN,
-                        "error": "Request content is too small",
-                    }
-                    error_response_bytes = (json.dumps(error_response_json)).encode()
+                error_response_json = {
+                    "errcode": Codes.TOO_LARGE,
+                    "error": "Request content is too large",
+                }
+                error_response_bytes = (json.dumps(error_response_json)).encode()
 
-                    self.responseHeaders.setRawHeaders(
-                        b"Content-Type", [b"application/json"]
-                    )
-                    self.responseHeaders.setRawHeaders(
-                        b"Content-Length", [f"{len(error_response_bytes)}"]
-                    )
-                    self.write(error_response_bytes)
-                    self.loseConnection()
-                    return
-                if content_length > self._max_request_body_size:
-                    self.method, self.uri = command, path
-                    self.clientproto = version
-                    logger.info(
-                        "Rejecting request from %s because Content-Length %d exceeds maximum size %d: %s %s",
-                        self.client,
-                        content_length,
-                        self._max_request_body_size,
-                        self.get_method(),
-                        self.get_redacted_uri(),
-                    )
-
-                    self.code = HTTPStatus.REQUEST_ENTITY_TOO_LARGE.value
-                    self.code_message = bytes(
-                        HTTPStatus.REQUEST_ENTITY_TOO_LARGE.phrase, "ascii"
-                    )
-
-                    error_response_json = {
-                        "errcode": Codes.TOO_LARGE,
-                        "error": "Request content is too large",
-                    }
-                    error_response_bytes = (json.dumps(error_response_json)).encode()
-
-                    self.responseHeaders.setRawHeaders(
-                        b"Content-Type", [b"application/json"]
-                    )
-                    self.responseHeaders.setRawHeaders(
-                        b"Content-Length", [f"{len(error_response_bytes)}"]
-                    )
-                    self.write(error_response_bytes)
-                    self.loseConnection()
-                    return
-            except ValueError:
-                # Invalid Content-Length header, let it proceed
-                pass
+                self.responseHeaders.setRawHeaders(
+                    b"Content-Type", [b"application/json"]
+                )
+                self.responseHeaders.setRawHeaders(
+                    b"Content-Length", [f"{len(error_response_bytes)}"]
+                )
+                self.write(error_response_bytes)
+                self.loseConnection()
+                return
 
         # We're patching Twisted to bail/abort early when we see someone trying to upload
         # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
@@ -250,8 +262,6 @@ class SynapseRequest(Request):
         if command == b"POST":
             ctype = self.requestHeaders.getRawHeaders(b"content-type")
             if ctype and b"multipart/form-data" in ctype[0]:
-                self.method, self.uri = command, path
-                self.clientproto = version
                 logger.warning(
                     "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
                     self.client,

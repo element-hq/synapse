@@ -186,3 +186,74 @@ class SynapseRequestTestCase(HomeserverTestCase):
         response = transport.value().decode()
         self.assertRegex(response, r"^HTTP/1\.1 413 ")
         self.assertSubstring("M_TOO_LARGE", response)
+
+    def test_too_many_content_length_headers(self) -> None:
+        """HTTP requests with multiple Content-Length headers should be rejected with 400"""
+        self.hs.start_listening()
+
+        # find the HTTP server which is configured to listen on port 0
+        (port, factory, _backlog, interface) = self.reactor.tcpServers[0]
+        self.assertEqual(interface, "::")
+        self.assertEqual(port, 0)
+
+        # complete the connection and wire it up to a fake transport
+        client_address = IPv6Address("TCP", "::1", 2345)
+        protocol = factory.buildProtocol(client_address)
+        transport = StringTransport()
+        protocol.makeConnection(transport)
+
+        # Send a request with Content-Length header that exceeds the limit.
+        # Default max is 50MB (from media max_upload_size), so send something larger.
+        oversized_length = 1 + max_request_body_size(self.hs.config)
+        protocol.dataReceived(
+            b"POST / HTTP/1.1\r\n"
+            b"Connection: close\r\n"
+            b"Content-Length: " + str(oversized_length).encode() + b"\r\n"
+            b"Content-Length: " + str(oversized_length).encode() + b"\r\n"
+            b"\r\n"
+            b"" + b"x" * oversized_length + b"\r\n"
+            b"\r\n"
+        )
+
+        # Advance the reactor to process the request
+        while not transport.disconnecting:
+            self.reactor.advance(1)
+
+        # We should get a 400
+        response = transport.value().decode()
+        self.assertRegex(response, r"^HTTP/1\.1 400 ")
+
+    def test_invalide_content_length_headers(self) -> None:
+        """HTTP requests with invalid Content-Length header should be rejected with 400"""
+        self.hs.start_listening()
+
+        # find the HTTP server which is configured to listen on port 0
+        (port, factory, _backlog, interface) = self.reactor.tcpServers[0]
+        self.assertEqual(interface, "::")
+        self.assertEqual(port, 0)
+
+        # complete the connection and wire it up to a fake transport
+        client_address = IPv6Address("TCP", "::1", 2345)
+        protocol = factory.buildProtocol(client_address)
+        transport = StringTransport()
+        protocol.makeConnection(transport)
+
+        # Send a request with Content-Length header that exceeds the limit.
+        # Default max is 50MB (from media max_upload_size), so send something larger.
+        oversized_length = 1 + max_request_body_size(self.hs.config)
+        protocol.dataReceived(
+            b"POST / HTTP/1.1\r\n"
+            b"Connection: close\r\n"
+            b"Content-Length: eight\r\n"
+            b"\r\n"
+            b"" + b"x" * oversized_length + b"\r\n"
+            b"\r\n"
+        )
+
+        # Advance the reactor to process the request
+        while not transport.disconnecting:
+            self.reactor.advance(1)
+
+        # We should get a 400
+        response = transport.value().decode()
+        self.assertRegex(response, r"^HTTP/1\.1 400 ")
