@@ -237,12 +237,12 @@ class Clock:
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
         self._looping_calls.append(call)
 
-        logger.debug(
+        clock_debug_logger.debug(
             "%s(%s): Scheduled looping call every %sms later",
             looping_call_context_string,
             instance_id,
             duration.as_millis(),
-            stack_info=clock_debug_logger.isEnabledFor(logging.DEBUG),
+            stack_info=True,
         )
 
         return call
@@ -340,14 +340,14 @@ class Clock:
             delay.as_secs(), wrapped_callback, *args, **kwargs
         )  # type: ignore[call-later-not-tracked]
 
-        logger.debug(
+        clock_debug_logger.debug(
             "call_later(%s): Scheduled call for %ss later (tracked for shutdown: %s)",
             call_id,
             delay,
             call_later_cancel_on_shutdown,
             # Find out who is scheduling the call which makes it easy to follow in the
             # logs.
-            stack_info=clock_debug_logger.isEnabledFor(logging.DEBUG),
+            stack_info=True,
         )
 
         wrapped_call = DelayedCallWrapper(call, call_id, self)
