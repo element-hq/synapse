@@ -895,6 +895,7 @@ def sdnotify(state: bytes) -> None:
 def max_request_body_size(config: HomeServerConfig) -> int:
     """Get a suitable maximum size for incoming HTTP requests"""
 
+    # Baseline default for any request that isn't configured in the homeserver config
     max_request_size = MAX_REQUEST_SIZE
 
     # if we have a media repo enabled, we may need to allow larger uploads than that
