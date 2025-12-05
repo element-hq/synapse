@@ -102,6 +102,8 @@ class UserMutualRoomsServlet(RestServlet):
                 errcode=Codes.UNKNOWN,
             )
 
+        # Sort here instead of the database function, so that we don't expose
+        # clients to any unrelated changes to the sorting algorithm.
         rooms = sorted(
             await self.store.get_mutual_rooms_between_users(
                 frozenset((requester.user.to_string(), user_id))
@@ -113,7 +115,7 @@ class UserMutualRoomsServlet(RestServlet):
             # lower than or equal to the token
             rooms = rooms[bisect(rooms, from_batch) :]
 
-        if len(rooms) < MUTUAL_ROOMS_BATCH_LIMIT:
+        if len(rooms) <= MUTUAL_ROOMS_BATCH_LIMIT:
             # We've reached the end of the list, don't return a batch token
             return 200, {"joined": rooms}
 
