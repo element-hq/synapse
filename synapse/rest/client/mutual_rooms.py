@@ -112,7 +112,13 @@ class UserMutualRoomsServlet(RestServlet):
 
         if from_batch:
             # A from_batch token was provided, so cut off any rooms where the ID is
-            # lower than or equal to the token
+            # lower than or equal to the token. This method doesn't care whether the
+            # provided token room still exists, nor whether it's even a real room ID.
+            #
+            # However, if rooms with a lower ID are added after the token was issued,
+            # they will not be included until the client makes a new request without a
+            # from token. This is considered acceptable, as clients generally won't
+            # persist these results for long periods.
             rooms = rooms[bisect(rooms, from_batch) :]
 
         if len(rooms) <= MUTUAL_ROOMS_BATCH_LIMIT:
