@@ -1167,7 +1167,7 @@ class SlidingSyncHandler:
 
         # The required state map to store in the room sync config, if it has
         # changed.
-        changed_required_state_map: Mapping[str, AbstractSet[str]] | None = None
+        required_state_map_change: Mapping[str, AbstractSet[str]] | None = None
 
         # We can return all of the state that was requested if this was the first
         # time we've sent the room down this connection.
@@ -1263,7 +1263,7 @@ class SlidingSyncHandler:
                     lazy_load_user_ids=lazy_load_user_ids,
                     state_deltas=room_state_delta_id_map,
                 )
-                changed_required_state_map = changes_return.required_state_map_change
+                required_state_map_change = changes_return.required_state_map_change
 
                 new_connection_state.room_lazy_membership[
                     room_id
@@ -1391,8 +1391,8 @@ class SlidingSyncHandler:
         room_sync_required_state_map_to_persist: Mapping[str, AbstractSet[str]] = (
             room_sync_config.required_state_map
         )
-        if changed_required_state_map:
-            room_sync_required_state_map_to_persist = changed_required_state_map
+        if required_state_map_change:
+            room_sync_required_state_map_to_persist = required_state_map_change
 
         # Record the `room_sync_config` if we're `ignore_timeline_bound` (which means
         # that the `timeline_limit` has increased)
@@ -1437,7 +1437,7 @@ class SlidingSyncHandler:
                     required_state_map=room_sync_required_state_map_to_persist,
                 )
 
-            elif changed_required_state_map is not None:
+            elif required_state_map_change is not None:
                 new_connection_state.room_configs[room_id] = RoomSyncConfig(
                     timeline_limit=room_sync_config.timeline_limit,
                     required_state_map=room_sync_required_state_map_to_persist,
