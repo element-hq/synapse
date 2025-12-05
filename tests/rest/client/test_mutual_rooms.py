@@ -150,7 +150,6 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         u1_token = self.login(u1, "pass")
         u2 = self.register_user("user2", "pass")
         u2_token = self.login(u2, "pass")
-        self.get_success(self.hs.get_datastores().main.set_ratelimit_for_user(u1, 0, 0))
         room_ids = []
         for i in range(count):
             room_id = self.helper.create_room_as(u1, is_public=i % 2 == 0, tok=u1_token)
