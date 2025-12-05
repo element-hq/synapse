@@ -1621,9 +1621,11 @@ def _required_state_changes(
             we have previously returned to the client due to lazy loading. This
             is filtered to only include users who have either sent events in the
             `timeline`, `required_state` or whose membership changed.
-        request_lazy_load_user_ids: The set of user IDs whose lazy-loaded membership
-            is required for this request.
-        state_deltas: The state deltas in the room in the request token range, considering user membership. See `get_current_state_deltas_for_room` for more details.
+        request_lazy_load_user_ids: The set of user IDs whose lazy-loaded
+            membership is required for this request.
+        state_deltas: The state deltas in the room in the request token range,
+            considering user membership. See `get_current_state_deltas_for_room`
+            for more details.
     """
 
     # First we find any lazy members that have been invalidated due to state

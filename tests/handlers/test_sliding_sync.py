@@ -4644,7 +4644,11 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 """,
                 RequiredStateChangesTestParameters(
                     previous_required_state_map={
-                        EventTypes.Member: {StateValues.LAZY, StateValues.ME, "@user2:test"}
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            StateValues.ME,
+                            "@user2:test",
+                        }
                     },
                     request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     previously_returned_lazy_user_ids=frozenset(),
