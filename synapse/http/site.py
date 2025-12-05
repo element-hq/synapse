@@ -61,6 +61,16 @@ logger = logging.getLogger(__name__)
 _next_request_seq = 0
 
 
+class ContentLengthError(Exception):
+    """Raised when content-length validation fails."""
+
+    def __init__(self, status: HTTPStatus, errcode: str, message: str):
+        self.status = status
+        self.errcode = errcode
+        self.message = message
+        super().__init__(message)
+
+
 class SynapseRequest(Request):
     """Class which encapsulates an HTTP request to synapse.
 
@@ -146,6 +156,19 @@ class SynapseRequest(Request):
             self.synapse_site.site_tag,
         )
 
+    def _respond_with_error(self, error_code: HTTPStatus, error_json: JsonDict) -> None:
+        """Send an error response and close the connection."""
+        self.code = error_code.value
+        self.code_message = bytes(error_code.phrase, "ascii")
+        error_response_bytes = json.dumps(error_json).encode()
+
+        self.responseHeaders.setRawHeaders(b"Content-Type", [b"application/json"])
+        self.responseHeaders.setRawHeaders(
+            b"Content-Length", [f"{len(error_response_bytes)}"]
+        )
+        self.write(error_response_bytes)
+        self.loseConnection()
+
     def _get_content_length_from_headers(self) -> int | None:
         """Attempts to obtain the `Content-Length` value from the request's headers.
 
@@ -153,24 +176,82 @@ class SynapseRequest(Request):
             Content length as `int` if present. Otherwise `None`.
 
         Raises:
-            `Exception` if multiple `Content-Length` headers are present or the value
-                is not an `int`.
+            ContentLengthError: if multiple `Content-Length` headers are present or the
+                value is not an `int`.
         """
         content_length_headers = self.requestHeaders.getRawHeaders(b"Content-Length")
-        if content_length_headers is not None:
-            # If there are multiple `Content-Length` headers return an error.
-            # We don't want to even try to pick the right one if there are multiple
-            # as we could run into problems similar to request smuggling vulnerabilities
-            # which rely on the mismatch of how different systems interpret information.
-            if len(content_length_headers) != 1:
-                raise Exception("Too many Content-Length headers.")
+        if content_length_headers is None:
+            return None
 
-            try:
-                content_length = int(content_length_headers[0])
-                return content_length
-            except Exception:
-                raise Exception("Content-Length value invalid.")
-        return None
+        # If there are multiple `Content-Length` headers return an error.
+        # We don't want to even try to pick the right one if there are multiple
+        # as we could run into problems similar to request smuggling vulnerabilities
+        # which rely on the mismatch of how different systems interpret information.
+        if len(content_length_headers) != 1:
+            raise ContentLengthError(
+                HTTPStatus.BAD_REQUEST,
+                Codes.UNKNOWN,
+                "Multiple Content-Length headers received",
+            )
+
+        try:
+            return int(content_length_headers[0])
+        except (ValueError, TypeError):
+            raise ContentLengthError(
+                HTTPStatus.BAD_REQUEST,
+                Codes.UNKNOWN,
+                "Content-Length header value is not a valid integer",
+            )
+
+    def _validate_content_length(self) -> None:
+        """Validate Content-Length header and actual content size.
+
+        Raises:
+            ContentLengthError: If validation fails.
+        """
+        # we should have a `content` by now.
+        assert self.content, "_validate_content_length() called before gotLength()"
+        content_length = self._get_content_length_from_headers()
+
+        if content_length is None:
+            return
+
+        actual_content_length = self.content.tell()
+
+        if content_length > self._max_request_body_size:
+            logger.info(
+                "Rejecting request from %s because Content-Length %d exceeds maximum size %d: %s %s",
+                self.client,
+                content_length,
+                self._max_request_body_size,
+                self.get_method(),
+                self.get_redacted_uri(),
+            )
+            raise ContentLengthError(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                Codes.TOO_LARGE,
+                f"Request content is too large (>{self._max_request_body_size})",
+            )
+
+        if content_length != actual_content_length:
+            comparison = (
+                "smaller" if content_length < actual_content_length else "larger"
+            )
+            logger.info(
+                "Rejecting request from %s because Content-Length %d is %s than the request content size %d: %s %s",
+                self.client,
+                content_length,
+                comparison,
+                actual_content_length,
+                self.get_method(),
+                self.get_redacted_uri(),
+            )
+            raise ContentLengthError(
+                HTTPStatus.BAD_REQUEST,
+                Codes.UNKNOWN,
+                f"Rejecting request as the Content-Length header value {content_length} "
+                f"is {comparison} than the actual request content size {actual_content_length}",
+            )
 
     # Twisted machinery: this method is called by the Channel once the full request has
     # been received, to dispatch the request to a resource.
@@ -186,74 +267,13 @@ class SynapseRequest(Request):
         self.method, self.uri = command, path
         self.clientproto = version
 
-        def respond_with_error(error_code: HTTPStatus, error_json: JsonDict) -> None:
-            self.code = error_code.value
-            self.code_message = bytes(error_code.phrase, "ascii")
-            error_response_bytes = (json.dumps(error_json)).encode()
-
-            self.responseHeaders.setRawHeaders(b"Content-Type", [b"application/json"])
-            self.responseHeaders.setRawHeaders(
-                b"Content-Length", [f"{len(error_response_bytes)}"]
-            )
-            self.write(error_response_bytes)
-
         try:
-            content_length = self._get_content_length_from_headers()
-        except Exception as e:
-            logger.warning(
-                "Rejecting request from %s because: %s - %s %s",
-                self.client,
-                str(e),
-                self.get_method(),
-                self.get_redacted_uri(),
+            self._validate_content_length()
+        except ContentLengthError as e:
+            self._respond_with_error(
+                e.status, {"errcode": e.errcode, "error": e.message}
             )
-            error_response_json = {
-                "errcode": Codes.UNKNOWN,
-                "error": f"Rejecting request: {str(e)}",
-            }
-            respond_with_error(HTTPStatus.BAD_REQUEST, error_response_json)
-            self.loseConnection()
             return
-
-        if content_length is not None and self.content is not None:
-            actual_content_length = self.content.tell()
-            if content_length < actual_content_length:
-                logger.info(
-                    "Rejecting request from %s because Content-Length %d is smaller than the request content size %d: %s %s",
-                    self.client,
-                    content_length,
-                    actual_content_length,
-                    self.get_method(),
-                    self.get_redacted_uri(),
-                )
-
-                error_response_json = {
-                    "errcode": Codes.UNKNOWN,
-                    "error": f"Rejecting request as the Content-Length header value {content_length} is smaller than the actual request content size {actual_content_length}",
-                }
-                respond_with_error(HTTPStatus.BAD_REQUEST, error_response_json)
-                self.loseConnection()
-                return
-
-            if content_length > self._max_request_body_size:
-                logger.info(
-                    "Rejecting request from %s because Content-Length %d exceeds maximum size %d: %s %s",
-                    self.client,
-                    content_length,
-                    self._max_request_body_size,
-                    self.get_method(),
-                    self.get_redacted_uri(),
-                )
-
-                error_response_json = {
-                    "errcode": Codes.TOO_LARGE,
-                    "error": f"Request content is too large (>{self._max_request_body_size})",
-                }
-                respond_with_error(
-                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE, error_response_json
-                )
-                self.loseConnection()
-                return
 
         # We're patching Twisted to bail/abort early when we see someone trying to upload
         # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
