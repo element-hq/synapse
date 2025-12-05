@@ -983,7 +983,7 @@ class StateMapWrapper(dict[StateKey, str]):
             raise Exception("State map was filtered and doesn't include: %s", key)
         return super().__getitem__(key)
 
-    @overload  # type: ignore[override]
+    @overload
     def get(self, key: StateKey, default: None = None, /) -> str | None: ...
     @overload
     def get(self, key: StateKey, default: str, /) -> str: ...

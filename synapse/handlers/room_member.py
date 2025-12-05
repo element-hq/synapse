@@ -874,7 +874,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             if target_id == self._server_notices_mxid:
                 raise SynapseError(HTTPStatus.FORBIDDEN, "Cannot invite this user")
 
-            block_invite_result = None
+            block_invite_result: tuple[Codes, dict] | None = None
 
             if (
                 self._server_notices_mxid is not None

@@ -22,6 +22,7 @@
 import heapq
 from itertools import islice
 from typing import (
+    Any,
     Callable,
     Collection,
     Generator,
@@ -33,7 +34,7 @@ from typing import (
     TypeVar,
 )
 
-T = TypeVar("T")
+T = TypeVar("T", bound=Any)
 S = TypeVar("S", bound="_SelfSlice")
 
 
