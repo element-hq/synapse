@@ -573,7 +573,8 @@ class SlidingSyncStore(SQLBaseStore):
 
         Returns:
             The mapping of user IDs to the last seen timestamp for those user
-            IDs.
+            IDs. Only includes user IDs that we have previously sent lazy
+            membership for, and so may be a subset of the `user_ids` passed in.
         """
 
         def get_sliding_sync_connection_lazy_members_txn(
