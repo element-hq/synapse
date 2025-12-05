@@ -839,7 +839,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             exact=True,
         )
 
-    def test_lazy_members_limited_sync(self) -> None:
+    def test_lazy_loading_room_members_limited_sync(self) -> None:
         """Test that when using lazy loading for room members and a limited sync
         missing a membership change, we include the membership change next time
         said user says something.
@@ -935,7 +935,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             exact=True,
         )
 
-    def test_lazy_members_across_multiple_rooms(self) -> None:
+    def test_lazy_loading_room_members_across_multiple_rooms(self) -> None:
         """Test that lazy loading room members are tracked per-room correctly."""
 
         user1_id = self.register_user("user1", "pass")
@@ -1018,7 +1018,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             exact=True,
         )
 
-    def test_lazy_members_across_multiple_connections(self) -> None:
+    def test_lazy_loading_room_members_across_multiple_connections(self) -> None:
         """Test that lazy loading room members are tracked per-connection
         correctly.
 
@@ -1118,7 +1118,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             exact=True,
         )
 
-    def test_lazy_members_forked_position(self) -> None:
+    def test_lazy_loading_room_members_forked_position(self) -> None:
         """Test that lazy loading room members are tracked correctly when a
         connection position is reused"""
 
@@ -1190,7 +1190,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             exact=True,
         )
 
-    def test_lazy_members_explicit_membership_removed(self) -> None:
+    def test_lazy_loading_room_members_explicit_membership_removed(self) -> None:
         """Test the case where we requested explicit memberships and then later
         changed to lazy loading."""
 
@@ -2116,7 +2116,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         # down.
         self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
 
-    def test_lazy_loaded_last_seen_ts(self) -> None:
+    def test_lazy_loading_room_members_last_seen_ts(self) -> None:
         """Test that the `last_seen_ts` column in
         `sliding_sync_connection_lazy_members` is correctly kept up to date"""
 
@@ -2247,7 +2247,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         # The timestamp for user1 should be updated.
         self.assertGreater(lazy_member_entries[user1_id], prev_timestamp)
 
-    def test_lazy_loading_room_members_state_reset(self) -> None:
+    def test_lazy_loading_room_members_state_reset_non_limited_timeline(self) -> None:
         """Test that when using lazy-loaded members, if a membership state is
         reset to a previous state and the sync is not limited, then we send down
         the state reset.
@@ -2355,8 +2355,9 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             sync_body, since=from_token, tok=user1_tok
         )
 
-        # This should be a non-limited sync as there is only one timeline event.
+        # This should be a non-limited sync as there is only one timeline event (<= `timeline_limit).
         # This is important as we don't send down state resets on limited
+        # This is important as we're specifically testing the non-`limited` timeline scenario. And for reference, we don't send down state resets on limited
         # timelines when using lazy loaded memberships.
         self.assertFalse(
             response_body["rooms"][room_id].get("limited", False),

@@ -564,7 +564,7 @@ class SlidingSyncStore(SQLBaseStore):
         Args:
             connection_position: The sliding sync connection position.
             room_id: The room ID to get lazy members for.
-            user_ids: The user IDs to check for lazy membership.
+            user_ids: The user IDs to check whether we've previously sent because of lazy membership.
 
         Returns:
             The mapping of user IDs to the last seen timestamp for those user
@@ -608,7 +608,7 @@ class SlidingSyncStore(SQLBaseStore):
             }
 
         return await self.db_pool.runInteraction(
-            "sliding_sync_connection_lazy_members",
+            "get_sliding_sync_connection_lazy_members",
             get_sliding_sync_connection_lazy_members_txn,
             db_autocommit=True,  # Avoid transaction for single read
         )

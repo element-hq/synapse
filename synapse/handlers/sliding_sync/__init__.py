@@ -1177,7 +1177,7 @@ class SlidingSyncHandler:
         # state as well).
         hero_membership_state: StateMap[EventBase] = {}
 
-        # By default we mark all required user state as being added when lazy
+        # By default, we mark all required user state as being added when lazy
         # loaded members is enabled.
         #
         # We may later update this to account for previously sent members.
@@ -1204,9 +1204,9 @@ class SlidingSyncHandler:
             assert from_bound is not None
 
             if prev_room_sync_config is not None:
-                # Define `required_user_state` as all user state we want, which
+                # Define `all_required_user_state` as all user state we want, which
                 # is the explicitly requested members, any needed for lazy
-                # loading, and users whose membership has changed.s
+                # loading, and users whose membership has changed.
                 all_required_user_state = explicit_user_state | lazy_load_user_ids
                 for state_type, state_key in room_state_delta_id_map:
                     if state_type == EventTypes.Member:
@@ -1620,11 +1620,10 @@ def _required_state_changes(
         previously_returned_lazy_user_ids: The set of user IDs whose membership
             we have previously returned to the client due to lazy loading. This
             is filtered to only include users who have either sent events in the
-            timeline, required state or whose membership changed.
+            `timeline`, `required_state` or whose membership changed.
         request_lazy_load_user_ids: The set of user IDs whose lazy-loaded membership
             is required for this request.
-        state_deltas: The state deltas that have changed in the room since the
-            previous request.
+        state_deltas: The state deltas in the room in the request token range, considering user membership. See `get_current_state_deltas_for_room` for more details.
     """
 
     # First we find any lazy members that have been invalidated due to state
@@ -1635,7 +1634,7 @@ def _required_state_changes(
             continue
 
         if state_key in lazy_load_user_ids:
-            # Because it's part of the `required_user_state`, we're going to
+            # Because it's part of the `request_lazy_load_user_ids`, we're going to
             # send this member change down.
             continue
 
@@ -1883,7 +1882,7 @@ def _required_state_changes(
             request_state_key_lazy = StateValues.LAZY in request_state_keys
             has_lazy = old_state_key_lazy or request_state_key_lazy
 
-            # If a "$LAZY" has been added or removed we always update.
+            # If a "$LAZY" has been added or removed we always update to match the request.
             if old_state_key_lazy != request_state_key_lazy:
                 changes[event_type] = request_state_keys
                 continue
@@ -1922,7 +1921,7 @@ def _required_state_changes(
                 # Normalize to proper user ID
                 state_key = user_id
 
-            # We remember the user if either they haven't been invalidated
+            # We remember the user if they haven't been invalidated
             if (EventTypes.Member, state_key) not in state_deltas:
                 lazy_members_previously_returned.add(state_key)
 
