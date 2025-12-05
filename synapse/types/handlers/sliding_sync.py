@@ -927,7 +927,13 @@ class RoomLazyMembershipChanges:
     invalidated_user_ids: AbstractSet[str] = attr.Factory(set)
 
     def has_updates(self, clock: Clock) -> bool:
-        """Check if there are any updates to the lazy membership changes."""
+        """Check if there are any updates to the lazy membership changes.
+
+        Called to check if we need to persist changes to the lazy membership
+        state for the room. We want to avoid persisting the state if there are
+        no changes, to avoid unnecessary writes (and cache misses due to new
+        connection position).
+        """
 
         # We consider there to be updates if there are any invalidated user
         # IDs...
