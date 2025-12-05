@@ -255,6 +255,8 @@ information.
     ^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$
     ^/_matrix/client/(r0|v3|unstable)/capabilities$
     ^/_matrix/client/(r0|v3|unstable)/notifications$
+
+    # Admin API requests
     ^/_synapse/admin/v1/rooms/[^/]+$
 
     # Encryption requests
@@ -299,6 +301,9 @@ Additionally, the following REST endpoints can be handled for GET requests:
 
     # Presence requests
     ^/_matrix/client/(api/v1|r0|v3|unstable)/presence/
+
+    # Admin API requests
+    ^/_synapse/admin/v2/users/[^/]+$
 
 Pagination requests can also be handled, but all requests for a given
 room must be routed to the same instance. Additionally, care must be taken to
