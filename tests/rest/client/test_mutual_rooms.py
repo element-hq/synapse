@@ -145,19 +145,23 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         for room_id_id in channel.json_body["joined"]:
             self.assertIn(room_id_id, [room_id_one, room_id_two])
 
-    def test_shared_room_list_pagination(self) -> None:
+    def _create_rooms_for_pagination_test(self, count: int) -> tuple[str, str, list[str]]:
         u1 = self.register_user("user1", "pass")
         u1_token = self.login(u1, "pass")
         u2 = self.register_user("user2", "pass")
         u2_token = self.login(u2, "pass")
         self.get_success(self.hs.get_datastores().main.set_ratelimit_for_user(u1, 0, 0))
         room_ids = []
-        for i in range(15):
+        for i in range(count):
             room_id = self.helper.create_room_as(u1, is_public=i % 2 == 0, tok=u1_token)
             self.helper.invite(room_id, src=u1, targ=u2, tok=u1_token)
             self.helper.join(room_id, user=u2, tok=u2_token)
             room_ids.append(room_id)
         room_ids.sort()
+        return u1_token, u2, room_ids
+
+    def test_shared_room_list_pagination_two_pages(self) -> None:
+        u1_token, u2, room_ids = self._create_rooms_for_pagination_test(15)
 
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
@@ -168,6 +172,21 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(channel.json_body["joined"], room_ids[10:20])
         self.assertNotIn("next_batch", channel.json_body)
+
+    def test_shared_room_list_pagination_one_page(self) -> None:
+        u1_token, u2, room_ids = self._create_rooms_for_pagination_test(10)
+
+        channel = self._get_mutual_rooms(u1_token, u2)
+        self.assertEqual(200, channel.code, channel.result)
+        self.assertEqual(channel.json_body["joined"], room_ids)
+        self.assertNotIn("next_batch", channel.json_body)
+
+    def test_shared_room_list_pagination_invalid_token(self) -> None:
+        u1_token, u2, room_ids = self._create_rooms_for_pagination_test(10)
+
+        channel = self._get_mutual_rooms(u1_token, u2, "!<>##faketoken")
+        self.assertEqual(400, channel.code, channel.result)
+        self.assertEqual("M_INVALID_PARAM", channel.json_body["errcode"], channel.result)
 
     def test_shared_room_list_after_leave(self) -> None:
         """
@@ -200,3 +219,14 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u2_token, u1)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 0)
+
+    def test_shared_room_list_nonexistent_user(self) -> None:
+        u1 = self.register_user("user1", "pass")
+        u1_token = self.login(u1, "pass")
+
+        # Check shared rooms from user1's perspective.
+        # We should see the one room in common
+        channel = self._get_mutual_rooms(u1_token, "@meow:example.com")
+        self.assertEqual(200, channel.code, channel.result)
+        self.assertEqual(len(channel.json_body["joined"]), 0)
+        self.assertNotIn("next_batch", channel.json_body)
