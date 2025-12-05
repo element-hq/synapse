@@ -4875,7 +4875,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             prev_required_state_map=test_parameters.previous_required_state_map,
             request_required_state_map=test_parameters.request_required_state_map,
             previously_returned_lazy_user_ids=test_parameters.previously_returned_lazy_user_ids,
-            lazy_load_user_ids=test_parameters.lazy_load_user_ids,
+            request_lazy_load_user_ids=test_parameters.lazy_load_user_ids,
             state_deltas={},
         )
 
@@ -4906,7 +4906,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             prev_required_state_map=test_parameters.previous_required_state_map,
             request_required_state_map=test_parameters.request_required_state_map,
             previously_returned_lazy_user_ids=test_parameters.previously_returned_lazy_user_ids,
-            lazy_load_user_ids=test_parameters.lazy_load_user_ids,
+            request_lazy_load_user_ids=test_parameters.lazy_load_user_ids,
             state_deltas=test_parameters.state_deltas,
         )
 
@@ -4970,7 +4970,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             prev_required_state_map=previous_required_state_map,
             request_required_state_map=request_required_state_map,
             previously_returned_lazy_user_ids=frozenset(),
-            lazy_load_user_ids=frozenset(),
+            request_lazy_load_user_ids=frozenset(),
             state_deltas={},
         )
         changed_required_state_map = state_changes.required_state_map_change
@@ -5043,7 +5043,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             prev_required_state_map=previous_required_state_map,
             request_required_state_map=request_required_state_map,
             previously_returned_lazy_user_ids=frozenset(),
-            lazy_load_user_ids=frozenset(),
+            request_lazy_load_user_ids=frozenset(),
             state_deltas={},
         )
         changed_required_state_map = state_changes.required_state_map_change

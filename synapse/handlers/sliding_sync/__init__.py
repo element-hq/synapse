@@ -1260,7 +1260,7 @@ class SlidingSyncHandler:
                     prev_required_state_map=prev_room_sync_config.required_state_map,
                     request_required_state_map=room_sync_config.required_state_map,
                     previously_returned_lazy_user_ids=previously_returned_user_to_last_seen.keys(),
-                    lazy_load_user_ids=lazy_load_user_ids,
+                    request_lazy_load_user_ids=lazy_load_user_ids,
                     state_deltas=room_state_delta_id_map,
                 )
                 required_state_map_change = changes_return.required_state_map_change
@@ -1608,7 +1608,7 @@ def _required_state_changes(
     prev_required_state_map: Mapping[str, AbstractSet[str]],
     request_required_state_map: Mapping[str, AbstractSet[str]],
     previously_returned_lazy_user_ids: AbstractSet[str],
-    lazy_load_user_ids: AbstractSet[str],
+    request_lazy_load_user_ids: AbstractSet[str],
     state_deltas: StateMap[str],
 ) -> _RequiredStateChangesReturn:
     """Calculates the changes between the required state room config from the
@@ -1648,7 +1648,7 @@ def _required_state_changes(
         if event_type != EventTypes.Member:
             continue
 
-        if state_key in lazy_load_user_ids:
+        if state_key in request_lazy_load_user_ids:
             # Because it's part of the `request_lazy_load_user_ids`, we're going to
             # send this member change down.
             continue
@@ -1663,7 +1663,7 @@ def _required_state_changes(
     if prev_required_state_map == request_required_state_map:
         # There has been no change in state, just need to check lazy members.
         newly_returned_lazy_members = (
-            lazy_load_user_ids - previously_returned_lazy_user_ids
+            request_lazy_load_user_ids - previously_returned_lazy_user_ids
         )
         if newly_returned_lazy_members:
             # There are some new lazy members we need to fetch.
@@ -1839,7 +1839,7 @@ def _required_state_changes(
     # We also need to pull out any lazy members that are now required but
     # haven't previously been returned.
     for required_user_id in (
-        lazy_load_user_ids
+        request_lazy_load_user_ids
         # Remove previously returned users
         - previously_returned_lazy_user_ids
         # Exclude previously explicitly requested members.
