@@ -209,26 +209,27 @@ class SynapseRequest(Request):
             )
             error_response_json = {
                 "errcode": Codes.UNKNOWN,
-                "error": f"{str(e)}",
+                "error": f"Rejecting request: {str(e)}",
             }
             respond_with_error(HTTPStatus.BAD_REQUEST, error_response_json)
             self.loseConnection()
             return
 
         if content_length is not None and self.content is not None:
-            if content_length < self.content.tell():
+            actual_content_length = self.content.tell()
+            if content_length < actual_content_length:
                 logger.info(
                     "Rejecting request from %s because Content-Length %d is smaller than the request content size %d: %s %s",
                     self.client,
                     content_length,
-                    self.content.tell(),
+                    actual_content_length,
                     self.get_method(),
                     self.get_redacted_uri(),
                 )
 
                 error_response_json = {
                     "errcode": Codes.UNKNOWN,
-                    "error": "Request content is too small",
+                    "error": f"Rejecting request as the Content-Length header value {content_length} is smaller than the actual request content size {actual_content_length}",
                 }
                 respond_with_error(HTTPStatus.BAD_REQUEST, error_response_json)
                 self.loseConnection()
@@ -246,7 +247,7 @@ class SynapseRequest(Request):
 
                 error_response_json = {
                     "errcode": Codes.TOO_LARGE,
-                    "error": "Request content is too large",
+                    "error": f"Request content is too large (>{self._max_request_body_size})",
                 }
                 respond_with_error(
                     HTTPStatus.REQUEST_ENTITY_TOO_LARGE, error_response_json
