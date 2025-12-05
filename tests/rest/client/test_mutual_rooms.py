@@ -145,7 +145,9 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         for room_id_id in channel.json_body["joined"]:
             self.assertIn(room_id_id, [room_id_one, room_id_two])
 
-    def _create_rooms_for_pagination_test(self, count: int) -> tuple[str, str, list[str]]:
+    def _create_rooms_for_pagination_test(
+        self, count: int
+    ) -> tuple[str, str, list[str]]:
         u1 = self.register_user("user1", "pass")
         u1_token = self.login(u1, "pass")
         u2 = self.register_user("user2", "pass")
@@ -185,7 +187,9 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
 
         channel = self._get_mutual_rooms(u1_token, u2, "!<>##faketoken")
         self.assertEqual(400, channel.code, channel.result)
-        self.assertEqual("M_INVALID_PARAM", channel.json_body["errcode"], channel.result)
+        self.assertEqual(
+            "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
+        )
 
     def test_shared_room_list_after_leave(self) -> None:
         """
