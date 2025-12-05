@@ -212,7 +212,7 @@ class JsonResourceTests(unittest.TestCase):
         self.assertEqual(channel.code, 200)
         self.assertNotIn("body", channel.result)
 
-    def test_content_too_large(self) -> None:
+    def test_content_larger_than_content_length(self) -> None:
         """
         HTTP requests with content size exceeding Content-Length should be rejected with 400.
         """
