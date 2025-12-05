@@ -1744,7 +1744,9 @@ def _required_state_changes(
             continue
 
         # Handle the special case of adding `$LAZY` membership, where we want to
-        # always record the change to be lazy loading.
+        # always record the change to be lazy loading, as we immediately start
+        # using the lazy loading tables so there is no point *not* recording the
+        # change to lazy load in the effective room config.
         if event_type == EventTypes.Member:
             old_state_key_lazy = StateValues.LAZY in old_state_keys
             request_state_key_lazy = StateValues.LAZY in request_state_keys
