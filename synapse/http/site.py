@@ -34,7 +34,6 @@ from twisted.internet.interfaces import IAddress
 from twisted.internet.protocol import Protocol
 from twisted.python.failure import Failure
 from twisted.web.http import HTTPChannel
-from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource, Resource
 from twisted.web.server import Request
 
@@ -147,6 +146,32 @@ class SynapseRequest(Request):
             self.synapse_site.site_tag,
         )
 
+    def _get_content_length_from_headers(self) -> int | None:
+        """Attempts to obtain the `Content-Length` value from the request's headers.
+
+        Returns:
+            Content length as `int` if present. Otherwise `None`.
+
+        Raises:
+            `Exception` if multiple `Content-Length` headers are present or the value
+                is not an `int`.
+        """
+        content_length_headers = self.requestHeaders.getRawHeaders(b"Content-Length")
+        if content_length_headers is not None:
+            # If there are multiple `Content-Length` headers return an error.
+            # We don't want to even try to pick the right one if there are multiple
+            # as we could run into problems similar to request smuggling vulnerabilities
+            # which rely on the mismatch of how different systems interpret information.
+            if len(content_length_headers) != 1:
+                raise Exception("Too many Content-Length headers.")
+
+            try:
+                content_length = int(content_length_headers[0])
+                return content_length
+            except Exception:
+                raise Exception("Content-Length value invalid.")
+        return None
+
     # Twisted machinery: this method is called by the Channel once the full request has
     # been received, to dispatch the request to a resource.
     def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
@@ -161,23 +186,6 @@ class SynapseRequest(Request):
         self.method, self.uri = command, path
         self.clientproto = version
 
-        def get_content_length_from_headers(headers: Headers) -> int | None:
-            content_length_headers = headers.getRawHeaders(b"Content-Length")
-            if content_length_headers is not None:
-                # If there are multiple `Content-Length` headers return an error.
-                # We don't want to even try to pick the right one if there are multiple
-                # as we could run into problems similar to request smuggling vulnerabilities
-                # which rely on the mismatch of how different systems interpret information.
-                if len(content_length_headers) != 1:
-                    raise Exception("Too many Content-Length headers.")
-
-                try:
-                    content_length = int(content_length_headers[0])
-                    return content_length
-                except Exception:
-                    raise Exception("Content-Length value invalid.")
-            return None
-
         def respond_with_error(error_code: HTTPStatus, error_json: JsonDict) -> None:
             self.code = error_code.value
             self.code_message = bytes(error_code.phrase, "ascii")
@@ -190,7 +198,7 @@ class SynapseRequest(Request):
             self.write(error_response_bytes)
 
         try:
-            content_length = get_content_length_from_headers(self.requestHeaders)
+            content_length = self._get_content_length_from_headers()
         except Exception as e:
             logger.warning(
                 "Rejecting request from %s because: %s %s %s",
