@@ -1215,9 +1215,22 @@ class SlidingSyncHandler:
                 # We need to know what user state we previously sent down the
                 # connection so we can determine what has changed.
                 #
-                # We don't just pull out the lazy loaded members here to handle
-                # the case where the client added explicit user state requests
-                # for users they already had lazy loaded.
+                # We need to fetch for all users whose memberships we may want
+                # to send down this sync. This includes (and matches
+                # `all_required_user_state`):
+                #   1. Explicitly requested user state
+                #   2. Lazy loaded members, i.e. users who appear in the
+                #      timeline.
+                #   3. The users whose membership has changed in the room, i.e.
+                #      in the state deltas.
+                #
+                # This is to correctly handle the cases where a user was
+                # previously sent down as a lazy loaded member:
+                #   - and is now explicitly requested (so shouldn't be sent down
+                #     again); or
+                #   - their membership has changed (so we need to invalidate
+                #     their entry in the lazy loaded table if we don't send the
+                #     change down).
                 if all_required_user_state:
                     previously_returned_user_to_last_seen = (
                         await self.store.get_sliding_sync_connection_lazy_members(
