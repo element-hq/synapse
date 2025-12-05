@@ -55,12 +55,16 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
+        mutual_rooms.MUTUAL_ROOMS_BATCH_LIMIT = 10
 
-    def _get_mutual_rooms(self, token: str, other_user: str) -> FakeChannel:
+    def _get_mutual_rooms(
+        self, token: str, other_user: str, since_token: str | None = None
+    ) -> FakeChannel:
         return self.make_request(
             "GET",
             "/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms"
-            f"?user_id={quote(other_user)}",
+            f"?user_id={quote(other_user)}"
+            + (f"&from={quote(since_token)}" if since_token else ""),
             access_token=token,
         )
 
@@ -140,6 +144,30 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         self.assertEqual(len(channel.json_body["joined"]), 2)
         for room_id_id in channel.json_body["joined"]:
             self.assertIn(room_id_id, [room_id_one, room_id_two])
+
+    def test_shared_room_list_pagination(self) -> None:
+        u1 = self.register_user("user1", "pass")
+        u1_token = self.login(u1, "pass")
+        u2 = self.register_user("user2", "pass")
+        u2_token = self.login(u2, "pass")
+        self.get_success(self.hs.get_datastores().main.set_ratelimit_for_user(u1, 0, 0))
+        room_ids = []
+        for i in range(15):
+            room_id = self.helper.create_room_as(u1, is_public=i % 2 == 0, tok=u1_token)
+            self.helper.invite(room_id, src=u1, targ=u2, tok=u1_token)
+            self.helper.join(room_id, user=u2, tok=u2_token)
+            room_ids.append(room_id)
+        room_ids.sort()
+
+        channel = self._get_mutual_rooms(u1_token, u2)
+        self.assertEqual(200, channel.code, channel.result)
+        self.assertEqual(channel.json_body["joined"], room_ids[0:10])
+        self.assertIn("next_batch", channel.json_body)
+
+        channel = self._get_mutual_rooms(u1_token, u2, channel.json_body["next_batch"])
+        self.assertEqual(200, channel.code, channel.result)
+        self.assertEqual(channel.json_body["joined"], room_ids[10:20])
+        self.assertNotIn("next_batch", channel.json_body)
 
     def test_shared_room_list_after_leave(self) -> None:
         """
