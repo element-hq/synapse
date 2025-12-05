@@ -459,7 +459,11 @@ class SlidingSyncStore(SQLBaseStore):
 
         # Move any lazy membership entries for this connection position to have
         # `NULL` connection position, indicating that it applies to all future
-        # positions on this connection.
+        # positions on this connection. This is safe because we have deleted all
+        # other (potentially forked) connection positions, and so all future
+        # positions in this connection will be a continuation of the current
+        # position. Thus any lazy membership entries we have sent down will still
+        # be valid.
         self.db_pool.simple_update_txn(
             txn,
             table="sliding_sync_connection_lazy_members",
