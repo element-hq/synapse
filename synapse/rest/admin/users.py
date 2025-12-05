@@ -251,6 +251,7 @@ class UserRestServletV2Get(RestServlet):
 
         return HTTPStatus.OK, user_info_dict
 
+
 class UserRestServletV2(UserRestServletV2Get):
     """
     Put request to allow an administrator to add or modify a user.
