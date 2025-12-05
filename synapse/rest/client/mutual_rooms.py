@@ -65,7 +65,7 @@ def _parse_mutual_rooms_batch_token_args(args: dict[bytes, list[bytes]]) -> str 
 
 class UserMutualRoomsServlet(RestServlet):
     """
-    GET /uk.half-shot.msc2666/user/mutual_rooms?user_id={user_id} HTTP/1.1
+    GET /uk.half-shot.msc2666/user/mutual_rooms?user_id={user_id}&from={token} HTTP/1.1
     """
 
     PATTERNS = client_patterns(
