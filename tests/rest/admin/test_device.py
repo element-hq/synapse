@@ -175,10 +175,7 @@ class DeviceRestTestCase(unittest.HomeserverTestCase):
         )
 
         # Request to update a device display name with a new value that is longer than allowed.
-        update = {
-            "display_name": "a"
-            * (MAX_DEVICE_DISPLAY_NAME_LEN + 1)
-        }
+        update = {"display_name": "a" * (MAX_DEVICE_DISPLAY_NAME_LEN + 1)}
 
         channel = self.make_request(
             "PUT",
