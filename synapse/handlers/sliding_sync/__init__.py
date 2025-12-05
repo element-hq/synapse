@@ -1272,7 +1272,7 @@ class SlidingSyncHandler:
                 # Add any previously returned explicit memberships to the lazy
                 # loaded table. This happens when a client requested explicit
                 # members and then converted them to lazy loading.
-                for user_id in changes_return.lazy_members_previously_returned:
+                for user_id in changes_return.users_to_add_to_lazy_cache:
                     # We don't know the right timestamp to use here, as we don't
                     # know the last time we would have sent the membership down.
                     # So we don't overwrite it if we have a timestamp already,
@@ -1588,8 +1588,10 @@ class _RequiredStateChangesReturn:
             the room config, or None if there is no change.
         added_state_filter: The state filter to use to fetch any additional
             current state that needs to be returned to the client.
-        lazy_members_previously_returned: The set of user IDs we should add to
-            the lazy members cache that we had previously returned.
+        users_to_add_to_lazy_cache: The set of user IDs we should add to
+            the lazy members cache that we had previously returned. Handles
+            the case where a user was previously sent down explicitly but is
+            now being lazy loaded.
         lazy_members_invalidated: The set of user IDs whose membership has
             changed but we didn't send down, so we need to invalidate them from
             the cache.
@@ -1598,7 +1600,7 @@ class _RequiredStateChangesReturn:
     required_state_map_change: Mapping[str, AbstractSet[str]] | None
     added_state_filter: StateFilter
 
-    lazy_members_previously_returned: AbstractSet[str] = frozenset()
+    users_to_add_to_lazy_cache: AbstractSet[str] = frozenset()
     lazy_members_invalidated: AbstractSet[str] = frozenset()
 
 
@@ -1925,7 +1927,7 @@ def _required_state_changes(
     # add to the lazy members previously returned. This is so that we don't
     # return a user due to lazy loading if they were previously returned as an
     # explicit membership.
-    lazy_members_previously_returned: set[str] = set()
+    users_to_add_to_lazy_cache: set[str] = set()
 
     membership_changes = changes.get(EventTypes.Member, set())
     if membership_changes and StateValues.LAZY in request_state_keys:
@@ -1940,7 +1942,7 @@ def _required_state_changes(
 
             # We remember the user if they haven't been invalidated
             if (EventTypes.Member, state_key) not in state_deltas:
-                lazy_members_previously_returned.add(state_key)
+                users_to_add_to_lazy_cache.add(state_key)
 
     if changes:
         # Update the required state config based on the changes.
@@ -1956,12 +1958,12 @@ def _required_state_changes(
             required_state_map_change=new_required_state_map,
             added_state_filter=added_state_filter,
             lazy_members_invalidated=lazy_members_invalidated,
-            lazy_members_previously_returned=lazy_members_previously_returned,
+            users_to_add_to_lazy_cache=users_to_add_to_lazy_cache,
         )
     else:
         return _RequiredStateChangesReturn(
             required_state_map_change=None,
             added_state_filter=added_state_filter,
             lazy_members_invalidated=lazy_members_invalidated,
-            lazy_members_previously_returned=lazy_members_previously_returned,
+            users_to_add_to_lazy_cache=users_to_add_to_lazy_cache,
         )
