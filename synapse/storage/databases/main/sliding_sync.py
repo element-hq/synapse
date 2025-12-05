@@ -595,8 +595,8 @@ class SlidingSyncStore(SQLBaseStore):
             # `sliding_sync_connection_lazy_members` is what we filter against
             # (it may be null or the same as the one passed in).
             sql = f"""
-                SELECT user_id, mem.connection_position, last_seen_ts
-                FROM sliding_sync_connection_lazy_members AS mem
+                SELECT user_id, members.connection_position, last_seen_ts
+                FROM sliding_sync_connection_lazy_members AS members
                 INNER JOIN sliding_sync_connection_positions AS pos USING (connection_key)
                 WHERE pos.connection_position = ? AND room_id = ? AND {user_clause}
             """
