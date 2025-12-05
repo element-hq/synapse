@@ -201,7 +201,7 @@ class SynapseRequest(Request):
             content_length = self._get_content_length_from_headers()
         except Exception as e:
             logger.warning(
-                "Rejecting request from %s because: %s %s %s",
+                "Rejecting request from %s because: %s - %s %s",
                 self.client,
                 str(e),
                 self.get_method(),
