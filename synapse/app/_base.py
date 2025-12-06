@@ -36,6 +36,7 @@ from typing import (
     Awaitable,
     Callable,
     NoReturn,
+    Optional,
     cast,
 )
 from wsgiref.simple_server import WSGIServer
@@ -455,7 +456,7 @@ def listen_http(
     root_resource: Resource,
     version_string: str,
     max_request_body_size: int,
-    context_factory: IOpenSSLContextFactory | None,
+    context_factory: Optional[IOpenSSLContextFactory],
     reactor: ISynapseReactor = reactor,
 ) -> list[Port]:
     """
