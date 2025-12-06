@@ -1,0 +1,1 @@
+Fix a bug where Mastodon posts (and possibly other embeds) have the wrong description for URL previews.
