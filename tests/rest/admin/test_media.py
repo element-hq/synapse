@@ -756,6 +756,112 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
             self.assertFalse(os.path.exists(local_path))
 
 
+class ListQuarantinedMediaTestCase(_AdminMediaTests):
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.server_name = hs.hostname
+
+    @parameterized.expand(["local", "remote"])
+    def test_no_auth(self, kind: str) -> None:
+        """
+        Try to list quarantined media without authentication.
+        """
+
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantined?kind=%s" % (kind,),
+        )
+
+        self.assertEqual(401, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.MISSING_TOKEN, channel.json_body["errcode"])
+
+    @parameterized.expand(["local", "remote"])
+    def test_requester_is_not_admin(self, kind: str) -> None:
+        """
+        If the user is not a server admin, an error is returned.
+        """
+        self.other_user = self.register_user("user", "pass")
+        self.other_user_token = self.login("user", "pass")
+
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantined?kind=%s" % (kind,),
+            access_token=self.other_user_token,
+        )
+
+        self.assertEqual(403, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+    def test_list_quarantined_media(self) -> None:
+        """
+        Ensure we actually get results for each page. We can't really test that
+        remote media is quarantined, but we can test that local media is.
+        """
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
+
+        def _upload() -> str:
+            return self.helper.upload_media(
+                SMALL_PNG, tok=self.admin_user_tok, expect_code=200
+            )["content_uri"][6:].split("/")[1]  # Cut off 'mxc://' and domain
+
+        self.media_id_1 = _upload()
+        self.media_id_2 = _upload()
+        self.media_id_3 = _upload()
+
+        def _quarantine(media_id: str) -> None:
+            channel = self.make_request(
+                "POST",
+                "/_synapse/admin/v1/media/quarantine/%s/%s"
+                % (
+                    self.server_name,
+                    media_id,
+                ),
+                access_token=self.admin_user_tok,
+            )
+            self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        _quarantine(self.media_id_1)
+        _quarantine(self.media_id_2)
+        _quarantine(self.media_id_3)
+
+        # Page 1
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantined?kind=local&from=0&limit=1",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(1, len(channel.json_body["media"]))
+
+        # Page 2
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantined?kind=local&from=1&limit=1",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(1, len(channel.json_body["media"]))
+
+        # Page 3
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantined?kind=local&from=2&limit=1",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(1, len(channel.json_body["media"]))
+
+        # Page 4 (no media)
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantined?kind=local&from=3&limit=1",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(0, len(channel.json_body["media"]))
+
+
 class QuarantineMediaByIDTestCase(_AdminMediaTests):
     def upload_media_and_return_media_id(self, data: bytes) -> str:
         # Upload some media into the room
