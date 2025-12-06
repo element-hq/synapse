@@ -171,6 +171,7 @@ from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import Databases
 from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
+from synapse.synapse_rust.msc4108v2025_rendezvous import MSC4108v2025RendezvousHandler
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import SYNAPSE_VERSION
@@ -1177,6 +1178,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_rendezvous_handler(self) -> RendezvousHandler:
         return RendezvousHandler(self)
+
+    @cache_in_self
+    def get_msc4108v2025_rendezvous_handler(self) -> MSC4108v2025RendezvousHandler:
+        return MSC4108v2025RendezvousHandler(self)
 
     @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":

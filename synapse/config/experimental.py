@@ -526,7 +526,7 @@ class ExperimentalConfig(Config):
             "msc4069_profile_inhibit_propagation", False
         )
 
-        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version:
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
 
         self.msc4108_delegation_endpoint: str | None = experimental.get(
@@ -549,6 +549,27 @@ class ExperimentalConfig(Config):
             raise ConfigError(
                 "You cannot have MSC4108 both enabled and delegated at the same time",
                 ("experimental", "msc4108_delegation_endpoint"),
+            )
+
+        # MSC4108: Mechanism to allow OAuth 2.0 API sign in and E2EE set up via QR code - 2025 version:
+        msc4108v2025_mode = experimental.get("msc4108v2025_mode", "off")
+
+        if ["off", "public", "authenticated"].count(msc4108v2025_mode) != 1:
+            raise ConfigError(
+                "msc4108v2025_mode must be one of 'off', 'public' or 'authenticated'",
+                ("experimental", "msc4108v2025_mode"),
+            )
+        self.msc4108v2025_enabled: bool = msc4108v2025_mode != "off"
+        self.msc4108v2025_requires_authentication: bool = (
+            msc4108v2025_mode == "authenticated"
+        )
+
+        if self.msc4108v2025_enabled and not (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False):
+            raise ConfigError(
+                "MSC4108 2025 version requires matrix_authentication_service to be enabled",
+                ("experimental", "msc4108v2025_enabled"),
             )
 
         # MSC4133: Custom profile fields
