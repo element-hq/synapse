@@ -2976,6 +2976,86 @@ class JoinAliasRoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(private_room_id, channel.json_body["joined_rooms"][0])
 
+    def test_joined_rooms(self) -> None:
+        """
+        Test joined_rooms admin endpoint.
+        """
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/join/{self.public_room_id}",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(self.public_room_id, channel.json_body["room_id"])
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.second_user_id}/joined_rooms",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(self.public_room_id, channel.json_body["joined_rooms"][0])
+
+    def test_memberships(self) -> None:
+        """
+        Test user memberships admin endpoint.
+        """
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/join/{self.public_room_id}",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        other_room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/join/{other_room_id}",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.second_user_id}/memberships",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            {self.public_room_id: Membership.JOIN, other_room_id: Membership.JOIN},
+            channel.json_body,
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{other_room_id}/leave",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.second_user_id}/memberships",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            {self.public_room_id: Membership.JOIN, other_room_id: Membership.LEAVE},
+            channel.json_body,
+        )
+
     def test_context_as_non_admin(self) -> None:
         """
         Test that, without being admin, one cannot use the context admin API

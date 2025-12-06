@@ -1031,7 +1031,7 @@ class UserAdminServlet(RestServlet):
         return HTTPStatus.OK, {}
 
 
-class UserMembershipRestServlet(RestServlet):
+class UserJoinedRoomsRestServlet(RestServlet):
     """
     Get list of joined room ID's for a user.
     """
@@ -1052,6 +1052,28 @@ class UserMembershipRestServlet(RestServlet):
         rooms_response = {"joined_rooms": list(room_ids), "total": len(room_ids)}
 
         return HTTPStatus.OK, rooms_response
+
+
+class UserMembershipsRestServlet(RestServlet):
+    """
+    Get list of left room ID's for a user.
+    """
+
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/memberships$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.is_mine = hs.is_mine
+        self.auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+
+    async def on_GET(
+        self, request: SynapseRequest, user_id: str
+    ) -> tuple[int, JsonDict]:
+        await assert_requester_is_admin(self.auth, request)
+
+        memberships = await self.store.get_memberships_for_user(user_id)
+
+        return HTTPStatus.OK, memberships
 
 
 class PushersRestServlet(RestServlet):
