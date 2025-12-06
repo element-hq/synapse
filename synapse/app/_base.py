@@ -59,7 +59,7 @@ from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
 
 import synapse.util.caches
-from synapse.api.constants import MAX_PDU_SIZE
+from synapse.api.constants import MAX_REQUEST_SIZE
 from synapse.app import check_bind_error
 from synapse.config import ConfigError
 from synapse.config._base import format_config_error
@@ -895,17 +895,8 @@ def sdnotify(state: bytes) -> None:
 def max_request_body_size(config: HomeServerConfig) -> int:
     """Get a suitable maximum size for incoming HTTP requests"""
 
-    # Other than media uploads, the biggest request we expect to see is a fully-loaded
-    # /federation/v1/send request.
-    #
-    # The main thing in such a request is up to 50 PDUs, and up to 100 EDUs. PDUs are
-    # limited to 65536 bytes (possibly slightly more if the sender didn't use canonical
-    # json encoding); there is no specced limit to EDUs (see
-    # https://github.com/matrix-org/matrix-doc/issues/3121).
-    #
-    # in short, we somewhat arbitrarily limit requests to 200 * 64K (about 12.5M)
-    #
-    max_request_size = 200 * MAX_PDU_SIZE
+    # Baseline default for any request that isn't configured in the homeserver config
+    max_request_size = MAX_REQUEST_SIZE
 
     # if we have a media repo enabled, we may need to allow larger uploads than that
     if config.media.can_load_media_repo:

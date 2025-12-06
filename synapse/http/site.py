@@ -19,6 +19,7 @@
 #
 #
 import contextlib
+import json
 import logging
 import time
 from http import HTTPStatus
@@ -36,6 +37,7 @@ from twisted.web.http import HTTPChannel
 from twisted.web.resource import IResource, Resource
 from twisted.web.server import Request
 
+from synapse.api.errors import Codes
 from synapse.config.server import ListenerConfig
 from synapse.http import get_request_user_agent, redact_uri
 from synapse.http.proxy import ProxySite
@@ -46,7 +48,7 @@ from synapse.logging.context import (
     PreserveLoggingContext,
 )
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.types import ISynapseReactor, Requester
+from synapse.types import ISynapseReactor, JsonDict, Requester
 
 if TYPE_CHECKING:
     import opentracing
@@ -57,6 +59,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _next_request_seq = 0
+
+
+class ContentLengthError(Exception):
+    """Raised when content-length validation fails."""
+
+    def __init__(self, status: HTTPStatus, errcode: str, message: str):
+        self.status = status
+        self.errcode = errcode
+        self.message = message
+        super().__init__(message)
 
 
 class SynapseRequest(Request):
@@ -144,36 +156,153 @@ class SynapseRequest(Request):
             self.synapse_site.site_tag,
         )
 
+    def _respond_with_error(self, error_code: HTTPStatus, error_json: JsonDict) -> None:
+        """Send an error response and close the connection."""
+        self.code = error_code.value
+        self.code_message = bytes(error_code.phrase, "ascii")
+        error_response_bytes = json.dumps(error_json).encode()
+
+        self.responseHeaders.setRawHeaders(b"Content-Type", [b"application/json"])
+        self.responseHeaders.setRawHeaders(
+            b"Content-Length", [f"{len(error_response_bytes)}"]
+        )
+        self.write(error_response_bytes)
+        self.loseConnection()
+
+    def _get_content_length_from_headers(self) -> int | None:
+        """Attempts to obtain the `Content-Length` value from the request's headers.
+
+        Returns:
+            Content length as `int` if present. Otherwise `None`.
+
+        Raises:
+            ContentLengthError: if multiple `Content-Length` headers are present or the
+                value is not an `int`.
+        """
+        content_length_headers = self.requestHeaders.getRawHeaders(b"Content-Length")
+        if content_length_headers is None:
+            return None
+
+        # If there are multiple `Content-Length` headers return an error.
+        # We don't want to even try to pick the right one if there are multiple
+        # as we could run into problems similar to request smuggling vulnerabilities
+        # which rely on the mismatch of how different systems interpret information.
+        if len(content_length_headers) != 1:
+            raise ContentLengthError(
+                HTTPStatus.BAD_REQUEST,
+                Codes.UNKNOWN,
+                "Multiple Content-Length headers received",
+            )
+
+        try:
+            return int(content_length_headers[0])
+        except (ValueError, TypeError):
+            raise ContentLengthError(
+                HTTPStatus.BAD_REQUEST,
+                Codes.UNKNOWN,
+                "Content-Length header value is not a valid integer",
+            )
+
+    def _validate_content_length(self) -> None:
+        """Validate Content-Length header and actual content size.
+
+        Raises:
+            ContentLengthError: If validation fails.
+        """
+        # we should have a `content` by now.
+        assert self.content, "_validate_content_length() called before gotLength()"
+        content_length = self._get_content_length_from_headers()
+
+        if content_length is None:
+            return
+
+        actual_content_length = self.content.tell()
+
+        if content_length > self._max_request_body_size:
+            logger.info(
+                "Rejecting request from %s because Content-Length %d exceeds maximum size %d: %s %s",
+                self.client,
+                content_length,
+                self._max_request_body_size,
+                self.get_method(),
+                self.get_redacted_uri(),
+            )
+            raise ContentLengthError(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                Codes.TOO_LARGE,
+                f"Request content is too large (>{self._max_request_body_size})",
+            )
+
+        if content_length != actual_content_length:
+            comparison = (
+                "smaller" if content_length < actual_content_length else "larger"
+            )
+            logger.info(
+                "Rejecting request from %s because Content-Length %d is %s than the request content size %d: %s %s",
+                self.client,
+                content_length,
+                comparison,
+                actual_content_length,
+                self.get_method(),
+                self.get_redacted_uri(),
+            )
+            raise ContentLengthError(
+                HTTPStatus.BAD_REQUEST,
+                Codes.UNKNOWN,
+                f"Rejecting request as the Content-Length header value {content_length} "
+                f"is {comparison} than the actual request content size {actual_content_length}",
+            )
+
     # Twisted machinery: this method is called by the Channel once the full request has
     # been received, to dispatch the request to a resource.
-    #
-    # We're patching Twisted to bail/abort early when we see someone trying to upload
-    # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
-    # in-memory (specific problem of this specific `Content-Type`). This protects us
-    # from an attacker uploading something bigger than the available RAM and crashing
-    # the server with a `MemoryError`, or carefully block just enough resources to cause
-    # all other requests to fail.
-    #
-    # FIXME: This can be removed once we Twisted releases a fix and we update to a
-    # version that is patched
     def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
+        # In the case of a Content-Length header being present, and it's value being too
+        # large, throw a proper error to make debugging issues due to overly large requests much
+        # easier. Currently we handle such cases in `handleContentChunk` and abort the
+        # connection without providing a proper HTTP response.
+        #
+        # Attempting to write an HTTP response from within `handleContentChunk` does not
+        # work, so the code here has been added to at least provide a response in the
+        # case of the Content-Length header being present.
+        self.method, self.uri = command, path
+        self.clientproto = version
+
+        try:
+            self._validate_content_length()
+        except ContentLengthError as e:
+            self._respond_with_error(
+                e.status, {"errcode": e.errcode, "error": e.message}
+            )
+            return
+
+        # We're patching Twisted to bail/abort early when we see someone trying to upload
+        # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
+        # in-memory (specific problem of this specific `Content-Type`). This protects us
+        # from an attacker uploading something bigger than the available RAM and crashing
+        # the server with a `MemoryError`, or carefully block just enough resources to cause
+        # all other requests to fail.
+        #
+        # FIXME: This can be removed once Twisted releases a fix and we update to a
+        # version that is patched
+        # See: https://github.com/element-hq/synapse/security/advisories/GHSA-rfq8-j7rh-8hf2
         if command == b"POST":
             ctype = self.requestHeaders.getRawHeaders(b"content-type")
             if ctype and b"multipart/form-data" in ctype[0]:
-                self.method, self.uri = command, path
-                self.clientproto = version
+                logger.warning(
+                    "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
+                    self.client,
+                    self.get_method(),
+                    self.get_redacted_uri(),
+                )
+
                 self.code = HTTPStatus.UNSUPPORTED_MEDIA_TYPE.value
                 self.code_message = bytes(
                     HTTPStatus.UNSUPPORTED_MEDIA_TYPE.phrase, "ascii"
                 )
-                self.responseHeaders.setRawHeaders(b"content-length", [b"0"])
 
-                logger.warning(
-                    "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
-                    self.client,
-                    command,
-                    path,
-                )
+                # FIXME: Return a better error response here similar to the
+                # `error_response_json` returned in other code paths here.
+                self.responseHeaders.setRawHeaders(b"Content-Length", [b"0"])
                 self.write(b"")
                 self.loseConnection()
                 return
