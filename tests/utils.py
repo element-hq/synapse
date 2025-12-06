@@ -198,7 +198,9 @@ def default_config(
         "rc_invites": {
             "per_room": {"per_second": 10000, "burst_count": 10000},
             "per_user": {"per_second": 10000, "burst_count": 10000},
+            "per_issuer": {"per_second": 10000, "burst_count": 10000},
         },
+        "rc_room_creation": {"per_second": 10000, "burst_count": 10000},
         "rc_3pid_validation": {"per_second": 10000, "burst_count": 10000},
         "rc_presence": {"per_user": {"per_second": 10000, "burst_count": 10000}},
         "saml2_enabled": False,
