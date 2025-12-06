@@ -14,7 +14,7 @@
 
 
 import logging
-from typing import TYPE_CHECKING, Mapping, cast
+from typing import TYPE_CHECKING, AbstractSet, Mapping, cast
 
 import attr
 
@@ -26,13 +26,17 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_in_list_sql_clause,
 )
+from synapse.storage.engines import PostgresEngine
 from synapse.types import MultiWriterStreamToken, RoomStreamToken
 from synapse.types.handlers.sliding_sync import (
+    LAZY_MEMBERS_UPDATE_INTERVAL,
     HaveSentRoom,
     HaveSentRoomFlag,
     MutablePerConnectionState,
     PerConnectionState,
+    RoomLazyMembershipChanges,
     RoomStatusMap,
     RoomSyncConfig,
 )
@@ -373,6 +377,13 @@ class SlidingSyncStore(SQLBaseStore):
             value_values=values,
         )
 
+        self._persist_sliding_sync_connection_lazy_members_txn(
+            txn,
+            connection_key,
+            connection_position,
+            per_connection_state.room_lazy_membership,
+        )
+
         return connection_position
 
     @cached(iterable=True, max_entries=100000)
@@ -445,6 +456,23 @@ class SlidingSyncStore(SQLBaseStore):
             WHERE connection_key = ? AND connection_position != ?
         """
         txn.execute(sql, (connection_key, connection_position))
+
+        # Move any lazy membership entries for this connection position to have
+        # `NULL` connection position, indicating that it applies to all future
+        # positions on this connection. This is safe because we have deleted all
+        # other (potentially forked) connection positions, and so all future
+        # positions in this connection will be a continuation of the current
+        # position. Thus any lazy membership entries we have sent down will still
+        # be valid.
+        self.db_pool.simple_update_txn(
+            txn,
+            table="sliding_sync_connection_lazy_members",
+            keyvalues={
+                "connection_key": connection_key,
+                "connection_position": connection_position,
+            },
+            updatevalues={"connection_position": None},
+        )
 
         # Fetch and create a mapping from required state ID to the actual
         # required state for the connection.
@@ -525,7 +553,158 @@ class SlidingSyncStore(SQLBaseStore):
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             room_configs=room_configs,
+            room_lazy_membership={},
         )
+
+    async def get_sliding_sync_connection_lazy_members(
+        self,
+        connection_position: int,
+        room_id: str,
+        user_ids: AbstractSet[str],
+    ) -> Mapping[str, int]:
+        """Get which user IDs in the room we have previously sent lazy
+        membership for.
+
+        Args:
+            connection_position: The sliding sync connection position.
+            room_id: The room ID to get lazy members for.
+            user_ids: The user IDs to check whether we've previously sent
+                because of lazy membership.
+
+        Returns:
+            The mapping of user IDs to the last seen timestamp for those user
+            IDs. Only includes user IDs that we have previously sent lazy
+            membership for, and so may be a subset of the `user_ids` passed in.
+        """
+
+        def get_sliding_sync_connection_lazy_members_txn(
+            txn: LoggingTransaction,
+        ) -> Mapping[str, int]:
+            user_clause, user_args = make_in_list_sql_clause(
+                txn.database_engine, "user_id", user_ids
+            )
+
+            # Fetch all the lazy membership entries for the given connection,
+            # room and user IDs. We don't have the `connection_key` here, so we
+            # join against `sliding_sync_connection_positions` to get it.
+            #
+            # Beware that there are two `connection_position` columns in the
+            # query which are different, the one in
+            # `sliding_sync_connection_positions` is the one we match to get the
+            # connection_key, whereas the one in
+            # `sliding_sync_connection_lazy_members` is what we filter against
+            # (it may be null or the same as the one passed in).
+            sql = f"""
+                SELECT user_id, members.connection_position, last_seen_ts
+                FROM sliding_sync_connection_lazy_members AS members
+                INNER JOIN sliding_sync_connection_positions AS pos USING (connection_key)
+                WHERE pos.connection_position = ? AND room_id = ? AND {user_clause}
+            """
+
+            txn.execute(sql, (connection_position, room_id, *user_args))
+
+            # Filter out any cache entries that only apply to forked connection
+            # positions. Entries with `NULL` connection position apply to all
+            # positions on the connection.
+            return {
+                user_id: last_seen_ts
+                for user_id, db_connection_position, last_seen_ts in txn
+                if db_connection_position == connection_position
+                or db_connection_position is None
+            }
+
+        return await self.db_pool.runInteraction(
+            "get_sliding_sync_connection_lazy_members",
+            get_sliding_sync_connection_lazy_members_txn,
+            db_autocommit=True,  # Avoid transaction for single read
+        )
+
+    def _persist_sliding_sync_connection_lazy_members_txn(
+        self,
+        txn: LoggingTransaction,
+        connection_key: int,
+        new_connection_position: int,
+        all_changes: dict[str, RoomLazyMembershipChanges],
+    ) -> None:
+        """Persist that we have sent lazy membership for the given user IDs."""
+
+        now = self.clock.time_msec()
+
+        # Figure out which cache entries to add or update.
+        #
+        # These are either a) new entries we've never sent before (i.e. with a
+        # None last_seen_ts), or b) where the `last_seen_ts` is old enough that
+        # we want to update it.
+        #
+        # We don't update the timestamp every time to avoid hammering the DB
+        # with writes, and we don't need the timestamp to be precise. It is used
+        # to evict old entries that haven't been used in a while.
+        to_update: list[tuple[str, str]] = []
+        for room_id, room_changes in all_changes.items():
+            for (
+                user_id,
+                last_seen_ts,
+            ) in room_changes.returned_user_id_to_last_seen_ts_map.items():
+                if last_seen_ts is None:
+                    # We've never sent this user before, so we need to record that
+                    # we've sent it at the new connection position.
+                    to_update.append((room_id, user_id))
+                elif last_seen_ts + LAZY_MEMBERS_UPDATE_INTERVAL.as_millis() < now:
+                    # We last saw this user over
+                    # `LAZY_MEMBERS_UPDATE_INTERVAL` ago, so we update the
+                    # timestamp (c.f. comment above).
+                    to_update.append((room_id, user_id))
+
+        if to_update:
+            # Upsert the new/updated entries.
+            #
+            # Ignore conflicts where the existing entry has a different
+            # connection position (i.e. from a forked connection position). This
+            # may mean that we lose some updates, but that's acceptable as this
+            # is a cache and its fine for it to *not* include rows. (Downstream
+            # this will cause us to maybe send a few extra lazy members down
+            # sync, but we're allowed to send extra members).
+            sql = """
+                INSERT INTO sliding_sync_connection_lazy_members
+                (connection_key, connection_position, room_id, user_id, last_seen_ts)
+                VALUES {value_placeholder}
+                ON CONFLICT (connection_key, room_id, user_id)
+                DO UPDATE SET last_seen_ts = EXCLUDED.last_seen_ts
+                WHERE sliding_sync_connection_lazy_members.connection_position IS NULL
+                    OR sliding_sync_connection_lazy_members.connection_position = EXCLUDED.connection_position
+            """
+
+            args = [
+                (connection_key, new_connection_position, room_id, user_id, now)
+                for room_id, user_id in to_update
+            ]
+
+            if isinstance(self.database_engine, PostgresEngine):
+                sql = sql.format(value_placeholder="?")
+                txn.execute_values(sql, args, fetch=False)
+            else:
+                sql = sql.format(value_placeholder="(?, ?, ?, ?, ?)")
+                txn.execute_batch(sql, args)
+
+        # Remove any invalidated entries.
+        to_remove: list[tuple[str, str]] = []
+        for room_id, room_changes in all_changes.items():
+            for user_id in room_changes.invalidated_user_ids:
+                to_remove.append((room_id, user_id))
+
+        if to_remove:
+            # We don't try and match on connection position here: it's fine to
+            # remove it from all forks. This is a cache so it's fine to expire
+            # arbitrary entries, the worst that happens is we send a few extra
+            # lazy members down sync.
+            self.db_pool.simple_delete_many_batch_txn(
+                txn,
+                table="sliding_sync_connection_lazy_members",
+                keys=("connection_key", "room_id", "user_id"),
+                values=[
+                    (connection_key, room_id, user_id) for room_id, user_id in to_remove
+                ],
+            )
 
     @wrap_as_background_process("delete_old_sliding_sync_connections")
     async def delete_old_sliding_sync_connections(self) -> None:
@@ -554,6 +733,8 @@ class PerConnectionStateDB:
     serialized to strings.
 
     When persisting this *only* contains updates to the state.
+
+    The `room_lazy_membership` field is only used when persisting (not reading from the database).
     """
 
     last_used_ts: int | None
@@ -563,6 +744,8 @@ class PerConnectionStateDB:
     account_data: "RoomStatusMap[str]"
 
     room_configs: Mapping[str, "RoomSyncConfig"]
+
+    room_lazy_membership: dict[str, RoomLazyMembershipChanges]
 
     @staticmethod
     async def from_state(
@@ -618,6 +801,7 @@ class PerConnectionStateDB:
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             room_configs=per_connection_state.room_configs.maps[0],
+            room_lazy_membership=per_connection_state.room_lazy_membership,
         )
 
     async def to_state(self, store: "DataStore") -> "PerConnectionState":

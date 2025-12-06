@@ -14,7 +14,6 @@ import sqlglot.expressions
 
 SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
 
-
 # The base branch we want to check against. We use the main development branch
 # on the assumption that is what we are developing against.
 DEVELOP_BRANCH = "develop"
