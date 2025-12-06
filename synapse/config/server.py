@@ -175,7 +175,7 @@ DEFAULT_IP_RANGE_BLOCKLIST = [
     "fec0::/10",
 ]
 
-DEFAULT_ROOM_VERSION = "10"
+DEFAULT_ROOM_VERSION = "11"
 
 ROOM_COMPLEXITY_TOO_GREAT = (
     "Your homeserver is unable to join rooms this large or complex. "
