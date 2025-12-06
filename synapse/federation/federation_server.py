@@ -51,7 +51,10 @@ from synapse.api.errors import (
     SynapseError,
     UnsupportedRoomVersionError,
 )
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
+from synapse.api.room_versions import (
+    KNOWN_ROOM_VERSIONS,
+    RoomVersion,
+)
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase
 from synapse.events.snapshot import EventPersistencePair
@@ -131,6 +134,8 @@ last_pdu_ts_metric = Gauge(
 # The name of the lock to use when process events in a room received over
 # federation.
 _INBOUND_EVENT_HANDLING_LOCK_NAME = "federation_inbound_pdu"
+
+_UNKNOWN_EVENT_ID = "<Unknown>"
 
 
 class FederationServer(FederationBase):
@@ -448,6 +453,8 @@ class FederationServer(FederationBase):
 
         newest_pdu_ts = 0
 
+        pdu_results = {}
+
         for p in transaction.pdus:
             # FIXME (richardv): I don't think this works:
             #  https://github.com/matrix-org/synapse/issues/8429
@@ -462,7 +469,7 @@ class FederationServer(FederationBase):
             # We try and pull out an event ID so that if later checks fail we
             # can log something sensible. We don't mandate an event ID here in
             # case future event formats get rid of the key.
-            possible_event_id = p.get("event_id", "<Unknown>")
+            possible_event_id = p.get("event_id", _UNKNOWN_EVENT_ID)
 
             # Now we get the room ID so that we can check that we know the
             # version of the room.
@@ -487,16 +494,28 @@ class FederationServer(FederationBase):
 
             try:
                 event = event_from_pdu_json(p, room_version)
-            except SynapseError as e:
-                logger.info("Ignoring PDU for failing to deserialize: %s", e)
+            except Exception as e:
+                # We can only provide feedback to the federating server if we can
+                # determine what the `event_id` is but since we failed to parse the
+                # event, we can't derive the `event_id` so there is nothing to use as
+                # the `pdu_results` key. Best we can do is just log for our own record
+                # and move on.
+
+                # If an `event_id` happened to be provided in the
+                # event dictionary, then use that.
+                if possible_event_id != _UNKNOWN_EVENT_ID:
+                    pdu_results[possible_event_id] = {
+                        "error": f"Failed to convert JSON into event: {e}"
+                    }
+                logger.warning(
+                    f"Failed to parse event {possible_event_id} in transaction from {origin}, due to: {e}"
+                )
                 continue
 
             pdus_by_room.setdefault(room_id, []).append(event)
 
             if event.origin_server_ts > newest_pdu_ts:
                 newest_pdu_ts = event.origin_server_ts
-
-        pdu_results = {}
 
         # we can process different rooms in parallel (which is useful if they
         # require callouts to other servers to fetch missing events), but

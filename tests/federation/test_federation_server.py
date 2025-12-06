@@ -27,11 +27,12 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.errors import FederationError
+from synapse.api.errors import FederationError, NotFoundError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import EventBase, make_event_from_dict
+from synapse.events.builder import EventBuilder
 from synapse.federation.federation_base import event_from_pdu_json
 from synapse.http.types import QueryParams
 from synapse.logging.context import LoggingContext
@@ -92,6 +93,79 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
         )
         self.assertEqual(500, channel.code, channel.result)
+
+    def test_accept_valid_pdus_and_ignore_invalid(self) -> None:
+        """
+        Test to make sure that old v1/v2 formatted events (that include `event_id`) are
+        rejected from a newer room version that don't support it but we still accept
+        properly formatted/valid events from the same batch.
+        """
+        user = self.register_user("user1", "test")
+        tok = self.login("user1", "test")
+        room_id = self.helper.create_room_as("user1", tok=tok)
+
+        def builder(message: str) -> EventBuilder:
+            return self.hs.get_event_builder_factory().for_room_version(
+                RoomVersions.V10,
+                {
+                    "type": EventTypes.Message,
+                    "sender": user,
+                    "room_id": room_id,
+                    "content": {"body": message, "msgtype": "m.text"},
+                },
+            )
+
+        def make_event(message: str) -> EventBase:
+            event, _ = self.get_success(
+                self.hs.get_event_creation_handler().create_new_client_event(
+                    builder(message),
+                )
+            )
+            return event
+
+        event1 = make_event("event1")
+        event2 = make_event("event2")
+        event3 = make_event("event3")
+        event1_json = event1.get_pdu_json()
+        event2_json = event2.get_pdu_json()
+        event3_json = event3.get_pdu_json()
+
+        # Purposely adding `event_id` that shouldn't be there
+        event2_json["event_id"] = event2.event_id
+
+        channel = self.make_signed_federation_request(
+            "PUT",
+            "/_matrix/federation/v1/send/txn",
+            {"pdus": [event1_json, event2_json, event3_json]},
+        )
+        body = channel.json_body
+        # Ensure the response indicates an error for the corrupt event
+        # and that it indicates success for valid events
+        pdus: JsonDict = body["pdus"]
+        self.assertIncludes(
+            set(pdus.keys()),
+            {event1.event_id, event2.event_id, event3.event_id},
+            exact=True,
+        )
+        self.assertEqual(pdus[event1.event_id], {})
+        self.assertNotEqual(pdus[event2.event_id]["error"], "")
+        self.assertEqual(pdus[event3.event_id], {})
+
+        # Make sure other valid events from the send transaction were persisted successfully
+        self.get_success(
+            self.hs.get_storage_controllers().main.get_event(event1.event_id)
+        )
+
+        # Make sure the corrupt event isn't persisted
+        self.get_failure(
+            self.hs.get_storage_controllers().main.get_event(event2.event_id),
+            NotFoundError,
+        )
+
+        # Verify that we continue looking at events that come after the corrupted one
+        self.get_success(
+            self.hs.get_storage_controllers().main.get_event(event3.event_id)
+        )
 
 
 def _create_acl_event(content: JsonDict) -> EventBase:
