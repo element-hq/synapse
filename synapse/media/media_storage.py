@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 from contextlib import closing
 from io import BytesIO
 from types import TracebackType
@@ -49,13 +50,13 @@ from twisted.internet.interfaces import IConsumer
 from synapse.api.errors import NotFoundError
 from synapse.logging.context import defer_to_thread, run_in_background
 from synapse.logging.opentracing import start_active_span, trace, trace_with_opname
-from synapse.media._base import ThreadedFileSender
+from synapse.media.storage_provider import FileStorageProviderBackend
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.file_consumer import BackgroundFileConsumer
 
 from ..types import JsonDict
-from ._base import FileInfo, Responder
+from ._base import FileInfo, Responder, ThreadedFileSender
 from .filepath import MediaFilePaths
 
 if TYPE_CHECKING:
@@ -150,27 +151,30 @@ class SHA256TransparentIOReader:
 
 
 class MediaStorage:
-    """Responsible for storing/fetching files from local sources.
+    """Responsible for storing/fetching files from storage providers.
 
     Args:
         hs
-        local_media_directory: Base path where we store media on disk
         filepaths
         storage_providers: List of StorageProvider that are used to fetch and store files.
+        local_provider: Optional local file storage provider for caching media on disk.
     """
 
     def __init__(
         self,
         hs: "HomeServer",
-        local_media_directory: str,
         filepaths: MediaFilePaths,
         storage_providers: Sequence["StorageProvider"],
+        local_provider: "FileStorageProviderBackend | None" = None,
     ):
         self.hs = hs
         self.reactor = hs.get_reactor()
-        self.local_media_directory = local_media_directory
         self.filepaths = filepaths
         self.storage_providers = storage_providers
+        self.local_provider = local_provider
+        self.local_media_directory: str | None = None
+        if local_provider is not None:
+            self.local_media_directory = local_provider.base_directory
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.clock = hs.get_clock()
 
@@ -205,11 +209,11 @@ class MediaStorage:
         """Async Context manager used to get a file like object to write into, as
         described by file_info.
 
-        Actually yields a 2-tuple (file, fname,), where file is a file
-        like object that can be written to and fname is the absolute path of file
-        on disk.
+        Actually yields a 2-tuple (file, media_filepath,), where file is a file
+        like object that can be written to and media_filepath is the absolute path
+        of file on disk.
 
-        fname can be used to read the contents from after upload, e.g. to
+        media_filepath can be used to read the contents from after upload, e.g. to
         generate thumbnails.
 
         Args:
@@ -217,25 +221,33 @@ class MediaStorage:
 
         Example:
 
-            async with media_storage.store_into_file(info) as (f, fname,):
+            async with media_storage.store_into_file(info) as (f, media_filepath,):
                 # .. write into f ...
         """
 
         path = self._file_info_to_path(file_info)
-        fname = os.path.join(self.local_media_directory, path)
+        is_temp_file = False
 
-        dirname = os.path.dirname(fname)
-        os.makedirs(dirname, exist_ok=True)
+        if self.local_provider:
+            media_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+            os.makedirs(os.path.dirname(media_filepath), exist_ok=True)
 
-        try:
             with start_active_span("writing to main media repo"):
-                with open(fname, "wb") as f:
-                    yield f, fname
+                with open(media_filepath, "wb") as f:
+                    yield f, media_filepath
+        else:
+            # No local provider, write to temp file
+            is_temp_file = True
+            with tempfile.NamedTemporaryFile(delete=False) as f:
+                media_filepath = f.name
+                yield cast(BinaryIO, f), media_filepath
 
-            with start_active_span("writing to other storage providers"):
+        # Spam check and store to other providers (runs for both local and temp file cases)
+        try:
+            with start_active_span("spam checking and writing to storage providers"):
                 spam_check = (
                     await self._spam_checker_module_callbacks.check_media_file_for_spam(
-                        ReadableFileWrapper(self.clock, fname), file_info
+                        ReadableFileWrapper(self.clock, media_filepath), file_info
                     )
                 )
                 if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
@@ -251,17 +263,23 @@ class MediaStorage:
                     with start_active_span(str(provider)):
                         await provider.store_file(path, file_info)
 
+                # If using a temp file, delete it after uploading to storage providers
+                if is_temp_file:
+                    try:
+                        os.remove(media_filepath)
+                    except Exception:
+                        pass
+
         except Exception as e:
             try:
-                os.remove(fname)
+                os.remove(media_filepath)
             except Exception:
                 pass
 
             raise e from None
 
     async def fetch_media(self, file_info: FileInfo) -> Responder | None:
-        """Attempts to fetch media described by file_info from the local cache
-        and configured storage providers.
+        """Attempts to fetch media described by file_info from the configured storage providers.
 
         Args:
             file_info: Metadata about the media file
@@ -269,6 +287,18 @@ class MediaStorage:
         Returns:
             Returns a Responder if the file was found, otherwise None.
         """
+        # URL cache files are stored locally and should not go through storage providers
+        if file_info.url_cache:
+            path = self._file_info_to_path(file_info)
+            if self.local_provider:
+                local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+                if os.path.isfile(local_path):
+                    # Import here to avoid circular import
+                    from .media_storage import FileResponder
+
+                    return FileResponder(self.hs, open(local_path, "rb"))
+            return None
+
         paths = [self._file_info_to_path(file_info)]
 
         # fallback for remote thumbnails with no method in the filename
@@ -283,16 +313,18 @@ class MediaStorage:
                 )
             )
 
-        for path in paths:
-            local_path = os.path.join(self.local_media_directory, path)
-            if os.path.exists(local_path):
-                logger.debug("responding with local file %s", local_path)
-                return FileResponder(self.hs, open(local_path, "rb"))
-            logger.debug("local file %s did not exist", local_path)
+        # Check local provider first, then other storage providers
+        if self.local_provider:
+            for path in paths:
+                res: Any = await self.local_provider.fetch(path, file_info)
+                if res:
+                    logger.debug("Streaming %s from %s", path, self.local_provider)
+                    return res
+                logger.debug("%s not found on %s", path, self.local_provider)
 
         for provider in self.storage_providers:
             for path in paths:
-                res: Any = await provider.fetch(path, file_info)
+                res = await provider.fetch(path, file_info)
                 if res:
                     logger.debug("Streaming %s from %s", path, provider)
                     return res
@@ -301,50 +333,93 @@ class MediaStorage:
         return None
 
     @trace
-    async def ensure_media_is_in_local_cache(self, file_info: FileInfo) -> str:
-        """Ensures that the given file is in the local cache. Attempts to
-        download it from storage providers if it isn't.
+    @contextlib.asynccontextmanager
+    async def ensure_media_is_in_local_cache(
+        self, file_info: FileInfo
+    ) -> AsyncIterator[str]:
+        """Async context manager that ensures the given file is in the local cache.
+        Attempts to download it from storage providers if it isn't.
+
+        When no local provider is configured, the file is downloaded to a temporary
+        location and automatically cleaned up when the context manager exits.
 
         Args:
             file_info
 
-        Returns:
+        Yields:
             Full path to local file
+
+        Example:
+            async with media_storage.ensure_media_is_in_local_cache(file_info) as path:
+                # use path to read the file
         """
         path = self._file_info_to_path(file_info)
-        local_path = os.path.join(self.local_media_directory, path)
-        if os.path.exists(local_path):
-            return local_path
+        if self.local_provider:
+            local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+            if os.path.exists(local_path):
+                yield local_path
+                return
 
-        # Fallback for paths without method names
-        # Should be removed in the future
-        if file_info.thumbnail and file_info.server_name:
-            legacy_path = self.filepaths.remote_media_thumbnail_rel_legacy(
-                server_name=file_info.server_name,
-                file_id=file_info.file_id,
-                width=file_info.thumbnail.width,
-                height=file_info.thumbnail.height,
-                content_type=file_info.thumbnail.type,
-            )
-            legacy_local_path = os.path.join(self.local_media_directory, legacy_path)
-            if os.path.exists(legacy_local_path):
-                return legacy_local_path
+            # Fallback for paths without method names
+            # Should be removed in the future
+            if file_info.thumbnail and file_info.server_name:
+                legacy_path = self.filepaths.remote_media_thumbnail_rel_legacy(
+                    server_name=file_info.server_name,
+                    file_id=file_info.file_id,
+                    width=file_info.thumbnail.width,
+                    height=file_info.thumbnail.height,
+                    content_type=file_info.thumbnail.type,
+                )
+                legacy_local_path = os.path.join(
+                    self.local_media_directory,  # type: ignore[arg-type]
+                    legacy_path,
+                )
+                if os.path.exists(legacy_local_path):
+                    yield legacy_local_path
+                    return
 
-        dirname = os.path.dirname(local_path)
-        os.makedirs(dirname, exist_ok=True)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
-        for provider in self.storage_providers:
-            res: Any = await provider.fetch(path, file_info)
-            if res:
-                with res:
-                    consumer = BackgroundFileConsumer(
-                        open(local_path, "wb"), self.reactor
-                    )
-                    await res.write_to_consumer(consumer)
-                    await consumer.wait()
-                return local_path
+            for provider in self.storage_providers:
+                remote_res: Any = await provider.fetch(path, file_info)
+                if remote_res:
+                    with remote_res:
+                        consumer = BackgroundFileConsumer(
+                            open(local_path, "wb"), self.reactor
+                        )
+                        await remote_res.write_to_consumer(consumer)
+                        await consumer.wait()
+                    yield local_path
+                    return
 
-        raise NotFoundError()
+            raise NotFoundError()
+        else:
+            # No local provider, download to temp file and clean up after use
+            for provider in self.storage_providers:
+                res: Any = await provider.fetch(path, file_info)
+                if res:
+                    temp_path = None
+                    try:
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=os.path.splitext(path)[1]
+                        ) as tmp:
+                            temp_path = tmp.name
+                        with res:
+                            consumer = BackgroundFileConsumer(
+                                open(temp_path, "wb"), self.reactor
+                            )
+                            await res.write_to_consumer(consumer)
+                            await consumer.wait()
+                        yield temp_path
+                    finally:
+                        if temp_path:
+                            try:
+                                os.remove(temp_path)
+                            except Exception:
+                                pass
+                    return
+
+            raise NotFoundError()
 
     @trace
     def _file_info_to_path(self, file_info: FileInfo) -> str:
