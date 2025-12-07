@@ -232,6 +232,18 @@ def _fetch_urls(tree: "etree._Element", tag_name: str) -> list[str]:
     return results
 
 
+def _should_reject_description(description: str) -> bool:
+    """
+    Determines whether or not this description should be preferred over the
+    og:description. Certain web apps with client-side JavaScript will serve
+    stub documents via oembed that are intended to be filled in by client-
+    side javascript that synapse won't execute; in these cases, the
+    og:description will actually be more complete.
+    """
+
+    return description.startswith("Post by @") and "View on Mastodon" in description
+
+
 def calc_description_and_urls(open_graph_response: JsonDict, html_body: str) -> None:
     """
     Calculate description for an HTML document.
@@ -273,5 +285,5 @@ def calc_description_and_urls(open_graph_response: JsonDict, html_body: str) -> 
         open_graph_response["og:video"] = video_urls[0]
 
     description = parse_html_description(tree)
-    if description:
+    if description and not _should_reject_description(description):
         open_graph_response["og:description"] = description
