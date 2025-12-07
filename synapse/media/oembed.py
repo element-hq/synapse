@@ -37,6 +37,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Certain providers supply a stub description less useful than Open Graph
+REJECT_PROVIDER_DESCRIPTIONS = {"Tumblr"}
+
+
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class OEmbedResult:
     # The Open Graph result (converted from the oEmbed result).
@@ -196,7 +200,7 @@ class OEmbedProvider:
         if oembed_type == "rich":
             html_str = oembed.get("html")
             if isinstance(html_str, str):
-                calc_description_and_urls(open_graph_response, html_str)
+                calc_description_and_urls(open_graph_response, html_str, provider_name)
 
         elif oembed_type == "photo":
             # If this is a photo, use the full image, not the thumbnail.
@@ -208,7 +212,9 @@ class OEmbedProvider:
             open_graph_response["og:type"] = "video.other"
             html_str = oembed.get("html")
             if html_str and isinstance(html_str, str):
-                calc_description_and_urls(open_graph_response, oembed["html"])
+                calc_description_and_urls(
+                    open_graph_response, oembed["html"], provider_name
+                )
             for size in ("width", "height"):
                 val = oembed.get(size)
                 if type(val) is int:  # noqa: E721
@@ -232,7 +238,7 @@ def _fetch_urls(tree: "etree._Element", tag_name: str) -> list[str]:
     return results
 
 
-def _should_reject_description(description: str) -> bool:
+def _should_reject_description(description: str, provider_name: str | None) -> bool:
     """
     Determines whether or not this description should be preferred over the
     og:description. Certain web apps with client-side JavaScript will serve
@@ -241,10 +247,16 @@ def _should_reject_description(description: str) -> bool:
     og:description will actually be more complete.
     """
 
-    return description.startswith("Post by @") and "View on Mastodon" in description
+    return provider_name in REJECT_PROVIDER_DESCRIPTIONS or (
+        # Mastodon posts can't be identified by provider, since the domain is
+        # used as the provider, so identify these via content instead.
+        description.startswith("Post by @") and "View on Mastodon" in description
+    )
 
 
-def calc_description_and_urls(open_graph_response: JsonDict, html_body: str) -> None:
+def calc_description_and_urls(
+    open_graph_response: JsonDict, html_body: str, provider_name: str | None
+) -> None:
     """
     Calculate description for an HTML document.
 
@@ -285,5 +297,5 @@ def calc_description_and_urls(open_graph_response: JsonDict, html_body: str) -> 
         open_graph_response["og:video"] = video_urls[0]
 
     description = parse_html_description(tree)
-    if description and not _should_reject_description(description):
+    if description and not _should_reject_description(description, provider_name):
         open_graph_response["og:description"] = description

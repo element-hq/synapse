@@ -1,1 +1,1 @@
-Improved previews for Mastodon posts.
+Improved previews for Mastodon and Tumblr posts.
