@@ -191,6 +191,7 @@ override-dependencies = [
     "pyparsing>=2.4",  # via packaging
     "pyrsistent>=0.18.0",  # via jsonschema
     "pytz>=2018.3",  # via pysaml2
+    "requests>=2.16.0", # 2.16.0+ no longer vendors urllib3, avoiding Python 3.10+ incompatibility
     "thrift>=0.10",  # via jaeger-client
     "tornado>=6.0",  # via jaeger-client
     "urllib3>=1.26.5", # via treq; 1.26.5 fixes Python 3.10+ collections.abc compatibility
