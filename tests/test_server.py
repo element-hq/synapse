@@ -242,7 +242,7 @@ class JsonResourceTests(unittest.TestCase):
         self.reactor.advance(0.1)
         self.assertEqual(channel.code, 400)
 
-    def test_content_length_larger_than_content(self) -> None:
+    def test_content_smaller_than_content_length(self) -> None:
         """
         HTTP requests with content size smaller than Content-Length should be rejected with 400.
         """
