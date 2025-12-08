@@ -455,6 +455,7 @@ jobs:
       # minimum version of all dependencies, both those explicitly specified and those
       # implicitly brought in by the explicit dependencies. 
       - run: pip install uv
+      - run: uv venv
       - run: uv pip install --resolution=lowest -e .[all,test]
       - run: cat pyproject.toml
 
