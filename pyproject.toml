@@ -199,7 +199,6 @@ override-dependencies = [
     "thrift>=0.10",  # via jaeger-client
     "tornado>=6.0",  # via jaeger-client
     "urllib3>=1.26.5", # via treq; 1.26.5 fixes Python 3.10+ collections.abc compatibility
-    "zope-interface>=6.2", # via twisted
 ]
 
 
