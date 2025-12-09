@@ -42,7 +42,8 @@ dependencies = [
     "Twisted[tls]>=21.2.0",
     "treq>=21.5.0",
     # Twisted has required pyopenssl 16.0 since about Twisted 16.6.
-    "pyOpenSSL>=21.0.0",
+    # pyOpenSSL 16.2.0 fixes compatibility with OpenSSL 1.1.0. 
+    "pyOpenSSL>=16.2.0",
     "PyYAML>=5.3",
     "pyasn1>=0.1.9",
     "pyasn1-modules>=0.0.7",
@@ -110,7 +111,7 @@ oidc = ["authlib>=0.15.1"]
 # `systemd.journal.JournalHandler`, as is documented in
 # `contrib/systemd/log_config.yaml`.
 systemd = ["systemd-python>=231"]
-url-preview = ["lxml>=4.9.1"]
+url-preview = ["lxml>=4.6.3"]
 sentry = ["sentry-sdk>=0.7.2"]
 opentracing = ["jaeger-client>=4.2.0", "opentracing>=2.2.0"]
 jwt = ["authlib"]
@@ -143,7 +144,7 @@ all = [
     # oidc and jwt
     "authlib>=0.15.1",
     # url-preview
-    "lxml>=4.9.1",
+    "lxml>=4.6.3",
     # sentry
     "sentry-sdk>=0.7.2",
     # opentracing
@@ -151,7 +152,7 @@ all = [
     # redis
     "txredisapi>=1.4.7", "hiredis",
     # cache-memory
-    # 1.0 added support for python 3.10
+    # 1.0 added support for python 3.10, our current minimum supported python version
     "pympler>=1.0",
     # omitted:
     #   - test: it's useful to have this separate from dev deps in the olddeps job
