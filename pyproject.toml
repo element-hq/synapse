@@ -180,11 +180,14 @@ synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
 update_synapse_database = "synapse._scripts.update_synapse_database:main"
 
 [tool.uv]
+# From the uv docs (https://docs.astral.sh/uv/concepts/resolution/#dependency-overrides):
+#   As with constraints, overrides do not add a dependency on the package and only take
+#   effect if the package is requested in a direct or transitive dependency.
 override-dependencies = [
     # Transitive dependency constraints
     # These dependencies aren't directly required by Syanpse.
     # However, in order for Synapse to build, Synapse requires a higher minimum version
-    # for these dependencies than the direct dependency that pulls them in specifies.
+    # for these dependencies than the minimum specified by the direct dependency.
     "cffi>=1.15", # via cryptography
     "defusedxml>=0.7.1", # via PIL
     "hiredis>=0.3", # via hiredis
