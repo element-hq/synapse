@@ -451,6 +451,7 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Prepare old deps
       # Note: we install using `uv` here, not poetry or pip to allow us to test with the
       # minimum version of all dependencies, both those explicitly specified and those
       # implicitly brought in by the explicit dependencies. 
