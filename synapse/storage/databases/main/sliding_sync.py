@@ -736,8 +736,6 @@ class PerConnectionStateDB:
     serialized to strings.
 
     When persisting this *only* contains updates to the state.
-
-    The `room_lazy_membership` field is only used when persisting (not reading from the database).
     """
 
     last_used_ts: int | None
@@ -749,6 +747,8 @@ class PerConnectionStateDB:
     room_configs: Mapping[str, "RoomSyncConfig"]
 
     room_lazy_membership: dict[str, RoomLazyMembershipChanges]
+    """Lazy membership changes to persist alongside this state. Only used
+    when persisting."""
 
     @staticmethod
     async def from_state(

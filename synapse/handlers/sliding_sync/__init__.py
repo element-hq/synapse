@@ -1581,27 +1581,24 @@ class SlidingSyncHandler:
 
 @attr.s(auto_attribs=True)
 class _RequiredStateChangesReturn:
-    """Return type for _required_state_changes.
-
-    Attributes:
-        required_state_map_change: The updated required state map to store in
-            the room config, or None if there is no change.
-        added_state_filter: The state filter to use to fetch any additional
-            current state that needs to be returned to the client.
-        users_to_add_to_lazy_cache: The set of user IDs we should add to
-            the lazy members cache that we had previously returned. Handles
-            the case where a user was previously sent down explicitly but is
-            now being lazy loaded.
-        lazy_members_invalidated: The set of user IDs whose membership has
-            changed but we didn't send down, so we need to invalidate them from
-            the cache.
-    """
+    """Return type for _required_state_changes."""
 
     required_state_map_change: Mapping[str, AbstractSet[str]] | None
+    """The updated required state map to store in the room config, or None if
+    there is no change."""
+
     added_state_filter: StateFilter
+    """The state filter to use to fetch any additional current state that needs
+    to be returned to the client."""
 
     users_to_add_to_lazy_cache: AbstractSet[str] = frozenset()
+    """The set of user IDs we should add to the lazy members cache that we had
+    previously returned. Handles the case where a user was previously sent down
+    explicitly but is now being lazy loaded."""
+
     lazy_members_invalidated: AbstractSet[str] = frozenset()
+    """The set of user IDs whose membership has changed but we didn't send down,
+    so we need to invalidate them from the cache."""
 
 
 def _required_state_changes(

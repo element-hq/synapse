@@ -902,29 +902,25 @@ class PerConnectionState:
 
 @attr.s(auto_attribs=True)
 class RoomLazyMembershipChanges:
-    """Changes to lazily-loaded room memberships for a given room.
-
-    Attributes:
-        returned_user_id_to_last_seen_ts_map: Map from user ID to timestamp for
-            users whose membership we have lazily loaded in this room an
-            request. The timestamp indicates the time we previously needed the
-            membership, or None if we sent it down for the first time in this
-            request.
-
-            We track a *rough* `last_seen_ts` for each user in each room which
-            indicates when we last would've sent their member state to the
-            client. This is used so that we can remove members which haven't
-            been seen for a while to save space.
-
-            Note: this will include users whose membership we would have sent
-            down but didn't due to us having previously sent them.
-        invalidated_user_ids: Set of user IDs whose latest membership we have
-            *not* sent down
-    """
+    """Changes to lazily-loaded room memberships for a given room."""
 
     returned_user_id_to_last_seen_ts_map: Mapping[str, int | None] = attr.Factory(dict)
+    """Map from user ID to timestamp for users whose membership we have lazily
+    loaded in this room an request. The timestamp indicates the time we
+    previously needed the membership, or None if we sent it down for the first
+    time in this request.
+
+    We track a *rough* `last_seen_ts` for each user in each room which indicates
+    when we last would've sent their member state to the client. This is used so
+    that we can remove members which haven't been seen for a while to save
+    space.
+
+    Note: this will include users whose membership we would have sent down but
+    didn't due to us having previously sent them.
+    """
 
     invalidated_user_ids: AbstractSet[str] = attr.Factory(set)
+    """Set of user IDs whose latest membership we have *not* sent down"""
 
     def has_updates(self, clock: Clock) -> bool:
         """Check if there are any updates to the lazy membership changes.
