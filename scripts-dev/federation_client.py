@@ -145,7 +145,7 @@ def request(
     print("Requesting %s" % dest, file=sys.stderr)
 
     s = requests.Session()
-    s.mount("matrix-federation://", MatrixConnectionAdapter())
+    s.mount("matrix-federation://", MatrixConnectionAdapter(verify=verify_tls))
 
     headers: dict[str, str] = {
         "Authorization": authorization_headers[0],
@@ -267,6 +267,10 @@ def read_args_from_config(args: argparse.Namespace) -> None:
 
 
 class MatrixConnectionAdapter(HTTPAdapter):
+    def __init__(self, verify=True):
+        self.verify = verify
+        super().__init__()
+
     def send(
         self,
         request: PreparedRequest,
@@ -280,7 +284,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
         assert isinstance(request.url, str)
         parsed = urlparse.urlsplit(request.url)
         server_name = parsed.netloc
-        well_known = self._get_well_known(parsed.netloc)
+        well_known = self._get_well_known(parsed.netloc, verify_tls=self.verify)
 
         if well_known:
             server_name = well_known
@@ -368,7 +372,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
             return server_name, 8448, server_name
 
     @staticmethod
-    def _get_well_known(server_name: str) -> str | None:
+    def _get_well_known(server_name: str, verify_tls: bool = True) -> str | None:
         if ":" in server_name:
             # explicit port, or ipv6 literal. Either way, no .well-known
             return None
@@ -379,7 +383,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
         print(f"fetching {uri}", file=sys.stderr)
 
         try:
-            resp = requests.get(uri)
+            resp = requests.get(uri, verify=verify_tls)
             if resp.status_code != 200:
                 print("%s gave %i" % (uri, resp.status_code), file=sys.stderr)
                 return None
