@@ -257,7 +257,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         invitee_user_id: str,
         unsigned_invite_room_state: list[StrippedStateEvent] | None,
         invite_room_id: str | None = None,
-    ) -> str:
+    ) -> tuple[str, EventBase]:
         """
         Create a fake invite for a remote room and persist it.
 
@@ -323,11 +323,13 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         context = EventContext.for_outlier(self.hs.get_storage_controllers())
         persist_controller = self.hs.get_storage_controllers().persistence
         assert persist_controller is not None
-        self.get_success(persist_controller.persist_event(invite_event, context))
+        persisted_event, _, _ = self.get_success(
+            persist_controller.persist_event(invite_event, context)
+        )
 
         self._remote_invite_count += 1
 
-        return invite_room_id
+        return invite_room_id, persisted_event
 
     def _bump_notifier_wait_for_events(
         self,
@@ -763,7 +765,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         user1_tok = self.login(user1_id, "pass")
 
         # Create a remote room invite (out-of-band membership)
-        room_id = self._create_remote_invite_room_for_user(user1_id, None)
+        room_id, _ = self._create_remote_invite_room_for_user(user1_id, None)
 
         # Make the Sliding Sync request
         sync_body = {
