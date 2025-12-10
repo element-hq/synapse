@@ -322,6 +322,21 @@ class MatrixConnectionAdapter(HTTPAdapter):
         print(
             f"Connecting to {host}:{port} with SNI {ssl_server_name}", file=sys.stderr
         )
+
+        if proxies:
+            scheme = parsed.scheme
+            if isinstance(scheme, bytes):
+                scheme = scheme.decode("utf-8")
+
+            proxy_for_scheme = proxies.get(scheme)
+            if proxy_for_scheme:
+                return self.proxy_manager_for(proxy_for_scheme).connection_from_host(
+                    host,
+                    port=port,
+                    scheme="https",
+                    pool_kwargs={"server_hostname": ssl_server_name},
+                )
+
         return self.poolmanager.connection_from_host(
             host,
             port=port,
