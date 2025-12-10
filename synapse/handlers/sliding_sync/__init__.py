@@ -1901,7 +1901,8 @@ def _required_state_changes(
             request_state_key_lazy = StateValues.LAZY in request_state_keys
             has_lazy = old_state_key_lazy or request_state_key_lazy
 
-            # If a "$LAZY" has been added or removed we always update to match the request.
+            # If a "$LAZY" has been added or removed we always update to match
+            # the request.
             if old_state_key_lazy != request_state_key_lazy:
                 changes[event_type] = request_state_keys
                 continue
