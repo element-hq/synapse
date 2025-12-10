@@ -1177,10 +1177,10 @@ class SlidingSyncHandler:
         # state as well).
         hero_membership_state: StateMap[EventBase] = {}
 
-        # By default, we mark all required user state as being added when lazy
-        # loaded members is enabled.
-        #
-        # We may later update this to account for previously sent members.
+        # By default, we mark all `lazy_load_user_ids` as being added sent down
+        # for the first time in this sync. We later check if we sent any of them
+        # down previously and update `returned_user_id_to_last_seen_ts_map` if
+        # we have.
         returned_user_id_to_last_seen_ts_map = {}
         if lazy_load_room_members:
             returned_user_id_to_last_seen_ts_map = dict.fromkeys(lazy_load_user_ids)
