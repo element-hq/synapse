@@ -4682,8 +4682,9 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # already sent it down before, so we don't need to
                         # request it again.
                         StateFilter.none(),
-                        # We don't add anything as we haven't changed the
-                        # required state yet.
+                        # No relevant state has changed and we don't persist the
+                        # changed required_state_map, so we don't yet move the
+                        # $ME state to the lazy cache.
                         users_to_add_to_lazy_cache=frozenset(),
                         # Nothing to invalidate as there are no existing lazy members.
                         lazy_members_invalidated=frozenset(),
