@@ -1,1 +1,0 @@
-Expire sliding sync connections that are too old or have too much pending data.

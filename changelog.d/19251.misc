@@ -1,1 +1,0 @@
-Fix check of the Rust compiled code being outdated when using source checkout and `.egg-info`.

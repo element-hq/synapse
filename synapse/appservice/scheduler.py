@@ -506,7 +506,7 @@ class _Recoverer:
 
     def recover(self) -> None:
         delay = Duration(seconds=2**self.backoff_counter)
-        logger.info("Scheduling retries on %s in %fs", self.service.id, delay)
+        logger.info("Scheduling retries on %s in %fs", self.service.id, delay.as_secs())
         self.scheduled_recovery = self.clock.call_later(
             delay,
             self.hs.run_as_background_process,

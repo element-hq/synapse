@@ -1,1 +1,0 @@
-Require an experimental feature flag to be enabled in order for the unstable [MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666) endpoint (`/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`) to be available.

@@ -1955,6 +1955,12 @@ class EventCreationHandler:
                 room_alias_str = event.content.get("alias", None)
                 directory_handler = self.hs.get_directory_handler()
                 if room_alias_str and room_alias_str != original_alias:
+                    if not isinstance(room_alias_str, str):
+                        raise SynapseError(
+                            400,
+                            "The alias must be of type string.",
+                            Codes.INVALID_PARAM,
+                        )
                     await self._validate_canonical_alias(
                         directory_handler, room_alias_str, event.room_id
                     )
@@ -1978,6 +1984,12 @@ class EventCreationHandler:
                 new_alt_aliases = set(alt_aliases) - set(original_alt_aliases)
                 if new_alt_aliases:
                     for alias_str in new_alt_aliases:
+                        if not isinstance(alias_str, str):
+                            raise SynapseError(
+                                400,
+                                "Each alt_alias must be of type string.",
+                                Codes.INVALID_PARAM,
+                            )
                         await self._validate_canonical_alias(
                             directory_handler, alias_str, event.room_id
                         )
