@@ -181,7 +181,28 @@ update_synapse_database = "synapse._scripts.update_synapse_database:main"
 packages = [{ include = "synapse" }]
 
 [tool.poetry.build]
+# Compile our rust module when using `poetry install`. This is still required
+# while using `poetry` as the build frontend. Saves the developer from needing
+# to run both:
+#
+# $ poetry install
+# $ maturin develop
 script = "build_rust.py"
+# Create a `setup.py` file which will call the `build` method in our build
+# script.
+#
+# Our build script currently uses the "old" build method, where we define a
+# `build` method and `setup.py` calls it. Poetry developers have mentioned that
+# this will eventually be removed:
+# https://github.com/matrix-org/synapse/pull/14949#issuecomment-1418001859
+#
+# The new build method is defined here:
+# https://python-poetry.org/docs/building-extension-modules/#maturin-build-script
+# but is still marked as "unstable" at the time of writing. This would also
+# bump our minimum `poetry-core` version to 1.5.0.
+#
+# We can just drop this work-around entirely if migrating away from
+# Poetry, thus there's little motivation to update the build script.
 generate-setup-file = true
 
 # Dependencies used for developing Synapse itself.
