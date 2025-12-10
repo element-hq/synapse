@@ -65,7 +65,7 @@ def decode_body(body: bytes | str, uri: str) -> Optional["BeautifulSoup"]:
     from bs4.builder import ParserRejectedMarkup
 
     try:
-        soup = BeautifulSoup(body, "lxml")
+        soup = BeautifulSoup(body, "html.parser")
         # If an empty document is returned, convert to None.
         if not len(soup):
             return None
@@ -291,6 +291,7 @@ def parse_html_description(soup: "BeautifulSoup") -> str | None:
     """
 
     TAGS_TO_REMOVE = {
+        "head",
         "header",
         "nav",
         "aside",
@@ -304,26 +305,19 @@ def parse_html_description(soup: "BeautifulSoup") -> str | None:
         "canvas",
         "img",
         "picture",
-        # etree.Comment is a function which creates an etree._Comment element.
-        # The "tag" attribute of an etree._Comment instance is confusingly the
-        # etree.Comment function instead of a string.
-        # etree.Comment,
-        # XXX
     }
 
     # Split all the text nodes into paragraphs (by splitting on new
     # lines)
     text_nodes = (
         re.sub(r"\s+", "\n", el).strip()
-        for el in _iterate_over_text(
-            cast(Optional["Tag"], soup.find("body")), TAGS_TO_REMOVE
-        )
+        for el in _iterate_over_text(soup, TAGS_TO_REMOVE)
     )
     return summarize_paragraphs(text_nodes)
 
 
 def _iterate_over_text(
-    soup: Optional["Tag"],
+    soup: "BeautifulSoup",
     tags_to_ignore: Iterable[str],
     stack_limit: int = 1024,
 ) -> Generator[str, None, None]:
@@ -331,16 +325,13 @@ def _iterate_over_text(
     skipping text nodes inside certain tags.
 
     Args:
-        tree: The parent element to iterate. Can be None if there isn't one.
+        soup: The parent element to iterate. Can be None if there isn't one.
         tags_to_ignore: Set of tags to ignore
         stack_limit: Maximum stack size limit for depth-first traversal.
             Nodes will be dropped if this limit is hit, which may truncate the
             textual result.
             Intended to limit the maximum working memory when generating a preview.
     """
-
-    if not soup:
-        return
 
     from bs4.element import NavigableString, Tag
 
