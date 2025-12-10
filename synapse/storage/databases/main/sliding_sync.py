@@ -594,6 +594,9 @@ class SlidingSyncStore(SQLBaseStore):
             # connection_key, whereas the one in
             # `sliding_sync_connection_lazy_members` is what we filter against
             # (it may be null or the same as the one passed in).
+            #
+            # FIXME: We should pass in `connection_key` here to avoid the join.
+            # We don't do this currently as the caller doesn't have it handy.
             sql = f"""
                 SELECT user_id, members.connection_position, last_seen_ts
                 FROM sliding_sync_connection_lazy_members AS members
