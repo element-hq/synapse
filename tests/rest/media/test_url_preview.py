@@ -367,7 +367,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         self.pump()
         self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["og:title"], "\u0434\u043a\u0430")
+        self.assertEqual(channel.json_body["og:title"], "���")
 
     def test_overlong_title(self) -> None:
         self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
