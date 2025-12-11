@@ -1272,7 +1272,7 @@ class SlidingSyncHandler:
                 # Add any previously returned explicit memberships to the lazy
                 # loaded table. This happens when a client requested explicit
                 # members and then converted them to lazy loading.
-                for user_id in changes_return.users_to_add_to_lazy_cache:
+                for user_id in changes_return.extra_users_to_add_to_lazy_cache:
                     # We don't know the right timestamp to use here, as we don't
                     # know the last time we would have sent the membership down.
                     # So we don't overwrite it if we have a timestamp already,
@@ -1591,7 +1591,7 @@ class _RequiredStateChangesReturn:
     """The state filter to use to fetch any additional current state that needs
     to be returned to the client."""
 
-    users_to_add_to_lazy_cache: AbstractSet[str] = frozenset()
+    extra_users_to_add_to_lazy_cache: AbstractSet[str] = frozenset()
     """The set of user IDs we should add to the lazy members cache that we had
     previously returned. Handles the case where a user was previously sent down
     explicitly but is now being lazy loaded."""
@@ -1957,5 +1957,5 @@ def _required_state_changes(
         required_state_map_change=new_required_state_map,
         added_state_filter=added_state_filter,
         lazy_members_invalidated=lazy_members_invalidated,
-        users_to_add_to_lazy_cache=users_to_add_to_lazy_cache,
+        extra_users_to_add_to_lazy_cache=users_to_add_to_lazy_cache,
     )
