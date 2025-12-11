@@ -2987,7 +2987,11 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
 
     def test_lazy_loading_room_members_last_seen_ts(self) -> None:
         """Test that the `last_seen_ts` column in
-        `sliding_sync_connection_lazy_members` is correctly kept up to date"""
+        `sliding_sync_connection_lazy_members` is correctly kept up to date.
+
+        We expect that it only gets updated every
+        `LAZY_MEMBERS_UPDATE_INTERVAL`, rather than on every sync.
+        """
 
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
