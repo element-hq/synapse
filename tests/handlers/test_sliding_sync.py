@@ -4507,7 +4507,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We have already sent @user3 down before.
                         #
                         # `@user3:test` is required for lazy loading, but we've
-                        # already sent it down before, so we don't need to
+                        # already sent it down before (due to it being in
+                        # `previous_required_state_map`), so we don't need to
                         # request it again.
                         StateFilter.none(),
                         # Remember the fact that we've sent @user3 down before,
@@ -4523,7 +4524,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We have already sent @user3 down before.
                         #
                         # `@user3:test` is required for lazy loading, but we've
-                        # already sent it down before, so we don't need to
+                        # already sent it down before (due to it being in
+                        # `previous_required_state_map`), so we don't need to
                         # request it again.
                         StateFilter.none(),
                         # Remember the fact that we've sent the users down before.
@@ -4601,14 +4603,15 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     request_lazy_load_user_ids={"@user3:test"},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
-                        # Since an explicit membership was removed we record the
-                        # new required state config and move them to lazy
+                        # Since an explicit membership was removed, we record
+                        # the new required state config and move them to lazy
                         # members.
                         {EventTypes.Member: {StateValues.LAZY}},
                         # We have already sent @user3 down before.
                         #
                         # `@user3:test` is required for lazy loading, but we've
-                        # already sent it down before, so we don't need to
+                        # already sent it down before (due to it being in
+                        # `previous_required_state_map`), so we don't need to
                         # request it again.
                         StateFilter.none(),
                         # Remember the fact that we've sent @user3 down before,
@@ -4625,7 +4628,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We have already sent @user3 down before.
                         #
                         # `@user3:test` is required for lazy loading, but we've
-                        # already sent it down before, so we don't need to
+                        # already sent it down before (due to it being in
+                        # `previous_required_state_map`), so we don't need to
                         # request it again.
                         StateFilter.none(),
                         # Remember the fact that we've sent the users down before.
@@ -4655,15 +4659,16 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     request_lazy_load_user_ids={"@user:test"},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=_RequiredStateChangesReturn(
-                        # Since an explicit membership was removed we record the
-                        # new required state config and move them to lazy
+                        # Since an explicit membership was removed, we record
+                        # the new required state config and move them to lazy
                         # members.
                         {EventTypes.Member: {StateValues.LAZY}},
                         # We have already sent @user down before.
                         #
                         # `@user:test` is required for lazy loading, but we've
-                        # already sent it down before, so we don't need to
-                        # request it again.
+                        # already sent it down before (due to `StateValues.ME`
+                        # being in `previous_required_state_map`), so we don't
+                        # need to request it again.
                         StateFilter.none(),
                         # Remember the fact that we've sent @user down before,
                         # but not @user2 as that has been invalidated.
@@ -4679,8 +4684,9 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We have already sent @user down before.
                         #
                         # `@user:test` is required for lazy loading, but we've
-                        # already sent it down before, so we don't need to
-                        # request it again.
+                        # already sent it down before (due to `StateValues.ME`
+                        # being in `previous_required_state_map`), so we don't
+                        # need to request it again.
                         StateFilter.none(),
                         # No relevant state has changed and we don't persist the
                         # changed required_state_map, so we don't yet move the
