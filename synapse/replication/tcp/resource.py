@@ -22,7 +22,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from prometheus_client import Counter
 
@@ -34,6 +34,7 @@ from synapse.replication.tcp.commands import PositionCommand
 from synapse.replication.tcp.protocol import ServerReplicationStreamProtocol
 from synapse.replication.tcp.streams import EventsStream
 from synapse.replication.tcp.streams._base import CachesStream, StreamRow, Token
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 
 if TYPE_CHECKING:
@@ -116,7 +117,7 @@ class ReplicationStreamer:
         #
         # Note that if the position hasn't advanced then we won't send anything.
         if any(EventsStream.NAME == s.NAME for s in self.streams):
-            self.clock.looping_call(self.on_notifier_poke, 1000)
+            self.clock.looping_call(self.on_notifier_poke, Duration(seconds=1))
 
     def on_notifier_poke(self) -> None:
         """Checks if there is actually any new data and sends it to the
@@ -320,8 +321,8 @@ class ReplicationStreamer:
 
 
 def _batch_updates(
-    updates: List[Tuple[Token, StreamRow]],
-) -> List[Tuple[Optional[Token], StreamRow]]:
+    updates: list[tuple[Token, StreamRow]],
+) -> list[tuple[Token | None, StreamRow]]:
     """Takes a list of updates of form [(token, row)] and sets the token to
     None for all rows where the next row has the same token. This is used to
     implement batching.
@@ -337,7 +338,7 @@ def _batch_updates(
     if not updates:
         return []
 
-    new_updates: List[Tuple[Optional[Token], StreamRow]] = []
+    new_updates: list[tuple[Token | None, StreamRow]] = []
     for i, update in enumerate(updates[:-1]):
         if update[0] == updates[i + 1][0]:
             new_updates.append((None, update[1]))

@@ -43,7 +43,7 @@ import argparse
 import base64
 import json
 import sys
-from typing import Any, Dict, Mapping, Optional, Tuple, Union
+from typing import Any, Mapping
 from urllib import parse as urlparse
 
 import requests
@@ -103,12 +103,12 @@ def sign_json(
 
 
 def request(
-    method: Optional[str],
+    method: str | None,
     origin_name: str,
     origin_key: signedjson.types.SigningKey,
     destination: str,
     path: str,
-    content: Optional[str],
+    content: str | None,
     verify_tls: bool,
 ) -> requests.Response:
     if method is None:
@@ -147,7 +147,7 @@ def request(
     s = requests.Session()
     s.mount("matrix-federation://", MatrixConnectionAdapter())
 
-    headers: Dict[str, str] = {
+    headers: dict[str, str] = {
         "Authorization": authorization_headers[0],
     }
 
@@ -301,9 +301,9 @@ class MatrixConnectionAdapter(HTTPAdapter):
     def get_connection_with_tls_context(
         self,
         request: PreparedRequest,
-        verify: Optional[Union[bool, str]],
-        proxies: Optional[Mapping[str, str]] = None,
-        cert: Optional[Union[Tuple[str, str], str]] = None,
+        verify: bool | str | None,
+        proxies: Mapping[str, str] | None = None,
+        cert: tuple[str, str] | str | None = None,
     ) -> HTTPConnectionPool:
         # overrides the get_connection_with_tls_context() method in the base class
         parsed = urlparse.urlsplit(request.url)
@@ -326,7 +326,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
         )
 
     @staticmethod
-    def _lookup(server_name: str) -> Tuple[str, int, str]:
+    def _lookup(server_name: str) -> tuple[str, int, str]:
         """
         Do an SRV lookup on a server name and return the host:port to connect to
         Given the server_name (after any .well-known lookup), return the host, port and
@@ -368,7 +368,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
             return server_name, 8448, server_name
 
     @staticmethod
-    def _get_well_known(server_name: str) -> Optional[str]:
+    def _get_well_known(server_name: str) -> str | None:
         if ":" in server_name:
             # explicit port, or ipv6 literal. Either way, no .well-known
             return None

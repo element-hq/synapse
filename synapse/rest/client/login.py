@@ -26,12 +26,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
     TypedDict,
-    Union,
 )
 
 from synapse.api.constants import ApprovalNoticeMedium
@@ -70,12 +65,12 @@ logger = logging.getLogger(__name__)
 
 class LoginResponse(TypedDict, total=False):
     user_id: str
-    access_token: Optional[str]
+    access_token: str | None
     home_server: str
-    expires_in_ms: Optional[int]
-    refresh_token: Optional[str]
-    device_id: Optional[str]
-    well_known: Optional[Dict[str, Any]]
+    expires_in_ms: int | None
+    refresh_token: str | None
+    device_id: str | None
+    well_known: dict[str, Any] | None
 
 
 class LoginRestServlet(RestServlet):
@@ -142,8 +137,8 @@ class LoginRestServlet(RestServlet):
         # counters are initialised for the auth_provider_ids.
         _load_sso_handlers(hs)
 
-    def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        flows: List[JsonDict] = []
+    def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        flows: list[JsonDict] = []
         if self.jwt_enabled:
             flows.append({"type": LoginRestServlet.JWT_TYPE})
 
@@ -178,7 +173,7 @@ class LoginRestServlet(RestServlet):
         # fall back to the fallback API if they don't understand one of the
         # login flow types returned.
         if support_login_token_flow:
-            tokenTypeFlow: Dict[str, Any] = {"type": LoginRestServlet.TOKEN_TYPE}
+            tokenTypeFlow: dict[str, Any] = {"type": LoginRestServlet.TOKEN_TYPE}
             # If the login token flow is enabled advertise the get_login_token flag.
             if self._get_login_token_enabled:
                 tokenTypeFlow["get_login_token"] = True
@@ -190,7 +185,7 @@ class LoginRestServlet(RestServlet):
 
         return 200, {"flows": flows}
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, LoginResponse]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, LoginResponse]:
         login_submission = parse_json_object_from_request(request)
 
         # Check to see if the client requested a refresh token.
@@ -370,13 +365,13 @@ class LoginRestServlet(RestServlet):
         self,
         user_id: str,
         login_submission: JsonDict,
-        callback: Optional[Callable[[LoginResponse], Awaitable[None]]] = None,
+        callback: Callable[[LoginResponse], Awaitable[None]] | None = None,
         create_non_existent_users: bool = False,
-        default_display_name: Optional[str] = None,
+        default_display_name: str | None = None,
         ratelimit: bool = True,
-        auth_provider_id: Optional[str] = None,
+        auth_provider_id: str | None = None,
         should_issue_refresh_token: bool = False,
-        auth_provider_session_id: Optional[str] = None,
+        auth_provider_session_id: str | None = None,
         should_check_deactivated_or_locked: bool = True,
         *,
         request_info: RequestInfo,
@@ -602,7 +597,7 @@ class RefreshTokenServlet(RestServlet):
         )
         self.refresh_token_lifetime = hs.config.registration.refresh_token_lifetime
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         refresh_submission = parse_json_object_from_request(request)
 
         assert_params_in_dict(refresh_submission, ["refresh_token"])
@@ -626,7 +621,7 @@ class RefreshTokenServlet(RestServlet):
             token, access_valid_until_ms, refresh_valid_until_ms
         )
 
-        response: Dict[str, Union[str, int]] = {
+        response: dict[str, str | int] = {
             "access_token": access_token,
             "refresh_token": refresh_token,
         }
@@ -655,9 +650,7 @@ class SsoRedirectServlet(RestServlet):
         self._sso_handler = hs.get_sso_handler()
         self._public_baseurl = hs.config.server.public_baseurl
 
-    async def on_GET(
-        self, request: SynapseRequest, idp_id: Optional[str] = None
-    ) -> None:
+    async def on_GET(self, request: SynapseRequest, idp_id: str | None = None) -> None:
         if not self._public_baseurl:
             raise SynapseError(400, "SSO requires a valid public_baseurl")
 
@@ -684,7 +677,7 @@ class SsoRedirectServlet(RestServlet):
             finish_request(request)
             return
 
-        args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+        args: dict[bytes, list[bytes]] = request.args  # type: ignore
         client_redirect_url = parse_bytes_from_args(args, "redirectUrl", required=True)
         sso_url = await self._sso_handler.handle_redirect_request(
             request,

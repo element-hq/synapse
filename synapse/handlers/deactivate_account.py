@@ -20,7 +20,7 @@
 #
 import itertools
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
@@ -76,7 +76,7 @@ class DeactivateAccountHandler:
         user_id: str,
         erase_data: bool,
         requester: Requester,
-        id_server: Optional[str] = None,
+        id_server: str | None = None,
         by_admin: bool = False,
     ) -> bool:
         """Deactivate a user's account

@@ -1,1 +1,0 @@
-Fix the GitHub Actions workflow that moves issues labeled "X-Needs-Info" to the "Needs info" column on the team's internal triage board.

@@ -19,7 +19,7 @@
 #
 #
 import time
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, cast
 from unittest.mock import Mock
 
 import attr
@@ -60,7 +60,7 @@ class MockPerspectiveServer:
         self.server_name = "mock_server"
         self.key = signedjson.key.generate_signing_key("0")
 
-    def get_verify_keys(self) -> Dict[str, str]:
+    def get_verify_keys(self) -> dict[str, str]:
         vk = signedjson.key.get_verify_key(self.key)
         return {"%s:%s" % (vk.alg, vk.version): encode_verify_key_base64(vk)}
 
@@ -87,7 +87,7 @@ class FakeRequest:
 @logcontext_clean
 class KeyringTestCase(unittest.HomeserverTestCase):
     def check_context(
-        self, val: ContextRequest, expected: Optional[ContextRequest]
+        self, val: ContextRequest, expected: ContextRequest | None
     ) -> ContextRequest:
         self.assertEqual(getattr(current_context(), "request", None), expected)
         return val
@@ -107,8 +107,8 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         first_lookup_deferred: "Deferred[None]" = Deferred()
 
         async def first_lookup_fetch(
-            server_name: str, key_ids: List[str], minimum_valid_until_ts: int
-        ) -> Dict[str, FetchKeyResult]:
+            server_name: str, key_ids: list[str], minimum_valid_until_ts: int
+        ) -> dict[str, FetchKeyResult]:
             # self.assertEqual(current_context().request.id, "context_11")
             self.assertEqual(server_name, "server10")
             self.assertEqual(key_ids, [get_key_id(key1)])
@@ -152,8 +152,8 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         # should block rather than start a second call
 
         async def second_lookup_fetch(
-            server_name: str, key_ids: List[str], minimum_valid_until_ts: int
-        ) -> Dict[str, FetchKeyResult]:
+            server_name: str, key_ids: list[str], minimum_valid_until_ts: int
+        ) -> dict[str, FetchKeyResult]:
             # self.assertEqual(current_context().request.id, "context_12")
             return {get_key_id(key1): FetchKeyResult(get_verify_key(key1), 100)}
 
@@ -276,8 +276,8 @@ class KeyringTestCase(unittest.HomeserverTestCase):
 
         # set up a mock fetcher which will return the key
         async def get_keys(
-            server_name: str, key_ids: List[str], minimum_valid_until_ts: int
-        ) -> Dict[str, FetchKeyResult]:
+            server_name: str, key_ids: list[str], minimum_valid_until_ts: int
+        ) -> dict[str, FetchKeyResult]:
             self.assertEqual(server_name, self.hs.hostname)
             self.assertEqual(key_ids, [get_key_id(key2)])
 
@@ -302,8 +302,8 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         key1 = signedjson.key.generate_signing_key("1")
 
         async def get_keys(
-            server_name: str, key_ids: List[str], minimum_valid_until_ts: int
-        ) -> Dict[str, FetchKeyResult]:
+            server_name: str, key_ids: list[str], minimum_valid_until_ts: int
+        ) -> dict[str, FetchKeyResult]:
             # there should only be one request object (with the max validity)
             self.assertEqual(server_name, "server1")
             self.assertEqual(key_ids, [get_key_id(key1)])
@@ -344,16 +344,16 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         key1 = signedjson.key.generate_signing_key("1")
 
         async def get_keys1(
-            server_name: str, key_ids: List[str], minimum_valid_until_ts: int
-        ) -> Dict[str, FetchKeyResult]:
+            server_name: str, key_ids: list[str], minimum_valid_until_ts: int
+        ) -> dict[str, FetchKeyResult]:
             self.assertEqual(server_name, "server1")
             self.assertEqual(key_ids, [get_key_id(key1)])
             self.assertEqual(minimum_valid_until_ts, 1500)
             return {get_key_id(key1): FetchKeyResult(get_verify_key(key1), 800)}
 
         async def get_keys2(
-            server_name: str, key_ids: List[str], minimum_valid_until_ts: int
-        ) -> Dict[str, FetchKeyResult]:
+            server_name: str, key_ids: list[str], minimum_valid_until_ts: int
+        ) -> dict[str, FetchKeyResult]:
             self.assertEqual(server_name, "server1")
             self.assertEqual(key_ids, [get_key_id(key1)])
             self.assertEqual(minimum_valid_until_ts, 1500)
@@ -701,7 +701,7 @@ class PerspectivesKeyFetcherTestCase(unittest.HomeserverTestCase):
                 SERVER_NAME, testkey, VALID_UNTIL_TS
             )
 
-        def get_key_from_perspectives(response: JsonDict) -> Dict[str, FetchKeyResult]:
+        def get_key_from_perspectives(response: JsonDict) -> dict[str, FetchKeyResult]:
             fetcher = PerspectivesKeyFetcher(self.hs)
             self.expect_outgoing_key_query(SERVER_NAME, "key1", response)
             return self.get_success(fetcher.get_keys(SERVER_NAME, ["key1"], 0))

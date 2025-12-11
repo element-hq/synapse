@@ -41,7 +41,7 @@ use pyo3::{
     pybacked::PyBackedStr,
     pyclass, pymethods,
     types::{PyAnyMethods, PyDict, PyDictMethods, PyString},
-    Bound, IntoPyObject, PyAny, PyObject, PyResult, Python,
+    Bound, IntoPyObject, Py, PyAny, PyResult, Python,
 };
 
 use crate::UnwrapInfallible;
@@ -289,7 +289,7 @@ impl EventInternalMetadata {
     /// Get a dict holding the data stored in the `internal_metadata` column in the database.
     ///
     /// Note that `outlier` and `stream_ordering` are stored in separate columns so are not returned here.
-    fn get_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn get_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
 
         for entry in &self.data {

@@ -20,7 +20,7 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import Direction
 from synapse.handlers.relations import ThreadsListInclude
@@ -61,9 +61,9 @@ class RelationPaginationServlet(RestServlet):
         request: SynapseRequest,
         room_id: str,
         parent_id: str,
-        relation_type: Optional[str] = None,
-        event_type: Optional[str] = None,
-    ) -> Tuple[int, JsonDict]:
+        relation_type: str | None = None,
+        event_type: str | None = None,
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         pagination_config = await PaginationConfig.from_request(
@@ -105,7 +105,7 @@ class ThreadsServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         limit = parse_integer(request, "limit", default=5)

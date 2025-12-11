@@ -20,7 +20,7 @@
 #
 import logging
 import re
-from typing import TYPE_CHECKING, List, Optional, Pattern, Sequence, Tuple, cast
+from typing import TYPE_CHECKING, Pattern, Sequence, cast
 
 from synapse.appservice import (
     ApplicationService,
@@ -52,8 +52,8 @@ logger = logging.getLogger(__name__)
 
 
 def _make_exclusive_regex(
-    services_cache: List[ApplicationService],
-) -> Optional[Pattern]:
+    services_cache: list[ApplicationService],
+) -> Pattern | None:
     # We precompile a regex constructed from all the regexes that the AS's
     # have registered for exclusive users.
     exclusive_user_regexes = [
@@ -63,7 +63,7 @@ def _make_exclusive_regex(
     ]
     if exclusive_user_regexes:
         exclusive_user_regex = "|".join("(" + r + ")" for r in exclusive_user_regexes)
-        exclusive_user_pattern: Optional[Pattern] = re.compile(exclusive_user_regex)
+        exclusive_user_pattern: Pattern | None = re.compile(exclusive_user_regex)
     else:
         # We handle this case specially otherwise the constructed regex
         # will always match
@@ -93,7 +93,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
             txn.execute(
                 "SELECT COALESCE(max(txn_id), 0) FROM application_services_txns"
             )
-            return cast(Tuple[int], txn.fetchone())[0]
+            return cast(tuple[int], txn.fetchone())[0]
 
         self._as_txn_seq_gen = build_sequence_generator(
             db_conn,
@@ -106,7 +106,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
 
         super().__init__(database, db_conn, hs)
 
-    def get_app_services(self) -> List[ApplicationService]:
+    def get_app_services(self) -> list[ApplicationService]:
         return self.services_cache
 
     def get_if_app_services_interested_in_user(self, user_id: str) -> bool:
@@ -116,7 +116,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
         else:
             return False
 
-    def get_app_service_by_user_id(self, user_id: str) -> Optional[ApplicationService]:
+    def get_app_service_by_user_id(self, user_id: str) -> ApplicationService | None:
         """Retrieve an application service from their user ID.
 
         All application services have associated with them a particular user ID.
@@ -134,7 +134,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
                 return service
         return None
 
-    def get_app_service_by_token(self, token: str) -> Optional[ApplicationService]:
+    def get_app_service_by_token(self, token: str) -> ApplicationService | None:
         """Get the application service with the given appservice token.
 
         Args:
@@ -147,7 +147,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
                 return service
         return None
 
-    def get_app_service_by_id(self, as_id: str) -> Optional[ApplicationService]:
+    def get_app_service_by_id(self, as_id: str) -> ApplicationService | None:
         """Get the application service with the given appservice ID.
 
         Args:
@@ -199,7 +199,7 @@ class ApplicationServiceTransactionWorkerStore(
 ):
     async def get_appservices_by_state(
         self, state: ApplicationServiceState
-    ) -> List[ApplicationService]:
+    ) -> list[ApplicationService]:
         """Get a list of application services based on their state.
 
         Args:
@@ -208,7 +208,7 @@ class ApplicationServiceTransactionWorkerStore(
             A list of ApplicationServices, which may be empty.
         """
         results = cast(
-            List[Tuple[str]],
+            list[tuple[str]],
             await self.db_pool.simple_select_list(
                 table="application_services_state",
                 keyvalues={"state": state.value},
@@ -227,7 +227,7 @@ class ApplicationServiceTransactionWorkerStore(
 
     async def get_appservice_state(
         self, service: ApplicationService
-    ) -> Optional[ApplicationServiceState]:
+    ) -> ApplicationServiceState | None:
         """Get the application service state.
 
         Args:
@@ -273,8 +273,8 @@ class ApplicationServiceTransactionWorkerStore(
         self,
         service: ApplicationService,
         events: Sequence[EventBase],
-        ephemeral: List[JsonMapping],
-        to_device_messages: List[JsonMapping],
+        ephemeral: list[JsonMapping],
+        to_device_messages: list[JsonMapping],
         one_time_keys_count: TransactionOneTimeKeysCount,
         unused_fallback_keys: TransactionUnusedFallbackKeys,
         device_list_summary: DeviceListUpdates,
@@ -347,7 +347,7 @@ class ApplicationServiceTransactionWorkerStore(
 
     async def get_oldest_unsent_txn(
         self, service: ApplicationService
-    ) -> Optional[AppServiceTransaction]:
+    ) -> AppServiceTransaction | None:
         """Get the oldest transaction which has not been sent for this service.
 
         Args:
@@ -358,7 +358,7 @@ class ApplicationServiceTransactionWorkerStore(
 
         def _get_oldest_unsent_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Tuple[int, str]]:
+        ) -> tuple[int, str] | None:
             # Monotonically increasing txn ids, so just select the smallest
             # one in the txns table (we delete them when they are sent)
             txn.execute(
@@ -366,7 +366,7 @@ class ApplicationServiceTransactionWorkerStore(
                 " ORDER BY txn_id ASC LIMIT 1",
                 (service.id,),
             )
-            return cast(Optional[Tuple[int, str]], txn.fetchone())
+            return cast(tuple[int, str] | None, txn.fetchone())
 
         entry = await self.db_pool.runInteraction(
             "get_oldest_unsent_appservice_txn", _get_oldest_unsent_txn
@@ -447,7 +447,7 @@ class ApplicationServiceTransactionWorkerStore(
         )
 
     async def set_appservice_stream_type_pos(
-        self, service: ApplicationService, stream_type: str, pos: Optional[int]
+        self, service: ApplicationService, stream_type: str, pos: int | None
     ) -> None:
         if stream_type not in ("read_receipt", "presence", "to_device", "device_list"):
             raise ValueError(

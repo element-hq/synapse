@@ -117,6 +117,71 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.144.0
+
+## Worker support for unstable MSC4140 `/restart` endpoint
+
+The following unstable endpoint pattern may now be routed to worker processes:
+
+```
+^/_matrix/client/unstable/org.matrix.msc4140/delayed_events/.*/restart$
+```
+
+## Unstable mutual rooms endpoint is now behind an experimental feature flag
+
+The unstable mutual rooms endpoint from
+[MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666)
+(`/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`) is now
+disabled by default.  If you rely on this unstable endpoint, you must now set
+`experimental_features.msc2666_enabled: true` in your configuration to keep
+using it.
+
+# Upgrading to v1.143.0
+
+## Dropping support for PostgreSQL 13
+
+In line with our [deprecation policy](deprecation_policy.md), we've dropped
+support for PostgreSQL 13, as it is no longer supported upstream.
+This release of Synapse requires PostgreSQL 14+.
+
+# Upgrading to v1.142.0
+
+## Python 3.10+ is now required
+
+The minimum supported Python version has been increased from v3.9 to v3.10.
+You will need Python 3.10+ to run Synapse v1.142.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+## SQLite 3.40.0+ is now required
+
+The minimum supported SQLite version has been increased from 3.27.0 to 3.40.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+
+# Upgrading to v1.141.0
+
+## Docker images now based on Debian `trixie` with Python 3.13
+
+The Docker images are now based on Debian `trixie` and use Python 3.13. If you
+are using the Docker images as a base image you may need to e.g. adjust the
+paths you mount any additional Python packages at.
+
+# Upgrading to v1.140.0
+
+## Users of `synapse-s3-storage-provider` must update the module to `v1.6.0`
+
+Deployments that make use of the
+[synapse-s3-storage-provider](https://github.com/matrix-org/synapse-s3-storage-provider/)
+module must update it to
+[v1.6.0](https://github.com/matrix-org/synapse-s3-storage-provider/releases/tag/v1.6.0),
+otherwise users will be unable to upload or download media.
+
 # Upgrading to v1.139.0
 
 ## `/register` requests from old application service implementations may break when using MAS

@@ -18,7 +18,6 @@
 #
 #
 import logging
-from typing import Optional
 from unittest.mock import patch
 
 from twisted.test.proto_helpers import MemoryReactor
@@ -693,9 +692,9 @@ async def inject_message_event(
     hs: HomeServer,
     room_id: str,
     sender: str,
-    body: Optional[str] = "testytest",
-    soft_failed: Optional[bool] = False,
-    policy_server_spammy: Optional[bool] = False,
+    body: str | None = "testytest",
+    soft_failed: bool | None = False,
+    policy_server_spammy: bool | None = False,
 ) -> EventBase:
     return await inject_event(
         hs,

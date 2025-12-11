@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Sequence, Tuple
+from typing import TYPE_CHECKING, Sequence
 
 import attr
 
@@ -52,7 +52,7 @@ class _EventSourcesInner:
     receipt: ReceiptEventSource
     account_data: AccountDataEventSource
 
-    def get_sources(self) -> Sequence[Tuple[StreamKeyType, EventSource]]:
+    def get_sources(self) -> Sequence[tuple[StreamKeyType, EventSource]]:
         return [
             (StreamKeyType.ROOM, self.room),
             (StreamKeyType.PRESENCE, self.presence),

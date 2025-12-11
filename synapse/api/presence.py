@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
 import attr
 
@@ -41,15 +41,13 @@ class UserDevicePresenceState:
     """
 
     user_id: str
-    device_id: Optional[str]
+    device_id: str | None
     state: str
     last_active_ts: int
     last_sync_ts: int
 
     @classmethod
-    def default(
-        cls, user_id: str, device_id: Optional[str]
-    ) -> "UserDevicePresenceState":
+    def default(cls, user_id: str, device_id: str | None) -> "UserDevicePresenceState":
         """Returns a default presence state."""
         return cls(
             user_id=user_id,
@@ -81,7 +79,7 @@ class UserPresenceState:
     last_active_ts: int
     last_federation_update_ts: int
     last_user_sync_ts: int
-    status_msg: Optional[str]
+    status_msg: str | None
     currently_active: bool
 
     def as_dict(self) -> JsonDict:

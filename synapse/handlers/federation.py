@@ -30,13 +30,7 @@ from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
-    Dict,
     Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Union,
 )
 
 import attr
@@ -80,6 +74,7 @@ from synapse.storage.invite_rule import InviteRule
 from synapse.types import JsonDict, StrCollection, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
+from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.visibility import filter_events_for_server
 
@@ -170,12 +165,12 @@ class FederationHandler:
         # Tracks running partial state syncs by room ID.
         # Partial state syncs currently only run on the main process, so it's okay to
         # track them in-memory for now.
-        self._active_partial_state_syncs: Set[str] = set()
+        self._active_partial_state_syncs: set[str] = set()
         # Tracks partial state syncs we may want to restart.
         # A dictionary mapping room IDs to (initial destination, other destinations)
         # tuples.
-        self._partial_state_syncs_maybe_needing_restart: Dict[
-            str, Tuple[Optional[str], AbstractSet[str]]
+        self._partial_state_syncs_maybe_needing_restart: dict[
+            str, tuple[str | None, AbstractSet[str]]
         ] = {}
         # A lock guarding the partial state flag for rooms.
         # When the lock is held for a given room, no other concurrent code may
@@ -238,7 +233,7 @@ class FederationHandler:
         current_depth: int,
         limit: int,
         *,
-        processing_start_time: Optional[int],
+        processing_start_time: int | None,
     ) -> bool:
         """
         Checks whether the `current_depth` is at or approaching any backfill
@@ -274,7 +269,7 @@ class FederationHandler:
 
         # we now have a list of potential places to backpaginate from. We prefer to
         # start with the most recent (ie, max depth), so let's sort the list.
-        sorted_backfill_points: List[_BackfillPoint] = sorted(
+        sorted_backfill_points: list[_BackfillPoint] = sorted(
             backwards_extremities,
             key=lambda e: -int(e.depth),
         )
@@ -382,7 +377,7 @@ class FederationHandler:
         # there is it's often sufficiently long ago that clients would stop
         # attempting to paginate before backfill reached the visible history.
 
-        extremities_to_request: List[str] = []
+        extremities_to_request: list[str] = []
         for bp in sorted_backfill_points:
             if len(extremities_to_request) >= 5:
                 break
@@ -564,7 +559,7 @@ class FederationHandler:
 
         return pdu
 
-    async def on_event_auth(self, event_id: str) -> List[EventBase]:
+    async def on_event_auth(self, event_id: str) -> list[EventBase]:
         event = await self.store.get_event(event_id)
         auth = await self.store.get_auth_chain(
             event.room_id, list(event.auth_event_ids()), include_given=True
@@ -573,7 +568,7 @@ class FederationHandler:
 
     async def do_invite_join(
         self, target_hosts: Iterable[str], room_id: str, joinee: str, content: JsonDict
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Attempts to join the `joinee` to the room `room_id` via the
         servers contained in `target_hosts`.
 
@@ -646,7 +641,7 @@ class FederationHandler:
             except ValueError:
                 pass
 
-            lock: Optional[Lock] = None
+            lock: Lock | None = None
             async with self._is_partial_state_room_linearizer.queue(room_id):
                 try:
                     # MSC4354: Sticky Events causes existing servers in the room to send sticky events
@@ -842,11 +837,11 @@ class FederationHandler:
 
     async def do_knock(
         self,
-        target_hosts: List[str],
+        target_hosts: list[str],
         room_id: str,
         knockee: str,
         content: JsonDict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Sends the knock to the remote server.
 
         This first triggers a make_knock request that returns a partial
@@ -875,7 +870,7 @@ class FederationHandler:
 
         # Ask the remote server to create a valid knock event for us. Once received,
         # we sign the event
-        params: Dict[str, Iterable[str]] = {"ver": supported_room_versions}
+        params: dict[str, Iterable[str]] = {"ver": supported_room_versions}
         origin, event, event_format_version = await self._make_and_verify_event(
             target_hosts, room_id, knockee, Membership.KNOCK, content, params=params
         )
@@ -924,7 +919,7 @@ class FederationHandler:
         return event.event_id, stream_id
 
     async def _handle_queued_pdus(
-        self, room_queue: List[Tuple[EventBase, str]]
+        self, room_queue: list[tuple[EventBase, str]]
     ) -> None:
         """Process PDUs which got queued up while we were busy send_joining.
 
@@ -1179,7 +1174,7 @@ class FederationHandler:
 
     async def do_remotely_reject_invite(
         self, target_hosts: Iterable[str], room_id: str, user_id: str, content: JsonDict
-    ) -> Tuple[EventBase, int]:
+    ) -> tuple[EventBase, int]:
         origin, event, room_version = await self._make_and_verify_event(
             target_hosts, room_id, user_id, "leave", content=content
         )
@@ -1213,8 +1208,8 @@ class FederationHandler:
         user_id: str,
         membership: str,
         content: JsonDict,
-        params: Optional[Dict[str, Union[str, Iterable[str]]]] = None,
-    ) -> Tuple[str, EventBase, RoomVersion]:
+        params: dict[str, str | Iterable[str]] | None = None,
+    ) -> tuple[str, EventBase, RoomVersion]:
         (
             origin,
             event,
@@ -1341,7 +1336,7 @@ class FederationHandler:
 
     @trace
     @tag_args
-    async def get_state_ids_for_pdu(self, room_id: str, event_id: str) -> List[str]:
+    async def get_state_ids_for_pdu(self, room_id: str, event_id: str) -> list[str]:
         """Returns the state at the event. i.e. not including said event."""
         event = await self.store.get_event(event_id, check_room_id=room_id)
         if event.internal_metadata.outlier:
@@ -1374,8 +1369,8 @@ class FederationHandler:
         return list(state_map.values())
 
     async def on_backfill_request(
-        self, origin: str, room_id: str, pdu_list: List[str], limit: int
-    ) -> List[EventBase]:
+        self, origin: str, room_id: str, pdu_list: list[str], limit: int
+    ) -> list[EventBase]:
         # We allow partially joined rooms since in this case we are filtering out
         # non-local events in `filter_events_for_server`.
         await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
@@ -1410,9 +1405,7 @@ class FederationHandler:
 
         return events
 
-    async def get_persisted_pdu(
-        self, origin: str, event_id: str
-    ) -> Optional[EventBase]:
+    async def get_persisted_pdu(self, origin: str, event_id: str) -> EventBase | None:
         """Get an event from the database for the given server.
 
         Args:
@@ -1451,10 +1444,10 @@ class FederationHandler:
         self,
         origin: str,
         room_id: str,
-        earliest_events: List[str],
-        latest_events: List[str],
+        earliest_events: list[str],
+        latest_events: list[str],
         limit: int,
-    ) -> List[EventBase]:
+    ) -> list[EventBase]:
         # We allow partially joined rooms since in this case we are filtering out
         # non-local events in `filter_events_for_server`.
         await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
@@ -1637,7 +1630,7 @@ class FederationHandler:
         event_dict: JsonDict,
         event: EventBase,
         context: UnpersistedEventContextBase,
-    ) -> Tuple[EventBase, UnpersistedEventContextBase]:
+    ) -> tuple[EventBase, UnpersistedEventContextBase]:
         key = (
             EventTypes.ThirdPartyInvite,
             event.content["third_party_invite"]["signed"]["token"],
@@ -1709,7 +1702,7 @@ class FederationHandler:
 
         logger.debug("Checking auth on event %r", event.content)
 
-        last_exception: Optional[Exception] = None
+        last_exception: Exception | None = None
 
         # for each public key in the 3pid invite event
         for public_key_object in event_auth.get_public_keys(invite_event):
@@ -1793,8 +1786,8 @@ class FederationHandler:
             raise AuthError(403, "Third party certificate was invalid")
 
     async def get_room_complexity(
-        self, remote_room_hosts: List[str], room_id: str
-    ) -> Optional[dict]:
+        self, remote_room_hosts: list[str], room_id: str
+    ) -> dict | None:
         """
         Fetch the complexity of a remote room over federation.
 
@@ -1832,7 +1825,7 @@ class FederationHandler:
 
     def _start_partial_state_room_sync(
         self,
-        initial_destination: Optional[str],
+        initial_destination: str | None,
         other_destinations: AbstractSet[str],
         room_id: str,
     ) -> None:
@@ -1915,7 +1908,7 @@ class FederationHandler:
 
     async def _sync_partial_state_room(
         self,
-        initial_destination: Optional[str],
+        initial_destination: str | None,
         other_destinations: AbstractSet[str],
         room_id: str,
     ) -> None:
@@ -2015,7 +2008,9 @@ class FederationHandler:
                                 logger.warning(
                                     "%s; waiting for %d ms...", e, e.retry_after_ms
                                 )
-                                await self.clock.sleep(e.retry_after_ms / 1000)
+                                await self.clock.sleep(
+                                    Duration(milliseconds=e.retry_after_ms)
+                                )
 
                         # Success, no need to try the rest of the destinations.
                         break
@@ -2057,7 +2052,7 @@ class FederationHandler:
 
 
 def _prioritise_destinations_for_partial_state_resync(
-    initial_destination: Optional[str],
+    initial_destination: str | None,
     other_destinations: AbstractSet[str],
     room_id: str,
 ) -> StrCollection:

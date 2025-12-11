@@ -12,7 +12,6 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 #
-from typing import Optional
 from unittest import mock
 
 import signedjson
@@ -113,7 +112,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         async def get_policy_recommendation_for_pdu(
             destination: str,
             pdu: EventBase,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
         ) -> JsonDict:
             self.call_count += 1
             self.assertEqual(destination, self.OTHER_SERVER_NAME)
@@ -128,8 +127,8 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         # Mock policy server actions on signing events
         async def policy_server_signs_event(
-            destination: str, pdu: EventBase, timeout: Optional[int] = None
-        ) -> Optional[JsonDict]:
+            destination: str, pdu: EventBase, timeout: int | None = None
+        ) -> JsonDict | None:
             sigs = compute_event_signature(
                 pdu.room_version,
                 pdu.get_dict(),
@@ -139,8 +138,8 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             return sigs
 
         async def policy_server_signs_event_with_wrong_key(
-            destination: str, pdu: EventBase, timeout: Optional[int] = None
-        ) -> Optional[JsonDict]:
+            destination: str, pdu: EventBase, timeout: int | None = None
+        ) -> JsonDict | None:
             sk = signedjson.key.generate_signing_key("policy_server")
             sigs = compute_event_signature(
                 pdu.room_version,
@@ -151,13 +150,13 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             return sigs
 
         async def policy_server_refuses_to_sign_event(
-            destination: str, pdu: EventBase, timeout: Optional[int] = None
-        ) -> Optional[JsonDict]:
+            destination: str, pdu: EventBase, timeout: int | None = None
+        ) -> JsonDict | None:
             return {}
 
         async def policy_server_event_sign_error(
-            destination: str, pdu: EventBase, timeout: Optional[int] = None
-        ) -> Optional[JsonDict]:
+            destination: str, pdu: EventBase, timeout: int | None = None
+        ) -> JsonDict | None:
             return None
 
         self.policy_server_signs_event = policy_server_signs_event
@@ -167,7 +166,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             policy_server_signs_event_with_wrong_key
         )
 
-    def _add_policy_server_to_room(self, public_key: Optional[str] = None) -> None:
+    def _add_policy_server_to_room(self, public_key: str | None = None) -> None:
         # Inject a member event into the room
         policy_user_id = f"@policy:{self.OTHER_SERVER_NAME}"
         self.get_success(
@@ -442,7 +441,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             f"event did not include policy server signature, signature block = {ev.get('signatures', None)}",
         )
 
-    def _fetch_federation_event(self, event_id: str) -> Optional[JsonDict]:
+    def _fetch_federation_event(self, event_id: str) -> JsonDict | None:
         # Request federation events to see the signatures
         channel = self.make_request(
             "POST",

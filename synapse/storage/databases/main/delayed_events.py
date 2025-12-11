@@ -13,17 +13,25 @@
 #
 
 import logging
-from typing import List, NewType, Optional, Tuple
+from typing import TYPE_CHECKING, NewType
 
 import attr
 
 from synapse.api.errors import NotFoundError
 from synapse.storage._base import SQLBaseStore, db_to_json
-from synapse.storage.database import LoggingTransaction, StoreError
+from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
+    LoggingTransaction,
+    StoreError,
+)
 from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID
 from synapse.util import stringutils
 from synapse.util.json import json_encoder
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +50,11 @@ Timestamp = NewType("Timestamp", int)
 class EventDetails:
     room_id: RoomID
     type: EventType
-    state_key: Optional[StateKey]
-    origin_server_ts: Optional[Timestamp]
+    state_key: StateKey | None
+    origin_server_ts: Timestamp | None
     content: JsonDict
-    device_id: Optional[DeviceID]
-    sticky_duration_ms: Optional[int]
+    device_id: DeviceID | None
+    sticky_duration_ms: int | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -56,6 +64,27 @@ class DelayedEventDetails(EventDetails):
 
 
 class DelayedEventsStore(SQLBaseStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+
+        # Set delayed events to be uniquely identifiable by their delay_id.
+        # In practice, delay_ids are already unique because they are generated
+        # from cryptographically strong random strings.
+        # Therefore, adding this constraint is not expected to ever fail,
+        # despite the current pkey technically allowing non-unique delay_ids.
+        self.db_pool.updates.register_background_index_update(
+            update_name="delayed_events_idx",
+            index_name="delayed_events_idx",
+            table="delayed_events",
+            columns=("delay_id",),
+            unique=True,
+        )
+
     async def get_delayed_events_stream_pos(self) -> int:
         """
         Gets the stream position of the background process to watch for state events
@@ -68,7 +97,7 @@ class DelayedEventsStore(SQLBaseStore):
             desc="get_delayed_events_stream_pos",
         )
 
-    async def update_delayed_events_stream_pos(self, stream_id: Optional[int]) -> None:
+    async def update_delayed_events_stream_pos(self, stream_id: int | None) -> None:
         """
         Updates the stream position of the background process to watch for state events
         that target the same piece of state as any pending delayed events.
@@ -86,16 +115,16 @@ class DelayedEventsStore(SQLBaseStore):
         self,
         *,
         user_localpart: str,
-        device_id: Optional[str],
+        device_id: str | None,
         creation_ts: Timestamp,
         room_id: str,
         event_type: str,
-        state_key: Optional[str],
-        origin_server_ts: Optional[int],
+        state_key: str | None,
+        origin_server_ts: int | None,
         content: JsonDict,
         delay: int,
-        sticky_duration_ms: Optional[int],
-    ) -> Tuple[DelayID, Timestamp]:
+        sticky_duration_ms: int | None,
+    ) -> tuple[DelayID, Timestamp]:
         """
         Inserts a new delayed event in the DB.
 
@@ -137,9 +166,7 @@ class DelayedEventsStore(SQLBaseStore):
 
     async def restart_delayed_event(
         self,
-        *,
         delay_id: str,
-        user_localpart: str,
         current_ts: Timestamp,
     ) -> Timestamp:
         """
@@ -148,7 +175,6 @@ class DelayedEventsStore(SQLBaseStore):
 
         Args:
             delay_id: The ID of the delayed event to restart.
-            user_localpart: The localpart of the delayed event's owner.
             current_ts: The current time, which will be used to calculate the new send time.
 
         Returns: The send time of the next delayed event to be sent,
@@ -166,13 +192,11 @@ class DelayedEventsStore(SQLBaseStore):
                 """
                 UPDATE delayed_events
                 SET send_ts = ? + delay
-                WHERE delay_id = ? AND user_localpart = ?
-                    AND NOT is_processed
+                WHERE delay_id = ? AND NOT is_processed
                 """,
                 (
                     current_ts,
                     delay_id,
-                    user_localpart,
                 ),
             )
             if txn.rowcount == 0:
@@ -204,7 +228,7 @@ class DelayedEventsStore(SQLBaseStore):
     async def get_all_delayed_events_for_user(
         self,
         user_localpart: str,
-    ) -> List[JsonDict]:
+    ) -> list[JsonDict]:
         """Returns all pending delayed events owned by the given user."""
         # TODO: Support Pagination stream API ("next_batch" field)
         rows = await self.db_pool.execute(
@@ -238,14 +262,24 @@ class DelayedEventsStore(SQLBaseStore):
         ]
 
     async def process_timeout_delayed_events(
-        self, current_ts: Timestamp
-    ) -> Tuple[
-        List[DelayedEventDetails],
-        Optional[Timestamp],
+        self, current_ts: Timestamp, reprocess_events: bool = False
+    ) -> tuple[
+        list[DelayedEventDetails],
+        Timestamp | None,
     ]:
         """
         Marks for processing all delayed events that should have been sent prior to the provided time
         that haven't already been marked as such.
+
+        Args:
+            current_ts: The current timestamp.
+            reprocess_events: Whether to reprocess already-processed delayed
+                events. If set to True, events which are marked as processed
+                will have their `send_ts` re-checked.
+
+                This is mainly useful for recovering from a server restart;
+                which could have occurred between an event being marked as
+                processed and the event actually being sent.
 
         Returns: The details of all newly-processed delayed events,
             and the send time of the next delayed event to be sent, if any.
@@ -253,9 +287,9 @@ class DelayedEventsStore(SQLBaseStore):
 
         def process_timeout_delayed_events_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[
-            List[DelayedEventDetails],
-            Optional[Timestamp],
+        ) -> tuple[
+            list[DelayedEventDetails],
+            Timestamp | None,
         ]:
             sql_cols = ", ".join(
                 (
@@ -272,7 +306,12 @@ class DelayedEventsStore(SQLBaseStore):
                 )
             )
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
-            sql_where = "WHERE send_ts <= ? AND NOT is_processed"
+            sql_where = "WHERE send_ts <= ?"
+
+            if not reprocess_events:
+                # Skip already-processed events.
+                sql_where += " AND NOT is_processed"
+
             sql_args = (current_ts,)
             sql_order = "ORDER BY send_ts"
             if isinstance(self.database_engine, PostgresEngine):
@@ -324,20 +363,14 @@ class DelayedEventsStore(SQLBaseStore):
 
     async def process_target_delayed_event(
         self,
-        *,
         delay_id: str,
-        user_localpart: str,
-    ) -> Tuple[
-        EventDetails,
-        Optional[Timestamp],
+    ) -> tuple[
+        DelayedEventDetails,
+        Timestamp | None,
     ]:
         """
         Marks for processing the matching delayed event, regardless of its timeout time,
         as long as it has not already been marked as such.
-
-        Args:
-            delay_id: The ID of the delayed event to restart.
-            user_localpart: The localpart of the delayed event's owner.
 
         Returns: The details of the matching delayed event,
             and the send time of the next delayed event to be sent, if any.
@@ -348,40 +381,32 @@ class DelayedEventsStore(SQLBaseStore):
 
         def process_target_delayed_event_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[
-            EventDetails,
-            Optional[Timestamp],
+        ) -> tuple[
+            DelayedEventDetails,
+            Timestamp | None,
         ]:
-            sql_cols = ", ".join(
-                (
-                    "room_id",
-                    "event_type",
-                    "state_key",
-                    "origin_server_ts",
-                    "content",
-                    "device_id",
-                    "sticky_duration_ms",
-                )
-            )
-            sql_update = "UPDATE delayed_events SET is_processed = TRUE"
-            sql_where = "WHERE delay_id = ? AND user_localpart = ? AND NOT is_processed"
-            sql_args = (delay_id, user_localpart)
             txn.execute(
-                (
-                    f"{sql_update} {sql_where} RETURNING {sql_cols}"
-                    if self.database_engine.supports_returning
-                    else f"SELECT {sql_cols} FROM delayed_events {sql_where}"
-                ),
-                sql_args,
+                """
+                UPDATE delayed_events
+                SET is_processed = TRUE
+                WHERE delay_id = ? AND NOT is_processed
+                RETURNING
+                    room_id,
+                    event_type,
+                    state_key,
+                    origin_server_ts,
+                    content,
+                    device_id,
+                    sticky_duration_ms,
+                    user_localpart
+                """,
+                (delay_id,),
             )
             row = txn.fetchone()
             if row is None:
                 raise NotFoundError("Delayed event not found")
-            elif not self.database_engine.supports_returning:
-                txn.execute(f"{sql_update} {sql_where}", sql_args)
-                assert txn.rowcount == 1
 
-            event = EventDetails(
+            event = DelayedEventDetails(
                 RoomID.from_string(row[0]),
                 EventType(row[1]),
                 StateKey(row[2]) if row[2] is not None else None,
@@ -389,6 +414,8 @@ class DelayedEventsStore(SQLBaseStore):
                 db_to_json(row[4]),
                 DeviceID(row[5]) if row[5] is not None else None,
                 int(row[6]) if row[6] is not None else None,
+                DelayID(delay_id),
+                UserLocalpart(row[7]),
             )
 
             return event, self._get_next_delayed_event_send_ts_txn(txn)
@@ -397,18 +424,9 @@ class DelayedEventsStore(SQLBaseStore):
             "process_target_delayed_event", process_target_delayed_event_txn
         )
 
-    async def cancel_delayed_event(
-        self,
-        *,
-        delay_id: str,
-        user_localpart: str,
-    ) -> Optional[Timestamp]:
+    async def cancel_delayed_event(self, delay_id: str) -> Timestamp | None:
         """
         Cancels the matching delayed event, i.e. remove it as long as it hasn't been processed.
-
-        Args:
-            delay_id: The ID of the delayed event to restart.
-            user_localpart: The localpart of the delayed event's owner.
 
         Returns: The send time of the next delayed event to be sent, if any.
 
@@ -418,14 +436,13 @@ class DelayedEventsStore(SQLBaseStore):
 
         def cancel_delayed_event_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Timestamp]:
+        ) -> Timestamp | None:
             try:
                 self.db_pool.simple_delete_one_txn(
                     txn,
                     table="delayed_events",
                     keyvalues={
                         "delay_id": delay_id,
-                        "user_localpart": user_localpart,
                         "is_processed": False,
                     },
                 )
@@ -448,7 +465,7 @@ class DelayedEventsStore(SQLBaseStore):
         event_type: str,
         state_key: str,
         not_from_localpart: str,
-    ) -> Optional[Timestamp]:
+    ) -> Timestamp | None:
         """
         Cancels all matching delayed state events, i.e. remove them as long as they haven't been processed.
 
@@ -464,7 +481,7 @@ class DelayedEventsStore(SQLBaseStore):
 
         def cancel_delayed_state_events_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Timestamp]:
+        ) -> Timestamp | None:
             txn.execute(
                 """
                 DELETE FROM delayed_events
@@ -485,11 +502,7 @@ class DelayedEventsStore(SQLBaseStore):
             "cancel_delayed_state_events", cancel_delayed_state_events_txn
         )
 
-    async def delete_processed_delayed_event(
-        self,
-        delay_id: DelayID,
-        user_localpart: UserLocalpart,
-    ) -> None:
+    async def delete_processed_delayed_event(self, delay_id: DelayID) -> None:
         """
         Delete the matching delayed event, as long as it has been marked as processed.
 
@@ -500,7 +513,6 @@ class DelayedEventsStore(SQLBaseStore):
             table="delayed_events",
             keyvalues={
                 "delay_id": delay_id,
-                "user_localpart": user_localpart,
                 "is_processed": True,
             },
             desc="delete_processed_delayed_event",
@@ -538,7 +550,7 @@ class DelayedEventsStore(SQLBaseStore):
             desc="unprocess_delayed_events",
         )
 
-    async def get_next_delayed_event_send_ts(self) -> Optional[Timestamp]:
+    async def get_next_delayed_event_send_ts(self) -> Timestamp | None:
         """
         Returns the send time of the next delayed event to be sent, if any.
         """
@@ -550,7 +562,7 @@ class DelayedEventsStore(SQLBaseStore):
 
     def _get_next_delayed_event_send_ts_txn(
         self, txn: LoggingTransaction
-    ) -> Optional[Timestamp]:
+    ) -> Timestamp | None:
         result = self.db_pool.simple_select_one_onecol_txn(
             txn,
             table="delayed_events",
@@ -566,7 +578,7 @@ def _generate_delay_id() -> DelayID:
 
     # We use the following format for delay IDs:
     #    syd_<random string>
-    # They are scoped to user localparts, so it is possible for
-    # the same ID to exist for multiple users.
+    # They are not scoped to user localparts, but the random string
+    # is expected to be sufficiently random to be globally unique.
 
     return DelayID(f"syd_{stringutils.random_string(20)}")

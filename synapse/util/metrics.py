@@ -25,11 +25,8 @@ from types import TracebackType
 from typing import (
     Awaitable,
     Callable,
-    Dict,
     Generator,
-    Optional,
     Protocol,
-    Type,
     TypeVar,
 )
 
@@ -138,7 +135,7 @@ class HasClockAndServerName(Protocol):
 
 
 def measure_func(
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Decorate an async method with a `Measure` context manager.
 
@@ -222,7 +219,7 @@ class Measure:
             server_name=self.server_name,
             parent_context=parent_context,
         )
-        self.start: Optional[float] = None
+        self.start: float | None = None
 
     def __enter__(self) -> "Measure":
         if self.start is not None:
@@ -238,9 +235,9 @@ class Measure:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         if self.start is None:
             raise RuntimeError("Measure() block exited without being entered")
@@ -293,8 +290,8 @@ class DynamicCollectorRegistry(CollectorRegistry):
 
     def __init__(self) -> None:
         super().__init__()
-        self._server_name_to_pre_update_hooks: Dict[
-            str, Dict[str, Callable[[], None]]
+        self._server_name_to_pre_update_hooks: dict[
+            str, dict[str, Callable[[], None]]
         ] = {}
         """
         Mapping of server name to a mapping of metric name to metric pre-update
@@ -323,9 +320,13 @@ class DynamicCollectorRegistry(CollectorRegistry):
         if server_hooks.get(metric_name) is not None:
             # TODO: This should be an `assert` since registering the same metric name
             # multiple times will clobber the old metric.
-            # We currently rely on this behaviour as we instantiate multiple
-            # `SyncRestServlet`, one per listener, and in the `__init__` we setup a new
-            # LruCache.
+            #
+            # We currently rely on this behaviour in a few places:
+            #  - We instantiate multiple `SyncRestServlet`, one per listener, and in the
+            #   `__init__` we setup a new `LruCache`.
+            #  - We instantiate multiple `ApplicationService` (one per configured
+            #    application service) which use the `@cached` decorator on some methods.
+            #
             # Once the above behaviour is changed, this should be changed to an `assert`.
             logger.error(
                 "Metric named %s already registered for server %s",

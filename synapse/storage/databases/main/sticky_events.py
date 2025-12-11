@@ -16,12 +16,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Collection,
-    Dict,
     Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
     cast,
 )
 
@@ -45,6 +40,7 @@ from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types.state import StateFilter
+from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
@@ -56,7 +52,7 @@ logger = logging.getLogger(__name__)
 # Note: this does NOT mean we don't honour shorter expiration timeouts.
 # Consumers call 'get_sticky_events_in_rooms' which has `WHERE expires_at > ?`
 # to filter out expired sticky events that have yet to be deleted.
-DELETE_EXPIRED_STICKY_EVENTS_MS = 60 * 1000 * 60  # 1 hour
+DELETE_EXPIRED_STICKY_EVENTS_INTERVAL = Duration(hours=1)
 
 
 class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
@@ -75,7 +71,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         # Technically this means we will cleanup N times, once per event persister, maybe put on master?
         if self._can_write_to_sticky_events:
             self.clock.looping_call(
-                self._run_background_cleanup, DELETE_EXPIRED_STICKY_EVENTS_MS
+                self._run_background_cleanup, DELETE_EXPIRED_STICKY_EVENTS_INTERVAL
             )
 
         self._sticky_events_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
@@ -126,7 +122,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         to_id: int,
         now: int,
         limit: int,
-    ) -> Tuple[int, Dict[str, Set[str]]]:
+    ) -> tuple[int, dict[str, set[str]]]:
         """
         Fetch all the sticky events in the given rooms, from the given sticky stream ID.
 
@@ -149,7 +145,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             limit,
         )
         new_to_id = from_id
-        room_to_events: Dict[str, Set[str]] = {}
+        room_to_events: dict[str, set[str]] = {}
         for stream_id, room_id, event_id in sticky_events_rows:
             new_to_id = max(new_to_id, stream_id)
             events = room_to_events.get(room_id, set())
@@ -165,7 +161,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         to_id: int,
         now: int,
         limit: int,
-    ) -> List[Tuple[int, str, str]]:
+    ) -> list[tuple[int, str, str]]:
         if len(room_ids) == 0:
             return []
         clause, room_id_values = make_in_list_sql_clause(
@@ -181,11 +177,11 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             query += "LIMIT ?"
             params += (limit,)
         txn.execute(query, params)
-        return cast(List[Tuple[int, str, str]], txn.fetchall())
+        return cast(list[tuple[int, str, str]], txn.fetchall())
 
     async def get_updated_sticky_events(
         self, from_id: int, to_id: int, limit: int
-    ) -> List[Tuple[int, str, str, bool]]:
+    ) -> list[tuple[int, str, str, bool]]:
         """Get updates to sticky events between two stream IDs.
 
         Args:
@@ -206,18 +202,18 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
     def _get_updated_sticky_events_txn(
         self, txn: LoggingTransaction, from_id: int, to_id: int, limit: int
-    ) -> List[Tuple[int, str, str, bool]]:
+    ) -> list[tuple[int, str, str, bool]]:
         txn.execute(
             """
             SELECT stream_id, room_id, event_id, soft_failed FROM sticky_events WHERE stream_id > ? AND stream_id <= ? LIMIT ?
             """,
             (from_id, to_id, limit),
         )
-        return cast(List[Tuple[int, str, str, bool]], txn.fetchall())
+        return cast(list[tuple[int, str, str, bool]], txn.fetchall())
 
     async def get_sticky_event_ids_sent_by_self(
         self, room_id: str, from_stream_pos: int
-    ) -> List[str]:
+    ) -> list[str]:
         """Get unexpired sticky event IDs which have been sent by users on this homeserver.
 
         Used when sending sticky events eagerly to newly joined servers, or when catching up over federation.
@@ -237,7 +233,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
     def _get_sticky_event_ids_sent_by_self_txn(
         self, txn: LoggingTransaction, room_id: str, from_stream_pos: int
-    ) -> List[str]:
+    ) -> list[str]:
         now_ms = self._now()
         txn.execute(
             """
@@ -247,7 +243,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             """,
             (False, now_ms, room_id),
         )
-        rows = cast(List[Tuple[str, str, int]], txn.fetchall())
+        rows = cast(list[tuple[str, str, int]], txn.fetchall())
         return [
             row[0]
             for row in rows
@@ -257,8 +253,8 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     async def reevaluate_soft_failed_sticky_events(
         self,
         room_id: str,
-        events_and_contexts: List[EventPersistencePair],
-        state_delta_for_room: Optional[DeltaState],
+        events_and_contexts: list[EventPersistencePair],
+        state_delta_for_room: DeltaState | None,
     ) -> None:
         """Re-evaluate soft failed events in the room provided.
 
@@ -290,11 +286,11 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     def insert_sticky_events_txn(
         self,
         txn: LoggingTransaction,
-        events: List[EventBase],
+        events: list[EventBase],
     ) -> None:
         now_ms = self._now()
         # event, expires_at, stream_id
-        sticky_events: List[Tuple[EventBase, int, int]] = []
+        sticky_events: list[tuple[EventBase, int, int]] = []
         for ev in events:
             # MSC: Note: policy servers and other similar antispam techniques still apply to these events.
             if ev.internal_metadata.policy_server_spammy:
@@ -356,8 +352,8 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     async def _get_soft_failed_sticky_events_to_recheck(
         self,
         room_id: str,
-        state_delta_for_room: Optional[DeltaState],
-    ) -> List[str]:
+        state_delta_for_room: DeltaState | None,
+    ) -> list[str]:
         """Fetch soft-failed sticky events which should be rechecked against the current state.
 
         Soft-failed events are not rejected, so they pass auth at the state before
@@ -424,8 +420,8 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             )
 
             # pull out senders of sticky events in this room
-            events_to_recheck: List[
-                Tuple[str]
+            events_to_recheck: list[
+                tuple[str]
             ] = await self.db_pool.simple_select_many_batch(
                 table="sticky_events",
                 column="sender",
@@ -488,7 +484,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         soft_failed_event_map = await self.get_events(
             soft_failed_event_ids, allow_rejected=False
         )
-        needed_tuples: Set[Tuple[str, str]] = set()
+        needed_tuples: set[tuple[str, str]] = set()
         for ev in soft_failed_event_map.values():
             needed_tuples.update(event_auth.auth_types_for_event(ev.room_version, ev))
 
@@ -499,7 +495,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         )
         current_state_ids_list = [e for _, e in current_state_map.items()]
         current_auth_events = await self.get_events_as_list(current_state_ids_list)
-        passing_event_ids: Set[str] = set()
+        passing_event_ids: set[str] = set()
         for soft_failed_event in soft_failed_event_map.values():
             if soft_failed_event.internal_metadata.policy_server_spammy:
                 # don't re-evaluate spam.
@@ -531,10 +527,10 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         )
 
     def _update_soft_failure_status_txn(
-        self, txn: LoggingTransaction, passing_event_ids: Set[str]
+        self, txn: LoggingTransaction, passing_event_ids: set[str]
     ) -> None:
         # Update the sticky events table so we notify downstream of the change in soft-failure status
-        new_stream_ids: List[Tuple[str, int]] = [
+        new_stream_ids: list[tuple[str, int]] = [
             (event_id, self._sticky_events_id_gen.get_next_txn(txn))
             for event_id in passing_event_ids
         ]

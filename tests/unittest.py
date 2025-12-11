@@ -33,18 +33,12 @@ from typing import (
     Awaitable,
     Callable,
     ClassVar,
-    Dict,
     Generic,
     Iterable,
-    List,
     Mapping,
     NoReturn,
-    Optional,
     Protocol,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
 )
 from unittest.mock import Mock, patch
 
@@ -169,7 +163,7 @@ def _parse_config_dict(config: str) -> HomeServerConfig:
     return config_obj
 
 
-def make_homeserver_config_obj(config: Dict[str, Any]) -> HomeServerConfig:
+def make_homeserver_config_obj(config: dict[str, Any]) -> HomeServerConfig:
     """Creates a :class:`HomeServerConfig` instance with the given configuration dict.
 
     This is equivalent to::
@@ -250,7 +244,7 @@ class TestCase(unittest.TestCase):
 
             return ret
 
-    def assertObjectHasAttributes(self, attrs: Dict[str, object], obj: object) -> None:
+    def assertObjectHasAttributes(self, attrs: dict[str, object], obj: object) -> None:
         """Asserts that the given object has each of the attributes given, and
         that the value of each matches according to assertEqual."""
         for key in attrs.keys():
@@ -278,7 +272,7 @@ class TestCase(unittest.TestCase):
         actual_items: AbstractSet[TV],
         expected_items: AbstractSet[TV],
         exact: bool = False,
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> None:
         """
         Assert that all of the `expected_items` are included in the `actual_items`.
@@ -299,14 +293,14 @@ class TestCase(unittest.TestCase):
         elif not exact and actual_items >= expected_items:
             return
 
-        expected_lines: List[str] = []
+        expected_lines: list[str] = []
         for expected_item in expected_items:
             is_expected_in_actual = expected_item in actual_items
             expected_lines.append(
                 "{}  {}".format(" " if is_expected_in_actual else "?", expected_item)
             )
 
-        actual_lines: List[str] = []
+        actual_lines: list[str] = []
         for actual_item in actual_items:
             is_actual_in_expected = actual_item in expected_items
             actual_lines.append(
@@ -345,6 +339,9 @@ def logcontext_clean(target: TV) -> TV:
     """
 
     def logcontext_error(msg: str) -> NoReturn:
+        # Log so we can still see it in the logs like normal
+        logger.warning(msg)
+        # But also fail the test
         raise AssertionError("logcontext error: %s" % (msg))
 
     patcher = patch("synapse.logging.context.logcontext_error", new=logcontext_error)
@@ -379,7 +376,7 @@ class HomeserverTestCase(TestCase):
 
     hijack_auth: ClassVar[bool] = True
     needs_threadpool: ClassVar[bool] = False
-    servlets: ClassVar[List[RegisterServletsFunc]] = []
+    servlets: ClassVar[list[RegisterServletsFunc]] = []
 
     def __init__(self, methodName: str):
         super().__init__(methodName)
@@ -527,7 +524,7 @@ class HomeserverTestCase(TestCase):
         create_resource_tree(self.create_resource_dict(), root_resource)
         return root_resource
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         """Create a resource tree for the test server
 
         A resource tree is a mapping from path to twisted.web.resource.
@@ -574,17 +571,17 @@ class HomeserverTestCase(TestCase):
 
     def make_request(
         self,
-        method: Union[bytes, str],
-        path: Union[bytes, str],
-        content: Union[bytes, str, JsonDict] = b"",
-        access_token: Optional[str] = None,
-        request: Type[Request] = SynapseRequest,
+        method: bytes | str,
+        path: bytes | str,
+        content: bytes | str | JsonDict = b"",
+        access_token: str | None = None,
+        request: type[Request] = SynapseRequest,
         shorthand: bool = True,
-        federation_auth_origin: Optional[bytes] = None,
-        content_type: Optional[bytes] = None,
+        federation_auth_origin: bytes | None = None,
+        content_type: bytes | None = None,
         content_is_form: bool = False,
         await_result: bool = True,
-        custom_headers: Optional[Iterable[CustomHeaderType]] = None,
+        custom_headers: Iterable[CustomHeaderType] | None = None,
         client_ip: str = "127.0.0.1",
     ) -> FakeChannel:
         """
@@ -637,10 +634,10 @@ class HomeserverTestCase(TestCase):
 
     def setup_test_homeserver(
         self,
-        server_name: Optional[str] = None,
-        config: Optional[JsonDict] = None,
-        reactor: Optional[ISynapseReactor] = None,
-        clock: Optional[Clock] = None,
+        server_name: str | None = None,
+        config: JsonDict | None = None,
+        reactor: ISynapseReactor | None = None,
+        clock: Clock | None = None,
         **extra_homeserver_attributes: Any,
     ) -> HomeServer:
         """
@@ -709,7 +706,7 @@ class HomeserverTestCase(TestCase):
         return self.successResultOf(deferred)
 
     def get_failure(
-        self, d: Awaitable[Any], exc: Type[_ExcType], by: float = 0.0
+        self, d: Awaitable[Any], exc: type[_ExcType], by: float = 0.0
     ) -> _TypedFailure[_ExcType]:
         """
         Run a Deferred and get a Failure from it. The failure must be of the type `exc`.
@@ -747,8 +744,8 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         password: str,
-        admin: Optional[bool] = False,
-        displayname: Optional[str] = None,
+        admin: bool | None = False,
+        displayname: str | None = None,
     ) -> str:
         """
         Register a user. Requires the Admin API be registered.
@@ -799,7 +796,7 @@ class HomeserverTestCase(TestCase):
         username: str,
         appservice_token: str,
         inhibit_login: bool = False,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Register an appservice user as an application service.
         Requires the client-facing registration API be registered.
 
@@ -830,9 +827,9 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         password: str,
-        device_id: Optional[str] = None,
-        additional_request_fields: Optional[Dict[str, str]] = None,
-        custom_headers: Optional[Iterable[CustomHeaderType]] = None,
+        device_id: str | None = None,
+        additional_request_fields: dict[str, str] | None = None,
+        custom_headers: Iterable[CustomHeaderType] | None = None,
     ) -> str:
         """
         Log in a user, and get an access token. Requires the Login API be registered.
@@ -871,7 +868,7 @@ class HomeserverTestCase(TestCase):
         room_id: str,
         user: UserID,
         soft_failed: bool = False,
-        prev_event_ids: Optional[List[str]] = None,
+        prev_event_ids: list[str] | None = None,
     ) -> str:
         """
         Create and send an event.
@@ -963,7 +960,7 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
             )
         )
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         d = super().create_resource_dict()
         d["/_matrix/federation"] = TransportLayerServer(self.hs)
         return d
@@ -972,9 +969,9 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
         self,
         method: str,
         path: str,
-        content: Optional[JsonDict] = None,
+        content: JsonDict | None = None,
         await_result: bool = True,
-        custom_headers: Optional[Iterable[CustomHeaderType]] = None,
+        custom_headers: Iterable[CustomHeaderType] | None = None,
         client_ip: str = "127.0.0.1",
     ) -> FakeChannel:
         """Make an inbound signed federation request to this server
@@ -1039,7 +1036,7 @@ def _auth_header_for_request(
     signing_key: signedjson.key.SigningKey,
     method: str,
     path: str,
-    content: Optional[JsonDict],
+    content: JsonDict | None,
 ) -> str:
     """Build a suitable Authorization header for an outgoing federation request"""
     request_description: JsonDict = {

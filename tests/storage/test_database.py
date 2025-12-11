@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Callable, Tuple
+from typing import Callable
 from unittest.mock import Mock, call
 
 from twisted.internet import defer
@@ -149,7 +149,7 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
 
     def _run_interaction(
         self, func: Callable[[LoggingTransaction], object]
-    ) -> Tuple[Mock, Mock]:
+    ) -> tuple[Mock, Mock]:
         """Run the given function in a database transaction, with callbacks registered.
 
         Args:

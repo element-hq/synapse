@@ -22,6 +22,7 @@ import gc
 import weakref
 
 from synapse.app.homeserver import SynapseHomeServer
+from synapse.logging.context import LoggingContext
 from synapse.storage.background_updates import UpdaterStatus
 
 from tests.server import (
@@ -29,7 +30,7 @@ from tests.server import (
     get_clock,
     setup_test_homeserver,
 )
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, logcontext_clean
 
 
 class HomeserverCleanShutdownTestCase(HomeserverTestCase):
@@ -44,6 +45,7 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
     # closed in a timely manner during shutdown. Simulating this behaviour in a unit test
     # won't be as good as a proper integration test in complement.
 
+    @logcontext_clean
     def test_clean_homeserver_shutdown(self) -> None:
         """Ensure the `SynapseHomeServer` can be fully shutdown and garbage collected"""
         self.reactor, self.clock = get_clock()
@@ -63,8 +65,13 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # we use in tests doesn't handle this properly (see doc comment)
         cleanup_test_reactor_system_event_triggers(self.reactor)
 
-        # Cleanup the homeserver.
-        self.get_success(self.hs.shutdown())
+        async def shutdown() -> None:
+            # Use a logcontext just to double-check that we don't mangle the logcontext
+            # during shutdown.
+            with LoggingContext(name="hs_shutdown", server_name=self.hs.hostname):
+                await self.hs.shutdown()
+
+        self.get_success(shutdown())
 
         # Cleanup the internal reference in our test case
         del self.hs
@@ -114,6 +121,7 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
             # # to generate the result.
             # objgraph.show_backrefs(synapse_hs, max_depth=10, too_many=10)
 
+    @logcontext_clean
     def test_clean_homeserver_shutdown_mid_background_updates(self) -> None:
         """Ensure the `SynapseHomeServer` can be fully shutdown and garbage collected
         before background updates have completed"""
@@ -141,8 +149,13 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # Ensure the background updates are not complete.
         self.assertNotEqual(store.db_pool.updates.get_status(), UpdaterStatus.COMPLETE)
 
-        # Cleanup the homeserver.
-        self.get_success(self.hs.shutdown())
+        async def shutdown() -> None:
+            # Use a logcontext just to double-check that we don't mangle the logcontext
+            # during shutdown.
+            with LoggingContext(name="hs_shutdown", server_name=self.hs.hostname):
+                await self.hs.shutdown()
+
+        self.get_success(shutdown())
 
         # Cleanup the internal reference in our test case
         del self.hs

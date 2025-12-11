@@ -20,7 +20,7 @@
 #
 #
 import time
-from typing import Dict, Iterable
+from typing import Iterable
 from unittest import mock
 
 from parameterized import parameterized
@@ -291,7 +291,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             (chris, "chris_dev_2", "alg2"): 1,
         }
         # Convert to the format the handler wants.
-        query: Dict[str, Dict[str, Dict[str, int]]] = {}
+        query: dict[str, dict[str, dict[str, int]]] = {}
         for (user_id, device_id, algorithm), count in claims_to_make.items():
             query.setdefault(user_id, {}).setdefault(device_id, {})[algorithm] = count
         claim_res = self.get_success(
@@ -1510,7 +1510,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         )
 
         # Setup a response.
-        response: Dict[str, Dict[str, Dict[str, JsonDict]]] = {
+        response: dict[str, dict[str, dict[str, JsonDict]]] = {
             local_user: {device_id_1: {**as_otk, **as_fallback_key}}
         }
         self.appservice_api.claim_client_keys.return_value = (response, [])

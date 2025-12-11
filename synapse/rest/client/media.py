@@ -22,7 +22,6 @@
 
 import logging
 import re
-from typing import Optional
 
 from synapse.http.server import (
     HttpServer,
@@ -231,7 +230,7 @@ class DownloadResource(RestServlet):
         request: SynapseRequest,
         server_name: str,
         media_id: str,
-        file_name: Optional[str] = None,
+        file_name: str | None = None,
     ) -> None:
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)

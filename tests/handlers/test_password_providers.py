@@ -22,7 +22,7 @@
 """Tests for the password_auth_provider interface"""
 
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -75,7 +75,7 @@ class LegacyCustomAuthProvider:
     def __init__(self, config: None, account_handler: AccountHandler):
         pass
 
-    def get_supported_login_types(self) -> Dict[str, List[str]]:
+    def get_supported_login_types(self) -> dict[str, list[str]]:
         return {"test.login_type": ["test_field"]}
 
     def check_auth(self, *args: str) -> Mock:
@@ -109,7 +109,7 @@ class LegacyPasswordCustomAuthProvider:
     def __init__(self, config: None, account_handler: AccountHandler):
         pass
 
-    def get_supported_login_types(self) -> Dict[str, List[str]]:
+    def get_supported_login_types(self) -> dict[str, list[str]]:
         return {"m.login.password": ["password"], "test.login_type": ["test_field"]}
 
     def check_auth(self, *args: str) -> Mock:
@@ -139,7 +139,7 @@ class PasswordCustomAuthProvider:
         return mock_password_provider.check_password(*args)
 
 
-def legacy_providers_config(*providers: Type[Any]) -> dict:
+def legacy_providers_config(*providers: type[Any]) -> dict:
     """Returns a config dict that will enable the given legacy password auth providers"""
     return {
         "password_providers": [
@@ -149,7 +149,7 @@ def legacy_providers_config(*providers: Type[Any]) -> dict:
     }
 
 
-def providers_config(*providers: Type[Any]) -> dict:
+def providers_config(*providers: type[Any]) -> dict:
     """Returns a config dict that will enable the given modules"""
     return {
         "modules": [
@@ -707,7 +707,7 @@ class PasswordAuthProviderTests(unittest.HomeserverTestCase):
         self.called = False
 
         async def on_logged_out(
-            user_id: str, device_id: Optional[str], access_token: str
+            user_id: str, device_id: str | None, access_token: str
         ) -> None:
             self.called = True
 
@@ -978,7 +978,7 @@ class PasswordAuthProviderTests(unittest.HomeserverTestCase):
         self,
         access_token: str,
         device: str,
-        body: Union[JsonDict, bytes] = b"",
+        body: JsonDict | bytes = b"",
     ) -> FakeChannel:
         """Delete an individual device."""
         channel = self.make_request(

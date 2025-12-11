@@ -24,7 +24,7 @@ import logging
 import os
 import shutil
 from io import BytesIO
-from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from typing import IO, TYPE_CHECKING
 
 import attr
 from matrix_common.types.mxc_uri import MXCUri
@@ -70,6 +70,7 @@ from synapse.media.url_previewer import UrlPreviewer
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
 from synapse.types import UserID
 from synapse.util.async_helpers import Linearizer
+from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import random_string
 
@@ -80,10 +81,10 @@ logger = logging.getLogger(__name__)
 
 # How often to run the background job to update the "recently accessed"
 # attribute of local and remote media.
-UPDATE_RECENTLY_ACCESSED_TS = 60 * 1000  # 1 minute
+UPDATE_RECENTLY_ACCESSED_TS = Duration(minutes=1)
 # How often to run the background job to check for local and remote media
 # that should be purged according to the configured media retention settings.
-MEDIA_RETENTION_CHECK_PERIOD_MS = 60 * 60 * 1000  # 1 hour
+MEDIA_RETENTION_CHECK_PERIOD = Duration(hours=1)
 
 
 class MediaRepository:
@@ -109,8 +110,8 @@ class MediaRepository:
 
         self.remote_media_linearizer = Linearizer(name="media_remote", clock=self.clock)
 
-        self.recently_accessed_remotes: Set[Tuple[str, str]] = set()
-        self.recently_accessed_locals: Set[str] = set()
+        self.recently_accessed_remotes: set[tuple[str, str]] = set()
+        self.recently_accessed_locals: set[str] = set()
 
         self.federation_domain_whitelist = (
             hs.config.federation.federation_domain_whitelist
@@ -166,11 +167,11 @@ class MediaRepository:
             # with the duration between runs dictated by the homeserver config.
             self.clock.looping_call(
                 self._start_apply_media_retention_rules,
-                MEDIA_RETENTION_CHECK_PERIOD_MS,
+                MEDIA_RETENTION_CHECK_PERIOD,
             )
 
         if hs.config.media.url_preview_enabled:
-            self.url_previewer: Optional[UrlPreviewer] = UrlPreviewer(
+            self.url_previewer: UrlPreviewer | None = UrlPreviewer(
                 hs, self, self.media_storage
             )
         else:
@@ -208,7 +209,7 @@ class MediaRepository:
             local_media, remote_media, self.clock.time_msec()
         )
 
-    def mark_recently_accessed(self, server_name: Optional[str], media_id: str) -> None:
+    def mark_recently_accessed(self, server_name: str | None, media_id: str) -> None:
         """Mark the given media as recently accessed.
 
         Args:
@@ -221,7 +222,7 @@ class MediaRepository:
             self.recently_accessed_locals.add(media_id)
 
     @trace
-    async def create_media_id(self, auth_user: UserID) -> Tuple[str, int]:
+    async def create_media_id(self, auth_user: UserID) -> tuple[str, int]:
         """Create and store a media ID for a local user and return the MXC URI and its
         expiration.
 
@@ -242,7 +243,7 @@ class MediaRepository:
         return f"mxc://{self.server_name}/{media_id}", now + self.unused_expiration_time
 
     @trace
-    async def reached_pending_media_limit(self, auth_user: UserID) -> Tuple[bool, int]:
+    async def reached_pending_media_limit(self, auth_user: UserID) -> tuple[bool, int]:
         """Check if the user is over the limit for pending media uploads.
 
         Args:
@@ -298,11 +299,11 @@ class MediaRepository:
     async def create_or_update_content(
         self,
         media_type: str,
-        upload_name: Optional[str],
+        upload_name: str | None,
         content: IO,
         content_length: int,
         auth_user: UserID,
-        media_id: Optional[str] = None,
+        media_id: str | None = None,
     ) -> MXCUri:
         """Create or update the content of the given media ID.
 
@@ -354,7 +355,7 @@ class MediaRepository:
 
         # This is the total size of media uploaded by the user in the last
         # `time_period_ms` milliseconds, or None if we haven't checked yet.
-        uploaded_media_size: Optional[int] = None
+        uploaded_media_size: int | None = None
 
         for limit in media_upload_limits:
             # We only need to check the amount of media uploaded by the user in
@@ -422,7 +423,7 @@ class MediaRepository:
 
     async def get_cached_remote_media_info(
         self, origin: str, media_id: str
-    ) -> Optional[RemoteMedia]:
+    ) -> RemoteMedia | None:
         """
         Get cached remote media info for a given origin/media ID combo. If the requested
         media is not found locally, it will not be requested over federation and the
@@ -439,7 +440,7 @@ class MediaRepository:
 
     async def get_local_media_info(
         self, request: SynapseRequest, media_id: str, max_timeout_ms: int
-    ) -> Optional[LocalMedia]:
+    ) -> LocalMedia | None:
         """Gets the info dictionary for given local media ID. If the media has
         not been uploaded yet, this function will wait up to ``max_timeout_ms``
         milliseconds for the media to be uploaded.
@@ -485,7 +486,7 @@ class MediaRepository:
             if now >= wait_until:
                 break
 
-            await self.clock.sleep(0.5)
+            await self.clock.sleep(Duration(milliseconds=500))
 
         logger.info("Media %s has not yet been uploaded", media_id)
         self.respond_not_yet_uploaded(request)
@@ -495,7 +496,7 @@ class MediaRepository:
         self,
         request: SynapseRequest,
         media_id: str,
-        name: Optional[str],
+        name: str | None,
         max_timeout_ms: int,
         allow_authenticated: bool = True,
         federation: bool = False,
@@ -555,7 +556,7 @@ class MediaRepository:
         request: SynapseRequest,
         server_name: str,
         media_id: str,
-        name: Optional[str],
+        name: str | None,
         max_timeout_ms: int,
         ip_address: str,
         use_federation_endpoint: bool,
@@ -696,7 +697,7 @@ class MediaRepository:
         ip_address: str,
         use_federation_endpoint: bool,
         allow_authenticated: bool,
-    ) -> Tuple[Optional[Responder], RemoteMedia]:
+    ) -> tuple[Responder | None, RemoteMedia]:
         """Looks for media in local cache, if not there then attempt to
         download from remote server.
 
@@ -1052,7 +1053,7 @@ class MediaRepository:
 
     def _get_thumbnail_requirements(
         self, media_type: str
-    ) -> Tuple[ThumbnailRequirement, ...]:
+    ) -> tuple[ThumbnailRequirement, ...]:
         scpos = media_type.find(";")
         if scpos > 0:
             media_type = media_type[:scpos]
@@ -1065,7 +1066,7 @@ class MediaRepository:
         t_height: int,
         t_method: str,
         t_type: str,
-    ) -> Optional[BytesIO]:
+    ) -> BytesIO | None:
         m_width = thumbnailer.width
         m_height = thumbnailer.height
 
@@ -1099,7 +1100,7 @@ class MediaRepository:
         t_method: str,
         t_type: str,
         url_cache: bool,
-    ) -> Optional[Tuple[str, FileInfo]]:
+    ) -> tuple[str, FileInfo] | None:
         input_path = await self.media_storage.ensure_media_is_in_local_cache(
             FileInfo(None, media_id, url_cache=url_cache)
         )
@@ -1175,7 +1176,7 @@ class MediaRepository:
         t_height: int,
         t_method: str,
         t_type: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         input_path = await self.media_storage.ensure_media_is_in_local_cache(
             FileInfo(server_name, file_id)
         )
@@ -1247,12 +1248,12 @@ class MediaRepository:
     @trace
     async def _generate_thumbnails(
         self,
-        server_name: Optional[str],
+        server_name: str | None,
         media_id: str,
         file_id: str,
         media_type: str,
         url_cache: bool = False,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Generate and store thumbnails for an image.
 
         Args:
@@ -1308,7 +1309,7 @@ class MediaRepository:
 
             # We deduplicate the thumbnail sizes by ignoring the cropped versions if
             # they have the same dimensions of a scaled one.
-            thumbnails: Dict[Tuple[int, int, str], str] = {}
+            thumbnails: dict[tuple[int, int, str], str] = {}
             for requirement in requirements:
                 if requirement.method == "crop":
                     thumbnails.setdefault(
@@ -1461,7 +1462,7 @@ class MediaRepository:
                 delete_protected_media=False,
             )
 
-    async def delete_old_remote_media(self, before_ts: int) -> Dict[str, int]:
+    async def delete_old_remote_media(self, before_ts: int) -> dict[str, int]:
         old_media = await self.store.get_remote_media_ids(
             before_ts, include_quarantined_media=False
         )
@@ -1497,8 +1498,8 @@ class MediaRepository:
         return {"deleted": deleted}
 
     async def delete_local_media_ids(
-        self, media_ids: List[str]
-    ) -> Tuple[List[str], int]:
+        self, media_ids: list[str]
+    ) -> tuple[list[str], int]:
         """
         Delete the given local or remote media ID from this server
 
@@ -1516,7 +1517,7 @@ class MediaRepository:
         keep_profiles: bool = True,
         delete_quarantined_media: bool = False,
         delete_protected_media: bool = False,
-    ) -> Tuple[List[str], int]:
+    ) -> tuple[list[str], int]:
         """
         Delete local or remote media from this server by size and timestamp. Removes
         media files, any thumbnails and cached URLs.
@@ -1543,8 +1544,8 @@ class MediaRepository:
         return await self._remove_local_media_from_disk(old_media)
 
     async def _remove_local_media_from_disk(
-        self, media_ids: List[str]
-    ) -> Tuple[List[str], int]:
+        self, media_ids: list[str]
+    ) -> tuple[list[str], int]:
         """
         Delete local or remote media from this server. Removes media files,
         any thumbnails and cached URLs.

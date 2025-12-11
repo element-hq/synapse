@@ -25,17 +25,10 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Collection,
-    Dict,
-    FrozenSet,
     Iterable,
-    List,
     Mapping,
     MutableMapping,
-    Optional,
-    Set,
-    Tuple,
     TypeVar,
-    Union,
     cast,
     overload,
 )
@@ -91,8 +84,8 @@ class EventMetadata:
 
     room_id: str
     event_type: str
-    state_key: Optional[str]
-    rejection_reason: Optional[str]
+    state_key: str | None
+    rejection_reason: str | None
 
 
 def _retrieve_and_check_room_version(room_id: str, room_version_id: str) -> RoomVersion:
@@ -199,7 +192,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     @trace
     async def get_metadata_for_events(
         self, event_ids: Collection[str]
-    ) -> Dict[str, EventMetadata]:
+    ) -> dict[str, EventMetadata]:
         """Get some metadata (room_id, type, state_key) for the given events.
 
         This method is a faster alternative than fetching the full events from
@@ -212,7 +205,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         def get_metadata_for_events_txn(
             txn: LoggingTransaction,
             batch_ids: Collection[str],
-        ) -> Dict[str, EventMetadata]:
+        ) -> dict[str, EventMetadata]:
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "e.event_id", batch_ids
             )
@@ -236,7 +229,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
                 for event_id, room_id, event_type, state_key, rejection_reason in txn
             }
 
-        result_map: Dict[str, EventMetadata] = {}
+        result_map: dict[str, EventMetadata] = {}
         for batch_ids in batch_iter(event_ids, 1000):
             result_map.update(
                 await self.db_pool.runInteraction(
@@ -248,7 +241,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return result_map
 
-    async def get_room_predecessor(self, room_id: str) -> Optional[JsonMapping]:
+    async def get_room_predecessor(self, room_id: str) -> JsonMapping | None:
         """Get the predecessor of an upgraded room if it exists.
         Otherwise return None.
 
@@ -308,7 +301,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         return create_event
 
     @cached(max_entries=10000)
-    async def get_room_type(self, room_id: str) -> Union[Optional[str], Sentinel]:
+    async def get_room_type(self, room_id: str) -> str | None | Sentinel:
         """Fetch room type for given room.
 
         Since this function is cached, any missing values would be cached as
@@ -329,8 +322,8 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     @cachedList(cached_method_name="get_room_type", list_name="room_ids")
     async def bulk_get_room_type(
-        self, room_ids: Set[str]
-    ) -> Mapping[str, Union[Optional[str], Sentinel]]:
+        self, room_ids: set[str]
+    ) -> Mapping[str, str | None | Sentinel]:
         """
         Bulk fetch room types for the given rooms (via current state).
 
@@ -347,7 +340,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def txn(
             txn: LoggingTransaction,
-        ) -> MutableMapping[str, Union[Optional[str], Sentinel]]:
+        ) -> MutableMapping[str, str | None | Sentinel]:
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "room_id", room_ids
             )
@@ -403,13 +396,13 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         return results
 
     @cached(max_entries=10000)
-    async def get_room_encryption(self, room_id: str) -> Optional[str]:
+    async def get_room_encryption(self, room_id: str) -> str | None:
         raise NotImplementedError()
 
     @cachedList(cached_method_name="get_room_encryption", list_name="room_ids")
     async def bulk_get_room_encryption(
-        self, room_ids: Set[str]
-    ) -> Mapping[str, Union[Optional[str], Sentinel]]:
+        self, room_ids: set[str]
+    ) -> Mapping[str, str | None | Sentinel]:
         """
         Bulk fetch room encryption for the given rooms (via current state).
 
@@ -427,7 +420,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def txn(
             txn: LoggingTransaction,
-        ) -> MutableMapping[str, Union[Optional[str], Sentinel]]:
+        ) -> MutableMapping[str, str | None | Sentinel]:
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "room_id", room_ids
             )
@@ -469,7 +462,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         # If we haven't updated `room_stats_state` with the room yet, query the state
         # directly. This should happen only rarely so we don't mind if we do this in a
         # loop.
-        encryption_event_ids: List[str] = []
+        encryption_event_ids: list[str] = []
         for room_id in room_ids - results.keys():
             state_map = await self.get_partial_filtered_current_state_ids(
                 room_id,
@@ -541,7 +534,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     async def check_if_events_in_current_state(
         self, event_ids: StrCollection
-    ) -> FrozenSet[str]:
+    ) -> frozenset[str]:
         """Checks and returns which of the given events is part of the current state."""
         rows = await self.db_pool.simple_select_many_batch(
             table="current_state_events",
@@ -556,7 +549,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     # FIXME: how should this be cached?
     @cancellable
     async def get_partial_filtered_current_state_ids(
-        self, room_id: str, state_filter: Optional[StateFilter] = None
+        self, room_id: str, state_filter: StateFilter | None = None
     ) -> StateMap[str]:
         """Get the current state event of a given type for a room based on the
         current_state_events table.  This may not be as up-to-date as the result
@@ -609,7 +602,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         )
 
     @cached(max_entries=50000)
-    async def _get_state_group_for_event(self, event_id: str) -> Optional[int]:
+    async def _get_state_group_for_event(self, event_id: str) -> int | None:
         return await self.db_pool.simple_select_one_onecol(
             table="event_to_state_groups",
             keyvalues={"event_id": event_id},
@@ -632,7 +625,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
              RuntimeError if the state is unknown at any of the given events
         """
         rows = cast(
-            List[Tuple[str, int]],
+            list[tuple[str, int]],
             await self.db_pool.simple_select_many_batch(
                 table="event_to_state_groups",
                 column="event_id",
@@ -651,7 +644,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     async def get_referenced_state_groups(
         self, state_groups: Iterable[int]
-    ) -> Set[int]:
+    ) -> set[int]:
         """Check if the state groups are referenced by events.
 
         Args:
@@ -662,7 +655,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         """
 
         rows = cast(
-            List[Tuple[int]],
+            list[tuple[int]],
             await self.db_pool.simple_select_many_batch(
                 table="event_to_state_groups",
                 column="state_group",
@@ -803,7 +796,7 @@ class MainStateBackgroundUpdateStore(RoomMemberWorkerStore):
 
         def _background_remove_left_rooms_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[bool, Set[str]]:
+        ) -> tuple[bool, set[str]]:
             # get a batch of room ids to consider
             sql = """
                 SELECT DISTINCT room_id FROM current_state_events
@@ -884,7 +877,7 @@ class MainStateBackgroundUpdateStore(RoomMemberWorkerStore):
             # server didn't share a room with the remote user and therefore may
             # have missed any device updates.
             rows = cast(
-                List[Tuple[str]],
+                list[tuple[str]],
                 self.db_pool.simple_select_many_txn(
                     txn,
                     table="current_state_events",
@@ -975,7 +968,7 @@ class StateStore(StateGroupWorkerStore, MainStateBackgroundUpdateStore):
 
 
 @attr.s(auto_attribs=True, slots=True)
-class StateMapWrapper(Dict[StateKey, str]):
+class StateMapWrapper(dict[StateKey, str]):
     """A wrapper around a StateMap[str] to ensure that we only query for items
     that were not filtered out.
 
@@ -991,15 +984,13 @@ class StateMapWrapper(Dict[StateKey, str]):
         return super().__getitem__(key)
 
     @overload  # type: ignore[override]
-    def get(self, key: StateKey, default: None = None, /) -> Optional[str]: ...
+    def get(self, key: StateKey, default: None = None, /) -> str | None: ...
     @overload
     def get(self, key: StateKey, default: str, /) -> str: ...
     @overload
-    def get(self, key: StateKey, default: _T, /) -> Union[str, _T]: ...
+    def get(self, key: StateKey, default: _T, /) -> str | _T: ...
 
-    def get(
-        self, key: StateKey, default: Union[str, _T, None] = None
-    ) -> Union[str, _T, None]:
+    def get(self, key: StateKey, default: str | _T | None = None) -> str | _T | None:
         if key not in self.state_filter:
             raise Exception("State map was filtered and doesn't include: %s", key)
         return super().get(key, default)

@@ -24,7 +24,7 @@
 import logging
 import urllib.parse
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Any
 
 from canonicaljson import encode_canonical_json
 
@@ -177,7 +177,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 400, channel.result)
 
-    def _get_displayname(self, name: Optional[str] = None) -> Optional[str]:
+    def _get_displayname(self, name: str | None = None) -> str | None:
         channel = self.make_request(
             "GET", "/profile/%s/displayname" % (name or self.owner,)
         )
@@ -187,7 +187,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         # https://github.com/matrix-org/synapse/issues/13137.
         return channel.json_body.get("displayname")
 
-    def _get_avatar_url(self, name: Optional[str] = None) -> Optional[str]:
+    def _get_avatar_url(self, name: str | None = None) -> str | None:
         channel = self.make_request(
             "GET", "/profile/%s/avatar_url" % (name or self.owner,)
         )
@@ -778,7 +778,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
-    def _setup_local_files(self, names_and_props: Dict[str, Dict[str, Any]]) -> None:
+    def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 
         Args:
@@ -846,7 +846,7 @@ class ProfilesRestrictedTestCase(unittest.HomeserverTestCase):
         self.try_fetch_profile(200, self.requester_tok)
 
     def try_fetch_profile(
-        self, expected_code: int, access_token: Optional[str] = None
+        self, expected_code: int, access_token: str | None = None
     ) -> None:
         self.request_profile(expected_code, access_token=access_token)
 
@@ -862,7 +862,7 @@ class ProfilesRestrictedTestCase(unittest.HomeserverTestCase):
         self,
         expected_code: int,
         url_suffix: str = "",
-        access_token: Optional[str] = None,
+        access_token: str | None = None,
     ) -> None:
         channel = self.make_request(
             "GET", self.profile_url + url_suffix, access_token=access_token

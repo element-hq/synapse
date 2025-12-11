@@ -99,7 +99,14 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
     def test_disable_registration(self) -> None:
         self.generate_config()
         self.add_lines_to_config(
-            ["enable_registration: true", "disable_registration: true"]
+            [
+                "enable_registration: true",
+                "disable_registration: true",
+                # We're not worried about open registration in this test. This test is
+                # focused on making sure that enable/disable_registration properly
+                # override each other.
+                "enable_registration_without_verification: true",
+            ]
         )
         # Check that disable_registration clobbers enable_registration.
         config = HomeServerConfig.load_config("", ["-c", self.config_file])
