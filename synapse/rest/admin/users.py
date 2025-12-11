@@ -1056,7 +1056,7 @@ class UserJoinedRoomsRestServlet(RestServlet):
 
 class UserMembershipsRestServlet(RestServlet):
     """
-    Get list of left room ID's for a user.
+    Get list of room memberships for a user.
     """
 
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/memberships$")
