@@ -23,6 +23,7 @@
 import logging
 import re
 
+from synapse.api.errors import SynapseError, cs_error, Codes
 from synapse.http.server import (
     HttpServer,
     respond_with_json,
@@ -238,12 +239,17 @@ class DownloadResource(RestServlet):
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         is_admin = await self.auth.is_server_admin(requester)
         bypass_quarantine = False
-        if (
-            is_admin
-            and parse_string(request, "admin_unsafely_bypass_quarantine") == "true"
-        ):
-            logger.info("Admin bypassing quarantine for media download")
-            bypass_quarantine = True
+        if parse_string(request, "admin_unsafely_bypass_quarantine") == "true":
+            if is_admin:
+                logger.info("Admin bypassing quarantine for media download")
+                bypass_quarantine = True
+            else:
+                respond_with_json(
+                    request,
+                    400,
+                    cs_error("Must be a server admin to bypass quarantine", code=Codes.UNKNOWN),
+                    send_cors=True,
+                )
 
         set_cors_headers(request)
         set_corp_headers(request)
