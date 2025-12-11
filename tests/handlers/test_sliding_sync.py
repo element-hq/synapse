@@ -4380,7 +4380,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                         # Previous request did not include any explicit members,
-                        # so nothing to store.
+                        # so there is no extra users to add to the lazy cache.
                         extra_users_to_add_to_lazy_cache=frozenset(),
                         # Remove "@user2:test" since that state has changed and is no
                         # longer being requested anymore. Since something was removed,
@@ -4397,7 +4397,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                         # Previous request did not include any explicit members,
-                        # so nothing to store.
+                        # so there is no extra users to add to the lazy cache.
                         extra_users_to_add_to_lazy_cache=frozenset(),
                         # Nothing should change (we should still keep track that
                         # we've sent specific `EventTypes.Member` before).
@@ -4424,7 +4424,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
                         # Previous request did not include any explicit members,
-                        # so nothing to store.
+                        # so there is no extra users to add to the lazy cache.
                         extra_users_to_add_to_lazy_cache=frozenset(),
                         # Remove "@user2:test" since that state has changed and
                         # is no longer being requested anymore. Since something
@@ -4441,7 +4441,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
                         # Previous request did not include any explicit members,
-                        # so nothing to store.
+                        # so there is no extra users to add to the lazy cache.
                         extra_users_to_add_to_lazy_cache=frozenset(),
                         lazy_members_invalidated=frozenset(),
                     ),
@@ -4554,7 +4554,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                         # Previous request did not include any explicit members,
-                        # so nothing to store.
+                        # so there is no extra users to add to the lazy cache.
                         extra_users_to_add_to_lazy_cache=frozenset(),
                         # Explicitly remove the now invalidated @user2:test
                         # membership.
@@ -4576,7 +4576,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # less state now
                         StateFilter.none(),
                         # Previous request did not include any explicit members,
-                        # so nothing to store.
+                        # so there is no extra users to add to the lazy cache.
                         extra_users_to_add_to_lazy_cache=frozenset(),
                         # Nothing has been invalidated.
                         lazy_members_invalidated=frozenset(),
@@ -4715,7 +4715,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
                         # Previous request did not include any explicit members,
-                        # so nothing to store.
+                        # so there is no extra users to add to the lazy cache.
                         extra_users_to_add_to_lazy_cache=frozenset(),
                         # Also remove "@user2:test" since that state has changed and is no
                         # longer being requested anymore. Since something was removed,
@@ -4732,7 +4732,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # We should see the new state_keys added
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
                         # Previous request did not include any explicit members,
-                        # so nothing to store.
+                        # so there is no extra users to add to the lazy cache.
                         extra_users_to_add_to_lazy_cache=frozenset(),
                         # We don't invalidate user2 as they haven't changed
                         lazy_members_invalidated=frozenset(),
