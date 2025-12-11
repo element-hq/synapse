@@ -18,10 +18,11 @@
 --
 -- We could have tracked these as part of the
 -- `sliding_sync_connection_required_state` table, but that would bloat that
--- table significantly as most rooms will have many lazy-loaded members. Due to
--- the way deduplication is done, we always pull out all rows for the connection
--- for every request, so having a large number of rows there causes significant
--- performance issues.
+-- table significantly as most rooms will have lazy-loaded members. We want to
+-- keep that table small as we always pull out all rows for the connection for
+-- every request, so storing lots of data there would be bad for performance. To
+-- keep that table small we also deduplicate the requested state across
+-- different rooms, which if we stored lazy members there would prevent.
 --
 -- We track a *rough* `last_seen_ts` for each user in each room which indicates
 -- when we last would've sent their member state to the client. `last_seen_ts`
