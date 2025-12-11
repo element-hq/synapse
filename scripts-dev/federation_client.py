@@ -145,7 +145,7 @@ def request(
     print("Requesting %s" % dest, file=sys.stderr)
 
     s = requests.Session()
-    s.mount("matrix-federation://", MatrixConnectionAdapter(verify=verify_tls))
+    s.mount("matrix-federation://", MatrixConnectionAdapter(verify_tls=verify_tls))
 
     headers: dict[str, str] = {
         "Authorization": authorization_headers[0],
@@ -267,8 +267,8 @@ def read_args_from_config(args: argparse.Namespace) -> None:
 
 
 class MatrixConnectionAdapter(HTTPAdapter):
-    def __init__(self, verify=True):
-        self.verify = verify
+    def __init__(self, verify_tls: bool = True) -> None:
+        self.verify_tls = verify_tls
         super().__init__()
 
     def send(
@@ -284,7 +284,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
         assert isinstance(request.url, str)
         parsed = urlparse.urlsplit(request.url)
         server_name = parsed.netloc
-        well_known = self._get_well_known(parsed.netloc, verify_tls=self.verify)
+        well_known = self._get_well_known(parsed.netloc, verify_tls=self.verify_tls)
 
         if well_known:
             server_name = well_known
