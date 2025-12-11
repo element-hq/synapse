@@ -76,8 +76,8 @@ Response:
 ## Listing all quarantined media
 
 This API returns a list of all quarantined media on the server. It is paginated, and can be scoped to either local or
-remote media. Note that the pagination values are also scoped to whether the media is local or remote. For example, 
-providing values from a local result set to a request for remote media will return unexpected results.
+remote media. Note that the pagination values are also scoped to the request parameters - changing them but keeping the
+same pagination values will result in unexpected results.
 
 Request:
 ```http
