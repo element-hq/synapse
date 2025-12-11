@@ -23,7 +23,7 @@
 import logging
 import re
 
-from synapse.api.errors import SynapseError, cs_error, Codes
+from synapse.api.errors import Codes, cs_error
 from synapse.http.server import (
     HttpServer,
     respond_with_json,
@@ -247,7 +247,10 @@ class DownloadResource(RestServlet):
                 respond_with_json(
                     request,
                     400,
-                    cs_error("Must be a server admin to bypass quarantine", code=Codes.UNKNOWN),
+                    cs_error(
+                        "Must be a server admin to bypass quarantine",
+                        code=Codes.UNKNOWN,
+                    ),
                     send_cors=True,
                 )
 
