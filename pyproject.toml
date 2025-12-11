@@ -47,6 +47,9 @@ dependencies = [
     # olddeps CI tests.
     # 5.2 is the current version in Debian oldstable. If we don't care to support that, then 5.4 is
     # the minimum version from Ubuntu 22.04 and RHEL 9. (as of 2025-12)
+    # When bumping this version to 6.2 or above, refer to https://github.com/element-hq/synapse/pull/19274
+    # for details of Synapse improvements that may be unlocked. Particularly around the use of `|`
+    # syntax with zope interface types.
     "zope-interface>=5.2",
     "treq>=21.5.0",
     # Twisted has required pyopenssl 16.0 since about Twisted 16.6.
