@@ -96,6 +96,20 @@ dependencies = [
 
     # This is used for parsing multipart responses
     "python-multipart>=0.0.9",
+
+    # Transitive dependency constraints
+    # These dependencies aren't directly required by Synapse.
+    # However, in order for Synapse to build, Synapse requires a higher minimum version
+    # for these dependencies than the minimum specified by the direct dependency.
+    # We should periodically check to see if these dependencies are still necessary and
+    # remove any that are no longer required.
+    "cffi>=1.15", # via cryptography
+    "pynacl>=1.3", # via signedjson
+    "pyparsing>=2.4",  # via packaging
+    "pyrsistent>=0.18.0",  # via jsonschema
+    "requests>=2.16.0", # 2.16.0+ no longer vendors urllib3, avoiding Python 3.10+ incompatibility
+    "urllib3>=1.26.5", # via treq; 1.26.5 fixes Python 3.10+ collections.abc compatibility
+    "zope-interface>=6.2", # via twisted
 ]
 
 [project.optional-dependencies]
@@ -105,7 +119,16 @@ postgres = [
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
 ]
-saml2 = ["pysaml2>=4.5.0"]
+saml2 = [
+    "pysaml2>=4.5.0",
+
+    # Transitive dependencies from pysaml2
+    # These dependencies aren't directly required by Synapse.
+    # However, in order for Synapse to build, Synapse requires a higher minimum version
+    # for these dependencies than the minimum specified by the direct dependency.
+    "defusedxml>=0.7.1", # via pysaml2
+    "pytz>=2018.3",  # via pysaml2
+]
 oidc = ["authlib>=0.15.1"]
 # systemd-python is necessary for logging to the systemd journal via
 # `systemd.journal.JournalHandler`, as is documented in
@@ -113,13 +136,23 @@ oidc = ["authlib>=0.15.1"]
 systemd = ["systemd-python>=231"]
 url-preview = ["lxml>=4.6.3"]
 sentry = ["sentry-sdk>=0.7.2"]
-opentracing = ["jaeger-client>=4.2.0", "opentracing>=2.2.0"]
+opentracing = [
+    "jaeger-client>=4.2.0",
+    "opentracing>=2.2.0",
+
+    # Transitive dependencies from jaeger-client
+    # These dependencies aren't directly required by Synapse.
+    # However, in order for Synapse to build, Synapse requires a higher minimum version
+    # for these dependencies than the minimum specified by the direct dependency.
+    "thrift>=0.10",  # via jaeger-client
+    "tornado>=6.0",  # via jaeger-client
+]
 jwt = ["authlib"]
 # hiredis is not a *strict* dependency, but it makes things much faster.
 # (if it is not installed, we fall back to slow code.)
-redis = ["txredisapi>=1.4.7", "hiredis"]
+redis = ["txredisapi>=1.4.7", "hiredis>=0.3"]
 # Required to use experimental `caches.track_memory_usage` config option.
-cache-memory = ["pympler"]
+cache-memory = ["pympler>=1.0"]
 # If this is updated, don't forget to update the equivalent lines in
 # tool.poetry.group.dev.dependencies.
 test = ["parameterized>=0.9.0", "idna>=3.3"]
@@ -150,13 +183,22 @@ all = [
     # opentracing
     "jaeger-client>=4.2.0", "opentracing>=2.2.0",
     # redis
-    "txredisapi>=1.4.7", "hiredis",
+    "txredisapi>=1.4.7", "hiredis>=0.3",
     # cache-memory
     # 1.0 added support for python 3.10, our current minimum supported python version
     "pympler>=1.0",
     # omitted:
     #   - test: it's useful to have this separate from dev deps in the olddeps job
     #   - systemd: this is a system-based requirement
+
+    # Transitive dependencies
+    # These dependencies aren't directly required by Synapse.
+    # However, in order for Synapse to build, Synapse requires a higher minimum version
+    # for these dependencies than the minimum specified by the direct dependency.
+    "defusedxml>=0.7.1", # via pysaml2
+    "pytz>=2018.3",  # via pysaml2
+    "thrift>=0.10",  # via jaeger-client
+    "tornado>=6.0",  # via jaeger-client
 ]
 
 [project.urls]
@@ -184,22 +226,6 @@ update_synapse_database = "synapse._scripts.update_synapse_database:main"
 #   As with constraints, overrides do not add a dependency on the package and only take
 #   effect if the package is requested in a direct or transitive dependency.
 override-dependencies = [
-    # Transitive dependency constraints
-    # These dependencies aren't directly required by Synapse.
-    # However, in order for Synapse to build, Synapse requires a higher minimum version
-    # for these dependencies than the minimum specified by the direct dependency.
-    "cffi>=1.15", # via cryptography
-    "defusedxml>=0.7.1", # via PIL
-    "hiredis>=0.3", # via hiredis
-    "pynacl>=1.3", # via signedjson
-    "pyparsing>=2.4",  # via packaging
-    "pyrsistent>=0.18.0",  # via jsonschema
-    "pytz>=2018.3",  # via pysaml2
-    "requests>=2.16.0", # 2.16.0+ no longer vendors urllib3, avoiding Python 3.10+ incompatibility
-    "thrift>=0.10",  # via jaeger-client
-    "tornado>=6.0",  # via jaeger-client
-    "urllib3>=1.26.5", # via treq; 1.26.5 fixes Python 3.10+ collections.abc compatibility
-    "zope-interface>=6.2", # via twisted
 ]
 
 
