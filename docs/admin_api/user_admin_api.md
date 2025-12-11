@@ -522,8 +522,10 @@ A response body like the following is returned:
 
 ```json
     {
-        "!DuGcnbhHGaSZQoNQR:matrix.org": "join",
-        "!ZtSaPCawyWtxfWiIy:matrix.org": "leave",
+        "memberships": {
+            "!DuGcnbhHGaSZQoNQR:matrix.org": "join",
+            "!ZtSaPCawyWtxfWiIy:matrix.org": "leave",
+        }
     }
 ```
 
@@ -548,7 +550,9 @@ The following parameters should be set in the URL:
 
 **Response**
 
-A map of `room_id` (string) to `membership` state (string).
+The following fields are returned in the JSON response body:
+
+- `memberships` - A map of `room_id` (string) to `membership` state (string).
 
 ## List joined rooms of a user
 

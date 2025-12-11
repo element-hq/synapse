@@ -1073,7 +1073,7 @@ class UserMembershipsRestServlet(RestServlet):
 
         memberships = await self.store.get_memberships_for_user(user_id)
 
-        return HTTPStatus.OK, memberships
+        return HTTPStatus.OK, {"memberships": memberships}
 
 
 class PushersRestServlet(RestServlet):

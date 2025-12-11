@@ -3032,7 +3032,12 @@ class JoinAliasRoomTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(
-            {self.public_room_id: Membership.JOIN, other_room_id: Membership.JOIN},
+            {
+                "memberships": {
+                    self.public_room_id: Membership.JOIN,
+                    other_room_id: Membership.JOIN,
+                }
+            },
             channel.json_body,
         )
 
@@ -3044,6 +3049,28 @@ class JoinAliasRoomTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
 
+        invited_room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok
+        )
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{invited_room_id}/invite",
+            content={"user_id": self.second_user_id},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        banned_room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok
+        )
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{banned_room_id}/ban",
+            content={"user_id": self.second_user_id},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
         channel = self.make_request(
             "GET",
             f"/_synapse/admin/v1/users/{self.second_user_id}/memberships",
@@ -3052,7 +3079,14 @@ class JoinAliasRoomTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(
-            {self.public_room_id: Membership.JOIN, other_room_id: Membership.LEAVE},
+            {
+                "memberships": {
+                    self.public_room_id: Membership.JOIN,
+                    other_room_id: Membership.LEAVE,
+                    invited_room_id: Membership.INVITE,
+                    banned_room_id: Membership.BAN,
+                }
+            },
             channel.json_body,
         )
 
