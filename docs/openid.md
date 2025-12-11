@@ -50,7 +50,10 @@ setting in your configuration file.
 See the [configuration manual](usage/configuration/config_documentation.md#oidc_providers) for some sample settings, as well as
 the text below for example configurations for specific providers.
 
-For setups using [delegation](delegate.md) make sure [public_baseurl](usage/configuration/config_documentation.md#public_baseurl) is set to the correct value (it defaults to [server_name](usage/configuration/config_documentation.md#server_name)), else Synapse will try to fix the incorrect hostname and will redirect to the value set as `server_name`.
+For setups using [`.well-known` delegation](delegate.md), make sure
+[`public_baseurl`](usage/configuration/config_documentation.md#public_baseurl) is set
+appropriately. If unset, Synapse defaults to `https://<server_name>/` which is used in
+the OIDC callback URL.
 
 ## OIDC Back-Channel Logout
 
