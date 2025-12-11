@@ -980,6 +980,14 @@ class MutablePerConnectionState(PerConnectionState):
     room_lazy_membership: dict[str, RoomLazyMembershipChanges] = attr.Factory(dict)
 
     def has_updates(self, clock: Clock) -> bool:
+        """Check if there are any updates to the per-connection state that need
+        persisting.
+
+        It is important that we don't spuriously do persistence, as that will
+        always generate a new connection position which will invalidate some of
+        the caches. It doesn't need to be perfect, but we should avoid always
+        generating new connection positions when doing lazy loading
+        """
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
