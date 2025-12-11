@@ -1167,7 +1167,7 @@ class SlidingSyncHandler:
 
         # The required state map to store in the room sync config, if it has
         # changed.
-        required_state_map_change: Mapping[str, AbstractSet[str]] | None = None
+        changed_required_state_map: Mapping[str, AbstractSet[str]] | None = None
 
         # We can return all of the state that was requested if this was the first
         # time we've sent the room down this connection.
@@ -1263,7 +1263,7 @@ class SlidingSyncHandler:
                     request_lazy_load_user_ids=lazy_load_user_ids,
                     state_deltas=room_state_delta_id_map,
                 )
-                required_state_map_change = changes_return.required_state_map_change
+                changed_required_state_map = changes_return.changed_required_state_map
 
                 new_connection_state.room_lazy_membership[
                     room_id
@@ -1391,8 +1391,8 @@ class SlidingSyncHandler:
         room_sync_required_state_map_to_persist: Mapping[str, AbstractSet[str]] = (
             room_sync_config.required_state_map
         )
-        if required_state_map_change:
-            room_sync_required_state_map_to_persist = required_state_map_change
+        if changed_required_state_map:
+            room_sync_required_state_map_to_persist = changed_required_state_map
 
         # Record the `room_sync_config` if we're `ignore_timeline_bound` (which means
         # that the `timeline_limit` has increased)
@@ -1437,7 +1437,7 @@ class SlidingSyncHandler:
                     required_state_map=room_sync_required_state_map_to_persist,
                 )
 
-            elif required_state_map_change is not None:
+            elif changed_required_state_map is not None:
                 new_connection_state.room_configs[room_id] = RoomSyncConfig(
                     timeline_limit=room_sync_config.timeline_limit,
                     required_state_map=room_sync_required_state_map_to_persist,
@@ -1583,7 +1583,7 @@ class SlidingSyncHandler:
 class _RequiredStateChangesReturn:
     """Return type for _required_state_changes."""
 
-    required_state_map_change: Mapping[str, AbstractSet[str]] | None
+    changed_required_state_map: Mapping[str, AbstractSet[str]] | None
     """The updated required state map to store in the room config, or None if
     there is no change."""
 
@@ -1675,7 +1675,7 @@ def _required_state_changes(
             added_state_filter = StateFilter.none()
 
         return _RequiredStateChangesReturn(
-            required_state_map_change=None,
+            changed_required_state_map=None,
             added_state_filter=added_state_filter,
             lazy_members_invalidated=lazy_members_invalidated,
         )
@@ -1689,7 +1689,7 @@ def _required_state_changes(
     # narrowed.
     if StateValues.WILDCARD in prev_wildcard:
         return _RequiredStateChangesReturn(
-            required_state_map_change=request_required_state_map,
+            changed_required_state_map=request_required_state_map,
             added_state_filter=StateFilter.none(),
             lazy_members_invalidated=lazy_members_invalidated,
         )
@@ -1700,14 +1700,14 @@ def _required_state_changes(
     if request_wildcard - prev_wildcard:
         # Some keys were added, so we need to fetch everything
         return _RequiredStateChangesReturn(
-            required_state_map_change=request_required_state_map,
+            changed_required_state_map=request_required_state_map,
             added_state_filter=StateFilter.all(),
             lazy_members_invalidated=lazy_members_invalidated,
         )
     if prev_wildcard - request_wildcard:
         # Keys were only removed, so we don't have to fetch everything.
         return _RequiredStateChangesReturn(
-            required_state_map_change=request_required_state_map,
+            changed_required_state_map=request_required_state_map,
             added_state_filter=StateFilter.none(),
             lazy_members_invalidated=lazy_members_invalidated,
         )
@@ -1954,7 +1954,7 @@ def _required_state_changes(
                 new_required_state_map.pop(event_type, None)
 
     return _RequiredStateChangesReturn(
-        required_state_map_change=new_required_state_map,
+        changed_required_state_map=new_required_state_map,
         added_state_filter=added_state_filter,
         lazy_members_invalidated=lazy_members_invalidated,
         extra_users_to_add_to_lazy_cache=users_to_add_to_lazy_cache,

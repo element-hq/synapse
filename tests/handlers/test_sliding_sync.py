@@ -4887,8 +4887,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         )
 
         self.assertEqual(
-            state_changes.required_state_map_change,
-            test_parameters.expected_without_state_deltas.required_state_map_change,
+            state_changes.changed_required_state_map,
+            test_parameters.expected_without_state_deltas.changed_required_state_map,
             "changed_required_state_map does not match (without state_deltas)",
         )
         self.assertEqual(
@@ -4918,8 +4918,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         )
 
         self.assertEqual(
-            state_changes.required_state_map_change,
-            test_parameters.expected_with_state_deltas.required_state_map_change,
+            state_changes.changed_required_state_map,
+            test_parameters.expected_with_state_deltas.changed_required_state_map,
             "changed_required_state_map does not match (with state_deltas)",
         )
         self.assertEqual(
@@ -4980,7 +4980,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             request_lazy_load_user_ids=frozenset(),
             state_deltas={},
         )
-        changed_required_state_map = state_changes.required_state_map_change
+        changed_required_state_map = state_changes.changed_required_state_map
 
         assert changed_required_state_map is not None
 
@@ -5053,7 +5053,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             request_lazy_load_user_ids=frozenset(),
             state_deltas={},
         )
-        changed_required_state_map = state_changes.required_state_map_change
+        changed_required_state_map = state_changes.changed_required_state_map
 
         assert changed_required_state_map is not None
 
