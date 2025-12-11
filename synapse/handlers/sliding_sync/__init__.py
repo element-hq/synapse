@@ -1942,6 +1942,7 @@ def _required_state_changes(
             if (EventTypes.Member, state_key) not in state_deltas:
                 users_to_add_to_lazy_cache.add(state_key)
 
+    new_required_state_map = None
     if changes:
         # Update the required state config based on the changes.
         new_required_state_map = dict(prev_required_state_map)
@@ -1952,16 +1953,9 @@ def _required_state_changes(
                 # Remove entries with empty state keys.
                 new_required_state_map.pop(event_type, None)
 
-        return _RequiredStateChangesReturn(
-            required_state_map_change=new_required_state_map,
-            added_state_filter=added_state_filter,
-            lazy_members_invalidated=lazy_members_invalidated,
-            users_to_add_to_lazy_cache=users_to_add_to_lazy_cache,
-        )
-    else:
-        return _RequiredStateChangesReturn(
-            required_state_map_change=None,
-            added_state_filter=added_state_filter,
-            lazy_members_invalidated=lazy_members_invalidated,
-            users_to_add_to_lazy_cache=users_to_add_to_lazy_cache,
-        )
+    return _RequiredStateChangesReturn(
+        required_state_map_change=new_required_state_map,
+        added_state_filter=added_state_filter,
+        lazy_members_invalidated=lazy_members_invalidated,
+        users_to_add_to_lazy_cache=users_to_add_to_lazy_cache,
+    )
