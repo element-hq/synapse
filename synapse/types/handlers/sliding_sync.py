@@ -922,6 +922,28 @@ class RoomLazyMembershipChanges:
     invalidated_user_ids: AbstractSet[str] = attr.Factory(set)
     """Set of user IDs whose latest membership we have *not* sent down"""
 
+    def get_returned_user_ids_to_update(self, clock: Clock) -> StrCollection:
+        """Get the user IDs whose last seen timestamp we need to update in the
+        database.
+
+        This is a subset of user IDs in `returned_user_id_to_last_seen_ts_map`,
+        whose timestamp is either None (first time we've sent them) or older
+        than `LAZY_MEMBERS_UPDATE_INTERVAL`.
+
+        We only update the timestamp in the database every so often to avoid
+        hammering the DB with writes. We don't need the timestamp to be precise,
+        as the timestamp is used to evict old entries that haven't been used in
+        a while.
+        """
+
+        now_ms = clock.time_msec()
+        return [
+            user_id
+            for user_id, last_seen_ts in self.returned_user_id_to_last_seen_ts_map.items()
+            if last_seen_ts is None
+            or now_ms - last_seen_ts >= LAZY_MEMBERS_UPDATE_INTERVAL.as_millis()
+        ]
+
     def has_updates(self, clock: Clock) -> bool:
         """Check if there are any updates to the lazy membership changes.
 
@@ -936,21 +958,9 @@ class RoomLazyMembershipChanges:
         if self.invalidated_user_ids:
             return True
 
-        # ...or if any of the returned user IDs have a last seen timestamp older
-        # than the lazy membership expiry time or is None.
-        now_ms = clock.time_msec()
-        for last_seen_ts in self.returned_user_id_to_last_seen_ts_map.values():
-            if last_seen_ts is None:
-                # We need to record that we're sending this membership for the first
-                # time.
-                return True
-
-            if now_ms - last_seen_ts >= LAZY_MEMBERS_UPDATE_INTERVAL.as_millis():
-                # The last seen timestamp is old enough that we need to refresh
-                # it.
-                return True
-
-        return False
+        # ...or if any of the returned user IDs need their last seen timestamp
+        # updating in the database.
+        return bool(self.get_returned_user_ids_to_update(clock))
 
 
 @attr.s(auto_attribs=True)

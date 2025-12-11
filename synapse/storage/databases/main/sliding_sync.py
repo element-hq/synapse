@@ -31,7 +31,6 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.types import MultiWriterStreamToken, RoomStreamToken
 from synapse.types.handlers.sliding_sync import (
-    LAZY_MEMBERS_UPDATE_INTERVAL,
     HaveSentRoom,
     HaveSentRoomFlag,
     MutablePerConnectionState,
@@ -644,19 +643,10 @@ class SlidingSyncStore(SQLBaseStore):
         # to evict old entries that haven't been used in a while.
         to_update: list[tuple[str, str]] = []
         for room_id, room_changes in all_changes.items():
-            for (
-                user_id,
-                last_seen_ts,
-            ) in room_changes.returned_user_id_to_last_seen_ts_map.items():
-                if last_seen_ts is None:
-                    # We've never sent this user before, so we need to record that
-                    # we've sent it at the new connection position.
-                    to_update.append((room_id, user_id))
-                elif last_seen_ts + LAZY_MEMBERS_UPDATE_INTERVAL.as_millis() < now:
-                    # We last saw this user over
-                    # `LAZY_MEMBERS_UPDATE_INTERVAL` ago, so we update the
-                    # timestamp (c.f. comment above).
-                    to_update.append((room_id, user_id))
+            user_ids_to_update = room_changes.get_returned_user_ids_to_update(
+                self.clock
+            )
+            to_update.extend((room_id, user_id) for user_id in user_ids_to_update)
 
         if to_update:
             # Upsert the new/updated entries.
