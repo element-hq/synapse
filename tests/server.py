@@ -81,6 +81,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource
 from twisted.web.server import Request, Site
 
+from synapse.api.constants import MAX_REQUEST_SIZE
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
@@ -241,7 +242,6 @@ class FakeChannel:
 
     def loseConnection(self) -> None:
         self.unregisterProducer()
-        self.transport.loseConnection()
 
     # Type ignore: mypy doesn't like the fact that producer isn't an IProducer.
     def registerProducer(self, producer: IProducer, streaming: bool) -> None:
@@ -428,18 +428,29 @@ def make_request(
 
     channel = FakeChannel(site, reactor, ip=client_ip)
 
-    req = request(channel, site, our_server_name="test_server")
+    req = request(
+        channel,
+        site,
+        our_server_name="test_server",
+        max_request_body_size=MAX_REQUEST_SIZE,
+    )
     channel.request = req
 
     req.content = BytesIO(content)
     # Twisted expects to be at the end of the content when parsing the request.
     req.content.seek(0, SEEK_END)
 
-    # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
-    # bodies if the Content-Length header is missing
-    req.requestHeaders.addRawHeader(
-        b"Content-Length", str(len(content)).encode("ascii")
-    )
+    # If `Content-Length` was passed in as a custom header, don't automatically add it
+    # here.
+    if custom_headers is None or not any(
+        (k if isinstance(k, bytes) else k.encode("ascii")) == b"Content-Length"
+        for k, _ in custom_headers
+    ):
+        # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
+        # bodies if the Content-Length header is missing
+        req.requestHeaders.addRawHeader(
+            b"Content-Length", str(len(content)).encode("ascii")
+        )
 
     if access_token:
         req.requestHeaders.addRawHeader(

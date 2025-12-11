@@ -9,6 +9,22 @@ updates:
     open-pull-requests-limit: 10
     schedule:
       interval: "weekly"
+    # Group patch updates to packages together into a single PR, as they rarely
+    # if ever contain breaking changes that need to be reviewed separately.
+    # 
+    # Less PRs means a streamlined review process.
+    #
+    # Python packages follow semantic versioning, and tend to only introduce
+    # breaking changes in major version bumps. Thus, we'll group minor and patch
+    # versions together.
+    groups:
+      minor-and-patches:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     # Prevent pulling packages that were recently updated to help mitigate
     # supply chain attacks. 14 days was taken from the recommendation at
     # https://blog.yossarian.net/2025/11/21/We-should-all-be-using-dependency-cooldowns
@@ -25,6 +41,16 @@ updates:
     open-pull-requests-limit: 10
     schedule:
       interval: "weekly"
+    # For container versions, breaking changes are also typically only introduced in major
+    # package bumps.
+    groups:
+      minor-and-patches:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     cooldown:
       default-days: 14
 
@@ -33,6 +59,16 @@ updates:
     open-pull-requests-limit: 10
     schedule:
       interval: "weekly"
+    # Similarly for GitHub Actions, breaking changes are typically only introduced in major
+    # package bumps.
+    groups:
+      minor-and-patches:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     cooldown:
       default-days: 14
 
@@ -42,5 +78,15 @@ updates:
     versioning-strategy: "lockfile-only"
     schedule:
       interval: "weekly"
+    # The Rust ecosystem is special in that breaking changes are often introduced
+    # in minor version bumps, as packages typically stay pre-1.0 for a long time.
+    # Thus we specifically keep minor version bumps separate in their own PRs.
+    groups:
+      patches:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
     cooldown:
       default-days: 14

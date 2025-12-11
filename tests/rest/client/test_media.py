@@ -2590,7 +2590,6 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
             self.tok,
             shorthand=False,
             content_type=b"image/png",
-            custom_headers=[("Content-Length", str(67))],
         )
         self.assertEqual(channel.code, 200)
         res = channel.json_body.get("content_uri")
@@ -2750,7 +2749,6 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
             self.tok,
             shorthand=False,
             content_type=b"image/png",
-            custom_headers=[("Content-Length", str(67))],
         )
         self.assertEqual(channel.code, 200)
         res = channel.json_body.get("content_uri")
@@ -2909,7 +2907,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
             access_token=self.tok,
             shorthand=False,
             content_type=b"text/plain",
-            custom_headers=[("Content-Length", str(size))],
         )
 
     def test_upload_under_limit(self) -> None:
@@ -3074,7 +3071,6 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
             access_token=tok,
             shorthand=False,
             content_type=b"text/plain",
-            custom_headers=[("Content-Length", str(size))],
         )
 
     def test_upload_under_limit(self) -> None:
