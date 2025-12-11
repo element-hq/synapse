@@ -221,14 +221,6 @@ synapse_port_db = "synapse._scripts.synapse_port_db:main"
 synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
 update_synapse_database = "synapse._scripts.update_synapse_database:main"
 
-[tool.uv]
-# From the uv docs (https://docs.astral.sh/uv/concepts/resolution/#dependency-overrides):
-#   As with constraints, overrides do not add a dependency on the package and only take
-#   effect if the package is requested in a direct or transitive dependency.
-override-dependencies = [
-]
-
-
 [tool.towncrier]
     package = "synapse"
     filename = "CHANGES.md"
