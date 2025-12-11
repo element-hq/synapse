@@ -524,9 +524,18 @@ A response body like the following is returned:
     }
 ```
 
-The server returns the list of memberships for rooms of which the server
-are member. If the user is local, all the room memberships of the user
-are returned.
+which is a list of room membership states for the given user. This endpoint can
+be used with both local and remote users, with the caveat that the homeserver will
+only be aware of the memberships for rooms one of its local users has joined.
+
+Remote user memberships may also be out of date if all local users have since left
+a room. The homeserver will thus no longer receive membership updates about it.
+
+The list includes rooms that the user has since left; other membership states (knock,
+invite, etc.) are also possible.
+
+Note that rooms will only disappear from this list if they are
+[purged](./rooms.md#delete-room-api) from the homeserver.
 
 **Parameters**
 
