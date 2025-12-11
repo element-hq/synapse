@@ -507,7 +507,10 @@ with a body of:
 
 ## List room memberships of a user
 
-Gets a list of room memberships for a specific `user_id`.
+Gets a list of room memberships for a specific `user_id`. This
+endpoint differs from
+[`GET /_synapse/admin/v1/users/<user_id>/joined_rooms`](#list-joined-rooms-of-a-user)
+in that it returns rooms with memberships other than "join".
 
 The API is:
 
@@ -545,7 +548,7 @@ The following parameters should be set in the URL:
 
 **Response**
 
-A map of `room_id` to `membership` state.
+A map of `room_id` (string) to `membership` state (string).
 
 ## List joined rooms of a user
 
