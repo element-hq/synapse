@@ -401,7 +401,7 @@ class SlidingSyncBody(RequestBodyModel):
             None, alias="io.element.msc4308.thread_subscriptions"
         )
         sticky_events: StickyEventsExtension | None = Field(
-            alias="org.matrix.msc4354.sticky_events"
+            None, alias="org.matrix.msc4354.sticky_events"
         )
 
     conn_id: StrictStr | None = None
