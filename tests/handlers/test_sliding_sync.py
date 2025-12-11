@@ -4582,7 +4582,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 ),
             ),
             (
-                "state_key_expand_lazy_keep_previous_explicit_memberships",
+                "state_key_retract_lazy_keep_previous_explicit_memberships",
                 """
                 Test removing explicit memberships from the `required_state`
                 when lazy-loading room members tracks previously sent
@@ -4636,7 +4636,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 ),
             ),
             (
-                "state_key_expand_lazy_keep_previous_explicit_me_memberships",
+                "state_key_retract_lazy_keep_previous_explicit_me_memberships",
                 """
                 Test removing explicit $ME memberships from the `required_state`
                 when lazy-loading room members tracks previously sent

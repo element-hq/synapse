@@ -607,7 +607,7 @@ class SlidingSyncStore(SQLBaseStore):
             txn.execute(sql, (connection_position, room_id, *user_args))
 
             # Filter out any cache entries that only apply to forked connection
-            # positions. Entries with `NULL` connection position apply to all
+            # positions. Entries with `NULL` `connection_position` apply to all
             # positions on the connection.
             return {
                 user_id: last_seen_ts

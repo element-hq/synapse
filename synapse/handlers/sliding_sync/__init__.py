@@ -1177,7 +1177,7 @@ class SlidingSyncHandler:
         # state as well).
         hero_membership_state: StateMap[EventBase] = {}
 
-        # By default, we mark all `lazy_load_user_ids` as being added sent down
+        # By default, we mark all `lazy_load_user_ids` as being sent down
         # for the first time in this sync. We later check if we sent any of them
         # down previously and update `returned_user_id_to_last_seen_ts_map` if
         # we have.
@@ -1215,7 +1215,7 @@ class SlidingSyncHandler:
                 # We need to know what user state we previously sent down the
                 # connection so we can determine what has changed.
                 #
-                # We need to fetch for all users whose memberships we may want
+                # We need to fetch all users whose memberships we may want
                 # to send down this sync. This includes (and matches
                 # `all_required_user_state`):
                 #   1. Explicitly requested user state

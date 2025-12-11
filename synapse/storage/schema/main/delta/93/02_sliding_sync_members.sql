@@ -24,8 +24,9 @@
 -- performance issues.
 --
 -- We track a *rough* `last_seen_ts` for each user in each room which indicates
--- when we last would've sent their member state to the client. This is used so
+-- when we last would've sent their member state to the client. `last_seen_ts` is used so
 -- that we can remove members which haven't been seen for a while to save space.
+-- This is a *rough* timestamp as we don't want to update the timestamp every time to avoid hammering the DB with writes, and we don't need the timestamp to be precise (as it is used to evict old entries that haven't been used in a while).
 --
 -- Care must be taken when handling "forked" positions, i.e. we have responded
 -- to a request with a position and then get another different request using the
