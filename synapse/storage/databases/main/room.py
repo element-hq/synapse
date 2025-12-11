@@ -949,10 +949,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         self, index_start: int, index_limit: int, local: bool
     ) -> list[str]:
         """Retrieves all the quarantined media MXC URIs starting from the given position,
-        ordered by quarantined timestamp.
+        ordered from oldest quarantined timestamp, then alphabetically by media ID
+        (including origin).
 
         Note that on established servers the "quarantined timestamp" may be zero due to
-        being introduced after the quarantine state was introduced.
+        being introduced after the quarantine timestamp field was introduced.
 
         Args:
             index_start: The position to start from.
@@ -967,7 +968,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             txn: LoggingTransaction,
         ) -> list[str]:
             # We order by quarantined timestamp *and* media ID (including origin, when
-            # known) to ensure there's stable ordering for established servers.
+            # known) to ensure the ordering is stable for established servers.
             if local:
                 sql = "SELECT '' as media_origin, media_id FROM local_media_repository WHERE quarantined_by IS NOT NULL ORDER BY quarantined_ts, media_id ASC LIMIT ? OFFSET ?"
             else:

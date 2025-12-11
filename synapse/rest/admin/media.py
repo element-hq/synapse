@@ -315,7 +315,7 @@ class ListQuarantinedMedia(RestServlet):
         if local_or_remote not in ["local", "remote"]:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
-                "Query parameter kind must be either 'local' or 'remote'.",
+                "Query parameter `kind` must be either 'local' or 'remote'.",
             )
 
         mxcs = await self.store.get_quarantined_media_mxcs(
