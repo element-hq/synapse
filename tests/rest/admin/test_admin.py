@@ -82,17 +82,35 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         admin_unsafely_bypass_quarantine query parameter, but still expects that the
         request will fail to download the media.
         """
-        query_string = ""
         if include_bypass_param:
             query_string = "?admin_unsafely_bypass_quarantine=true"
+            channel = self.make_request(
+                "GET",
+                f"/_matrix/client/v1/media/download/{server_and_media_id}{query_string}",
+                shorthand=False,
+                access_token=user_tok,
+            )
+
+            # Non-admins can't bypass, so this should fail regardless of whether the
+            # media is actually quarantined.
+            self.assertEqual(
+                400,
+                channel.code,
+                msg=(
+                    "Expected to receive a 400 when bypassing quarantined media: %s"
+                    % server_and_media_id
+                ),
+            )
+
+        # Repeat the request, this time without the bypass parameter.
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/v1/media/download/{server_and_media_id}{query_string}",
+            f"/_matrix/client/v1/media/download/{server_and_media_id}",
             shorthand=False,
             access_token=user_tok,
         )
 
-        # Should be quarantined (despite bypass)
+        # Should be quarantined
         self.assertEqual(
             404,
             channel.code,
