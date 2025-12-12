@@ -527,7 +527,7 @@ class FederationSender(AbstractFederationSender):
     ) -> None:
         sticky_event_ids = await self.store.get_sticky_event_ids_sent_by_self(
             room_id,
-            0,
+            from_stream_pos=0,
         )
         sticky_events = await self.store.get_events_as_list(sticky_event_ids)
 
@@ -540,8 +540,7 @@ class FederationSender(AbstractFederationSender):
             and not ev.internal_metadata.is_outlier()
         ]
         # order by stream ordering so we present things in the right timeline order on the receiver
-        sticky_events = sorted(
-            sticky_events,
+        sticky_events.sort(
             key=lambda ev: ev.internal_metadata.stream_ordering
             or 0,  # not possible to be 0
         )
@@ -555,18 +554,21 @@ class FederationSender(AbstractFederationSender):
             filter_out_erased_senders=True,
             filter_out_remote_partial_state_events=True,
         )
-        if sticky_events:
-            logger.info(
-                "sending %d sticky events to newly joined server %s in room %s",
-                len(sticky_events),
-                new_server,
-                room_id,
-            )
-            # we don't track that we sent up to this stream position since it won't make any difference
-            # since notify_new_server_joined is only called initially.
-            await self._transaction_manager.send_new_transaction(
-                new_server, sticky_events, []
-            )
+
+        if not sticky_events:
+            return
+
+        logger.info(
+            "sending %d sticky events to newly joined server %s in room %s",
+            len(sticky_events),
+            new_server,
+            room_id,
+        )
+        # we don't track that we sent up to this stream position since it won't make any difference
+        # since notify_new_server_joined is only called initially.
+        await self._transaction_manager.send_new_transaction(
+            new_server, sticky_events, []
+        )
 
     def notify_new_events(self, max_token: RoomStreamToken) -> None:
         """This gets called when we have some new events we might want to
