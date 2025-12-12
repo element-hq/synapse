@@ -471,9 +471,6 @@ skip = "cp3??t-* *i686* *macosx*"
 enable = "pypy"
 
 # We need a rust compiler.
-#
-# We temporarily pin Rust to 1.82.0 to work around
-# https://github.com/element-hq/synapse/issues/17988
 before-all =  "sh .ci/before_build_wheel.sh"
 environment= { PATH = "$PATH:$HOME/.cargo/bin" }
 
