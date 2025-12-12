@@ -15679,6 +15679,41 @@ The parameter <code>logout_devices</code> is optional and defaults to <code>true
     &quot;admin&quot;: true
 }
 </code></pre>
+<h2 id="list-room-memberships-of-a-user"><a class="header" href="#list-room-memberships-of-a-user">List room memberships of a user</a></h2>
+<p>Gets a list of room memberships for a specific <code>user_id</code>. This
+endpoint differs from
+<a href="admin_api/user_admin_api.html#list-joined-rooms-of-a-user"><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/joined_rooms</code></a>
+in that it returns rooms with memberships other than &quot;join&quot;.</p>
+<p>The API is:</p>
+<pre><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/memberships
+</code></pre>
+<p>A response body like the following is returned:</p>
+<pre><code class="language-json">    {
+        &quot;memberships&quot;: {
+            &quot;!DuGcnbhHGaSZQoNQR:matrix.org&quot;: &quot;join&quot;,
+            &quot;!ZtSaPCawyWtxfWiIy:matrix.org&quot;: &quot;leave&quot;,
+        }
+    }
+</code></pre>
+<p>which is a list of room membership states for the given user. This endpoint can
+be used with both local and remote users, with the caveat that the homeserver will
+only be aware of the memberships for rooms one of its local users has joined.</p>
+<p>Remote user memberships may also be out of date if all local users have since left
+a room. The homeserver will thus no longer receive membership updates about it.</p>
+<p>The list includes rooms that the user has since left; other membership states (knock,
+invite, etc.) are also possible.</p>
+<p>Note that rooms will only disappear from this list if they are
+<a href="admin_api/./rooms.html#delete-room-api">purged</a> from the homeserver.</p>
+<p><strong>Parameters</strong></p>
+<p>The following parameters should be set in the URL:</p>
+<ul>
+<li><code>user_id</code> - fully qualified: for example, <code>@user:server.com</code>.</li>
+</ul>
+<p><strong>Response</strong></p>
+<p>The following fields are returned in the JSON response body:</p>
+<ul>
+<li><code>memberships</code> - A map of <code>room_id</code> (string) to <code>membership</code> state (string).</li>
+</ul>
 <h2 id="list-joined-rooms-of-a-user"><a class="header" href="#list-joined-rooms-of-a-user">List joined rooms of a user</a></h2>
 <p>Gets a list of all <code>room_id</code> that a specific <code>user_id</code> is joined to and is a member of (participating in).</p>
 <p>The API is:</p>
