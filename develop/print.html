@@ -15697,7 +15697,7 @@ in that it returns rooms with memberships other than &quot;join&quot;.</p>
 </code></pre>
 <p>which is a list of room membership states for the given user. This endpoint can
 be used with both local and remote users, with the caveat that the homeserver will
-only be aware of the memberships for rooms one of its local users has joined.</p>
+only be aware of the memberships for rooms that one of its local users has joined.</p>
 <p>Remote user memberships may also be out of date if all local users have since left
 a room. The homeserver will thus no longer receive membership updates about it.</p>
 <p>The list includes rooms that the user has since left; other membership states (knock,
