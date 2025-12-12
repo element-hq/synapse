@@ -28,14 +28,14 @@ from synapse.media.preview_html import (
 from tests import unittest
 
 try:
-    import lxml
+    import beauitfulsoup4
 except ImportError:
-    lxml = None  # type: ignore[assignment]
+    beauitfulsoup4 = None  # type: ignore[assignment]
 
 
 class SummarizeTestCase(unittest.TestCase):
-    if not lxml:
-        skip = "url preview feature requires lxml"
+    if not beauitfulsoup4:
+        skip = "url preview feature requires beauitfulsoup4"
 
     def test_long_summarize(self) -> None:
         example_paras = [
@@ -152,8 +152,8 @@ class SummarizeTestCase(unittest.TestCase):
 
 
 class OpenGraphFromHtmlTestCase(unittest.TestCase):
-    if not lxml:
-        skip = "url preview feature requires lxml"
+    if not beauitfulsoup4:
+        skip = "url preview feature requires beauitfulsoup4"
 
     def test_simple(self) -> None:
         html = b"""

@@ -45,14 +45,14 @@ from tests.test_utils import SMALL_PNG
 from tests.unittest import override_config
 
 try:
-    import lxml
+    import beautifulsoup4
 except ImportError:
-    lxml = None  # type: ignore[assignment]
+    beautifulsoup4 = None  # type: ignore[assignment]
 
 
 class URLPreviewTests(unittest.HomeserverTestCase):
-    if not lxml:
-        skip = "url preview feature requires lxml"
+    if not beautifulsoup4:
+        skip = "url preview feature requires beautifulsoup4"
 
     hijack_auth = True
     user_id = "@test:user"
