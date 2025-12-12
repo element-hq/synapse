@@ -42,7 +42,8 @@ dependencies = [
     "Twisted[tls]>=21.2.0",
     "treq>=21.5.0",
     # Twisted has required pyopenssl 16.0 since about Twisted 16.6.
-    "pyOpenSSL>=16.0.0",
+    # pyOpenSSL 16.2.0 fixes compatibility with OpenSSL 1.1.0. 
+    "pyOpenSSL>=16.2.0",
     "PyYAML>=5.3",
     "pyasn1>=0.1.9",
     "pyasn1-modules>=0.0.7",
@@ -95,6 +96,20 @@ dependencies = [
 
     # This is used for parsing multipart responses
     "python-multipart>=0.0.9",
+
+    # Transitive dependency constraints
+    # These dependencies aren't directly required by Synapse.
+    # However, in order for Synapse to build, Synapse requires a higher minimum version
+    # for these dependencies than the minimum specified by the direct dependency.
+    # We should periodically check to see if these dependencies are still necessary and
+    # remove any that are no longer required.
+    "cffi>=1.15", # via cryptography
+    "pynacl>=1.3", # via signedjson
+    "pyparsing>=2.4",  # via packaging
+    "pyrsistent>=0.18.0",  # via jsonschema
+    "requests>=2.16.0", # 2.16.0+ no longer vendors urllib3, avoiding Python 3.10+ incompatibility
+    "urllib3>=1.26.5", # via treq; 1.26.5 fixes Python 3.10+ collections.abc compatibility
+    "zope-interface>=6.2", # via twisted
 ]
 
 [project.optional-dependencies]
@@ -104,7 +119,16 @@ postgres = [
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
 ]
-saml2 = ["pysaml2>=4.5.0"]
+saml2 = [
+    "pysaml2>=4.5.0",
+
+    # Transitive dependencies from pysaml2
+    # These dependencies aren't directly required by Synapse.
+    # However, in order for Synapse to build, Synapse requires a higher minimum version
+    # for these dependencies than the minimum specified by the direct dependency.
+    "defusedxml>=0.7.1", # via pysaml2
+    "pytz>=2018.3",  # via pysaml2
+]
 oidc = ["authlib>=0.15.1"]
 # systemd-python is necessary for logging to the systemd journal via
 # `systemd.journal.JournalHandler`, as is documented in
@@ -112,15 +136,25 @@ oidc = ["authlib>=0.15.1"]
 systemd = ["systemd-python>=231"]
 url-preview = ["beautifulsoup4>=4.13.0"]
 sentry = ["sentry-sdk>=0.7.2"]
-opentracing = ["jaeger-client>=4.2.0", "opentracing>=2.2.0"]
+opentracing = [
+    "jaeger-client>=4.2.0",
+    "opentracing>=2.2.0",
+
+    # Transitive dependencies from jaeger-client
+    # These dependencies aren't directly required by Synapse.
+    # However, in order for Synapse to build, Synapse requires a higher minimum version
+    # for these dependencies than the minimum specified by the direct dependency.
+    "thrift>=0.10",  # via jaeger-client
+    "tornado>=6.0",  # via jaeger-client
+]
 jwt = ["authlib"]
 # hiredis is not a *strict* dependency, but it makes things much faster.
 # (if it is not installed, we fall back to slow code.)
-redis = ["txredisapi>=1.4.7", "hiredis"]
+redis = ["txredisapi>=1.4.7", "hiredis>=0.3"]
 # Required to use experimental `caches.track_memory_usage` config option.
-cache-memory = ["pympler"]
+cache-memory = ["pympler>=1.0"]
 # If this is updated, don't forget to update the equivalent lines in
-# tool.poetry.group.dev.dependencies.
+# `dependency-groups.dev` below.
 test = ["parameterized>=0.9.0", "idna>=3.3"]
 
 # The duplication here is awful.
@@ -149,12 +183,22 @@ all = [
     # opentracing
     "jaeger-client>=4.2.0", "opentracing>=2.2.0",
     # redis
-    "txredisapi>=1.4.7", "hiredis",
+    "txredisapi>=1.4.7", "hiredis>=0.3",
     # cache-memory
-    "pympler",
+    # 1.0 added support for python 3.10, our current minimum supported python version
+    "pympler>=1.0",
     # omitted:
     #   - test: it's useful to have this separate from dev deps in the olddeps job
     #   - systemd: this is a system-based requirement
+
+    # Transitive dependencies
+    # These dependencies aren't directly required by Synapse.
+    # However, in order for Synapse to build, Synapse requires a higher minimum version
+    # for these dependencies than the minimum specified by the direct dependency.
+    "defusedxml>=0.7.1", # via pysaml2
+    "pytz>=2018.3",  # via pysaml2
+    "thrift>=0.10",  # via jaeger-client
+    "tornado>=6.0",  # via jaeger-client
 ]
 
 [project.urls]
@@ -177,6 +221,84 @@ synapse_port_db = "synapse._scripts.synapse_port_db:main"
 synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
 update_synapse_database = "synapse._scripts.update_synapse_database:main"
 
+[tool.poetry]
+packages = [{ include = "synapse" }]
+
+[tool.poetry.build]
+# Compile our rust module when using `poetry install`. This is still required
+# while using `poetry` as the build frontend. Saves the developer from needing
+# to run both:
+#
+# $ poetry install
+# $ maturin develop
+script = "build_rust.py"
+# Create a `setup.py` file which will call the `build` method in our build
+# script.
+#
+# Our build script currently uses the "old" build method, where we define a
+# `build` method and `setup.py` calls it. Poetry developers have mentioned that
+# this will eventually be removed:
+# https://github.com/matrix-org/synapse/pull/14949#issuecomment-1418001859
+#
+# The new build method is defined here:
+# https://python-poetry.org/docs/building-extension-modules/#maturin-build-script
+# but is still marked as "unstable" at the time of writing. This would also
+# bump our minimum `poetry-core` version to 1.5.0.
+#
+# We can just drop this work-around entirely if migrating away from
+# Poetry, thus there's little motivation to update the build script.
+generate-setup-file = true
+
+# Dependencies used for developing Synapse itself.
+#
+# Hold off on migrating these to `dev-dependencies` (PEP 735) for now until
+# Poetry 2.2.0+, pip 25.1+ are more widely available.
+[tool.poetry.group.dev.dependencies]
+# We pin development dependencies in poetry.lock so that our tests don't start
+# failing on new releases. Keeping lower bounds loose here means that dependabot
+# can bump versions without having to update the content-hash in the lockfile.
+# This helps prevents merge conflicts when running a batch of dependabot updates.
+ruff = "0.14.6"
+
+# Typechecking
+mypy = "*"
+mypy-zope = "*"
+types-bleach = ">=4.1.0"
+types-jsonschema = ">=3.2.0"
+types-netaddr = ">=0.8.0.6"
+types-opentracing = ">=2.4.2"
+types-Pillow = ">=8.3.4"
+types-psycopg2 = ">=2.9.9"
+types-pyOpenSSL = ">=20.0.7"
+types-PyYAML = ">=5.4.10"
+types-requests = ">=2.26.0"
+types-setuptools = ">=57.4.0"
+
+# Dependencies which are exclusively required by unit test code. This is
+# NOT a list of all modules that are necessary to run the unit tests.
+# Tests assume that all optional dependencies are installed.
+#
+# If this is updated, don't forget to update the equivalent lines in
+# project.optional-dependencies.test.
+parameterized = ">=0.9.0"
+idna = ">=3.3"
+
+# The following are used by the release script
+click = ">=8.1.3"
+# GitPython was == 3.1.14; bumped to 3.1.20, the first release with type hints.
+GitPython = ">=3.1.20"
+markdown-it-py = ">=3.0.0"
+pygithub = ">=1.59"
+# The following are executed as commands by the release script.
+twine = "*"
+# Towncrier min version comes from https://github.com/matrix-org/synapse/pull/3425. Rationale unclear.
+towncrier = ">=18.6.0rc1"
+
+# Used for checking the Poetry lockfile
+tomli = ">=1.2.3"
+
+# Used for checking the schema delta files
+sqlglot = ">=28.0.0"
 
 [tool.towncrier]
     package = "synapse"
@@ -291,87 +413,30 @@ line-ending = "auto"
 [tool.maturin]
 manifest-path = "rust/Cargo.toml"
 module-name = "synapse.synapse_rust"
-
-[tool.poetry]
-packages = [
-    { include = "synapse" },
-]
-include = [
-    { path = "AUTHORS.rst", format = "sdist" },
-    { path = "book.toml", format = "sdist" },
-    { path = "changelog.d", format = "sdist" },
-    { path = "CHANGES.md", format = "sdist" },
-    { path = "CONTRIBUTING.md", format = "sdist" },
-    { path = "demo", format = "sdist" },
-    { path = "docs", format = "sdist" },
-    { path = "INSTALL.md", format = "sdist" },
-    { path = "mypy.ini", format = "sdist" },
-    { path = "scripts-dev", format = "sdist" },
-    { path = "synmark", format="sdist" },
-    { path = "sytest-blacklist", format = "sdist" },
-    { path = "tests", format = "sdist" },
-    { path = "UPGRADE.rst", format = "sdist" },
-    { path = "Cargo.toml", format = "sdist" },
-    { path = "Cargo.lock", format = "sdist" },
-    { path = "rust/Cargo.toml", format = "sdist" },
-    { path = "rust/build.rs", format = "sdist" },
-    { path = "rust/src/**", format = "sdist" },
-]
-exclude = [
-    { path = "synapse/*.so", format = "sdist"}
+python-source = "."
+sdist-include = [
+    "AUTHORS.rst",
+    "book.toml",
+    "changelog.d",
+    "CHANGES.md",
+    "CONTRIBUTING.md",
+    "demo",
+    "docs",
+    "INSTALL.md",
+    "mypy.ini",
+    "scripts-dev",
+    "synmark",
+    "sytest-blacklist",
+    "tests",
+    "UPGRADE.rst",
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust/Cargo.toml",
+    "rust/build.rs",
+    "rust/src/**",
 ]
 
-[tool.poetry.build]
-script = "build_rust.py"
-generate-setup-file = true
-
-[tool.poetry.group.dev.dependencies]
-# We pin development dependencies in poetry.lock so that our tests don't start
-# failing on new releases. Keeping lower bounds loose here means that dependabot
-# can bump versions without having to update the content-hash in the lockfile.
-# This helps prevents merge conflicts when running a batch of dependabot updates.
-ruff = "0.14.6"
-
-# Typechecking
-mypy = "*"
-mypy-zope = "*"
-types-bleach = ">=4.1.0"
-types-jsonschema = ">=3.2.0"
-types-netaddr = ">=0.8.0.6"
-types-opentracing = ">=2.4.2"
-types-Pillow = ">=8.3.4"
-types-psycopg2 = ">=2.9.9"
-types-pyOpenSSL = ">=20.0.7"
-types-PyYAML = ">=5.4.10"
-types-requests = ">=2.26.0"
-types-setuptools = ">=57.4.0"
-
-# Dependencies which are exclusively required by unit test code. This is
-# NOT a list of all modules that are necessary to run the unit tests.
-# Tests assume that all optional dependencies are installed.
-#
-# If this is updated, don't forget to update the equivalent lines in
-# project.optional-dependencies.test.
-parameterized = ">=0.9.0"
-idna = ">=3.3"
-
-# The following are used by the release script
-click = ">=8.1.3"
-# GitPython was == 3.1.14; bumped to 3.1.20, the first release with type hints.
-GitPython = ">=3.1.20"
-markdown-it-py = ">=3.0.0"
-pygithub = ">=1.59"
-# The following are executed as commands by the release script.
-twine = "*"
-# Towncrier min version comes from https://github.com/matrix-org/synapse/pull/3425. Rationale unclear.
-towncrier = ">=18.6.0rc1"
-
-# Used for checking the Poetry lockfile
-tomli = ">=1.2.3"
-
-# Used for checking the schema delta files
-sqlglot = ">=28.0.0"
-
+sdist-exclude = ["synapse/*.so"]
 
 [build-system]
 # The upper bounds here are defensive, intended to prevent situations like
@@ -380,8 +445,8 @@ sqlglot = ">=28.0.0"
 # runtime errors caused by build system changes.
 # We are happy to raise these upper bounds upon request,
 # provided we check that it's safe to do so (i.e. that CI passes).
-requires = ["poetry-core>=2.0.0,<=2.1.3", "setuptools_rust>=1.3,<=1.11.1"]
-build-backend = "poetry.core.masonry.api"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 
 [tool.cibuildwheel]
@@ -406,9 +471,6 @@ skip = "cp3??t-* *i686* *macosx*"
 enable = "pypy"
 
 # We need a rust compiler.
-#
-# We temporarily pin Rust to 1.82.0 to work around
-# https://github.com/element-hq/synapse/issues/17988
 before-all =  "sh .ci/before_build_wheel.sh"
 environment= { PATH = "$PATH:$HOME/.cargo/bin" }
 
@@ -418,8 +480,3 @@ environment= { PATH = "$PATH:$HOME/.cargo/bin" }
 before-build = "rm -rf {project}/build"
 build-frontend = "build"
 test-command = "python -c 'from synapse.synapse_rust import sum_as_string; print(sum_as_string(1, 2))'"
-
-
-[tool.cibuildwheel.linux]
-# Wrap the repair command to correctly rename the built cpython wheels as ABI3.
-repair-wheel-command = "./.ci/scripts/auditwheel_wrapper.py -w {dest_dir} {wheel}"

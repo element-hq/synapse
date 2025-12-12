@@ -914,6 +914,7 @@ class MediaRepository:
             filesystem_id=file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
+            quarantined_ts=None,
             authenticated=authenticated,
             sha256=sha256writer.hexdigest(),
         )
@@ -1047,6 +1048,7 @@ class MediaRepository:
             filesystem_id=file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
+            quarantined_ts=None,
             authenticated=authenticated,
             sha256=sha256writer.hexdigest(),
         )

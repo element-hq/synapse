@@ -505,6 +505,55 @@ with a body of:
 }
 ```
 
+## List room memberships of a user
+
+Gets a list of room memberships for a specific `user_id`. This
+endpoint differs from
+[`GET /_synapse/admin/v1/users/<user_id>/joined_rooms`](#list-joined-rooms-of-a-user)
+in that it returns rooms with memberships other than "join".
+
+The API is:
+
+```
+GET /_synapse/admin/v1/users/<user_id>/memberships
+```
+
+A response body like the following is returned:
+
+```json
+    {
+        "memberships": {
+            "!DuGcnbhHGaSZQoNQR:matrix.org": "join",
+            "!ZtSaPCawyWtxfWiIy:matrix.org": "leave",
+        }
+    }
+```
+
+which is a list of room membership states for the given user. This endpoint can
+be used with both local and remote users, with the caveat that the homeserver will
+only be aware of the memberships for rooms that one of its local users has joined.
+
+Remote user memberships may also be out of date if all local users have since left
+a room. The homeserver will thus no longer receive membership updates about it.
+
+The list includes rooms that the user has since left; other membership states (knock,
+invite, etc.) are also possible.
+
+Note that rooms will only disappear from this list if they are
+[purged](./rooms.md#delete-room-api) from the homeserver.
+
+**Parameters**
+
+The following parameters should be set in the URL:
+
+- `user_id` - fully qualified: for example, `@user:server.com`.
+
+**Response**
+
+The following fields are returned in the JSON response body:
+
+- `memberships` - A map of `room_id` (string) to `membership` state (string).
+
 ## List joined rooms of a user
 
 Gets a list of all `room_id` that a specific `user_id` is joined to and is a member of (participating in).
