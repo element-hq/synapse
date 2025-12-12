@@ -347,7 +347,9 @@ class DelayedEventsHandler:
                 If None, the timestamp will be the actual time when the event is sent.
             content: The content of the event to be sent.
             delay: How long (in milliseconds) to wait before automatically sending the event.
-            sticky_duration_ms: The sticky duration if any, see MSC4354.
+            sticky_duration_ms: If an MSC4354 sticky event: the sticky duration (in milliseconds).
+                The event will be attempted to be reliably delivered to clients and remote servers
+                during its sticky period.
         Returns: The ID of the added delayed event.
 
         Raises:

@@ -770,7 +770,9 @@ class StickyEventsStreamRow:
     """Stream to inform workers about changes to sticky events."""
 
     room_id: str
-    event_id: str  # The sticky event ID
+
+    event_id: str
+    """The sticky event ID"""
 
 
 class StickyEventsStream(_StreamFromIdGen):
