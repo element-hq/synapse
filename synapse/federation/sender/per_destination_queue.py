@@ -105,7 +105,7 @@ class PerDestinationQueue:
         self._instance_name = hs.get_instance_name()
         self._federation_shard_config = hs.config.worker.federation_shard_config
         self._state = hs.get_state_handler()
-        self.msc4354_enabled = hs.config.experimental.msc4354_enabled
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
         self._should_send_on_this_instance = True
         if not self._federation_shard_config.should_handle(
@@ -584,7 +584,7 @@ class PerDestinationQueue:
                     # send.
                     extrem_events = await self._store.get_events_as_list(extrems)
 
-                    if self.msc4354_enabled:
+                    if self._msc4354_enabled:
                         # we also want to send sticky events that are still active in this room
                         sticky_event_ids = (
                             await self._store.get_sticky_event_ids_sent_by_self(

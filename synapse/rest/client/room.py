@@ -210,7 +210,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.clock = hs.get_clock()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
-        self.msc4354_enabled = hs.config.experimental.msc4354_enabled
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -333,7 +333,7 @@ class RoomStateEventRestServlet(RestServlet):
             origin_server_ts = parse_integer(request, "ts")
 
         sticky_duration_ms: int | None = None
-        if self.msc4354_enabled:
+        if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
         delay = _parse_request_delay(request, self._max_event_delay_ms)
@@ -410,7 +410,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
-        self.msc4354_enabled = hs.config.experimental.msc4354_enabled
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/send/$event_type[/$txn_id]
@@ -432,7 +432,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             origin_server_ts = parse_integer(request, "ts")
 
         sticky_duration_ms: int | None = None
-        if self.msc4354_enabled:
+        if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
         delay = _parse_request_delay(request, self._max_event_delay_ms)

@@ -264,7 +264,7 @@ class PersistEventsStore:
         self.database_engine = db.engine
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
-        self.msc4354_sticky_events = hs.config.experimental.msc4354_enabled
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -391,7 +391,7 @@ class PersistEventsStore:
             # get_events_as_list and get_partial_filtered_current_state_ids to handle soft-failure
             # re-evaluation, so it can't do that without leaking out the txn currently, hence it
             # now just lives outside.
-            if self.msc4354_sticky_events:
+            if self._msc4354_enabled:
                 # re-evaluate soft-failed sticky events.
                 await self.store.reevaluate_soft_failed_sticky_events(
                     room_id,
@@ -1201,7 +1201,7 @@ class PersistEventsStore:
                 sliding_sync_table_changes,
             )
 
-        if self.msc4354_sticky_events:
+        if self._msc4354_enabled:
             self.store.insert_sticky_events_txn(
                 txn, [ev for ev, _ in events_and_contexts]
             )
@@ -2667,7 +2667,7 @@ class PersistEventsStore:
                 # event isn't an outlier any more.
                 self._update_backward_extremeties(txn, [event])
 
-                if self.msc4354_sticky_events and event.sticky_duration():
+                if self._msc4354_enabled and event.sticky_duration():
                     # The de-outliered event is sticky. Update the sticky events table to ensure
                     # we delivery this down /sync.
                     self.store.insert_sticky_events_txn(txn, [event])
