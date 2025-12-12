@@ -108,7 +108,7 @@ def _get_meta_tags(
             )
             return {}
 
-        key = tag[property]
+        key = cast(str, tag[property])
         if property_mapper:
             new_key = property_mapper(key)
             # None is a special value used to ignore a value.
@@ -116,7 +116,7 @@ def _get_meta_tags(
                 continue
             key = new_key
 
-        results[key] = tag["content"]
+        results[key] = cast(str, tag["content"])
 
     return results
 
@@ -198,9 +198,10 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
 
     if "og:title" not in og:
         # Attempt to find a title from the title tag, or the biggest header on the page.
-        title = cast(
-            Optional["Tag"], soup.find(("title", "h1", "h2", "h3"), string=True)
-        )
+        #
+        # mypy doesn't like passing both name and string, but it is used to ignore
+        # empty elements.
+        title = soup.find(("title", "h1", "h2", "h3"), string=True)  # type: ignore[call-overload]
         if title and title.string:
             og["og:title"] = title.string.strip()
         else:
@@ -208,9 +209,8 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
 
     if "og:image" not in og:
         # Check microdata for an image.
-        meta_image = cast(
-            Optional["Tag"],
-            soup.find("meta", itemprop=re.compile("image", re.I), content=NON_BLANK),
+        meta_image = soup.find(
+            "meta", itemprop=re.compile("image", re.I), content=NON_BLANK
         )
         # If a meta image is found, use it.
         if meta_image:
@@ -247,13 +247,10 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
 
     if "og:description" not in og:
         # Check the first meta description tag for content.
-        meta_description = cast(
-            Optional["Tag"],
-            soup.find(
-                "meta",
-                attrs={"name": re.compile("description", re.I)},
-                content=NON_BLANK,
-            ),
+        meta_description = soup.find(
+            "meta",
+            attrs={"name": re.compile("description", re.I)},
+            content=NON_BLANK,
         )
 
         # If a meta description is found with content, use it.

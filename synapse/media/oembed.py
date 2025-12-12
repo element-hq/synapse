@@ -31,7 +31,6 @@ from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from bs4 import BeautifulSoup
-    from bs4.element import Tag
 
     from synapse.server import HomeServer
 
@@ -124,7 +123,7 @@ class OEmbedProvider:
             type="application/json+oembed",
             href=NON_BLANK,
         )
-        return cast(str, cast("Tag", tag)["href"]) if tag else None
+        return cast(str, tag["href"]) if tag else None
 
     def parse_oembed_response(self, url: str, raw_body: bytes) -> OEmbedResult:
         """
@@ -216,7 +215,7 @@ class OEmbedProvider:
 
 def _fetch_url(soup: "BeautifulSoup", tag_name: str) -> str | None:
     tag = soup.find(tag_name, src=NON_BLANK)
-    return cast(str, cast("Tag", tag)["src"]) if tag else None
+    return cast(str, tag["src"]) if tag else None
 
 
 def calc_description_and_urls(
