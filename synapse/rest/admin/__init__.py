@@ -114,7 +114,8 @@ from synapse.rest.admin.users import (
     UserByThreePid,
     UserInvitesCount,
     UserJoinedRoomCount,
-    UserMembershipRestServlet,
+    UserJoinedRoomsRestServlet,
+    UserMembershipsRestServlet,
     UserRegisterServlet,
     UserReplaceMasterCrossSigningKeyRestServlet,
     UserRestServletV2,
@@ -297,7 +298,8 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     VersionServlet(hs).register(http_server)
     if not auth_delegated:
         UserAdminServlet(hs).register(http_server)
-    UserMembershipRestServlet(hs).register(http_server)
+    UserJoinedRoomsRestServlet(hs).register(http_server)
+    UserMembershipsRestServlet(hs).register(http_server)
     if not auth_delegated:
         UserTokenRestServlet(hs).register(http_server)
     UserRestServletV2(hs).register(http_server)

@@ -109,7 +109,12 @@ dependencies = [
     "pyrsistent>=0.18.0",  # via jsonschema
     "requests>=2.16.0", # 2.16.0+ no longer vendors urllib3, avoiding Python 3.10+ incompatibility
     "urllib3>=1.26.5", # via treq; 1.26.5 fixes Python 3.10+ collections.abc compatibility
-    "zope-interface>=6.2", # via twisted
+    # 5.2 is the current version in Debian oldstable. If we don't care to support that, then 5.4 is
+    # the minimum version from Ubuntu 22.04 and RHEL 9. (as of 2025-12)
+    # When bumping this version to 6.2 or above, refer to https://github.com/element-hq/synapse/pull/19274
+    # for details of Synapse improvements that may be unlocked. Particularly around the use of `|`
+    # syntax with zope interface types.
+    "zope-interface>=5.2", # via twisted
 ]
 
 [project.optional-dependencies]
@@ -383,15 +388,10 @@ select = [
     "G",
     # pyupgrade
     "UP006",
-    "UP007",
-    "UP045",
 ]
 extend-safe-fixes = [
     # pyupgrade rules compatible with Python >= 3.9
     "UP006",
-    "UP007",
-    # pyupgrade rules compatible with Python >= 3.10
-    "UP045",
     # Allow ruff to automatically fix trailing spaces within a multi-line string/comment.
     "W293"
 ]
@@ -471,9 +471,6 @@ skip = "cp3??t-* *i686* *macosx*"
 enable = "pypy"
 
 # We need a rust compiler.
-#
-# We temporarily pin Rust to 1.82.0 to work around
-# https://github.com/element-hq/synapse/issues/17988
 before-all =  "sh .ci/before_build_wheel.sh"
 environment= { PATH = "$PATH:$HOME/.cargo/bin" }
 

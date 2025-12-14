@@ -50,6 +50,11 @@ setting in your configuration file.
 See the [configuration manual](usage/configuration/config_documentation.md#oidc_providers) for some sample settings, as well as
 the text below for example configurations for specific providers.
 
+For setups using [`.well-known` delegation](delegate.md), make sure
+[`public_baseurl`](usage/configuration/config_documentation.md#public_baseurl) is set
+appropriately. If unset, Synapse defaults to `https://<server_name>/` which is used in
+the OIDC callback URL.
+
 ## OIDC Back-Channel Logout
 
 Synapse supports receiving [OpenID Connect Back-Channel Logout](https://openid.net/specs/openid-connect-backchannel-1_0.html) notifications.
