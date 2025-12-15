@@ -90,8 +90,8 @@ logger = logging.getLogger(__name__)
 #
 # Here we have the names of the cookies, and the options we use to set them.
 _SESSION_COOKIES = [
-    (b"oidc_session", b"HttpOnly; Secure; SameSite=None"),
-    (b"oidc_session_no_samesite", b"HttpOnly; Secure"),
+    (b"oidc_session", b"SameSite=None"),
+    (b"oidc_session_no_samesite", b""),
 ]
 
 
@@ -1095,6 +1095,12 @@ class OidcProvider:
         # (https://twistedmatrix.com/trac/ticket/10088)
 
         for cookie_name, options in _SESSION_COOKIES:
+
+            options = options + b"; HttpOnly" if options else b"HttpOnly"
+
+            if request.isSecure():
+                options += b"; Secure"
+
             request.cookies.append(
                 b"%s=%s; Max-Age=3600; Path=%s; %s"
                 % (
