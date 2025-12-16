@@ -439,7 +439,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
     @override_config({"oidc_config": DEFAULT_CONFIG})
     def test_redirect_request(self) -> None:
         """The redirect request has the right arguments & generates a valid session cookie."""
-        req = Mock(spec=["cookies"])
+        req = Mock(spec=["cookies", "isSecure"])
+        req.isSecure.return_value = True
         req.cookies = []
 
         url = urlparse(
@@ -494,7 +495,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
     )
     def test_passthrough_parameters(self) -> None:
         """The redirect request has additional parameters, one is authorized, one is not"""
-        req = Mock(spec=["cookies", "args"])
+        req = Mock(spec=["cookies", "args", "isSecure"])
+        req.isSecure.return_value = True
         req.cookies = []
         req.args = {}
         req.args[b"additional_parameter"] = ["a_value".encode("utf-8")]
@@ -513,7 +515,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
     @override_config({"oidc_config": DEFAULT_CONFIG})
     def test_redirect_request_with_code_challenge(self) -> None:
         """The redirect request has the right arguments & generates a valid session cookie."""
-        req = Mock(spec=["cookies"])
+        req = Mock(spec=["cookies", "isSecure"])
+        req.isSecure.return_value = True
         req.cookies = []
 
         with self.metadata_edit({"code_challenge_methods_supported": ["S256"]}):
@@ -548,7 +551,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
     @override_config({"oidc_config": {**DEFAULT_CONFIG, "pkce_method": "always"}})
     def test_redirect_request_with_forced_code_challenge(self) -> None:
         """The redirect request has the right arguments & generates a valid session cookie."""
-        req = Mock(spec=["cookies"])
+        req = Mock(spec=["cookies", "isSecure"])
+        req.isSecure.return_value = True
         req.cookies = []
 
         url = urlparse(
@@ -580,7 +584,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
     @override_config({"oidc_config": {**DEFAULT_CONFIG, "pkce_method": "never"}})
     def test_redirect_request_with_disabled_code_challenge(self) -> None:
         """The redirect request has the right arguments & generates a valid session cookie."""
-        req = Mock(spec=["cookies"])
+        req = Mock(spec=["cookies", "isSecure"])
+        req.isSecure.return_value = True
         req.cookies = []
 
         # The metadata should state that PKCE is enabled.
@@ -618,7 +623,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
     )
     def test_redirect_request_with_overridden_redirect_uri(self) -> None:
         """The authorization endpoint redirect has the overridden `redirect_uri` value."""
-        req = Mock(spec=["cookies"])
+        req = Mock(spec=["cookies", "isSecure"])
+        req.isSecure.return_value = True
         req.cookies = []
 
         url = urlparse(
