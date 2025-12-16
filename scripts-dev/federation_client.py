@@ -273,6 +273,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
 
     verify_tls: bool
     """whether to verify the remote server's TLS certificate."""
+
     def __init__(self, verify_tls: bool = True) -> None:
         self.verify_tls = verify_tls
         super().__init__()
