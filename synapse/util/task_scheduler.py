@@ -471,8 +471,12 @@ class TaskScheduler:
                     log_context,
                     start_time,
                 )
+                result = None
+                error = None
                 try:
                     (status, result, error) = await function(task)
+                except defer.CancelledError:
+                    status = TaskStatus.CANCELLED
                 except Exception:
                     f = Failure()
                     logger.error(
@@ -481,7 +485,6 @@ class TaskScheduler:
                         exc_info=(f.type, f.value, f.getTracebackObject()),
                     )
                     status = TaskStatus.FAILED
-                    result = None
                     error = f.getErrorMessage()
 
                 await self._store.update_scheduled_task(
