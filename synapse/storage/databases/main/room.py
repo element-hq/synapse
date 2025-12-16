@@ -945,9 +945,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             max_lifetime=max_lifetime,
         )
 
-    async def get_quarantined_media_mxcs(
-        self, index_start: int, index_limit: int, local: bool
-    ) -> list[str]:
+    async def get_quarantined_media_mxcs_and_timestamps(
+        self, start_ts: int, index_start: int, index_limit: int, local: bool
+    ) -> list[tuple[str, int]]:
         """Retrieves all the quarantined media MXC URIs starting from the given position,
         ordered from oldest quarantined timestamp, then alphabetically by media ID
         (including origin).
@@ -956,37 +956,39 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         being introduced after the quarantine timestamp field was introduced.
 
         Args:
+            start_ts: The timestamp to start from (inclusive).
             index_start: The position to start from.
             index_limit: The maximum number of results to return.
             local: When true, only local media will be returned. When false, only remote media will be returned.
 
         Returns:
-            The quarantined media as a list of media IDs.
+            The quarantined media as a list of tuples containing an MXC URI and the
+            timestamp the media was quarantined.
         """
 
-        def _get_quarantined_media_mxcs_txn(
+        def _get_quarantined_media_mxcs_and_timestamps_txn(
             txn: LoggingTransaction,
-        ) -> list[str]:
+        ) -> list[tuple[str, int]]:
             # We order by quarantined timestamp *and* media ID (including origin, when
             # known) to ensure the ordering is stable for established servers.
             if local:
-                sql = "SELECT '' as media_origin, media_id FROM local_media_repository WHERE quarantined_by IS NOT NULL ORDER BY quarantined_ts, media_id ASC LIMIT ? OFFSET ?"
+                sql = "SELECT '' as media_origin, media_id, quarantined_ts FROM local_media_repository WHERE quarantined_by IS NOT NULL AND quarantined_ts >= ? ORDER BY quarantined_ts, media_id ASC LIMIT ? OFFSET ?"
             else:
-                sql = "SELECT media_origin, media_id FROM remote_media_cache WHERE quarantined_by IS NOT NULL ORDER BY quarantined_ts, media_origin, media_id ASC LIMIT ? OFFSET ?"
-            txn.execute(sql, (index_limit, index_start))
+                sql = "SELECT media_origin, media_id, quarantined_ts FROM remote_media_cache WHERE quarantined_by IS NOT NULL AND quarantined_ts >= ? ORDER BY quarantined_ts, media_origin, media_id ASC LIMIT ? OFFSET ?"
+            txn.execute(sql, (start_ts, index_limit, index_start))
 
-            mxcs = []
+            results = []
 
-            for media_origin, media_id in txn:
+            for media_origin, media_id, ts in txn:
                 if local:
                     media_origin = self.hs.hostname
-                mxcs.append(f"mxc://{media_origin}/{media_id}")
+                results.append((f"mxc://{media_origin}/{media_id}", ts))
 
-            return mxcs
+            return results
 
         return await self.db_pool.runInteraction(
-            "get_quarantined_media_mxcs",
-            _get_quarantined_media_mxcs_txn,
+            "_get_quarantined_media_mxcs_and_timestamps",
+            _get_quarantined_media_mxcs_and_timestamps_txn,
         )
 
     async def get_media_mxcs_in_room(self, room_id: str) -> tuple[list[str], list[str]]:

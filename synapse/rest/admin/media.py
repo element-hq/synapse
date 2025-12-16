@@ -308,7 +308,7 @@ class ListQuarantinedMedia(RestServlet):
     ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        start = parse_integer(request, "from", default=0)
+        start = parse_string(request, "from", default="")
         limit = parse_integer(request, "limit", default=100)
         local_or_remote = parse_string(request, "kind", required=True)
 
@@ -318,11 +318,35 @@ class ListQuarantinedMedia(RestServlet):
                 "Query parameter `kind` must be either 'local' or 'remote'.",
             )
 
-        mxcs = await self.store.get_quarantined_media_mxcs(
-            start, limit, local_or_remote == "local"
+        start_ts = 0
+        #start_index = 0
+        if '-' in start:  # indicates we have a next_batch token
+            # Batch tokens are structured as `timestamp-index`, where `index` is relative
+            # to the timestamp. This is done to support pages having many records with
+            # the same timestamp (like existing servers having a ton of `ts=0` records).
+            #
+            # Dev note: The structure of the `from` token is partially documented in the
+            # admin API. Do not change the behaviour without consulting the docs.
+            parts = start.split('-', maxsplit=1)
+            start_ts = int(parts[0])
+            start_index = int(parts[1])
+        else:
+            start_index = int(start)
+
+        mxcs_with_ts = await self.store.get_quarantined_media_mxcs_and_timestamps(
+            start_ts, start_index, limit, local_or_remote == "local"
         )
 
-        return HTTPStatus.OK, {"media": mxcs}
+        res: JsonDict = {
+            "media": (mxc for mxc, _ in mxcs_with_ts),
+        }
+
+        if len(mxcs_with_ts) > 0:
+            max_ts = mxcs_with_ts[-1][1] if mxcs_with_ts else 0
+            count_of_max_ts = sum(1 for _, ts in mxcs_with_ts if ts == max_ts)
+            res["next_batch"] = f"{max_ts}-{count_of_max_ts}"
+
+        return HTTPStatus.OK, res
 
 
 class PurgeMediaCacheRestServlet(RestServlet):

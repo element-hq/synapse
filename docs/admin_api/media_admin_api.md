@@ -81,11 +81,17 @@ same pagination values will result in unexpected results.
 
 Request:
 ```http
-GET /_synapse/admin/v1/media/quarantined?from=0&limit=100&kind=local
+GET /_synapse/admin/v1/media/quarantined?from=1765860979860-0&limit=100&kind=local
 ```
 
-`from` and `limit` are optional parameters, and default to `0` and `100` respectively. They are the row index and number
-of rows to return - they are not timestamps.
+`from` and `limit` are optional parameters, and default to the first page and `100` respectively. `from` is the `next_batch`
+token returned by a previous request and `limit` is the number of rows to return. Note that `next_batch` is not intended 
+to survive longer than about a minute and may produce inconsistent results if used after that time. Neither `from` or 
+`limit` is a timestamp, though `from` does encode a timestamp.
+
+If you require a long-lived `from` token, split `next_batch` on `-` and combine the first part with a `0`, separated by
+a `-` again. For example: `1234-5678` becomes `1234-0`. Your application will need to deduplicate `media` rows it has 
+already seen if using this method.
 
 `kind` *MUST* either be `local` or `remote`.
 
@@ -96,9 +102,12 @@ The API returns a JSON body containing MXC URIs for the quarantined media, like 
   "media": [
     "mxc://localhost/xwvutsrqponmlkjihgfedcba",
     "mxc://localhost/abcdefghijklmnopqrstuvwx"
-  ]
+  ],
+  "next_batch": "1765860979860-2"
 }
 ```
+
+`media` may be empty. `next_batch` may be omitted if there are no rows in `media`.
 
 # Quarantine media
 

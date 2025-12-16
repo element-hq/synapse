@@ -861,6 +861,53 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(0, len(channel.json_body["media"]))
 
+        # Now repeat the same pages, but this time use the next_batch token as intended.
+
+        # Page 1
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantined?kind=local&limit=1",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(1, len(channel.json_body["media"]))
+        next_batch = channel.json_body["next_batch"]
+        self.assertNotEqual(None, next_batch)
+
+        # Page 2
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/media/quarantined?kind=local&from={next_batch}&limit=1",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(1, len(channel.json_body["media"]))
+        next_batch2 = channel.json_body["next_batch"]
+        self.assertNotEqual(None, next_batch2)
+        self.assertNotEqual(next_batch, next_batch2)
+
+        # Page 3
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/media/quarantined?kind=local&from={next_batch2}&limit=1",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(1, len(channel.json_body["media"]))
+        next_batch3 = channel.json_body["next_batch"]
+        self.assertNotEqual(None, next_batch3)
+        self.assertNotEqual(next_batch2, next_batch3)
+
+        # Page 4 (empty results)
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/media/quarantined?kind=local&from={next_batch3}&limit=1",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(0, len(channel.json_body["media"]))
+        self.assertNone(channel.json_body["next_batch"])
+
 
 class QuarantineMediaByIDTestCase(_AdminMediaTests):
     def upload_media_and_return_media_id(self, data: bytes) -> str:
