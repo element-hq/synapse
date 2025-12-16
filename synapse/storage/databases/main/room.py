@@ -969,6 +969,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         ) -> list[str]:
             # We order by quarantined timestamp *and* media ID (including origin, when
             # known) to ensure the ordering is stable for established servers.
+            #
+            # Note: these queries are backed by indexes. If the queries change, update
+            # them:
+            # - local_media_repository_quarantined_by_quarantined_ts_media_id
+            # - remote_media_cache_quarantined_by_quarantined_ts_media_origin_media_id
             if local:
                 sql = "SELECT '' as media_origin, media_id FROM local_media_repository WHERE quarantined_by IS NOT NULL ORDER BY quarantined_ts, media_id ASC LIMIT ? OFFSET ?"
             else:

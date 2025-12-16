@@ -23,5 +23,4 @@ ALTER TABLE remote_media_cache ADD COLUMN quarantined_ts BIGINT;
 UPDATE local_media_repository SET quarantined_ts = 0 WHERE quarantined_by IS NOT NULL;
 UPDATE remote_media_cache SET quarantined_ts = 0 WHERE quarantined_by IS NOT NULL;
 
--- Note: We *probably* should have an index on quarantined_ts, but we're going
--- to try to defer that to a future migration after seeing the performance impact.
+-- Note: the index is added in 05_add_quarantined_by_index.sql

@@ -177,6 +177,35 @@ class MediaRepositoryBackgroundUpdateStore(SQLBaseStore):
             ],
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="local_media_repository_quarantined_ts_idx",
+            index_name="local_media_repository_quarantined_by_quarantined_ts_media_id",
+            table="local_media_repository",
+            where_clause="quarantined_by IS NOT NULL",
+            columns=[
+                # We include columns in both the WHERE and ORDER BY clauses to make
+                # the resulting query a bit more efficient.
+                "quarantined_by",
+                "quarantined_ts",
+                "media_id",
+            ],
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="remote_media_cache_quarantined_ts_idx",
+            index_name="remote_media_cache_quarantined_by_quarantined_ts_media_origin_media_id",
+            table="remote_media_cache",
+            where_clause="quarantined_by IS NOT NULL",
+            columns=[
+                # We include columns in both the WHERE and ORDER BY clauses to make
+                # the resulting query a bit more efficient.
+                "quarantined_by",
+                "quarantined_ts",
+                "media_origin",
+                "media_id",
+            ],
+        )
+
         self.db_pool.updates.register_background_update_handler(
             BG_UPDATE_REMOVE_MEDIA_REPO_INDEX_WITHOUT_METHOD_2,
             self._drop_media_index_without_method,
