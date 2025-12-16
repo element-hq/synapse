@@ -259,6 +259,8 @@ class UserRestServletV2(UserRestServletV2Get):
     We use PUT instead of POST since we already know the id of the user
     object to create. POST could be used to create guests.
 
+    Note: This inherits from `UserRestServletV2Get`, so also supports the `GET` route.
+
     PUT /_synapse/admin/v2/users/<user_id>
     {
         "password": "secret",
