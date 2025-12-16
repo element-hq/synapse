@@ -11,12 +11,6 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Add a timestamp for when the sliding sync connection position was last used,
--- only updated with a small granularity.
---
--- This should be NOT NULL, but we need to consider existing rows. In future we
--- may want to either backfill this or delete all rows with a NULL value (and
--- then make it NOT NULL).
 ALTER TABLE local_media_repository ADD COLUMN quarantined_ts BIGINT;
 ALTER TABLE remote_media_cache ADD COLUMN quarantined_ts BIGINT;
 
