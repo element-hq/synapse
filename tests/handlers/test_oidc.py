@@ -485,6 +485,63 @@ class OidcHandlerTestCase(HomeserverTestCase):
         self.assertEqual(code_verifier, "")
         self.assertEqual(redirect, "http://client/redirect")
 
+    @override_config({"oidc_config": DEFAULT_CONFIG})
+    def test_redirect_request_cookie_has_httponly_when_secure(self) -> None:
+        """The session cookies should have HttpOnly and Secure flags when request is secure."""
+        # Arrange
+        req = Mock(spec=["cookies", "isSecure"])
+        req.isSecure.return_value = True
+        req.cookies = []
+
+        # Act
+        self.get_success(
+            self.provider.handle_redirect_request(req, b"http://client/redirect")
+        )
+
+        # Assert
+        self.assertEqual(len(req.cookies), 2)
+
+        # First cookie: oidc_session with SameSite=None
+        first_cookie_parts = [p.strip() for p in req.cookies[0].split(b";")]
+        self.assertIn(b"HttpOnly", first_cookie_parts)
+        self.assertIn(b"Secure", first_cookie_parts)
+        self.assertIn(b"SameSite=None", first_cookie_parts)
+
+        # Second cookie: oidc_session_no_samesite without SameSite
+        second_cookie_parts = [p.strip() for p in req.cookies[1].split(b";")]
+        self.assertIn(b"HttpOnly", second_cookie_parts)
+        self.assertIn(b"Secure", second_cookie_parts)
+        self.assertNotIn(b"SameSite=None", second_cookie_parts)
+
+    @override_config({"oidc_config": DEFAULT_CONFIG})
+    def test_redirect_request_cookie_has_httponly_without_secure_when_not_secure(
+        self,
+    ) -> None:
+        """The session cookies should have HttpOnly but not Secure when request is not secure."""
+        # Arrange
+        req = Mock(spec=["cookies", "isSecure"])
+        req.isSecure.return_value = False
+        req.cookies = []
+
+        # Act
+        self.get_success(
+            self.provider.handle_redirect_request(req, b"http://client/redirect")
+        )
+
+        # Assert
+        self.assertEqual(len(req.cookies), 2)
+
+        # First cookie: oidc_session with SameSite=None
+        first_cookie_parts = [p.strip() for p in req.cookies[0].split(b";")]
+        self.assertIn(b"HttpOnly", first_cookie_parts)
+        self.assertNotIn(b"Secure", first_cookie_parts)
+        self.assertIn(b"SameSite=None", first_cookie_parts)
+
+        # Second cookie: oidc_session_no_samesite without SameSite
+        second_cookie_parts = [p.strip() for p in req.cookies[1].split(b";")]
+        self.assertIn(b"HttpOnly", second_cookie_parts)
+        self.assertNotIn(b"Secure", second_cookie_parts)
+
     @override_config(
         {
             "oidc_config": {
