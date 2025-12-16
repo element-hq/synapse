@@ -906,7 +906,7 @@ class ListQuarantinedMediaTestCase(_AdminMediaTests):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(0, len(channel.json_body["media"]))
-        self.assertNone(channel.json_body["next_batch"])
+        self.assertNotIn("next_batch", channel.json_body)
 
 
 class QuarantineMediaByIDTestCase(_AdminMediaTests):

@@ -319,18 +319,18 @@ class ListQuarantinedMedia(RestServlet):
             )
 
         start_ts = 0
-        #start_index = 0
-        if '-' in start:  # indicates we have a next_batch token
+        start_index = 0
+        if "-" in start:  # indicates we have a next_batch token
             # Batch tokens are structured as `timestamp-index`, where `index` is relative
             # to the timestamp. This is done to support pages having many records with
             # the same timestamp (like existing servers having a ton of `ts=0` records).
             #
             # Dev note: The structure of the `from` token is partially documented in the
             # admin API. Do not change the behaviour without consulting the docs.
-            parts = start.split('-', maxsplit=1)
+            parts = start.split("-", maxsplit=1)
             start_ts = int(parts[0])
             start_index = int(parts[1])
-        else:
+        elif len(start) > 0:
             start_index = int(start)
 
         mxcs_with_ts = await self.store.get_quarantined_media_mxcs_and_timestamps(
@@ -338,12 +338,14 @@ class ListQuarantinedMedia(RestServlet):
         )
 
         res: JsonDict = {
-            "media": (mxc for mxc, _ in mxcs_with_ts),
+            "media": [mxc for mxc, _ in mxcs_with_ts],
         }
 
         if len(mxcs_with_ts) > 0:
             max_ts = mxcs_with_ts[-1][1] if mxcs_with_ts else 0
-            count_of_max_ts = sum(1 for _, ts in mxcs_with_ts if ts == max_ts)
+            count_of_max_ts = (
+                sum(1 for _, ts in mxcs_with_ts if ts == max_ts) + start_index
+            )
             res["next_batch"] = f"{max_ts}-{count_of_max_ts}"
 
         return HTTPStatus.OK, res
