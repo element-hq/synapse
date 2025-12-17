@@ -270,14 +270,6 @@ class ReplicationCommandHandler:
             for stream_name in self._streams
         }
 
-        self._global_command_queue = BackgroundQueue[
-            tuple[CancelTaskCommand, IReplicationConnection]
-        ](
-            hs,
-            "process-replication-data",
-            self._process_global_command,
-        )
-
         # For each connection, the incoming stream names that have received a POSITION
         # from that connection.
         self._streams_by_connection: dict[IReplicationConnection, set[str]] = {}
@@ -384,14 +376,6 @@ class ReplicationCommandHandler:
         else:
             # This shouldn't be possible
             raise Exception("Unrecognised command %s in stream queue", cmd.NAME)
-
-    async def _process_global_command(
-        self, item: tuple[CancelTaskCommand, IReplicationConnection]
-    ) -> None:
-        cmd, conn = item
-        if isinstance(cmd, CancelTaskCommand):
-            if self._task_scheduler:
-                await self._task_scheduler.on_cancel_task(cmd.data)
 
     def start_replication(self, hs: "HomeServer") -> None:
         """Helper method to start replication."""
@@ -771,7 +755,8 @@ class ReplicationCommandHandler:
         self, conn: IReplicationConnection, cmd: CancelTaskCommand
     ) -> None:
         """Called when we get a new CANCEL_TASK command."""
-        self._global_command_queue.add((cmd, conn))
+        if self._task_scheduler:
+            await self._task_scheduler.on_cancel_task(cmd.data)
 
     def new_connection(self, connection: IReplicationConnection) -> None:
         """Called when we have a new connection."""
