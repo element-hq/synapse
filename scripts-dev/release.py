@@ -32,7 +32,7 @@ import time
 import urllib.request
 from os import path
 from tempfile import TemporaryDirectory
-from typing import Any, Match
+from typing import Any
 
 import attr
 import click
@@ -291,6 +291,12 @@ def _prepare() -> None:
     synapse_repo.git.add("-u")
     subprocess.run("git diff --cached", shell=True)
 
+    print(
+        "Consider any upcoming platform deprecations that should be mentioned in the changelog. (e.g. upcoming Python, PostgreSQL or SQLite deprecations)"
+    )
+    print(
+        "Platform deprecations should be mentioned at least 1 release prior to being unsupported."
+    )
     if click.confirm("Edit changelog?", default=False):
         click.edit(filename="CHANGES.md")
 
@@ -962,10 +968,6 @@ def generate_and_write_changelog(
     new_changes = new_changes.replace(
         "No significant changes.", f"No significant changes since {current_version}."
     )
-    new_changes += build_dependabot_changelog(
-        repo,
-        current_version,
-    )
 
     # Prepend changes to changelog
     with open("CHANGES.md", "r+") as f:
@@ -978,50 +980,6 @@ def generate_and_write_changelog(
     # Remove all the news fragments
     for filename in glob.iglob("changelog.d/*.*"):
         os.remove(filename)
-
-
-def build_dependabot_changelog(repo: Repo, current_version: version.Version) -> str:
-    """Summarise dependabot commits between `current_version` and `release_branch`.
-
-    Returns an empty string if there have been no such commits; otherwise outputs a
-    third-level markdown header followed by an unordered list."""
-    last_release_commit = repo.tag("v" + str(current_version)).commit
-    rev_spec = f"{last_release_commit.hexsha}.."
-    commits = list(git.objects.Commit.iter_items(repo, rev_spec))
-    messages = []
-    for commit in reversed(commits):
-        if commit.author.name == "dependabot[bot]":
-            message: str | bytes = commit.message
-            if isinstance(message, bytes):
-                message = message.decode("utf-8")
-            messages.append(message.split("\n", maxsplit=1)[0])
-
-    if not messages:
-        print(f"No dependabot commits in range {rev_spec}", file=sys.stderr)
-        return ""
-
-    messages.sort()
-
-    def replacer(match: Match[str]) -> str:
-        desc = match.group(1)
-        number = match.group(2)
-        return f"* {desc}. ([\\#{number}](https://github.com/element-hq/synapse/issues/{number}))"
-
-    for i, message in enumerate(messages):
-        messages[i] = re.sub(r"(.*) \(#(\d+)\)$", replacer, message)
-    messages.insert(0, "### Updates to locked dependencies\n")
-    # Add an extra blank line to the bottom of the section
-    messages.append("")
-    return "\n".join(messages)
-
-
-@cli.command()
-@click.argument("since")
-def test_dependabot_changelog(since: str) -> None:
-    """Test building the dependabot changelog.
-
-    Summarises all dependabot commits between the SINCE tag and the current git HEAD."""
-    print(build_dependabot_changelog(git.Repo("."), version.Version(since)))
 
 
 if __name__ == "__main__":

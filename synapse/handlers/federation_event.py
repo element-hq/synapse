@@ -91,6 +91,7 @@ from synapse.types import (
 )
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer, concurrently_execute
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter, partition, sorted_topologically
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import shortstr
@@ -1802,7 +1803,7 @@ class FederationEventHandler:
             # the reactor. For large rooms let's yield to the reactor
             # occasionally to ensure we don't block other work.
             if (i + 1) % 1000 == 0:
-                await self._clock.sleep(0)
+                await self._clock.sleep(Duration(seconds=0))
 
         # Also persist the new event in batches for similar reasons as above.
         for batch in batch_iter(events_and_contexts_to_persist, 1000):

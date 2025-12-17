@@ -32,6 +32,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -54,7 +55,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
             hs.config.worker.run_background_tasks
             and self.hs.config.server.redaction_retention_period is not None
         ):
-            hs.get_clock().looping_call(self._censor_redactions, 5 * 60 * 1000)
+            hs.get_clock().looping_call(self._censor_redactions, Duration(minutes=5))
 
     @wrap_as_background_process("_censor_redactions")
     async def _censor_redactions(self) -> None:

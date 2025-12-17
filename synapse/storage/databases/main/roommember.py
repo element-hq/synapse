@@ -63,6 +63,7 @@ from synapse.types import (
     get_domain_from_id,
 )
 from synapse.util.caches.descriptors import _CacheContext, cached, cachedList
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.metrics import Measure
 
@@ -110,10 +111,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             self._known_servers_count = 1
             self.hs.get_clock().looping_call(
                 self._count_known_servers,
-                60 * 1000,
+                Duration(minutes=1),
             )
             self.hs.get_clock().call_later(
-                1,
+                Duration(seconds=1),
                 self._count_known_servers,
             )
             federation_known_servers_gauge.register_hook(
@@ -745,6 +746,27 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         )
 
         return frozenset(room_ids)
+
+    async def get_memberships_for_user(self, user_id: str) -> dict[str, str]:
+        """Returns a dict of room_id to membership state for a given user.
+
+        If a remote user only returns rooms this server is currently
+        participating in.
+        """
+
+        rows = cast(
+            list[tuple[str, str]],
+            await self.db_pool.simple_select_list(
+                "current_state_events",
+                keyvalues={
+                    "type": EventTypes.Member,
+                    "state_key": user_id,
+                },
+                retcols=["room_id", "membership"],
+                desc="get_memberships_for_user",
+            ),
+        )
+        return dict(rows)
 
     @cached(max_entries=500000, iterable=True)
     async def get_rooms_for_user(self, user_id: str) -> frozenset[str]:

@@ -62,6 +62,7 @@ from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3E
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters
 from synapse.types import StrCollection
 from synapse.util.async_helpers import delay_cancellation
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
@@ -631,7 +632,7 @@ class DatabasePool:
         # Check ASAP (and then later, every 1s) to see if we have finished
         # background updates of tables that aren't safe to update.
         self._clock.call_later(
-            0.0,
+            Duration(seconds=0),
             self.hs.run_as_background_process,
             "upsert_safety_check",
             self._check_safe_to_upsert,
@@ -679,7 +680,7 @@ class DatabasePool:
         # If there's any updates still running, reschedule to run.
         if background_update_names:
             self._clock.call_later(
-                15.0,
+                Duration(seconds=15),
                 self.hs.run_as_background_process,
                 "upsert_safety_check",
                 self._check_safe_to_upsert,
@@ -706,7 +707,7 @@ class DatabasePool:
                 "Total database time: %.3f%% {%s}", ratio * 100, top_three_counters
             )
 
-        self._clock.looping_call(loop, 10000)
+        self._clock.looping_call(loop, Duration(seconds=10))
 
     def new_transaction(
         self,

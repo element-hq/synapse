@@ -70,6 +70,7 @@ from synapse.media.url_previewer import UrlPreviewer
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
 from synapse.types import UserID
 from synapse.util.async_helpers import Linearizer
+from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import random_string
 
@@ -80,10 +81,10 @@ logger = logging.getLogger(__name__)
 
 # How often to run the background job to update the "recently accessed"
 # attribute of local and remote media.
-UPDATE_RECENTLY_ACCESSED_TS = 60 * 1000  # 1 minute
+UPDATE_RECENTLY_ACCESSED_TS = Duration(minutes=1)
 # How often to run the background job to check for local and remote media
 # that should be purged according to the configured media retention settings.
-MEDIA_RETENTION_CHECK_PERIOD_MS = 60 * 60 * 1000  # 1 hour
+MEDIA_RETENTION_CHECK_PERIOD = Duration(hours=1)
 
 
 class MediaRepository:
@@ -166,7 +167,7 @@ class MediaRepository:
             # with the duration between runs dictated by the homeserver config.
             self.clock.looping_call(
                 self._start_apply_media_retention_rules,
-                MEDIA_RETENTION_CHECK_PERIOD_MS,
+                MEDIA_RETENTION_CHECK_PERIOD,
             )
 
         if hs.config.media.url_preview_enabled:
@@ -438,7 +439,11 @@ class MediaRepository:
         return await self.store.get_cached_remote_media(origin, media_id)
 
     async def get_local_media_info(
-        self, request: SynapseRequest, media_id: str, max_timeout_ms: int
+        self,
+        request: SynapseRequest,
+        media_id: str,
+        max_timeout_ms: int,
+        bypass_quarantine: bool = False,
     ) -> LocalMedia | None:
         """Gets the info dictionary for given local media ID. If the media has
         not been uploaded yet, this function will wait up to ``max_timeout_ms``
@@ -450,6 +455,7 @@ class MediaRepository:
                 the file_id for local content.)
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            bypass_quarantine: whether to bypass quarantine checks
 
         Returns:
             Either the info dictionary for the given local media ID or
@@ -465,7 +471,7 @@ class MediaRepository:
                 respond_404(request)
                 return None
 
-            if media_info.quarantined_by:
+            if media_info.quarantined_by and not bypass_quarantine:
                 logger.info("Media %s is quarantined", media_id)
                 respond_404(request)
                 return None
@@ -485,7 +491,7 @@ class MediaRepository:
             if now >= wait_until:
                 break
 
-            await self.clock.sleep(0.5)
+            await self.clock.sleep(Duration(milliseconds=500))
 
         logger.info("Media %s has not yet been uploaded", media_id)
         self.respond_not_yet_uploaded(request)
@@ -499,6 +505,7 @@ class MediaRepository:
         max_timeout_ms: int,
         allow_authenticated: bool = True,
         federation: bool = False,
+        bypass_quarantine: bool = False,
     ) -> None:
         """Responds to requests for local media, if exists, or returns 404.
 
@@ -512,11 +519,14 @@ class MediaRepository:
                 media to be uploaded.
             allow_authenticated: whether media marked as authenticated may be served to this request
             federation: whether the local media being fetched is for a federation request
+            bypass_quarantine: whether to bypass quarantine checks
 
         Returns:
             Resolves once a response has successfully been written to request
         """
-        media_info = await self.get_local_media_info(request, media_id, max_timeout_ms)
+        media_info = await self.get_local_media_info(
+            request, media_id, max_timeout_ms, bypass_quarantine=bypass_quarantine
+        )
         if not media_info:
             return
 
@@ -560,6 +570,7 @@ class MediaRepository:
         ip_address: str,
         use_federation_endpoint: bool,
         allow_authenticated: bool = True,
+        bypass_quarantine: bool = False,
     ) -> None:
         """Respond to requests for remote media.
 
@@ -576,6 +587,7 @@ class MediaRepository:
                 federation `/download` endpoint
             allow_authenticated: whether media marked as authenticated may be served to this
                 request
+            bypass_quarantine: whether to bypass quarantine checks
 
         Returns:
             Resolves once a response has successfully been written to request
@@ -608,6 +620,7 @@ class MediaRepository:
                 ip_address,
                 use_federation_endpoint,
                 allow_authenticated,
+                bypass_quarantine=bypass_quarantine,
             )
 
         # Check if the media is cached on the client, if so return 304. We need
@@ -696,6 +709,7 @@ class MediaRepository:
         ip_address: str,
         use_federation_endpoint: bool,
         allow_authenticated: bool,
+        bypass_quarantine: bool = False,
     ) -> tuple[Responder | None, RemoteMedia]:
         """Looks for media in local cache, if not there then attempt to
         download from remote server.
@@ -711,6 +725,7 @@ class MediaRepository:
             ip_address: the IP address of the requester
             use_federation_endpoint: whether to request the remote media over the new federation
             /download endpoint
+            bypass_quarantine: whether to bypass quarantine checks
 
         Returns:
             A tuple of responder and the media info of the file.
@@ -731,7 +746,7 @@ class MediaRepository:
             file_id = media_info.filesystem_id
             file_info = FileInfo(server_name, file_id)
 
-            if media_info.quarantined_by:
+            if media_info.quarantined_by and not bypass_quarantine:
                 logger.info("Media is quarantined")
                 raise NotFoundError()
 
@@ -913,6 +928,7 @@ class MediaRepository:
             filesystem_id=file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
+            quarantined_ts=None,
             authenticated=authenticated,
             sha256=sha256writer.hexdigest(),
         )
@@ -1046,6 +1062,7 @@ class MediaRepository:
             filesystem_id=file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
+            quarantined_ts=None,
             authenticated=authenticated,
             sha256=sha256writer.hexdigest(),
         )

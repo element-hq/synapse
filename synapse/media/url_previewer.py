@@ -47,6 +47,7 @@ from synapse.media.preview_html import decode_body, parse_html_to_open_graph
 from synapse.types import JsonDict, UserID
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import random_string
 
@@ -208,7 +209,9 @@ class UrlPreviewer:
         )
 
         if self._worker_run_media_background_jobs:
-            self.clock.looping_call(self._start_expire_url_cache_data, 10 * 1000)
+            self.clock.looping_call(
+                self._start_expire_url_cache_data, Duration(seconds=10)
+            )
 
     async def preview(self, url: str, user: UserID, ts: int) -> bytes:
         # the in-memory cache:
@@ -328,10 +331,16 @@ class UrlPreviewer:
                 # response failed or is incomplete.
                 og_from_html = parse_html_to_open_graph(tree)
 
-                # Compile the Open Graph response by using the scraped
-                # information from the HTML and overlaying any information
-                # from the oEmbed response.
-                og = {**og_from_html, **og_from_oembed}
+                # Compile an Open Graph response by combining the oEmbed response
+                # and the information from the HTML, with information in the HTML
+                # preferred.
+                #
+                # The ordering here is intentional: certain websites (especially
+                # SPA JavaScript-based ones) including Mastodon and YouTube provide
+                # almost complete OpenGraph descriptions but only stubs for oEmbed,
+                # with further oEmbed information being populated with JavaScript,
+                # that Synapse won't execute.
+                og = og_from_oembed | og_from_html
 
                 await self._precache_image_url(user, media_info, og)
             else:

@@ -38,6 +38,7 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.types import JsonDict
 from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.http.server._base import test_disconnect
@@ -210,6 +211,66 @@ class JsonResourceTests(unittest.TestCase):
 
         self.assertEqual(channel.code, 200)
         self.assertNotIn("body", channel.result)
+
+    def test_content_larger_than_content_length(self) -> None:
+        """
+        HTTP requests with content size exceeding Content-Length should be rejected with 400.
+        """
+
+        def _callback(
+            request: SynapseRequest, **kwargs: object
+        ) -> tuple[int, JsonDict]:
+            return 200, {}
+
+        res = JsonResource(self.homeserver)
+        res.register_paths(
+            "POST", [re.compile("^/_matrix/foo$")], _callback, "test_servlet"
+        )
+
+        channel = make_request(
+            self.reactor,
+            FakeSite(res, self.reactor),
+            b"POST",
+            b"/_matrix/foo",
+            {},
+            # Set the `Content-Length` value to be smaller than the actual content size
+            custom_headers=[("Content-Length", "1")],
+            # The request should disconnect early so don't await the result
+            await_result=False,
+        )
+
+        self.reactor.advance(0.1)
+        self.assertEqual(channel.code, 400)
+
+    def test_content_smaller_than_content_length(self) -> None:
+        """
+        HTTP requests with content size smaller than Content-Length should be rejected with 400.
+        """
+
+        def _callback(
+            request: SynapseRequest, **kwargs: object
+        ) -> tuple[int, JsonDict]:
+            return 200, {}
+
+        res = JsonResource(self.homeserver)
+        res.register_paths(
+            "POST", [re.compile("^/_matrix/foo$")], _callback, "test_servlet"
+        )
+
+        channel = make_request(
+            self.reactor,
+            FakeSite(res, self.reactor),
+            b"POST",
+            b"/_matrix/foo",
+            {},
+            # Set the `Content-Length` value to be larger than the actual content size
+            custom_headers=[("Content-Length", "10")],
+            # The request should disconnect early so don't await the result
+            await_result=False,
+        )
+
+        self.reactor.advance(0.1)
+        self.assertEqual(channel.code, 400)
 
 
 class OptionsResourceTests(unittest.TestCase):
@@ -406,11 +467,11 @@ class CancellableDirectServeJsonResource(DirectServeJsonResource):
 
     @cancellable
     async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        await self.clock.sleep(1.0)
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, {"result": True}
 
     async def _async_render_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        await self.clock.sleep(1.0)
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, {"result": True}
 
 
@@ -423,11 +484,11 @@ class CancellableDirectServeHtmlResource(DirectServeHtmlResource):
 
     @cancellable
     async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, bytes]:
-        await self.clock.sleep(1.0)
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, b"ok"
 
     async def _async_render_POST(self, request: SynapseRequest) -> tuple[int, bytes]:
-        await self.clock.sleep(1.0)
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, b"ok"
 
 

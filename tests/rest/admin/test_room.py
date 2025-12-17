@@ -44,6 +44,7 @@ from synapse.storage.databases.main.purge_events import (
 )
 from synapse.types import UserID
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests import unittest
@@ -1161,7 +1162,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
         # Mock PaginationHandler.purge_room to sleep for 100s, so we have time to do a second call
         # before the purge is over. Note that it doesn't purge anymore, but we don't care.
         async def purge_room(room_id: str, force: bool) -> None:
-            await self.hs.get_clock().sleep(100)
+            await self.hs.get_clock().sleep(Duration(seconds=100))
 
         self.pagination_handler.purge_room = AsyncMock(side_effect=purge_room)  # type: ignore[method-assign]
 
@@ -1464,7 +1465,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
             self._is_purged(room_id)
 
         # Wait for next scheduler run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         self._is_purged(room_id)
 
@@ -1501,7 +1502,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
             self._is_purged(room_id)
 
         # Wait for next scheduler run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         # Test that all users has been kicked (room is shutdown)
         self._has_no_members(room_id)
@@ -2974,6 +2975,120 @@ class JoinAliasRoomTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(private_room_id, channel.json_body["joined_rooms"][0])
+
+    def test_joined_rooms(self) -> None:
+        """
+        Test joined_rooms admin endpoint.
+        """
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/join/{self.public_room_id}",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(self.public_room_id, channel.json_body["room_id"])
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.second_user_id}/joined_rooms",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(self.public_room_id, channel.json_body["joined_rooms"][0])
+
+    def test_memberships(self) -> None:
+        """
+        Test user memberships admin endpoint.
+        """
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/join/{self.public_room_id}",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        other_room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/join/{other_room_id}",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.second_user_id}/memberships",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            {
+                "memberships": {
+                    self.public_room_id: Membership.JOIN,
+                    other_room_id: Membership.JOIN,
+                }
+            },
+            channel.json_body,
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{other_room_id}/leave",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        invited_room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok
+        )
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{invited_room_id}/invite",
+            content={"user_id": self.second_user_id},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        banned_room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok
+        )
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{banned_room_id}/ban",
+            content={"user_id": self.second_user_id},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.second_user_id}/memberships",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            {
+                "memberships": {
+                    self.public_room_id: Membership.JOIN,
+                    other_room_id: Membership.LEAVE,
+                    invited_room_id: Membership.INVITE,
+                    banned_room_id: Membership.BAN,
+                }
+            },
+            channel.json_body,
+        )
 
     def test_context_as_non_admin(self) -> None:
         """

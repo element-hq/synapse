@@ -55,6 +55,7 @@ from synapse.replication.tcp.commands import (
     parse_command_from_line,
 )
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -193,7 +194,9 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         self._send_pending_commands()
 
         # Starts sending pings
-        self._send_ping_loop = self.clock.looping_call(self.send_ping, 5000)
+        self._send_ping_loop = self.clock.looping_call(
+            self.send_ping, Duration(seconds=5)
+        )
 
         # Always send the initial PING so that the other side knows that they
         # can time us out.

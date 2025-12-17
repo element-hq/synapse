@@ -39,6 +39,7 @@ from prometheus_client import Gauge
 from twisted.internet import defer
 from twisted.python.failure import Failure
 
+from synapse.logging.context import PreserveLoggingContext
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.lrucache import LruCache
@@ -514,7 +515,8 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
             cache._completed_callback(value, self, key)
 
         if self._deferred:
-            self._deferred.callback(result)
+            with PreserveLoggingContext():
+                self._deferred.callback(result)
 
     def error_bulk(
         self, cache: DeferredCache[KT, VT], keys: Collection[KT], failure: Failure
@@ -524,4 +526,5 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
             cache._error_callback(failure, self, key)
 
         if self._deferred:
-            self._deferred.errback(failure)
+            with PreserveLoggingContext():
+                self._deferred.errback(failure)

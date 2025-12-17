@@ -30,6 +30,7 @@ from typing import (
     Awaitable,
     BinaryIO,
     Generator,
+    Optional,
 )
 
 import attr
@@ -45,6 +46,7 @@ from synapse.api.errors import Codes, cs_error
 from synapse.http.server import finish_request, respond_with_json
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import (
+    PreserveLoggingContext,
     defer_to_threadpool,
     make_deferred_yieldable,
     run_in_background,
@@ -704,7 +706,7 @@ class ThreadedFileSender:
 
         self.file: BinaryIO | None = None
         self.deferred: "Deferred[None]" = Deferred()
-        self.consumer: interfaces.IConsumer | None = None
+        self.consumer: Optional[IConsumer] = None
 
         # Signals if the thread should keep reading/sending data. Set means
         # continue, clear means pause.
@@ -753,9 +755,10 @@ class ThreadedFileSender:
         self.wakeup_event.set()
 
         if not self.deferred.called:
-            self.deferred.errback(
-                ConsumerRequestedStopError("Consumer asked us to stop producing")
-            )
+            with PreserveLoggingContext():
+                self.deferred.errback(
+                    ConsumerRequestedStopError("Consumer asked us to stop producing")
+                )
 
     async def start_read_loop(self) -> None:
         """This is the loop that drives reading/writing"""
@@ -809,7 +812,8 @@ class ThreadedFileSender:
             self.consumer = None
 
         if not self.deferred.called:
-            self.deferred.errback(failure)
+            with PreserveLoggingContext():
+                self.deferred.errback(failure)
 
     def _finish(self) -> None:
         """Called when we have finished writing (either on success or
@@ -823,4 +827,5 @@ class ThreadedFileSender:
             self.consumer = None
 
         if not self.deferred.called:
-            self.deferred.callback(None)
+            with PreserveLoggingContext():
+                self.deferred.callback(None)

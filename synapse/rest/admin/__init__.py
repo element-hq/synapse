@@ -114,10 +114,12 @@ from synapse.rest.admin.users import (
     UserByThreePid,
     UserInvitesCount,
     UserJoinedRoomCount,
-    UserMembershipRestServlet,
+    UserJoinedRoomsRestServlet,
+    UserMembershipsRestServlet,
     UserRegisterServlet,
     UserReplaceMasterCrossSigningKeyRestServlet,
     UserRestServletV2,
+    UserRestServletV2Get,
     UsersRestServletV2,
     UsersRestServletV3,
     UserTokenRestServlet,
@@ -280,6 +282,8 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
         # matrix_authentication_service integration uses the dedicated MAS API.
         if hs.config.experimental.msc3861.enabled:
             register_servlets_for_msc3861_delegation(hs, http_server)
+        else:
+            UserRestServletV2Get(hs).register(http_server)
 
         return
 
@@ -297,7 +301,8 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     VersionServlet(hs).register(http_server)
     if not auth_delegated:
         UserAdminServlet(hs).register(http_server)
-    UserMembershipRestServlet(hs).register(http_server)
+    UserJoinedRoomsRestServlet(hs).register(http_server)
+    UserMembershipsRestServlet(hs).register(http_server)
     if not auth_delegated:
         UserTokenRestServlet(hs).register(http_server)
     UserRestServletV2(hs).register(http_server)

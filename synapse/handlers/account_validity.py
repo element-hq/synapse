@@ -28,6 +28,7 @@ from synapse.metrics.background_process_metrics import wrap_as_background_proces
 from synapse.types import UserID
 from synapse.util import stringutils
 from synapse.util.async_helpers import delay_cancellation
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -73,7 +74,7 @@ class AccountValidityHandler:
 
             # Check the renewal emails to send and send them every 30min.
             if hs.config.worker.run_background_tasks:
-                self.clock.looping_call(self._send_renewal_emails, 30 * 60 * 1000)
+                self.clock.looping_call(self._send_renewal_emails, Duration(minutes=30))
 
     async def is_user_expired(self, user_id: str) -> bool:
         """Checks if a user has expired against third-party modules.

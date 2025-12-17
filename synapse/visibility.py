@@ -33,6 +33,7 @@ from synapse.api.constants import (
     EventTypes,
     EventUnsignedContentFields,
     HistoryVisibility,
+    JoinRules,
     Membership,
 )
 from synapse.events import EventBase
@@ -111,7 +112,17 @@ async def filter_events_for_client(
     # happen within the function.
     events_before_filtering = events.copy()
     # Default case is to *exclude* soft-failed events
-    events = [e for e in events if not e.internal_metadata.is_soft_failed()]
+    events = []
+    found_call_invite = False
+    for event in events_before_filtering:
+        if event.internal_metadata.is_soft_failed():
+            continue
+
+        if event.type == EventTypes.CallInvite and not event.is_state():
+            found_call_invite = True
+
+        events.append(event)
+
     client_config = await storage.main.get_admin_client_config_for_user(user_id)
     if filter_send_to_client and await storage.main.is_server_admin(user_id):
         if client_config.return_soft_failed_events:
@@ -139,7 +150,11 @@ async def filter_events_for_client(
                 [event.event_id for event in events],
             )
 
-    types = (_HISTORY_VIS_KEY, (EventTypes.Member, user_id))
+    types = [_HISTORY_VIS_KEY, (EventTypes.Member, user_id)]
+    if found_call_invite:
+        # We need to fetch the room's join rules state to determine
+        # whether to allow call invites in public rooms.
+        types.append((EventTypes.JoinRules, ""))
 
     # we exclude outliers at this point, and then handle them separately later
     event_id_to_state = await storage.state.get_state_for_events(
@@ -177,6 +192,25 @@ async def filter_events_for_client(
         )
         if filtered is None:
             return None
+
+        # Filter out call invites in public rooms, as this would potentially
+        # ring a lot of users.
+        if event.type == EventTypes.CallInvite and not event.is_state():
+            # `state_after_event` should only be None if the event is an outlier,
+            # and earlier code should filter out outliers entirely.
+            #
+            # In addition, we only create outliers locally for out-of-band
+            # invite rejections, invites received over federation, or state
+            # events needed to authorise other events. None of this applies to
+            # call invites.
+            assert state_after_event is not None
+
+            room_join_rules = state_after_event.get((EventTypes.JoinRules, ""))
+            if (
+                room_join_rules is not None
+                and room_join_rules.content.get("join_rule") == JoinRules.PUBLIC
+            ):
+                return None
 
         # Annotate the event with the user's membership after the event.
         #

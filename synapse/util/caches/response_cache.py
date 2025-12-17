@@ -42,6 +42,7 @@ from synapse.logging.opentracing import (
 from synapse.util.async_helpers import AbstractObservableDeferred, ObservableDeferred
 from synapse.util.caches import EvictionReason, register_cache
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class ResponseCache(Generic[KV]):
         self._result_cache: dict[KV, ResponseCacheEntry] = {}
 
         self.clock = clock
-        self.timeout_sec = timeout_ms / 1000.0
+        self.timeout = Duration(milliseconds=timeout_ms)
 
         self._name = name
         self._metrics = register_cache(
@@ -195,9 +196,9 @@ class ResponseCache(Generic[KV]):
             # if this cache has a non-zero timeout, and the callback has not cleared
             # the should_cache bit, we leave it in the cache for now and schedule
             # its removal later.
-            if self.timeout_sec and context.should_cache:
+            if self.timeout and context.should_cache:
                 self.clock.call_later(
-                    self.timeout_sec,
+                    self.timeout,
                     self._entry_timeout,
                     key,
                     # We don't need to track these calls since they don't hold any strong

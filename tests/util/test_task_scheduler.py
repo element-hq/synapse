@@ -26,6 +26,7 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -68,7 +69,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
         # The timestamp being 30s after now the task should been executed
         # after the first scheduling loop is run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS / 1000)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         task = self.get_success(self.task_scheduler.get_task(task_id))
         assert task is not None
@@ -87,7 +88,7 @@ class TestTaskScheduler(HomeserverTestCase):
         self, task: ScheduledTask
     ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         # Sleep for a second
-        await self.hs.get_clock().sleep(1)
+        await self.hs.get_clock().sleep(Duration(seconds=1))
         return TaskStatus.COMPLETE, None, None
 
     def test_schedule_lot_of_tasks(self) -> None:
@@ -187,7 +188,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
         # Simulate a synapse restart by emptying the list of running tasks
         self.task_scheduler._running_tasks = set()
-        self.reactor.advance((TaskScheduler.SCHEDULE_INTERVAL_MS / 1000))
+        self.reactor.advance((TaskScheduler.SCHEDULE_INTERVAL.as_secs()))
 
         task = self.get_success(self.task_scheduler.get_task(task_id))
         assert task is not None

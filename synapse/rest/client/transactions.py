@@ -34,13 +34,14 @@ from twisted.web.iweb import IRequest
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import JsonDict, Requester
 from synapse.util.async_helpers import ObservableDeferred
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
-CLEANUP_PERIOD_MS = 1000 * 60 * 30  # 30 mins
+CLEANUP_PERIOD = Duration(minutes=30)
 
 
 P = ParamSpec("P")
@@ -56,7 +57,7 @@ class HttpTransactionCache:
         ] = {}
         # Try to clean entries every 30 mins. This means entries will exist
         # for at *LEAST* 30 mins, and at *MOST* 60 mins.
-        self.clock.looping_call(self._cleanup, CLEANUP_PERIOD_MS)
+        self.clock.looping_call(self._cleanup, CLEANUP_PERIOD)
 
     def _get_transaction_key(self, request: IRequest, requester: Requester) -> Hashable:
         """A helper function which returns a transaction key that can be used
@@ -145,5 +146,5 @@ class HttpTransactionCache:
         now = self.clock.time_msec()
         for key in list(self.transactions):
             ts = self.transactions[key][1]
-            if now > (ts + CLEANUP_PERIOD_MS):  # after cleanup period
+            if now > (ts + CLEANUP_PERIOD.as_millis()):  # after cleanup period
                 del self.transactions[key]

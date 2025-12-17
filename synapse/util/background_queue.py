@@ -27,7 +27,7 @@ from typing import (
 from twisted.internet import defer
 
 from synapse.util.async_helpers import DeferredEvent
-from synapse.util.constants import MILLISECONDS_PER_SECOND
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -67,7 +67,7 @@ class BackgroundQueue(Generic[T]):
         self._hs = hs
         self._name = name
         self._callback = callback
-        self._timeout_ms = timeout_ms
+        self._timeout_ms = Duration(milliseconds=timeout_ms)
 
         # The queue of items to process.
         self._queue: collections.deque[T] = collections.deque()
@@ -125,7 +125,7 @@ class BackgroundQueue(Generic[T]):
                 # just loop round, clear the event, recheck the queue, and then
                 # wait here again.
                 new_data = await self._wakeup_event.wait(
-                    timeout_seconds=self._timeout_ms / MILLISECONDS_PER_SECOND
+                    timeout_seconds=self._timeout_ms.as_secs()
                 )
                 if not new_data:
                     # Timed out waiting for new data, so exit the loop

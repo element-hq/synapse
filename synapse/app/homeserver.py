@@ -22,7 +22,7 @@
 import logging
 import os
 import sys
-from typing import Iterable
+from typing import Iterable, Optional
 
 from twisted.internet.tcp import Port
 from twisted.web.resource import EncodingResourceWrapper, Resource
@@ -350,7 +350,7 @@ def load_or_generate_config(argv_options: list[str]) -> HomeServerConfig:
 
 def create_homeserver(
     config: HomeServerConfig,
-    reactor: ISynapseReactor | None = None,
+    reactor: Optional[ISynapseReactor] = None,
 ) -> SynapseHomeServer:
     """
     Create a homeserver instance for the Synapse main process.
@@ -450,7 +450,8 @@ async def start(
     await _base.start(hs, freeze=freeze)
 
     # TODO: Feels like this should be moved somewhere else.
-    hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
+    for db in hs.get_datastores().databases:
+        db.updates.start_doing_background_updates()
 
 
 def start_reactor(

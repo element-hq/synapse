@@ -46,7 +46,7 @@ from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 from tests import unittest
-from tests.server import TimedOutException
+from tests.server import FakeChannel, TimedOutException
 from tests.test_utils.event_injection import create_event
 
 logger = logging.getLogger(__name__)
@@ -80,12 +80,10 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         config["experimental_features"] = {"msc3575_enabled": True}
         return config
 
-    def do_sync(
+    def make_sync_request(
         self, sync_body: JsonDict, *, since: str | None = None, tok: str
-    ) -> tuple[JsonDict, str]:
-        """Do a sliding sync request with given body.
-
-        Asserts the request was successful.
+    ) -> FakeChannel:
+        """Make a sliding sync request with given body.
 
         Attributes:
             sync_body: The full request body to use
@@ -106,6 +104,24 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
             content=sync_body,
             access_token=tok,
         )
+        return channel
+
+    def do_sync(
+        self, sync_body: JsonDict, *, since: str | None = None, tok: str
+    ) -> tuple[JsonDict, str]:
+        """Do a sliding sync request with given body.
+
+        Asserts the request was successful.
+
+        Attributes:
+            sync_body: The full request body to use
+            since: Optional since token
+            tok: Access token to use
+
+        Returns:
+            A tuple of the response body and the `pos` field.
+        """
+        channel = self.make_sync_request(sync_body, since=since, tok=tok)
         self.assertEqual(channel.code, 200, channel.json_body)
 
         return channel.json_body, channel.json_body["pos"]
@@ -241,7 +257,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         invitee_user_id: str,
         unsigned_invite_room_state: list[StrippedStateEvent] | None,
         invite_room_id: str | None = None,
-    ) -> str:
+    ) -> tuple[str, EventBase]:
         """
         Create a fake invite for a remote room and persist it.
 
@@ -307,11 +323,13 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         context = EventContext.for_outlier(self.hs.get_storage_controllers())
         persist_controller = self.hs.get_storage_controllers().persistence
         assert persist_controller is not None
-        self.get_success(persist_controller.persist_event(invite_event, context))
+        persisted_event, _, _ = self.get_success(
+            persist_controller.persist_event(invite_event, context)
+        )
 
         self._remote_invite_count += 1
 
-        return invite_room_id
+        return invite_room_id, persisted_event
 
     def _bump_notifier_wait_for_events(
         self,
@@ -747,7 +765,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         user1_tok = self.login(user1_id, "pass")
 
         # Create a remote room invite (out-of-band membership)
-        room_id = self._create_remote_invite_room_for_user(user1_id, None)
+        room_id, _ = self._create_remote_invite_room_for_user(user1_id, None)
 
         # Make the Sliding Sync request
         sync_body = {

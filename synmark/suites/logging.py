@@ -37,6 +37,7 @@ from synapse.logging import RemoteHandler
 from synapse.synapse_rust import reset_logging_config
 from synapse.types import ISynapseReactor
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 
 class LineCounter(LineOnlyReceiver):
@@ -141,7 +142,7 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
 
         if len(handler._buffer) == handler.maximum_buffer:
             while len(handler._buffer) > handler.maximum_buffer / 2:
-                await clock.sleep(0.01)
+                await clock.sleep(Duration(milliseconds=10))
 
     await logger_factory.on_done
 

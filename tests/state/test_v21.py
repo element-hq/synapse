@@ -39,6 +39,7 @@ from synapse.state.v2 import (
 )
 from synapse.types import StateMap
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.state.test_v2 import TestStateResolutionStore
@@ -66,7 +67,7 @@ def monotonic_timestamp() -> int:
 
 
 class FakeClock:
-    async def sleep(self, duration_ms: float) -> None:
+    async def sleep(self, duration: Duration) -> None:
         defer.succeed(None)
 
 
