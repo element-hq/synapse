@@ -41,7 +41,10 @@ class TestTaskScheduler(HomeserverTestCase):
         self.task_scheduler.register_action(self._raising_task, "_raising_task")
         self.task_scheduler.register_action(self._resumable_task, "_resumable_task")
         self.task_scheduler.register_action(
-            self._incrementing_task, "_incrementing_task"
+            self._incrementing_active_task, "_incrementing_active_task"
+        )
+        self.task_scheduler.register_action(
+            self._incrementing_running_task, "_incrementing_running_task"
         )
 
     async def _test_task(
@@ -199,24 +202,7 @@ class TestTaskScheduler(HomeserverTestCase):
         assert task.result is not None
         self.assertTrue(task.result.get("success"))
 
-    async def _incrementing_task(
-        self, task: ScheduledTask
-    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
-        current_counter = 0
-        if task.result and "counter" in task.result:
-            current_counter = int(task.result["counter"])
-
-        return TaskStatus.ACTIVE, {"counter": current_counter + 1}, None
-
-    def test_cancel_task(self) -> None:
-        """Schedule and then cancel a long running task that increments a counter."""
-
-        task_id = self.get_success(
-            self.task_scheduler.schedule_task(
-                "_incrementing_task",
-            )
-        )
-
+    def _test_cancel_task(self, task_id: str) -> None:
         task = self.get_success(self.task_scheduler.get_task(task_id))
         assert task is not None
         assert task.status == TaskStatus.ACTIVE
@@ -263,6 +249,53 @@ class TestTaskScheduler(HomeserverTestCase):
         assert task.result and "counter" in task.result
         new_counter = int(task.result["counter"])
         assert new_counter == current_counter
+
+    async def _incrementing_running_task(
+        self, task: ScheduledTask
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
+        current_counter = 0
+
+        while True:
+            current_counter += 1
+            await self.task_scheduler.update_task(
+                task.id, result={"counter": current_counter}
+            )
+            await self.hs.get_clock().sleep(Duration(microseconds=1))
+
+        return TaskStatus.COMPLETE, None, None  # type: ignore[unreachable]
+
+    def test_cancel_running_task(self) -> None:
+        """Schedule and then cancel a long running task that increments a counter."""
+
+        task_id = self.get_success(
+            self.task_scheduler.schedule_task(
+                "_incrementing_running_task",
+            )
+        )
+
+        self._test_cancel_task(task_id)
+
+    async def _incrementing_active_task(
+        self, task: ScheduledTask
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
+        current_counter = 0
+        if task.result and "counter" in task.result:
+            current_counter = int(task.result["counter"])
+
+        return TaskStatus.ACTIVE, {"counter": current_counter + 1}, None
+
+    def test_cancel_active_task(self) -> None:
+        """Schedule and then cancel a long active task that increments a counter,
+        but step by step, by keeping the task ACTIVE even if it is not running
+        between the steps."""
+
+        task_id = self.get_success(
+            self.task_scheduler.schedule_task(
+                "_incrementing_active_task",
+            )
+        )
+
+        self._test_cancel_task(task_id)
 
 
 class TestTaskSchedulerWithBackgroundWorker(BaseMultiWorkerStreamTestCase):
