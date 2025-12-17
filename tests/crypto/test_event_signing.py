@@ -48,7 +48,6 @@ class EventSigningTestCase(unittest.TestCase):
     def test_sign_minimal(self) -> None:
         event_dict = {
             "event_id": "$0:domain",
-            "origin": "domain",
             "origin_server_ts": 1000000,
             "signatures": {},
             "type": "X",
@@ -64,7 +63,7 @@ class EventSigningTestCase(unittest.TestCase):
         self.assertTrue(hasattr(event, "hashes"))
         self.assertIn("sha256", event.hashes)
         self.assertEqual(
-            event.hashes["sha256"], "6tJjLpXtggfke8UxFhAKg82QVkJzvKOVOOSjUDK4ZSI"
+            event.hashes["sha256"], "A6Nco6sqoy18PPfPDVdYvoowfc0PVBk9g9OiyT3ncRM"
         )
 
         self.assertTrue(hasattr(event, "signatures"))
@@ -72,15 +71,14 @@ class EventSigningTestCase(unittest.TestCase):
         self.assertIn(KEY_NAME, event.signatures["domain"])
         self.assertEqual(
             event.signatures[HOSTNAME][KEY_NAME],
-            "2Wptgo4CwmLo/Y8B8qinxApKaCkBG2fjTWB7AbP5Uy+"
-            "aIbygsSdLOFzvdDjww8zUVKCmI02eP9xtyJxc/cLiBA",
+            "PBc48yDVszWB9TRaB/+CZC1B+pDAC10F8zll006j+NN"
+            "fe4PEMWcVuLaG63LFTK9e4rwJE8iLZMPtCKhDTXhpAQ",
         )
 
     def test_sign_message(self) -> None:
         event_dict = {
             "content": {"body": "Here is the message content"},
             "event_id": "$0:domain",
-            "origin": "domain",
             "origin_server_ts": 1000000,
             "type": "m.room.message",
             "room_id": "!r:domain",
@@ -98,7 +96,7 @@ class EventSigningTestCase(unittest.TestCase):
         self.assertTrue(hasattr(event, "hashes"))
         self.assertIn("sha256", event.hashes)
         self.assertEqual(
-            event.hashes["sha256"], "onLKD1bGljeBWQhWZ1kaP9SorVmRQNdN5aM2JYU2n/g"
+            event.hashes["sha256"], "rDCeYBepPlI891h/RkI2/Lkf9bt7u0TxFku4tMs7WKk"
         )
 
         self.assertTrue(hasattr(event, "signatures"))
@@ -106,6 +104,6 @@ class EventSigningTestCase(unittest.TestCase):
         self.assertIn(KEY_NAME, event.signatures["domain"])
         self.assertEqual(
             event.signatures[HOSTNAME][KEY_NAME],
-            "Wm+VzmOUOz08Ds+0NTWb1d4CZrVsJSikkeRxh6aCcUw"
-            "u6pNC78FunoD7KNWzqFn241eYHYMGCA5McEiVPdhzBA",
+            "Ay4aj2b5oJ1k8INYZ9n3KnszCflM0emwcmQQ7vxpbdc"
+            "Sv9bkJxIZdWX1IJllcZLq89+D3sSabE+vqPtZs9akDw",
         )

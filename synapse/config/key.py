@@ -23,7 +23,7 @@
 import hashlib
 import logging
 import os
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
+from typing import TYPE_CHECKING, Any, Iterator
 
 import attr
 import jsonschema
@@ -110,7 +110,7 @@ class TrustedKeyServer:
     server_name: str
 
     # map from key id to key object, or None to disable signature verification.
-    verify_keys: Optional[Dict[str, VerifyKey]] = None
+    verify_keys: dict[str, VerifyKey] | None = None
 
 
 class KeyConfig(Config):
@@ -191,7 +191,7 @@ class KeyConfig(Config):
             if macaroon_secret_key:
                 raise ConfigError(CONFLICTING_MACAROON_SECRET_KEY_OPTS_ERROR)
             macaroon_secret_key = read_file(
-                macaroon_secret_key_path, "macaroon_secret_key_path"
+                macaroon_secret_key_path, ("macaroon_secret_key_path",)
             ).strip()
         if not macaroon_secret_key:
             macaroon_secret_key = self.root.registration.registration_shared_secret
@@ -212,11 +212,16 @@ class KeyConfig(Config):
                 "Config options that expect an in-line secret as value are disabled",
                 ("form_secret",),
             )
+        if form_secret is not None and not isinstance(form_secret, str):
+            raise ConfigError("Config option must be a string", ("form_secret",))
+
         form_secret_path = config.get("form_secret_path", None)
         if form_secret_path:
             if form_secret:
                 raise ConfigError(CONFLICTING_FORM_SECRET_OPTS_ERROR)
-            self.form_secret = read_file(form_secret_path, "form_secret_path").strip()
+            self.form_secret: str | None = read_file(
+                form_secret_path, ("form_secret_path",)
+            ).strip()
         else:
             self.form_secret = form_secret
 
@@ -245,7 +250,7 @@ class KeyConfig(Config):
           - server_name: "matrix.org"
         """ % locals()
 
-    def read_signing_keys(self, signing_key_path: str, name: str) -> List[SigningKey]:
+    def read_signing_keys(self, signing_key_path: str, name: str) -> list[SigningKey]:
         """Read the signing keys in the given path.
 
         Args:
@@ -274,8 +279,8 @@ class KeyConfig(Config):
             raise ConfigError("Error reading %s: %s" % (name, str(e)))
 
     def read_old_signing_keys(
-        self, old_signing_keys: Optional[JsonDict]
-    ) -> Dict[str, "VerifyKeyWithExpiry"]:
+        self, old_signing_keys: JsonDict | None
+    ) -> dict[str, "VerifyKeyWithExpiry"]:
         if old_signing_keys is None:
             return {}
         keys = {}
@@ -294,7 +299,7 @@ class KeyConfig(Config):
                 )
         return keys
 
-    def generate_files(self, config: Dict[str, Any], config_dir_path: str) -> None:
+    def generate_files(self, config: dict[str, Any], config_dir_path: str) -> None:
         if "signing_key" in config:
             return
 
@@ -388,7 +393,7 @@ TRUSTED_KEY_SERVERS_SCHEMA = {
 
 
 def _parse_key_servers(
-    key_servers: List[Any], federation_verify_certificates: bool
+    key_servers: list[Any], federation_verify_certificates: bool
 ) -> Iterator[TrustedKeyServer]:
     try:
         jsonschema.validate(key_servers, TRUSTED_KEY_SERVERS_SCHEMA)
@@ -403,7 +408,7 @@ def _parse_key_servers(
         server_name = server["server_name"]
         result = TrustedKeyServer(server_name=server_name)
 
-        verify_keys: Optional[Dict[str, str]] = server.get("verify_keys")
+        verify_keys: dict[str, str] | None = server.get("verify_keys")
         if verify_keys is not None:
             result.verify_keys = {}
             for key_id, key_base64 in verify_keys.items():

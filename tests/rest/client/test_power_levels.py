@@ -20,14 +20,14 @@
 #
 from http import HTTPStatus
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import Codes
 from synapse.events.utils import CANONICALJSON_MAX_INT, CANONICALJSON_MIN_INT
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

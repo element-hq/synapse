@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import ReceiptTypes
 from synapse.http.server import HttpServer
@@ -56,7 +56,7 @@ class ReadMarkerRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         await self.presence_handler.bump_presence_active_time(

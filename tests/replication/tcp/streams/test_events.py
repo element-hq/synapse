@@ -18,11 +18,11 @@
 #
 #
 
-from typing import Any, List, Optional
+from typing import Any
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
@@ -30,6 +30,7 @@ from synapse.replication.tcp.commands import RdataCommand
 from synapse.replication.tcp.streams._base import _STREAM_UPDATE_TARGET_ROW_COUNT
 from synapse.replication.tcp.streams.events import (
     _MAX_STATE_UPDATES_PER_ROOM,
+    EventsStream,
     EventsStreamAllStateRow,
     EventsStreamCurrentStateRow,
     EventsStreamEventRow,
@@ -38,7 +39,7 @@ from synapse.replication.tcp.streams.events import (
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.replication._base import BaseStreamTestCase
 from tests.test_utils.event_injection import inject_event, inject_member_event
@@ -82,7 +83,12 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
         # check we're testing what we think we are: no rows should yet have been
         # received
-        self.assertEqual([], self.test_handler.received_rdata_rows)
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
+        ]
+        self.assertEqual([], received_event_rows)
 
         # now reconnect to pull the updates
         self.reconnect()
@@ -90,31 +96,34 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
         # we should have received all the expected rows in the right order (as
         # well as various cache invalidation updates which we ignore)
-        received_rows = [
-            row for row in self.test_handler.received_rdata_rows if row[0] == "events"
+        #
+        # Filter the updates to only include event changes
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
         ]
-
         for event in events:
-            stream_name, token, row = received_rows.pop(0)
-            self.assertEqual("events", stream_name)
+            stream_name, token, row = received_event_rows.pop(0)
+            self.assertEqual(EventsStream.NAME, stream_name)
             self.assertIsInstance(row, EventsStreamRow)
             self.assertEqual(row.type, "ev")
             self.assertIsInstance(row.data, EventsStreamEventRow)
             self.assertEqual(row.data.event_id, event.event_id)
 
-        stream_name, token, row = received_rows.pop(0)
+        stream_name, token, row = received_event_rows.pop(0)
         self.assertIsInstance(row, EventsStreamRow)
         self.assertIsInstance(row.data, EventsStreamEventRow)
         self.assertEqual(row.data.event_id, state_event.event_id)
 
-        stream_name, token, row = received_rows.pop(0)
+        stream_name, token, row = received_event_rows.pop(0)
         self.assertEqual("events", stream_name)
         self.assertIsInstance(row, EventsStreamRow)
         self.assertEqual(row.type, "state")
         self.assertIsInstance(row.data, EventsStreamCurrentStateRow)
         self.assertEqual(row.data.event_id, state_event.event_id)
 
-        self.assertEqual([], received_rows)
+        self.assertEqual([], received_event_rows)
 
     @parameterized.expand(
         [(_STREAM_UPDATE_TARGET_ROW_COUNT, False), (_MAX_STATE_UPDATES_PER_ROOM, True)]
@@ -170,9 +179,12 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
         self.replicate()
         # all those events and state changes should have landed
-        self.assertGreaterEqual(
-            len(self.test_handler.received_rdata_rows), 2 * len(events)
-        )
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
+        ]
+        self.assertGreaterEqual(len(received_event_rows), 2 * len(events))
 
         # disconnect, so that we can stack up the changes
         self.disconnect()
@@ -202,7 +214,12 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
         # check we're testing what we think we are: no rows should yet have been
         # received
-        self.assertEqual([], self.test_handler.received_rdata_rows)
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
+        ]
+        self.assertEqual([], received_event_rows)
 
         # now reconnect to pull the updates
         self.reconnect()
@@ -218,33 +235,34 @@ class EventsStreamTestCase(BaseStreamTestCase):
         #       of the states that got reverted.
         # - two rows for state2
 
-        received_rows = [
-            row for row in self.test_handler.received_rdata_rows if row[0] == "events"
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
         ]
-
         # first check the first two rows, which should be the state1 event.
-        stream_name, token, row = received_rows.pop(0)
+        stream_name, token, row = received_event_rows.pop(0)
         self.assertEqual("events", stream_name)
         self.assertIsInstance(row, EventsStreamRow)
         self.assertEqual(row.type, "ev")
         self.assertIsInstance(row.data, EventsStreamEventRow)
         self.assertEqual(row.data.event_id, state1.event_id)
 
-        stream_name, token, row = received_rows.pop(0)
+        stream_name, token, row = received_event_rows.pop(0)
         self.assertIsInstance(row, EventsStreamRow)
         self.assertEqual(row.type, "state")
         self.assertIsInstance(row.data, EventsStreamCurrentStateRow)
         self.assertEqual(row.data.event_id, state1.event_id)
 
         # now the last two rows, which should be the state2 event.
-        stream_name, token, row = received_rows.pop(-2)
+        stream_name, token, row = received_event_rows.pop(-2)
         self.assertEqual("events", stream_name)
         self.assertIsInstance(row, EventsStreamRow)
         self.assertEqual(row.type, "ev")
         self.assertIsInstance(row.data, EventsStreamEventRow)
         self.assertEqual(row.data.event_id, state2.event_id)
 
-        stream_name, token, row = received_rows.pop(-1)
+        stream_name, token, row = received_event_rows.pop(-1)
         self.assertIsInstance(row, EventsStreamRow)
         self.assertEqual(row.type, "state")
         self.assertIsInstance(row.data, EventsStreamCurrentStateRow)
@@ -254,16 +272,16 @@ class EventsStreamTestCase(BaseStreamTestCase):
         if collapse_state_changes:
             # that should leave us with the rows for the PL event, the state changes
             # get collapsed into a single row.
-            self.assertEqual(len(received_rows), 2)
+            self.assertEqual(len(received_event_rows), 2)
 
-            stream_name, token, row = received_rows.pop(0)
+            stream_name, token, row = received_event_rows.pop(0)
             self.assertEqual("events", stream_name)
             self.assertIsInstance(row, EventsStreamRow)
             self.assertEqual(row.type, "ev")
             self.assertIsInstance(row.data, EventsStreamEventRow)
             self.assertEqual(row.data.event_id, pl_event.event_id)
 
-            stream_name, token, row = received_rows.pop(0)
+            stream_name, token, row = received_event_rows.pop(0)
             self.assertIsInstance(row, EventsStreamRow)
             self.assertEqual(row.type, "state-all")
             self.assertIsInstance(row.data, EventsStreamAllStateRow)
@@ -271,9 +289,9 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
         else:
             # that should leave us with the rows for the PL event
-            self.assertEqual(len(received_rows), len(events) + 2)
+            self.assertEqual(len(received_event_rows), len(events) + 2)
 
-            stream_name, token, row = received_rows.pop(0)
+            stream_name, token, row = received_event_rows.pop(0)
             self.assertEqual("events", stream_name)
             self.assertIsInstance(row, EventsStreamRow)
             self.assertEqual(row.type, "ev")
@@ -281,8 +299,8 @@ class EventsStreamTestCase(BaseStreamTestCase):
             self.assertEqual(row.data.event_id, pl_event.event_id)
 
             # the state rows are unsorted
-            state_rows: List[EventsStreamCurrentStateRow] = []
-            for stream_name, _, row in received_rows:
+            state_rows: list[EventsStreamCurrentStateRow] = []
+            for stream_name, _, row in received_event_rows:
                 self.assertEqual("events", stream_name)
                 self.assertIsInstance(row, EventsStreamRow)
                 self.assertEqual(row.type, "state")
@@ -324,7 +342,7 @@ class EventsStreamTestCase(BaseStreamTestCase):
         pls = self.helper.get_state(
             self.room_id, EventTypes.PowerLevels, tok=self.user_tok
         )
-        pls["users"].update({u: 50 for u in user_ids})
+        pls["users"].update(dict.fromkeys(user_ids, 50))
         self.helper.send_state(
             self.room_id,
             EventTypes.PowerLevels,
@@ -337,7 +355,7 @@ class EventsStreamTestCase(BaseStreamTestCase):
             self.hs.get_datastores().main.get_latest_event_ids_in_room(self.room_id)
         )
 
-        events: List[EventBase] = []
+        events: list[EventBase] = []
         for user in user_ids:
             events.extend(
                 self._inject_state_event(sender=user) for _ in range(STATES_PER_USER)
@@ -346,9 +364,12 @@ class EventsStreamTestCase(BaseStreamTestCase):
         self.replicate()
 
         # all those events and state changes should have landed
-        self.assertGreaterEqual(
-            len(self.test_handler.received_rdata_rows), 2 * len(events)
-        )
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
+        ]
+        self.assertGreaterEqual(len(received_event_rows), 2 * len(events))
 
         # disconnect, so that we can stack up the changes
         self.disconnect()
@@ -375,7 +396,12 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
         # check we're testing what we think we are: no rows should yet have been
         # received
-        self.assertEqual([], self.test_handler.received_rdata_rows)
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
+        ]
+        self.assertEqual([], received_event_rows)
 
         # now reconnect to pull the updates
         self.reconnect()
@@ -383,14 +409,16 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
         # we should have received all the expected rows in the right order (as
         # well as various cache invalidation updates which we ignore)
-        received_rows = [
-            row for row in self.test_handler.received_rdata_rows if row[0] == "events"
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
         ]
-        self.assertGreaterEqual(len(received_rows), len(events))
+        self.assertGreaterEqual(len(received_event_rows), len(events))
         for i in range(NUM_USERS):
             # for each user, we expect the PL event row, followed by state rows for
             # the PL event and each of the states that got reverted.
-            stream_name, token, row = received_rows.pop(0)
+            stream_name, token, row = received_event_rows.pop(0)
             self.assertEqual("events", stream_name)
             self.assertIsInstance(row, EventsStreamRow)
             self.assertEqual(row.type, "ev")
@@ -398,9 +426,9 @@ class EventsStreamTestCase(BaseStreamTestCase):
             self.assertEqual(row.data.event_id, pl_events[i].event_id)
 
             # the state rows are unsorted
-            state_rows: List[EventsStreamCurrentStateRow] = []
+            state_rows: list[EventsStreamCurrentStateRow] = []
             for _ in range(STATES_PER_USER + 1):
-                stream_name, token, row = received_rows.pop(0)
+                stream_name, token, row = received_event_rows.pop(0)
                 self.assertEqual("events", stream_name)
                 self.assertIsInstance(row, EventsStreamRow)
                 self.assertEqual(row.type, "state")
@@ -417,7 +445,7 @@ class EventsStreamTestCase(BaseStreamTestCase):
                 # "None" indicates the state has been deleted
                 self.assertIsNone(sr.event_id)
 
-        self.assertEqual([], received_rows)
+        self.assertEqual([], received_event_rows)
 
     def test_backwards_stream_id(self) -> None:
         """
@@ -432,7 +460,12 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
         # check we're testing what we think we are: no rows should yet have been
         # received
-        self.assertEqual([], self.test_handler.received_rdata_rows)
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
+        ]
+        self.assertEqual([], received_event_rows)
 
         # now reconnect to pull the updates
         self.reconnect()
@@ -440,14 +473,16 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
         # We should have received the expected single row (as well as various
         # cache invalidation updates which we ignore).
-        received_rows = [
-            row for row in self.test_handler.received_rdata_rows if row[0] == "events"
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
         ]
 
         # There should be a single received row.
-        self.assertEqual(len(received_rows), 1)
+        self.assertEqual(len(received_event_rows), 1)
 
-        stream_name, token, row = received_rows[0]
+        stream_name, token, row = received_event_rows[0]
         self.assertEqual("events", stream_name)
         self.assertIsInstance(row, EventsStreamRow)
         self.assertEqual(row.type, "ev")
@@ -468,10 +503,12 @@ class EventsStreamTestCase(BaseStreamTestCase):
         )
 
         # No updates have been received (because it was discard as old).
-        received_rows = [
-            row for row in self.test_handler.received_rdata_rows if row[0] == "events"
+        received_event_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == EventsStream.NAME
         ]
-        self.assertEqual(len(received_rows), 0)
+        self.assertEqual(len(received_event_rows), 0)
 
         # Ensure the stream has not gone backwards.
         current_token = worker_events_stream.current_token("master")
@@ -480,7 +517,7 @@ class EventsStreamTestCase(BaseStreamTestCase):
     event_count = 0
 
     def _inject_test_event(
-        self, body: Optional[str] = None, sender: Optional[str] = None, **kwargs: Any
+        self, body: str | None = None, sender: str | None = None, **kwargs: Any
     ) -> EventBase:
         if sender is None:
             sender = self.user_id
@@ -502,9 +539,9 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
     def _inject_state_event(
         self,
-        body: Optional[str] = None,
-        state_key: Optional[str] = None,
-        sender: Optional[str] = None,
+        body: str | None = None,
+        state_key: str | None = None,
+        sender: str | None = None,
     ) -> EventBase:
         if sender is None:
             sender = self.user_id

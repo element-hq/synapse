@@ -22,22 +22,19 @@
 import heapq
 from itertools import islice
 from typing import (
+    Any,
     Callable,
     Collection,
-    Dict,
     Generator,
     Iterable,
     Iterator,
-    List,
     Mapping,
     Protocol,
-    Set,
     Sized,
-    Tuple,
     TypeVar,
 )
 
-T = TypeVar("T")
+T = TypeVar("T", bound=Any)
 S = TypeVar("S", bound="_SelfSlice")
 
 
@@ -52,7 +49,7 @@ class _SelfSlice(Sized, Protocol):
     def __getitem__(self: S, i: slice) -> S: ...
 
 
-def batch_iter(iterable: Iterable[T], size: int) -> Iterator[Tuple[T, ...]]:
+def batch_iter(iterable: Iterable[T], size: int) -> Iterator[tuple[T, ...]]:
     """batch an iterable up into tuples with a maximum size
 
     Args:
@@ -80,7 +77,7 @@ def chunk_seq(iseq: S, maxlen: int) -> Iterator[S]:
 
 def partition(
     iterable: Iterable[T], predicate: Callable[[T], bool]
-) -> Tuple[List[T], List[T]]:
+) -> tuple[list[T], list[T]]:
     """
     Separate a given iterable into two lists based on the result of a predicate function.
 
@@ -114,8 +111,8 @@ def sorted_topologically(
 
     # This is implemented by Kahn's algorithm.
 
-    degree_map = {node: 0 for node in nodes}
-    reverse_graph: Dict[T, Set[T]] = {}
+    degree_map = dict.fromkeys(nodes, 0)
+    reverse_graph: dict[T, set[T]] = {}
 
     for node, edges in graph.items():
         if node not in degree_map:
@@ -164,8 +161,8 @@ def sorted_topologically_batched(
     persisted.
     """
 
-    degree_map = {node: 0 for node in nodes}
-    reverse_graph: Dict[T, Set[T]] = {}
+    degree_map = dict.fromkeys(nodes, 0)
+    reverse_graph: dict[T, set[T]] = {}
 
     for node, edges in graph.items():
         if node not in degree_map:

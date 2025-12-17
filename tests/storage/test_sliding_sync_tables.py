@@ -18,31 +18,35 @@
 #
 #
 import logging
-from typing import Dict, List, Optional, Tuple, cast
+from typing import cast
 
 import attr
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events import DeltaState
 from synapse.storage.databases.main.events_bg_updates import (
     _resolve_stale_data_in_sliding_sync_joined_rooms_table,
     _resolve_stale_data_in_sliding_sync_membership_snapshots_table,
 )
-from synapse.types import create_requester
+from synapse.types import SlidingSyncStreamToken, create_requester
+from synapse.types.handlers.sliding_sync import (
+    LAZY_MEMBERS_UPDATE_INTERVAL,
+    StateValues,
+)
 from synapse.types.storage import _BackgroundUpdates
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
+from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.test_utils.event_injection import create_event
-from tests.unittest import HomeserverTestCase
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +59,12 @@ class _SlidingSyncJoinedRoomResult:
     # `event.internal_metadata.stream_ordering` is marked optional because it only
     # exists for persisted events but in the context of these tests, we're only working
     # with persisted events and we're making comparisons so we will find any mismatch.
-    event_stream_ordering: Optional[int]
-    bump_stamp: Optional[int]
-    room_type: Optional[str]
-    room_name: Optional[str]
+    event_stream_ordering: int | None
+    bump_stamp: int | None
+    room_type: str | None
+    room_name: str | None
     is_encrypted: bool
-    tombstone_successor_room_id: Optional[str]
+    tombstone_successor_room_id: str | None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -75,18 +79,18 @@ class _SlidingSyncMembershipSnapshotResult:
     # `event.internal_metadata.stream_ordering` is marked optional because it only
     # exists for persisted events but in the context of these tests, we're only working
     # with persisted events and we're making comparisons so we will find any mismatch.
-    event_stream_ordering: Optional[int]
+    event_stream_ordering: int | None
     has_known_state: bool
-    room_type: Optional[str]
-    room_name: Optional[str]
+    room_type: str | None
+    room_name: str | None
     is_encrypted: bool
-    tombstone_successor_room_id: Optional[str]
+    tombstone_successor_room_id: str | None
     # Make this default to "not forgotten" because it doesn't apply to many tests and we
     # don't want to force all of the tests to deal with it.
     forgotten: bool = False
 
 
-class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
+class SlidingSyncTablesTestCaseBase(SlidingSyncBase):
     """
     Helpers to deal with testing that the
     `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` database tables are
@@ -97,6 +101,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
         admin.register_servlets,
         login.register_servlets,
         room.register_servlets,
+        sync.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -112,7 +117,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
 
         self.state_handler = self.hs.get_state_handler()
 
-    def _get_sliding_sync_joined_rooms(self) -> Dict[str, _SlidingSyncJoinedRoomResult]:
+    def _get_sliding_sync_joined_rooms(self) -> dict[str, _SlidingSyncJoinedRoomResult]:
         """
         Return the rows from the `sliding_sync_joined_rooms` table.
 
@@ -120,7 +125,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             Mapping from room_id to _SlidingSyncJoinedRoomResult.
         """
         rows = cast(
-            List[Tuple[str, int, int, str, str, bool, str]],
+            list[tuple[str, int, int, str, str, bool, str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     "sliding_sync_joined_rooms",
@@ -153,7 +158,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
 
     def _get_sliding_sync_membership_snapshots(
         self,
-    ) -> Dict[Tuple[str, str], _SlidingSyncMembershipSnapshotResult]:
+    ) -> dict[tuple[str, str], _SlidingSyncMembershipSnapshotResult]:
         """
         Return the rows from the `sliding_sync_membership_snapshots` table.
 
@@ -161,7 +166,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             Mapping from the (room_id, user_id) to _SlidingSyncMembershipSnapshotResult.
         """
         rows = cast(
-            List[Tuple[str, str, str, str, str, int, int, bool, str, str, bool, str]],
+            list[tuple[str, str, str, str, str, int, int, bool, str, str, bool, str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     "sliding_sync_membership_snapshots",
@@ -201,78 +206,6 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             )
             for row in rows
         }
-
-    _remote_invite_count: int = 0
-
-    def _create_remote_invite_room_for_user(
-        self,
-        invitee_user_id: str,
-        unsigned_invite_room_state: Optional[List[StrippedStateEvent]],
-    ) -> Tuple[str, EventBase]:
-        """
-        Create a fake invite for a remote room and persist it.
-
-        We don't have any state for these kind of rooms and can only rely on the
-        stripped state included in the unsigned portion of the invite event to identify
-        the room.
-
-        Args:
-            invitee_user_id: The person being invited
-            unsigned_invite_room_state: List of stripped state events to assist the
-                receiver in identifying the room.
-
-        Returns:
-            The room ID of the remote invite room and the persisted remote invite event.
-        """
-        invite_room_id = f"!test_room{self._remote_invite_count}:remote_server"
-
-        invite_event_dict = {
-            "room_id": invite_room_id,
-            "sender": "@inviter:remote_server",
-            "state_key": invitee_user_id,
-            "depth": 1,
-            "origin_server_ts": 1,
-            "type": EventTypes.Member,
-            "content": {"membership": Membership.INVITE},
-            "auth_events": [],
-            "prev_events": [],
-        }
-        if unsigned_invite_room_state is not None:
-            serialized_stripped_state_events = []
-            for stripped_event in unsigned_invite_room_state:
-                serialized_stripped_state_events.append(
-                    {
-                        "type": stripped_event.type,
-                        "state_key": stripped_event.state_key,
-                        "sender": stripped_event.sender,
-                        "content": stripped_event.content,
-                    }
-                )
-
-            invite_event_dict["unsigned"] = {
-                "invite_room_state": serialized_stripped_state_events
-            }
-
-        invite_event = make_event_from_dict(
-            invite_event_dict,
-            room_version=RoomVersions.V10,
-        )
-        invite_event.internal_metadata.outlier = True
-        invite_event.internal_metadata.out_of_band_membership = True
-
-        self.get_success(
-            self.store.maybe_store_room_on_outlier_membership(
-                room_id=invite_room_id, room_version=invite_event.room_version
-            )
-        )
-        context = EventContext.for_outlier(self.hs.get_storage_controllers())
-        persisted_event, _, _ = self.get_success(
-            self.persist_controller.persist_event(invite_event, context)
-        )
-
-        self._remote_invite_count += 1
-
-        return invite_room_id, persisted_event
 
     def _retract_remote_invite_for_user(
         self,
@@ -2246,7 +2179,7 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
         ]
     )
     def test_non_join_remote_invite_no_stripped_state(
-        self, _description: str, stripped_state: Optional[List[StrippedStateEvent]]
+        self, _description: str, stripped_state: list[StrippedStateEvent] | None
     ) -> None:
         """
         Test remote invite with no stripped state provided shows up in
@@ -3051,6 +2984,141 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
             set(),
             exact=True,
         )
+
+    def test_lazy_loading_room_members_last_seen_ts(self) -> None:
+        """Test that the `last_seen_ts` column in
+        `sliding_sync_connection_lazy_members` is correctly kept up to date.
+
+        We expect that it only gets updated every
+        `LAZY_MEMBERS_UPDATE_INTERVAL`, rather than on every sync.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Send a message so that user1 comes down sync.
+        self.helper.send(room_id, "msg", tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Member, StateValues.LAZY],
+                    ],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Check that user1 is returned
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+            exact=True,
+        )
+
+        # Check that we have an entry in sliding_sync_connection_lazy_members
+        connection_pos1 = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        ).connection_position
+        lazy_member_entries = self.get_success(
+            self.store.get_sliding_sync_connection_lazy_members(
+                connection_pos1, room_id, {user1_id}
+            )
+        )
+        self.assertIn(user1_id, lazy_member_entries)
+
+        prev_timestamp = lazy_member_entries[user1_id]
+
+        # If user1 sends a message then we consider it for lazy loading. We have
+        # previously returned it so we don't send the state down again, but it
+        # is still eligible for updating the timestamp. Since we last updated
+        # the timestamp within the last `LAZY_MEMBERS_UPDATE_INTERVAL`, we do not
+        # update it.
+        self.helper.send(room_id, "msg2", tok=user1_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # We expect the required_state map to be empty as nothing has changed.
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id].get("required_state", []),
+            {},
+            exact=True,
+        )
+
+        connection_pos2 = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        ).connection_position
+
+        lazy_member_entries = self.get_success(
+            self.store.get_sliding_sync_connection_lazy_members(
+                connection_pos2, room_id, {user1_id}
+            )
+        )
+
+        # The timestamp should be unchanged.
+        self.assertEqual(lazy_member_entries[user1_id], prev_timestamp)
+
+        # Now advance the time by `LAZY_MEMBERS_UPDATE_INTERVAL` so that we
+        # would update the timestamp.
+        self.reactor.advance(LAZY_MEMBERS_UPDATE_INTERVAL.as_secs())
+
+        # Send a message from user2
+        self.helper.send(room_id, "msg3", tok=user2_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        connection_pos3 = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        ).connection_position
+
+        lazy_member_entries = self.get_success(
+            self.store.get_sliding_sync_connection_lazy_members(
+                connection_pos3, room_id, {user1_id}
+            )
+        )
+
+        # The timestamp for user1 should be unchanged, as they were not sent down.
+        self.assertEqual(lazy_member_entries[user1_id], prev_timestamp)
+
+        # Now if user1 sends a message, then the timestamp should be updated as
+        # its been over `LAZY_MEMBERS_UPDATE_INTERVAL` since we last updated it.
+        # (Even though we don't send the state down again).
+        self.helper.send(room_id, "msg4", tok=user1_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        connection_pos4 = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        ).connection_position
+
+        lazy_member_entries = self.get_success(
+            self.store.get_sliding_sync_connection_lazy_members(
+                connection_pos4, room_id, {user1_id}
+            )
+        )
+        # The timestamp for user1 should be updated.
+        self.assertGreater(lazy_member_entries[user1_id], prev_timestamp)
 
 
 class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):

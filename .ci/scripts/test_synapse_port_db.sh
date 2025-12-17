@@ -61,7 +61,7 @@ poetry run update_synapse_database --database-config .ci/postgres-config-unporte
 echo "+++ Comparing ported schema with unported schema"
 # Ignore the tables that portdb creates. (Should it tidy them up when the porting is completed?)
 psql synapse -c "DROP TABLE port_from_sqlite3;"
-pg_dump --format=plain --schema-only --no-tablespaces --no-acl --no-owner synapse_unported > unported.sql
-pg_dump --format=plain --schema-only --no-tablespaces --no-acl --no-owner synapse          >   ported.sql
+pg_dump --format=plain --schema-only --no-tablespaces --no-acl --no-owner --restrict-key=TESTING synapse_unported > unported.sql
+pg_dump --format=plain --schema-only --no-tablespaces --no-acl --no-owner --restrict-key=TESTING synapse          >   ported.sql
 # By default, `diff` returns zero if there are no changes and nonzero otherwise
 diff -u unported.sql ported.sql | tee schema_diff

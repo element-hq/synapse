@@ -18,21 +18,20 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import FrameType
-from typing import Collection, Optional, Sequence, Set
+from typing import Collection, Sequence
 
 # These are expanded inside the dockerfile to be a fully qualified image name.
-# e.g. docker.io/library/debian:bullseye
+# e.g. docker.io/library/debian:bookworm
 #
 # If an EOL is forced by a Python version and we're dropping support for it, make sure
-# to remove references to the distibution across Synapse (search for "bullseye" for
+# to remove references to the distibution across Synapse (search for "bookworm" for
 # example)
 DISTS = (
-    "debian:bullseye",  # (EOL ~2024-07) (our EOL forced by Python 3.9 is 2025-10-05)
     "debian:bookworm",  # (EOL 2026-06) (our EOL forced by Python 3.11 is 2027-10-24)
     "debian:sid",  # (rolling distro, no EOL)
     "ubuntu:jammy",  # 22.04 LTS (EOL 2027-04) (our EOL forced by Python 3.10 is 2026-10-04)
     "ubuntu:noble",  # 24.04 LTS (EOL 2029-06)
-    "ubuntu:oracular",  # 24.10 (EOL 2025-07)
+    "ubuntu:plucky",  # 25.04 (EOL 2026-01)
     "debian:trixie",  # (EOL not specified yet)
 )
 
@@ -50,11 +49,11 @@ class Builder:
     def __init__(
         self,
         redirect_stdout: bool = False,
-        docker_build_args: Optional[Sequence[str]] = None,
+        docker_build_args: Sequence[str] | None = None,
     ):
         self.redirect_stdout = redirect_stdout
         self._docker_build_args = tuple(docker_build_args or ())
-        self.active_containers: Set[str] = set()
+        self.active_containers: set[str] = set()
         self._lock = threading.Lock()
         self._failed = False
 
@@ -168,7 +167,7 @@ class Builder:
 def run_builds(
     builder: Builder, dists: Collection[str], jobs: int = 1, skip_tests: bool = False
 ) -> None:
-    def sig(signum: int, _frame: Optional[FrameType]) -> None:
+    def sig(signum: int, _frame: FrameType | None) -> None:
         print("Caught SIGINT")
         builder.kill_containers()
 

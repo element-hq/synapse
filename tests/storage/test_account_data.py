@@ -19,13 +19,14 @@
 #
 #
 
-from typing import Iterable, Optional, Set
+from typing import Iterable
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes
+from synapse.api.errors import Codes, SynapseError
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -36,7 +37,7 @@ class IgnoredUsersTestCase(unittest.HomeserverTestCase):
         self.user = "@user:test"
 
     def _update_ignore_list(
-        self, *ignored_user_ids: Iterable[str], ignorer_user_id: Optional[str] = None
+        self, *ignored_user_ids: Iterable[str], ignorer_user_id: str | None = None
     ) -> None:
         """Update the account data to block the given users."""
         if ignorer_user_id is None:
@@ -51,7 +52,7 @@ class IgnoredUsersTestCase(unittest.HomeserverTestCase):
         )
 
     def assert_ignorers(
-        self, ignored_user_id: str, expected_ignorer_user_ids: Set[str]
+        self, ignored_user_id: str, expected_ignorer_user_ids: set[str]
     ) -> None:
         self.assertEqual(
             self.get_success(self.store.ignored_by(ignored_user_id)),
@@ -59,7 +60,7 @@ class IgnoredUsersTestCase(unittest.HomeserverTestCase):
         )
 
     def assert_ignored(
-        self, ignorer_user_id: str, expected_ignored_user_ids: Set[str]
+        self, ignorer_user_id: str, expected_ignored_user_ids: set[str]
     ) -> None:
         self.assertEqual(
             self.get_success(self.store.ignored_users(ignorer_user_id)),
@@ -92,6 +93,20 @@ class IgnoredUsersTestCase(unittest.HomeserverTestCase):
 
         # Check the removed user.
         self.assert_ignorers("@another:remote", {self.user})
+
+    def test_ignoring_self_fails(self) -> None:
+        """Ensure users cannot add themselves to the ignored list."""
+
+        f = self.get_failure(
+            self.store.add_account_data_for_user(
+                self.user,
+                AccountDataTypes.IGNORED_USER_LIST,
+                {"ignored_users": {self.user: {}}},
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(f.code, 400)
+        self.assertEqual(f.errcode, Codes.INVALID_PARAM)
 
     def test_caching(self) -> None:
         """Ensure that caching works properly between different users."""
@@ -152,7 +167,7 @@ class IgnoredUsersTestCase(unittest.HomeserverTestCase):
         """Test that ignoring users updates the latest stream ID for the ignored
         user list account data."""
 
-        def get_latest_ignore_streampos(user_id: str) -> Optional[int]:
+        def get_latest_ignore_streampos(user_id: str) -> int | None:
             return self.get_success(
                 self.store.get_latest_stream_id_for_global_account_data_by_type_for_user(
                     user_id, AccountDataTypes.IGNORED_USER_LIST

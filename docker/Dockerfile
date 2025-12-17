@@ -20,8 +20,8 @@
 # `poetry export | pip install -r /dev/stdin`, but beware: we have experienced bugs in
 # in `poetry export` in the past.
 
-ARG DEBIAN_VERSION=bookworm
-ARG PYTHON_VERSION=3.12
+ARG DEBIAN_VERSION=trixie
+ARG PYTHON_VERSION=3.13
 ARG POETRY_VERSION=2.1.1
 
 ###
@@ -142,10 +142,10 @@ RUN \
       libwebp7 \
       xmlsec1 \
       libjemalloc2 \
-      libicu \
     | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
+    chown _apt:root /tmp/debs-${arch} && \
     cd /tmp/debs-${arch} && \
     apt-get -o APT::Architecture="${arch}" download $(cat /tmp/pkg-list); \
   done
@@ -171,20 +171,20 @@ FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
 
 ARG TARGETARCH
 
-LABEL org.opencontainers.image.url='https://matrix.org/docs/projects/server/synapse'
-LABEL org.opencontainers.image.documentation='https://github.com/element-hq/synapse/blob/master/docker/README.md'
+LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
+LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'
 LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
-LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
+LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later OR LicenseRef-Element-Commercial'
 
-# On the runtime image, /lib is a symlink to /usr/lib, so we need to copy the
-# libraries to the right place, else the `COPY` won't work.
-# On amd64, we'll also have a /lib64 folder with ld-linux-x86-64.so.2, which is
-# already present in the runtime image.
-COPY --from=runtime-deps /install-${TARGETARCH}/lib /usr/lib
 COPY --from=runtime-deps /install-${TARGETARCH}/etc /etc
 COPY --from=runtime-deps /install-${TARGETARCH}/usr /usr
 COPY --from=runtime-deps /install-${TARGETARCH}/var /var
-COPY --from=builder /install /usr/local
+
+# Copy the installed python packages from the builder stage.
+#
+# uv will generate a `.lock` file when installing packages, which we don't want
+# to copy to the final image.
+COPY --from=builder  --exclude=.lock /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 

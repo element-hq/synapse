@@ -20,7 +20,7 @@
 #
 import logging
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import ReceiptTypes
 from synapse.rest import admin
@@ -28,7 +28,7 @@ from synapse.rest.client import login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import StreamToken
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import make_request

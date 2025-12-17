@@ -19,10 +19,11 @@
 #
 #
 import contextlib
+import json
 import logging
 import time
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Generator, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Generator
 
 import attr
 from zope.interface import implementer
@@ -30,11 +31,13 @@ from zope.interface import implementer
 from twisted.internet.address import UNIXAddress
 from twisted.internet.defer import Deferred
 from twisted.internet.interfaces import IAddress
+from twisted.internet.protocol import Protocol
 from twisted.python.failure import Failure
 from twisted.web.http import HTTPChannel
 from twisted.web.resource import IResource, Resource
 from twisted.web.server import Request
 
+from synapse.api.errors import Codes, SynapseError
 from synapse.config.server import ListenerConfig
 from synapse.http import get_request_user_agent, redact_uri
 from synapse.http.proxy import ProxySite
@@ -44,6 +47,7 @@ from synapse.logging.context import (
     LoggingContext,
     PreserveLoggingContext,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, Requester
 
 if TYPE_CHECKING:
@@ -55,6 +59,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _next_request_seq = 0
+
+
+class ContentLengthError(SynapseError):
+    """Raised when content-length validation fails."""
 
 
 class SynapseRequest(Request):
@@ -83,12 +91,14 @@ class SynapseRequest(Request):
         self,
         channel: HTTPChannel,
         site: "SynapseSite",
+        our_server_name: str,
         *args: Any,
         max_request_body_size: int = 1024,
-        request_id_header: Optional[str] = None,
+        request_id_header: str | None = None,
         **kw: Any,
     ):
         super().__init__(channel, *args, **kw)
+        self.our_server_name = our_server_name
         self._max_request_body_size = max_request_body_size
         self.request_id_header = request_id_header
         self.synapse_site = site
@@ -98,18 +108,18 @@ class SynapseRequest(Request):
 
         # The requester, if authenticated. For federation requests this is the
         # server name, for client requests this is the Requester object.
-        self._requester: Optional[Union[Requester, str]] = None
+        self._requester: Requester | str | None = None
 
         # An opentracing span for this request. Will be closed when the request is
         # completely processed.
-        self._opentracing_span: "Optional[opentracing.Span]" = None
+        self._opentracing_span: "opentracing.Span | None" = None
 
         # we can't yet create the logcontext, as we don't know the method.
-        self.logcontext: Optional[LoggingContext] = None
+        self.logcontext: LoggingContext | None = None
 
         # The `Deferred` to cancel if the client disconnects early and
         # `is_render_cancellable` is set. Expected to be set by `Resource.render`.
-        self.render_deferred: Optional["Deferred[None]"] = None
+        self.render_deferred: "Deferred[None]" | None = None
         # A boolean indicating whether `render_deferred` should be cancelled if the
         # client disconnects early. Expected to be set by the coroutine started by
         # `Resource.render`, if rendering is asynchronous.
@@ -123,11 +133,11 @@ class SynapseRequest(Request):
         self._is_processing = False
 
         # the time when the asynchronous request handler completed its processing
-        self._processing_finished_time: Optional[float] = None
+        self._processing_finished_time: float | None = None
 
         # what time we finished sending the response to the client (or the connection
         # dropped)
-        self.finish_time: Optional[float] = None
+        self.finish_time: float | None = None
 
     def __repr__(self) -> str:
         # We overwrite this so that we don't log ``access_token``
@@ -140,36 +150,150 @@ class SynapseRequest(Request):
             self.synapse_site.site_tag,
         )
 
+    def _respond_with_error(self, synapse_error: SynapseError) -> None:
+        """Send an error response and close the connection."""
+        self.setResponseCode(synapse_error.code)
+        error_response_bytes = json.dumps(synapse_error.error_dict(None)).encode()
+
+        self.responseHeaders.setRawHeaders(b"Content-Type", [b"application/json"])
+        self.responseHeaders.setRawHeaders(
+            b"Content-Length", [f"{len(error_response_bytes)}"]
+        )
+        self.write(error_response_bytes)
+        self.loseConnection()
+
+    def _get_content_length_from_headers(self) -> int | None:
+        """Attempts to obtain the `Content-Length` value from the request's headers.
+
+        Returns:
+            Content length as `int` if present. Otherwise `None`.
+
+        Raises:
+            ContentLengthError: if multiple `Content-Length` headers are present or the
+                value is not an `int`.
+        """
+        content_length_headers = self.requestHeaders.getRawHeaders(b"Content-Length")
+        if content_length_headers is None:
+            return None
+
+        # If there are multiple `Content-Length` headers return an error.
+        # We don't want to even try to pick the right one if there are multiple
+        # as we could run into problems similar to request smuggling vulnerabilities
+        # which rely on the mismatch of how different systems interpret information.
+        if len(content_length_headers) != 1:
+            raise ContentLengthError(
+                HTTPStatus.BAD_REQUEST,
+                "Multiple Content-Length headers received",
+                Codes.UNKNOWN,
+            )
+
+        try:
+            return int(content_length_headers[0])
+        except (ValueError, TypeError):
+            raise ContentLengthError(
+                HTTPStatus.BAD_REQUEST,
+                "Content-Length header value is not a valid integer",
+                Codes.UNKNOWN,
+            )
+
+    def _validate_content_length(self) -> None:
+        """Validate Content-Length header and actual content size.
+
+        Raises:
+            ContentLengthError: If validation fails.
+        """
+        # we should have a `content` by now.
+        assert self.content, "_validate_content_length() called before gotLength()"
+        content_length = self._get_content_length_from_headers()
+
+        if content_length is None:
+            return
+
+        actual_content_length = self.content.tell()
+
+        if content_length > self._max_request_body_size:
+            logger.info(
+                "Rejecting request from %s because Content-Length %d exceeds maximum size %d: %s %s",
+                self.client,
+                content_length,
+                self._max_request_body_size,
+                self.get_method(),
+                self.get_redacted_uri(),
+            )
+            raise ContentLengthError(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                f"Request content is too large (>{self._max_request_body_size})",
+                Codes.TOO_LARGE,
+            )
+
+        if content_length != actual_content_length:
+            comparison = (
+                "smaller" if content_length < actual_content_length else "larger"
+            )
+            logger.info(
+                "Rejecting request from %s because Content-Length %d is %s than the request content size %d: %s %s",
+                self.client,
+                content_length,
+                comparison,
+                actual_content_length,
+                self.get_method(),
+                self.get_redacted_uri(),
+            )
+            raise ContentLengthError(
+                HTTPStatus.BAD_REQUEST,
+                f"Rejecting request as the Content-Length header value {content_length} "
+                f"is {comparison} than the actual request content size {actual_content_length}",
+                Codes.UNKNOWN,
+            )
+
     # Twisted machinery: this method is called by the Channel once the full request has
     # been received, to dispatch the request to a resource.
-    #
-    # We're patching Twisted to bail/abort early when we see someone trying to upload
-    # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
-    # in-memory (specific problem of this specific `Content-Type`). This protects us
-    # from an attacker uploading something bigger than the available RAM and crashing
-    # the server with a `MemoryError`, or carefully block just enough resources to cause
-    # all other requests to fail.
-    #
-    # FIXME: This can be removed once we Twisted releases a fix and we update to a
-    # version that is patched
     def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
+        # In the case of a Content-Length header being present, and it's value being too
+        # large, throw a proper error to make debugging issues due to overly large requests much
+        # easier. Currently we handle such cases in `handleContentChunk` and abort the
+        # connection without providing a proper HTTP response.
+        #
+        # Attempting to write an HTTP response from within `handleContentChunk` does not
+        # work, so the code here has been added to at least provide a response in the
+        # case of the Content-Length header being present.
+        self.method, self.uri = command, path
+        self.clientproto = version
+
+        try:
+            self._validate_content_length()
+        except ContentLengthError as e:
+            self._respond_with_error(e)
+            return
+
+        # We're patching Twisted to bail/abort early when we see someone trying to upload
+        # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
+        # in-memory (specific problem of this specific `Content-Type`). This protects us
+        # from an attacker uploading something bigger than the available RAM and crashing
+        # the server with a `MemoryError`, or carefully block just enough resources to cause
+        # all other requests to fail.
+        #
+        # FIXME: This can be removed once Twisted releases a fix and we update to a
+        # version that is patched
+        # See: https://github.com/element-hq/synapse/security/advisories/GHSA-rfq8-j7rh-8hf2
         if command == b"POST":
             ctype = self.requestHeaders.getRawHeaders(b"content-type")
             if ctype and b"multipart/form-data" in ctype[0]:
-                self.method, self.uri = command, path
-                self.clientproto = version
+                logger.warning(
+                    "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
+                    self.client,
+                    self.get_method(),
+                    self.get_redacted_uri(),
+                )
+
                 self.code = HTTPStatus.UNSUPPORTED_MEDIA_TYPE.value
                 self.code_message = bytes(
                     HTTPStatus.UNSUPPORTED_MEDIA_TYPE.phrase, "ascii"
                 )
-                self.responseHeaders.setRawHeaders(b"content-length", [b"0"])
 
-                logger.warning(
-                    "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
-                    self.client,
-                    command,
-                    path,
-                )
+                # FIXME: Return a better error response here similar to the
+                # `error_response_json` returned in other code paths here.
+                self.responseHeaders.setRawHeaders(b"Content-Length", [b"0"])
                 self.write(b"")
                 self.loseConnection()
                 return
@@ -191,11 +315,11 @@ class SynapseRequest(Request):
         super().handleContentChunk(data)
 
     @property
-    def requester(self) -> Optional[Union[Requester, str]]:
+    def requester(self) -> Requester | str | None:
         return self._requester
 
     @requester.setter
-    def requester(self, value: Union[Requester, str]) -> None:
+    def requester(self, value: Requester | str) -> None:
         # Store the requester, and update some properties based on it.
 
         # This should only be called once.
@@ -242,7 +366,7 @@ class SynapseRequest(Request):
         Returns:
             The redacted URI as a string.
         """
-        uri: Union[bytes, str] = self.uri
+        uri: bytes | str = self.uri
         if isinstance(uri, bytes):
             uri = uri.decode("ascii", errors="replace")
         return redact_uri(uri)
@@ -257,12 +381,12 @@ class SynapseRequest(Request):
         Returns:
             The request method as a string.
         """
-        method: Union[bytes, str] = self.method
+        method: bytes | str = self.method
         if isinstance(method, bytes):
             return self.method.decode("ascii")
         return method
 
-    def get_authenticated_entity(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_authenticated_entity(self) -> tuple[str | None, str | None]:
         """
         Get the "authenticated" entity of the request, which might be the user
         performing the action, or a user being puppeted by a server admin.
@@ -299,10 +423,15 @@ class SynapseRequest(Request):
         # this is called once a Resource has been found to serve the request; in our
         # case the Resource in question will normally be a JsonResource.
 
-        # create a LogContext for this request
+        # Create a LogContext for this request
+        #
+        # We only care about associating logs and tallying up metrics at the per-request
+        # level so we don't worry about setting the `parent_context`; preventing us from
+        # unnecessarily piling up metrics on the main process's context.
         request_id = self.get_request_id()
         self.logcontext = LoggingContext(
-            request_id,
+            name=request_id,
+            server_name=self.our_server_name,
             request=ContextRequest(
                 request_id=request_id,
                 ip_address=self.get_client_ip_if_available(),
@@ -334,7 +463,11 @@ class SynapseRequest(Request):
             # dispatching to the handler, so that the handler
             # can update the servlet name in the request
             # metrics
-            requests_counter.labels(self.get_method(), self.request_metrics.name).inc()
+            requests_counter.labels(
+                method=self.get_method(),
+                servlet=self.request_metrics.name,
+                **{SERVER_NAME_LABEL: self.our_server_name},
+            ).inc()
 
     @contextlib.contextmanager
     def processing(self) -> Generator[None, None, None]:
@@ -390,7 +523,7 @@ class SynapseRequest(Request):
             with PreserveLoggingContext(self.logcontext):
                 self._finished_processing()
 
-    def connectionLost(self, reason: Union[Failure, Exception]) -> None:
+    def connectionLost(self, reason: Failure | Exception) -> None:
         """Called when the client connection is closed before the response is written.
 
         Overrides twisted.web.server.Request.connectionLost to record the finish time and
@@ -455,7 +588,7 @@ class SynapseRequest(Request):
                 self.request_metrics.name.
         """
         self.start_time = time.time()
-        self.request_metrics = RequestMetrics()
+        self.request_metrics = RequestMetrics(our_server_name=self.our_server_name)
         self.request_metrics.start(
             self.start_time, name=servlet_name, method=self.get_method()
         )
@@ -582,7 +715,7 @@ class XForwardedForRequest(SynapseRequest):
     """
 
     # the client IP and ssl flag, as extracted from the headers.
-    _forwarded_for: "Optional[_XForwardedForAddress]" = None
+    _forwarded_for: "_XForwardedForAddress | None" = None
     _forwarded_https: bool = False
 
     def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
@@ -648,6 +781,70 @@ class _XForwardedForAddress:
     host: str
 
 
+class SynapseProtocol(HTTPChannel):
+    """
+    Synapse-specific twisted http Protocol.
+
+    This is a small wrapper around the twisted HTTPChannel so we can track active
+    connections in order to close any outstanding connections on shutdown.
+    """
+
+    def __init__(
+        self,
+        site: "SynapseSite",
+        our_server_name: str,
+        max_request_body_size: int,
+        request_id_header: str | None,
+        request_class: type,
+    ):
+        super().__init__()
+        self.factory: SynapseSite = site
+        self.site = site
+        self.our_server_name = our_server_name
+        self.max_request_body_size = max_request_body_size
+        self.request_id_header = request_id_header
+        self.request_class = request_class
+
+    def connectionMade(self) -> None:
+        """
+        Called when a connection is made.
+
+        This may be considered the initializer of the protocol, because
+        it is called when the connection is completed.
+
+        Add the connection to the factory's connection list when it's established.
+        """
+        super().connectionMade()
+        self.factory.addConnection(self)
+
+    def connectionLost(self, reason: Failure) -> None:  # type: ignore[override]
+        """
+        Called when the connection is shut down.
+
+        Clear any circular references here, and any external references to this
+        Protocol. The connection has been closed. In our case, we need to remove the
+        connection from the factory's connection list, when it's lost.
+        """
+        super().connectionLost(reason)
+        self.factory.removeConnection(self)
+
+    def requestFactory(self, http_channel: HTTPChannel, queued: bool) -> SynapseRequest:  # type: ignore[override]
+        """
+        A callable used to build `twisted.web.iweb.IRequest` objects.
+
+        Use our own custom SynapseRequest type instead of the regular
+        twisted.web.server.Request.
+        """
+        return self.request_class(
+            self,
+            self.factory,
+            our_server_name=self.our_server_name,
+            max_request_body_size=self.max_request_body_size,
+            queued=queued,
+            request_id_header=self.request_id_header,
+        )
+
+
 class SynapseSite(ProxySite):
     """
     Synapse-specific twisted http Site
@@ -664,6 +861,7 @@ class SynapseSite(ProxySite):
 
     def __init__(
         self,
+        *,
         logger_name: str,
         site_tag: str,
         config: ListenerConfig,
@@ -694,25 +892,55 @@ class SynapseSite(ProxySite):
 
         self.site_tag = site_tag
         self.reactor: ISynapseReactor = reactor
+        self.server_name = hs.hostname
 
         assert config.http_options is not None
         proxied = config.http_options.x_forwarded
-        request_class = XForwardedForRequest if proxied else SynapseRequest
+        self.request_class = XForwardedForRequest if proxied else SynapseRequest
 
-        request_id_header = config.http_options.request_id_header
+        self.request_id_header = config.http_options.request_id_header
+        self.max_request_body_size = max_request_body_size
 
-        def request_factory(channel: HTTPChannel, queued: bool) -> Request:
-            return request_class(
-                channel,
-                self,
-                max_request_body_size=max_request_body_size,
-                queued=queued,
-                request_id_header=request_id_header,
-            )
-
-        self.requestFactory = request_factory  # type: ignore
         self.access_logger = logging.getLogger(logger_name)
         self.server_version_string = server_version_string.encode("ascii")
+        self.connections: list[Protocol] = []
+
+    def buildProtocol(self, addr: IAddress) -> SynapseProtocol:
+        protocol = SynapseProtocol(
+            self,
+            self.server_name,
+            self.max_request_body_size,
+            self.request_id_header,
+            self.request_class,
+        )
+        return protocol
+
+    def addConnection(self, protocol: Protocol) -> None:
+        self.connections.append(protocol)
+
+    def removeConnection(self, protocol: Protocol) -> None:
+        if protocol in self.connections:
+            self.connections.remove(protocol)
+
+    def stopFactory(self) -> None:
+        super().stopFactory()
+
+        # Shutdown any connections which are still active.
+        # These can be long lived HTTP connections which wouldn't normally be closed
+        # when calling `shutdown` on the respective `Port`.
+        # Closing the connections here is required for us to fully shutdown the
+        # `SynapseHomeServer` in order for it to be garbage collected.
+        for protocol in self.connections[:]:
+            if protocol.transport is not None:
+                protocol.transport.loseConnection()
+        self.connections.clear()
+
+        # Replace the resource tree with an empty resource to break circular references
+        # to the resource tree which holds a bunch of homeserver references. This is
+        # important if we try to call `hs.shutdown()` after `start` fails. For some
+        # reason, this doesn't seem to be necessary in the normal case where `start`
+        # succeeds and we call `hs.shutdown()` later.
+        self.resource = Resource()
 
     def log(self, request: SynapseRequest) -> None:  # type: ignore[override]
         pass
@@ -720,5 +948,5 @@ class SynapseSite(ProxySite):
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)
 class RequestInfo:
-    user_agent: Optional[str]
+    user_agent: str | None
     ip: str

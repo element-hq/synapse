@@ -17,17 +17,17 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.visibility import filter_events_for_client
 
 from tests import unittest
@@ -265,7 +265,7 @@ class RetentionNoDefaultPolicyTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
 
         retention_config = {

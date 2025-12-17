@@ -20,7 +20,8 @@
 
 import functools
 import sys
-from typing import Any, Callable, Generator, List, TypeVar, cast
+from types import GeneratorType
+from typing import Any, Callable, Generator, TypeVar, cast
 
 from typing_extensions import ParamSpec
 
@@ -55,7 +56,7 @@ def do_patch() -> None:
         @functools.wraps(f)
         def wrapped(*args: P.args, **kwargs: P.kwargs) -> "Deferred[T]":
             start_context = current_context()
-            changes: List[str] = []
+            changes: list[str] = []
             orig: Callable[P, "Deferred[T]"] = orig_inline_callbacks(
                 _check_yield_points(f, changes)
             )
@@ -125,7 +126,7 @@ def do_patch() -> None:
 
 def _check_yield_points(
     f: Callable[P, Generator["Deferred[object]", object, T]],
-    changes: List[str],
+    changes: list[str],
 ) -> Callable:
     """Wraps a generator that is about to be passed to defer.inlineCallbacks
     checking that after every yield the log contexts are correct.
@@ -150,6 +151,12 @@ def _check_yield_points(
         *args: P.args, **kwargs: P.kwargs
     ) -> Generator["Deferred[object]", object, T]:
         gen = f(*args, **kwargs)
+
+        # We only patch if we have a native generator function, as we rely on
+        # `gen.gi_frame`.
+        if not isinstance(gen, GeneratorType):
+            ret = yield from gen
+            return ret
 
         last_yield_line_no = gen.gi_frame.f_lineno
         result: Any = None

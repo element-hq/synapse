@@ -19,30 +19,33 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, List, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, cast
+
+import attr
 
 from twisted.python.failure import Failure
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.api.filtering import Filter
-from synapse.events.utils import SerializeEventConfig
+from synapse.events import EventBase
+from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.opentracing import trace
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.admin._base import assert_user_is_admin
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
-    JsonDict,
     JsonMapping,
     Requester,
     ScheduledTask,
     StreamKeyType,
+    StreamToken,
     TaskStatus,
 )
 from synapse.types.handlers import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import ReadWriteLock
+from synapse.util.duration import Duration
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
@@ -70,6 +73,58 @@ PURGE_ROOM_ACTION_NAME = "purge_room"
 SHUTDOWN_AND_PURGE_ROOM_ACTION_NAME = "shutdown_and_purge_room"
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class GetMessagesResult:
+    """
+    Everything needed to serialize a `/messages` response.
+    """
+
+    messages_chunk: list[EventBase]
+    """
+    A list of room events.
+
+     - When the request is `Direction.FORWARDS`, events will be in the range:
+       `start_token` < x <= `end_token`, (ascending topological_order)
+     - When the request is `Direction.BACKWARDS`, events will be in the range:
+       `start_token` >= x > `end_token`, (descending topological_order)
+
+    Note that an empty chunk does not necessarily imply that no more events are
+    available. Clients should continue to paginate until no `end_token` property is returned.
+    """
+
+    bundled_aggregations: dict[str, BundledAggregations]
+    """
+    A map of event ID to the bundled aggregations for the events in the chunk.
+
+    If an event doesn't have any bundled aggregations, it may not appear in the map.
+    """
+
+    state: list[EventBase] | None
+    """
+    A list of state events relevant to showing the chunk. For example, if
+    lazy_load_members is enabled in the filter then this may contain the membership
+    events for the senders of events in the chunk.
+
+    Omitted from the response when `None`.
+    """
+
+    start_token: StreamToken
+    """
+    Token corresponding to the start of chunk. This will be the same as the value given
+    in `from` query parameter of the `/messages` request.
+    """
+
+    end_token: StreamToken | None
+    """
+    A token corresponding to the end of chunk. This token can be passed back to this
+    endpoint to request further events.
+
+    If no further events are available (either because we have reached the start of the
+    timeline, or because the user does not have permission to see any more events), this
+    property is omitted from the response.
+    """
+
+
 class PaginationHandler:
     """Handles pagination and purge history requests.
 
@@ -79,12 +134,12 @@ class PaginationHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
         self.clock = hs.get_clock()
-        self._server_name = hs.hostname
         self._room_shutdown_handler = hs.get_room_shutdown_handler()
         self._relations_handler = hs.get_relations_handler()
         self._worker_locks = hs.get_worker_locks_handler()
@@ -92,7 +147,7 @@ class PaginationHandler:
 
         self.pagination_lock = ReadWriteLock()
         # IDs of rooms in which there currently an active purge *or delete* operation.
-        self._purges_in_progress_by_room: Set[str] = set()
+        self._purges_in_progress_by_room: set[str] = set()
         self._event_serializer = hs.get_event_client_serializer()
 
         self._retention_default_max_lifetime = (
@@ -116,8 +171,8 @@ class PaginationHandler:
                 logger.info("Setting up purge job with config: %s", job)
 
                 self.clock.looping_call(
-                    run_as_background_process,
-                    job.interval,
+                    self.hs.run_as_background_process,
+                    Duration(milliseconds=job.interval),
                     "purge_history_for_rooms_in_range",
                     self.purge_history_for_rooms_in_range,
                     job.shortest_max_lifetime,
@@ -133,7 +188,7 @@ class PaginationHandler:
         )
 
     async def purge_history_for_rooms_in_range(
-        self, min_ms: Optional[int], max_ms: Optional[int]
+        self, min_ms: int | None, max_ms: int | None
     ) -> None:
         """Purge outdated events from rooms within the given retention range.
 
@@ -243,7 +298,7 @@ class PaginationHandler:
             # We want to purge everything, including local events, and to run the purge in
             # the background so that it's not blocking any other operation apart from
             # other purges in the same room.
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 PURGE_HISTORY_ACTION_NAME,
                 self.purge_history,
                 room_id,
@@ -280,7 +335,7 @@ class PaginationHandler:
     async def _purge_history(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         """
         Scheduler action to purge some history of a room.
         """
@@ -309,7 +364,7 @@ class PaginationHandler:
         room_id: str,
         token: str,
         delete_local_events: bool,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Carry out a history purge on a room.
 
         Args:
@@ -333,7 +388,7 @@ class PaginationHandler:
             )
             return f.getErrorMessage()
 
-    async def get_delete_task(self, delete_id: str) -> Optional[ScheduledTask]:
+    async def get_delete_task(self, delete_id: str) -> ScheduledTask | None:
         """Get the current status of an active deleting
 
         Args:
@@ -343,8 +398,8 @@ class PaginationHandler:
         return await self._task_scheduler.get_task(delete_id)
 
     async def get_delete_tasks_by_room(
-        self, room_id: str, only_active: Optional[bool] = False
-    ) -> List[ScheduledTask]:
+        self, room_id: str, only_active: bool | None = False
+    ) -> list[ScheduledTask]:
         """Get complete, failed or active delete tasks by room
 
         Args:
@@ -364,7 +419,7 @@ class PaginationHandler:
     async def _purge_room(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         """
         Scheduler action to purge a room.
         """
@@ -395,7 +450,7 @@ class PaginationHandler:
             write=True,
         ):
             # first check that we have no users in this room
-            joined = await self.store.is_host_joined(room_id, self._server_name)
+            joined = await self.store.is_host_joined(room_id, self.server_name)
             if joined:
                 if force:
                     logger.info(
@@ -416,9 +471,9 @@ class PaginationHandler:
         room_id: str,
         pagin_config: PaginationConfig,
         as_client_event: bool = True,
-        event_filter: Optional[Filter] = None,
+        event_filter: Filter | None = None,
         use_admin_priviledge: bool = False,
-    ) -> JsonDict:
+    ) -> GetMessagesResult:
         """Get messages in a room.
 
         Args:
@@ -524,7 +579,7 @@ class PaginationHandler:
             # We use a `Set` because there can be multiple events at a given depth
             # and we only care about looking at the unique continum of depths to
             # find gaps.
-            event_depths: Set[int] = {event.depth for event in events}
+            event_depths: set[int] = {event.depth for event in events}
             sorted_event_depths = sorted(event_depths)
 
             # Inspect the depths of the returned events to see if there are any gaps
@@ -602,7 +657,7 @@ class PaginationHandler:
                 # Otherwise, we can backfill in the background for eventual
                 # consistency's sake but we don't need to block the client waiting
                 # for a costly federation call and processing.
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "maybe_backfill_in_the_background",
                     self.hs.get_federation_handler().maybe_backfill,
                     room_id,
@@ -617,10 +672,13 @@ class PaginationHandler:
         # In that case we do not return end, to tell the client
         # there is no need for further queries.
         if not events:
-            return {
-                "chunk": [],
-                "start": await from_token.to_string(self.store),
-            }
+            return GetMessagesResult(
+                messages_chunk=[],
+                bundled_aggregations={},
+                state=None,
+                start_token=from_token,
+                end_token=None,
+            )
 
         if event_filter:
             events = await event_filter.filter(events)
@@ -636,11 +694,13 @@ class PaginationHandler:
         # if after the filter applied there are no more events
         # return immediately - but there might be more in next_token batch
         if not events:
-            return {
-                "chunk": [],
-                "start": await from_token.to_string(self.store),
-                "end": await next_token.to_string(self.store),
-            }
+            return GetMessagesResult(
+                messages_chunk=[],
+                bundled_aggregations={},
+                state=None,
+                start_token=from_token,
+                end_token=next_token,
+            )
 
         state = None
         if event_filter and event_filter.lazy_load_members and len(events) > 0:
@@ -657,42 +717,24 @@ class PaginationHandler:
 
             if state_ids:
                 state_dict = await self.store.get_events(list(state_ids.values()))
-                state = state_dict.values()
+                state = list(state_dict.values())
 
         aggregations = await self._relations_handler.get_bundled_aggregations(
             events, user_id
         )
 
-        time_now = self.clock.time_msec()
-
-        serialize_options = SerializeEventConfig(
-            as_client_event=as_client_event, requester=requester
+        return GetMessagesResult(
+            messages_chunk=events,
+            bundled_aggregations=aggregations,
+            state=state,
+            start_token=from_token,
+            end_token=next_token,
         )
-
-        chunk = {
-            "chunk": (
-                await self._event_serializer.serialize_events(
-                    events,
-                    time_now,
-                    config=serialize_options,
-                    bundle_aggregations=aggregations,
-                )
-            ),
-            "start": await from_token.to_string(self.store),
-            "end": await next_token.to_string(self.store),
-        }
-
-        if state:
-            chunk["state"] = await self._event_serializer.serialize_events(
-                state, time_now, config=serialize_options
-            )
-
-        return chunk
 
     async def _shutdown_and_purge_room(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         """
         Scheduler action to shutdown and purge a room.
         """
@@ -703,7 +745,7 @@ class PaginationHandler:
 
         room_id = task.resource_id
 
-        async def update_result(result: Optional[JsonMapping]) -> None:
+        async def update_result(result: JsonMapping | None) -> None:
             await self._task_scheduler.update_task(task.id, result=result)
 
         shutdown_result = (

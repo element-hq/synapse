@@ -23,12 +23,8 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Collection,
-    Dict,
-    FrozenSet,
     Iterable,
-    List,
     Mapping,
-    Optional,
     Sequence,
 )
 
@@ -78,9 +74,9 @@ class BundledAggregations:
     Some values require additional processing during serialization.
     """
 
-    references: Optional[JsonDict] = None
-    replace: Optional[EventBase] = None
-    thread: Optional[_ThreadAggregation] = None
+    references: JsonDict | None = None
+    replace: EventBase | None = None
+    thread: _ThreadAggregation | None = None
 
     def __bool__(self) -> bool:
         return bool(self.references or self.replace or self.thread)
@@ -104,8 +100,8 @@ class RelationsHandler:
         pagin_config: PaginationConfig,
         recurse: bool,
         include_original_event: bool,
-        relation_type: Optional[str] = None,
-        event_type: Optional[str] = None,
+        relation_type: str | None = None,
+        event_type: str | None = None,
     ) -> JsonDict:
         """Get related events of a event, ordered by topological ordering.
 
@@ -212,7 +208,7 @@ class RelationsHandler:
         requester: Requester,
         event_id: str,
         initial_redaction_event: EventBase,
-        relation_types: List[str],
+        relation_types: list[str],
     ) -> None:
         """Redacts all events related to the given event ID with one of the given
         relation types.
@@ -267,7 +263,7 @@ class RelationsHandler:
                 )
 
     async def get_references_for_events(
-        self, event_ids: Collection[str], ignored_users: FrozenSet[str] = frozenset()
+        self, event_ids: Collection[str], ignored_users: frozenset[str] = frozenset()
     ) -> Mapping[str, Sequence[_RelatedEvent]]:
         """Get a list of references to the given events.
 
@@ -308,11 +304,11 @@ class RelationsHandler:
 
     async def _get_threads_for_events(
         self,
-        events_by_id: Dict[str, EventBase],
-        relations_by_id: Dict[str, str],
+        events_by_id: dict[str, EventBase],
+        relations_by_id: dict[str, str],
         user_id: str,
-        ignored_users: FrozenSet[str],
-    ) -> Dict[str, _ThreadAggregation]:
+        ignored_users: frozenset[str],
+    ) -> dict[str, _ThreadAggregation]:
         """Get the bundled aggregations for threads for the requested events.
 
         Args:
@@ -437,7 +433,7 @@ class RelationsHandler:
     @trace
     async def get_bundled_aggregations(
         self, events: Iterable[EventBase], user_id: str
-    ) -> Dict[str, BundledAggregations]:
+    ) -> dict[str, BundledAggregations]:
         """Generate bundled aggregations for events.
 
         Args:
@@ -456,7 +452,7 @@ class RelationsHandler:
         # De-duplicated events by ID to handle the same event requested multiple times.
         events_by_id = {}
         # A map of event ID to the relation in that event, if there is one.
-        relations_by_id: Dict[str, str] = {}
+        relations_by_id: dict[str, str] = {}
         for event in events:
             # State events do not get bundled aggregations.
             if event.is_state():
@@ -479,7 +475,7 @@ class RelationsHandler:
             events_by_id[event.event_id] = event
 
         # event ID -> bundled aggregation in non-serialized form.
-        results: Dict[str, BundledAggregations] = {}
+        results: dict[str, BundledAggregations] = {}
 
         # Fetch any ignored users of the requesting user.
         ignored_users = await self._main_store.ignored_users(user_id)
@@ -556,7 +552,7 @@ class RelationsHandler:
         room_id: str,
         include: ThreadsListInclude,
         limit: int = 5,
-        from_token: Optional[ThreadsNextBatch] = None,
+        from_token: ThreadsNextBatch | None = None,
     ) -> JsonDict:
         """Get related events of a event, ordered by topological ordering.
 

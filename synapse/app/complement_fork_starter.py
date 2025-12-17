@@ -26,13 +26,13 @@ import os
 import signal
 import sys
 from types import FrameType
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable
 
 from twisted.internet.main import installReactor
 
 # a list of the original signal handlers, before we installed our custom ones.
 # We restore these in our child processes.
-_original_signal_handlers: Dict[int, Any] = {}
+_original_signal_handlers: dict[int, Any] = {}
 
 
 class ProxiedReactor:
@@ -72,7 +72,7 @@ class ProxiedReactor:
 
 
 def _worker_entrypoint(
-    func: Callable[[], None], proxy_reactor: ProxiedReactor, args: List[str]
+    func: Callable[[], None], proxy_reactor: ProxiedReactor, args: list[str]
 ) -> None:
     """
     Entrypoint for a forked worker process.
@@ -128,7 +128,7 @@ def main() -> None:
 
     # Split up the subsequent arguments into each workers' arguments;
     # `--` is our delimiter of choice.
-    args_by_worker: List[List[str]] = [
+    args_by_worker: list[list[str]] = [
         list(args)
         for cond, args in itertools.groupby(ns.args, lambda ele: ele != "--")
         if cond and args
@@ -167,12 +167,12 @@ def main() -> None:
     update_proc.join()
     print("===== PREPARED DATABASE =====", file=sys.stderr)
 
-    processes: List[multiprocessing.Process] = []
+    processes: list[multiprocessing.Process] = []
 
     # Install signal handlers to propagate signals to all our children, so that they
     # shut down cleanly. This also inhibits our own exit, but that's good: we want to
     # wait until the children have exited.
-    def handle_signal(signum: int, frame: Optional[FrameType]) -> None:
+    def handle_signal(signum: int, frame: FrameType | None) -> None:
         print(
             f"complement_fork_starter: Caught signal {signum}. Stopping children.",
             file=sys.stderr,

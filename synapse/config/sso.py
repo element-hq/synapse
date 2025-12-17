@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import attr
 
@@ -43,10 +43,9 @@ class SsoAttributeRequirement:
     """Object describing a single requirement for SSO attributes."""
 
     attribute: str
-    # If neither value nor one_of is given, the attribute must simply exist. This is
-    # only true for CAS configs which use a different JSON schema than the one below.
-    value: Optional[str] = None
-    one_of: Optional[List[str]] = None
+    # If neither `value` nor `one_of` is given, the attribute must simply exist.
+    value: str | None = None
+    one_of: list[str] | None = None
 
     JSON_SCHEMA = {
         "type": "object",
@@ -56,10 +55,6 @@ class SsoAttributeRequirement:
             "one_of": {"type": "array", "items": {"type": "string"}},
         },
         "required": ["attribute"],
-        "oneOf": [
-            {"required": ["value"]},
-            {"required": ["one_of"]},
-        ],
     }
 
 
@@ -69,7 +64,7 @@ class SSOConfig(Config):
     section = "sso"
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
-        sso_config: Dict[str, Any] = config.get("sso") or {}
+        sso_config: dict[str, Any] = config.get("sso") or {}
 
         # The sso-specific template_dir
         self.sso_template_dir = sso_config.get("template_dir")

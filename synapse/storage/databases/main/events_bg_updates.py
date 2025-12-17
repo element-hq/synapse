@@ -20,11 +20,16 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, cast
 
 import attr
 
-from synapse.api.constants import EventContentFields, Membership, RelationTypes
+from synapse.api.constants import (
+    MAX_DEPTH,
+    EventContentFields,
+    Membership,
+    RelationTypes,
+)
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.events import EventBase, make_event_from_dict
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
@@ -47,14 +52,14 @@ from synapse.storage.databases.main.events_worker import (
 )
 from synapse.storage.databases.main.state_deltas import StateDeltasStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
-from synapse.storage.engines import PostgresEngine, Sqlite3Engine
+from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
 from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
-from synapse.util import json_encoder
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -92,7 +97,7 @@ class _CalculateChainCover:
     # Map from room_id to last depth/stream processed for each room that we have
     # processed all events for (i.e. the rooms we can flip the
     # `has_auth_chain_index` for)
-    finished_room_map: Dict[str, Tuple[int, int]]
+    finished_room_map: dict[str, tuple[int, int]]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -104,7 +109,7 @@ class _JoinedRoomStreamOrderingUpdate:
     # The most recent event stream_ordering for the room
     most_recent_event_stream_ordering: int
     # The most recent event `bump_stamp` for the room
-    most_recent_bump_stamp: Optional[int]
+    most_recent_bump_stamp: int | None
 
 
 class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseStore):
@@ -289,6 +294,27 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             where_clause="NOT outlier",
         )
 
+        # These indices are needed to validate the foreign key constraint
+        # when events are deleted.
+        self.db_pool.updates.register_background_index_update(
+            _BackgroundUpdates.CURRENT_STATE_EVENTS_STREAM_ORDERING_INDEX_UPDATE_NAME,
+            index_name="current_state_events_stream_ordering_idx",
+            table="current_state_events",
+            columns=["event_stream_ordering"],
+        )
+        self.db_pool.updates.register_background_index_update(
+            _BackgroundUpdates.ROOM_MEMBERSHIPS_STREAM_ORDERING_INDEX_UPDATE_NAME,
+            index_name="room_memberships_stream_ordering_idx",
+            table="room_memberships",
+            columns=["event_stream_ordering"],
+        )
+        self.db_pool.updates.register_background_index_update(
+            _BackgroundUpdates.LOCAL_CURRENT_MEMBERSHIP_STREAM_ORDERING_INDEX_UPDATE_NAME,
+            index_name="local_current_membership_stream_ordering_idx",
+            table="local_current_membership",
+            columns=["event_stream_ordering"],
+        )
+
         # Handle background updates for Sliding Sync tables
         #
         self.db_pool.updates.register_background_update_handler(
@@ -311,10 +337,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             self._sliding_sync_membership_snapshots_fix_forgotten_column_bg_update,
         )
 
-        # Add a background update to add triggers which track event counts.
         self.db_pool.updates.register_background_update_handler(
-            _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE,
-            self._event_stats_populate_counts_bg_update,
+            _BackgroundUpdates.FIXUP_MAX_DEPTH_CAP, self.fixup_max_depth_cap_bg_update
         )
 
         # We want this to run on the main database at startup before we start processing
@@ -427,7 +451,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             chunks = [event_ids[i : i + 100] for i in range(0, len(event_ids), 100)]
             for chunk in chunks:
                 ev_rows = cast(
-                    List[Tuple[str, str]],
+                    list[tuple[str, str]],
                     self.db_pool.simple_select_many_txn(
                         txn,
                         table="event_json",
@@ -503,8 +527,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # The set of extremity event IDs that we're checking this round
             original_set = set()
 
-            # A dict[str, Set[str]] of event ID to their prev events.
-            graph: Dict[str, Set[str]] = {}
+            # A dict[str, set[str]] of event ID to their prev events.
+            graph: dict[str, set[str]] = {}
 
             # The set of descendants of the original set that are not rejected
             # nor soft-failed. Ancestors of these events should be removed
@@ -623,7 +647,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             if deleted:
                 # We now need to invalidate the caches of these rooms
                 rows = cast(
-                    List[Tuple[str]],
+                    list[tuple[str]],
                     self.db_pool.simple_select_many_txn(
                         txn,
                         table="events",
@@ -706,7 +730,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 WHERE ? <= event_id AND event_id <= ?
             """
 
-            txn.execute(sql, (self._clock.time_msec(), last_event_id, upper_event_id))
+            txn.execute(sql, (self.clock.time_msec(), last_event_id, upper_event_id))
 
             self.db_pool.updates._background_update_progress_txn(
                 txn, "redactions_received_ts", {"last_event_id": upper_event_id}
@@ -827,7 +851,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def get_rejected_events(
             txn: Cursor,
-        ) -> List[Tuple[str, str, JsonDict, bool, bool]]:
+        ) -> list[tuple[str, str, JsonDict, bool, bool]]:
             # Fetch rejected event json, their room version and whether we have
             # inserted them into the state_events or auth_events tables.
             #
@@ -859,7 +883,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
             return cast(
-                List[Tuple[str, str, JsonDict, bool, bool]],
+                list[tuple[str, str, JsonDict, bool, bool]],
                 [(row[0], row[1], db_to_json(row[2]), row[3], row[4]) for row in txn],
             )
 
@@ -1014,7 +1038,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         last_room_id: str,
         last_depth: int,
         last_stream: int,
-        batch_size: Optional[int],
+        batch_size: int | None,
         single_room: bool,
     ) -> _CalculateChainCover:
         """Calculate the chain cover for `batch_size` events, ordered by
@@ -1102,7 +1126,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         # We also need to fetch the auth events for them.
         auth_events = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             self.db_pool.simple_select_many_txn(
                 txn,
                 table="event_auth",
@@ -1113,7 +1137,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             ),
         )
 
-        event_to_auth_chain: Dict[str, List[str]] = {}
+        event_to_auth_chain: dict[str, list[str]] = {}
         for event_id, auth_id in auth_events:
             event_to_auth_chain.setdefault(event_id, []).append(auth_id)
 
@@ -1127,7 +1151,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             self.event_chain_id_gen,
             event_to_room_id,
             event_to_types,
-            cast(Dict[str, StrCollection], event_to_auth_chain),
+            cast(dict[str, StrCollection], event_to_auth_chain),
         )
 
         return _CalculateChainCover(
@@ -1232,7 +1256,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
             results = list(txn)
             # (event_id, parent_id, rel_type) for each relation
-            relations_to_insert: List[Tuple[str, str, str, str]] = []
+            relations_to_insert: list[tuple[str, str, str, str]] = []
             for event_id, event_json_raw in results:
                 try:
                     event_json = db_to_json(event_json_raw)
@@ -1612,7 +1636,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         # We don't need to fetch any progress state because we just grab the next N
         # events in `sliding_sync_joined_rooms_to_recalculate`
 
-        def _get_rooms_to_update_txn(txn: LoggingTransaction) -> List[Tuple[str]]:
+        def _get_rooms_to_update_txn(txn: LoggingTransaction) -> list[tuple[str]]:
             """
             Returns:
                 A list of room ID's to update along with the progress value
@@ -1634,7 +1658,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 (batch_size,),
             )
 
-            rooms_to_update_rows = cast(List[Tuple[str]], txn.fetchall())
+            rooms_to_update_rows = cast(list[tuple[str]], txn.fetchall())
 
             return rooms_to_update_rows
 
@@ -1650,9 +1674,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             return 0
 
         # Map from room_id to insert/update state values in the `sliding_sync_joined_rooms` table.
-        joined_room_updates: Dict[str, SlidingSyncStateInsertValues] = {}
+        joined_room_updates: dict[str, SlidingSyncStateInsertValues] = {}
         # Map from room_id to stream_ordering/bump_stamp, etc values
-        joined_room_stream_ordering_updates: Dict[
+        joined_room_stream_ordering_updates: dict[
             str, _JoinedRoomStreamOrderingUpdate
         ] = {}
         # As long as we get this value before we fetch the current state, we can use it
@@ -1862,17 +1886,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _find_memberships_to_update_txn(
             txn: LoggingTransaction,
-        ) -> List[
-            Tuple[
+        ) -> list[
+            tuple[
                 str,
-                Optional[str],
-                Optional[str],
+                str | None,
+                str | None,
                 str,
                 str,
                 str,
                 str,
                 int,
-                Optional[str],
+                str | None,
                 bool,
             ]
         ]:
@@ -1955,17 +1979,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 raise Exception("last_event_stream_ordering should not be None")
 
             memberships_to_update_rows = cast(
-                List[
-                    Tuple[
+                list[
+                    tuple[
                         str,
-                        Optional[str],
-                        Optional[str],
+                        str | None,
+                        str | None,
                         str,
                         str,
                         str,
                         str,
                         int,
-                        Optional[str],
+                        str | None,
                         bool,
                     ]
                 ],
@@ -1999,7 +2023,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _find_previous_invite_or_knock_membership_txn(
             txn: LoggingTransaction, room_id: str, user_id: str, event_id: str
-        ) -> Optional[Tuple[str, str]]:
+        ) -> tuple[str, str] | None:
             # Find the previous invite/knock event before the leave event
             #
             # Here are some notes on how we landed on this query:
@@ -2061,11 +2085,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             return event_id, membership
 
         # Map from (room_id, user_id) to ...
-        to_insert_membership_snapshots: Dict[
-            Tuple[str, str], SlidingSyncMembershipSnapshotSharedInsertValues
+        to_insert_membership_snapshots: dict[
+            tuple[str, str], SlidingSyncMembershipSnapshotSharedInsertValues
         ] = {}
-        to_insert_membership_infos: Dict[
-            Tuple[str, str], SlidingSyncMembershipInfoWithEventPos
+        to_insert_membership_infos: dict[
+            tuple[str, str], SlidingSyncMembershipInfoWithEventPos
         ] = {}
         for (
             room_id,
@@ -2486,7 +2510,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
             memberships_to_update_rows = cast(
-                List[Tuple[str, str, str, int, int]],
+                list[tuple[str, str, str, int, int]],
                 txn.fetchall(),
             )
             if not memberships_to_update_rows:
@@ -2495,9 +2519,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # Assemble the values to update
             #
             # (room_id, user_id)
-            key_values: List[Tuple[str, str]] = []
+            key_values: list[tuple[str, str]] = []
             # (forgotten,)
-            value_values: List[Tuple[int]] = []
+            value_values: list[tuple[int]] = []
             for (
                 room_id,
                 user_id,
@@ -2553,287 +2577,76 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         return num_rows
 
-    async def _event_stats_populate_counts_bg_update(
+    async def fixup_max_depth_cap_bg_update(
         self, progress: JsonDict, batch_size: int
     ) -> int:
-        """
-        Background update to populate the `event_stats` table with initial
-        values, and register DB triggers to continue updating it.
+        """Fixes the topological ordering for events that have a depth greater
+        than MAX_DEPTH. This should fix /messages ordering oddities."""
 
-        We first register TRIGGERs on rows being added/removed from the `events` table,
-        which will keep the event counts continuously updated. We also mark the stopping
-        point for the main population step so we don't double count events.
+        room_id_bound = progress.get("room_id", "")
 
-        Then we will iterate through the `events` table in batches and update event
-        counts until we reach the stopping point.
-
-        This data is intended to be used by the phone-home stats to keep track
-        of total event and message counts. A trigger is preferred to counting
-        rows in the `events` table, as said table can grow quite large.
-
-        It is also preferable to adding an index on the `events` table, as even
-        an index can grow large. And calculating total counts would require
-        querying that entire index.
-        """
-        # The last event `stream_ordering` we processed (starting place of this next
-        # batch).
-        last_event_stream_ordering = progress.get(
-            "last_event_stream_ordering", -(1 << 31)
-        )
-        # The event `stream_ordering` we should stop at. This is used to avoid double
-        # counting events that are already accounted for because of the triggers.
-        stop_event_stream_ordering: Optional[int] = progress.get(
-            "stop_event_stream_ordering", None
-        )
-
-        def _add_triggers_txn(
-            txn: LoggingTransaction,
-        ) -> Optional[int]:
-            """
-            Adds the triggers to the `events` table to keep the `event_stats` counts
-            up-to-date.
-
-            Also populates the `stop_event_stream_ordering` background update progress
-            value. This marks the point at which we added the triggers, so we can avoid
-            double counting events that are already accounted for in the population
-            step.
-
-            Returns:
-                The latest event `stream_ordering` in the `events` table when the triggers
-                were added or `None` if the `events` table is empty.
-            """
-
-            # Each time an event is inserted into the `events` table, update the stats.
-            #
-            # We're using `AFTER` triggers as we want to count successful inserts/deletes and
-            # not the ones that could potentially fail.
-            if isinstance(txn.database_engine, Sqlite3Engine):
-                txn.execute(
-                    """
-                    CREATE TRIGGER IF NOT EXISTS event_stats_events_insert_trigger
-                    AFTER INSERT ON events
-                    BEGIN
-                        -- Always increment total_event_count
-                        UPDATE event_stats SET total_event_count = total_event_count + 1;
-
-                        -- Increment unencrypted_message_count for m.room.message events
-                        UPDATE event_stats
-                        SET unencrypted_message_count = unencrypted_message_count + 1
-                        WHERE NEW.type = 'm.room.message' AND NEW.state_key IS NULL;
-
-                        -- Increment e2ee_event_count for m.room.encrypted events
-                        UPDATE event_stats
-                        SET e2ee_event_count = e2ee_event_count + 1
-                        WHERE NEW.type = 'm.room.encrypted' AND NEW.state_key IS NULL;
-                    END;
-                    """
-                )
-
-                txn.execute(
-                    """
-                    CREATE TRIGGER IF NOT EXISTS event_stats_events_delete_trigger
-                    AFTER DELETE ON events
-                    BEGIN
-                        -- Always decrement total_event_count
-                        UPDATE event_stats SET total_event_count = total_event_count - 1;
-
-                        -- Decrement unencrypted_message_count for m.room.message events
-                        UPDATE event_stats
-                        SET unencrypted_message_count = unencrypted_message_count - 1
-                        WHERE OLD.type = 'm.room.message' AND OLD.state_key IS NULL;
-
-                        -- Decrement e2ee_event_count for m.room.encrypted events
-                        UPDATE event_stats
-                        SET e2ee_event_count = e2ee_event_count - 1
-                        WHERE OLD.type = 'm.room.encrypted' AND OLD.state_key IS NULL;
-                    END;
-                    """
-                )
-            elif isinstance(txn.database_engine, PostgresEngine):
-                txn.execute(
-                    """
-                    CREATE OR REPLACE FUNCTION event_stats_increment_counts() RETURNS trigger AS $BODY$
-                    BEGIN
-                        IF TG_OP = 'INSERT' THEN
-                            -- Always increment total_event_count
-                            UPDATE event_stats SET total_event_count = total_event_count + 1;
-
-                            -- Increment unencrypted_message_count for m.room.message events
-                            IF NEW.type = 'm.room.message' AND NEW.state_key IS NULL THEN
-                                UPDATE event_stats SET unencrypted_message_count = unencrypted_message_count + 1;
-                            END IF;
-
-                            -- Increment e2ee_event_count for m.room.encrypted events
-                            IF NEW.type = 'm.room.encrypted' AND NEW.state_key IS NULL THEN
-                                UPDATE event_stats SET e2ee_event_count = e2ee_event_count + 1;
-                            END IF;
-
-                            -- We're not modifying the row being inserted/deleted, so we return it unchanged.
-                            RETURN NEW;
-
-                        ELSIF TG_OP = 'DELETE' THEN
-                            -- Always decrement total_event_count
-                            UPDATE event_stats SET total_event_count = total_event_count - 1;
-
-                            -- Decrement unencrypted_message_count for m.room.message events
-                            IF OLD.type = 'm.room.message' AND OLD.state_key IS NULL THEN
-                                UPDATE event_stats SET unencrypted_message_count = unencrypted_message_count - 1;
-                            END IF;
-
-                            -- Decrement e2ee_event_count for m.room.encrypted events
-                            IF OLD.type = 'm.room.encrypted' AND OLD.state_key IS NULL THEN
-                                UPDATE event_stats SET e2ee_event_count = e2ee_event_count - 1;
-                            END IF;
-
-                            -- "The usual idiom in DELETE triggers is to return OLD."
-                            -- (https://www.postgresql.org/docs/current/plpgsql-trigger.html)
-                            RETURN OLD;
-                        END IF;
-
-                        RAISE EXCEPTION 'update_event_stats() was run with unexpected operation (%%). '
-                            'This indicates a trigger misconfiguration as this function should only'
-                            'run with INSERT/DELETE operations.', TG_OP;
-                    END;
-                    $BODY$ LANGUAGE plpgsql;
-                    """
-                )
-
-                # We could use `CREATE OR REPLACE TRIGGER` but that's only available in Postgres
-                # 14 (https://www.postgresql.org/docs/14/sql-createtrigger.html)
-                txn.execute(
-                    """
-                    DO
-                    $$BEGIN
-                        CREATE TRIGGER event_stats_increment_counts_trigger
-                        AFTER INSERT OR DELETE ON events
-                        FOR EACH ROW
-                        EXECUTE PROCEDURE event_stats_increment_counts();
-                    EXCEPTION
-                    -- This acts as a "CREATE TRIGGER IF NOT EXISTS" for Postgres
-                    WHEN duplicate_object THEN
-                        NULL;
-                    END;$$;
-                    """
-                )
-            else:
-                raise NotImplementedError("Unknown database engine")
-
-            # Find the latest `stream_ordering` in the `events` table. We need to do
-            # this in the same transaction as where we add the triggers so we don't miss
-            # any events.
+        def redo_max_depth_bg_update_txn(txn: LoggingTransaction) -> tuple[bool, int]:
             txn.execute(
                 """
-                SELECT stream_ordering
-                FROM events
-                ORDER BY stream_ordering DESC
-                LIMIT 1
-                """
-            )
-            row = cast(Optional[Tuple[int]], txn.fetchone())
-
-            # Update the progress
-            if row is not None:
-                (max_stream_ordering,) = row
-                self.db_pool.updates._background_update_progress_txn(
-                    txn,
-                    _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE,
-                    {"stop_event_stream_ordering": max_stream_ordering},
-                )
-                return max_stream_ordering
-
-            return None
-
-        # First, add the triggers to keep the `event_stats` values up-to-date.
-        #
-        # If we don't have a `stop_event_stream_ordering` yet, we need to add the
-        # triggers to the `events` table and set the stopping point so we don't
-        # double count `events` later.
-        if stop_event_stream_ordering is None:
-            stop_event_stream_ordering = await self.db_pool.runInteraction(
-                "_event_stats_populate_counts_bg_update_add_triggers",
-                _add_triggers_txn,
-            )
-
-            # If there is no `stop_event_stream_ordering`, then there are no events
-            # in the `events` table and we can end the background update altogether.
-            if stop_event_stream_ordering is None:
-                await self.db_pool.updates._end_background_update(
-                    _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE
-                )
-                return batch_size
-
-        def _populate_txn(
-            txn: LoggingTransaction,
-        ) -> int:
-            """
-            Updates the `event_stats` table from this batch of events.
-            """
-
-            # Increment the counts based on the events present in this batch.
-            txn.execute(
-                """
-                WITH event_batch AS (
-                    SELECT *
-                    FROM events
-                    WHERE stream_ordering > ? AND stream_ordering <= ?
-                    ORDER BY stream_ordering ASC
-                    LIMIT ?
-                ),
-                batch_stats AS (
-                    SELECT
-                        MAX(stream_ordering) AS max_stream_ordering,
-                        COALESCE(COUNT(*), 0) AS total_event_count,
-                        COALESCE(SUM(CASE WHEN type = 'm.room.message' AND state_key IS NULL THEN 1 ELSE 0 END), 0) AS unencrypted_message_count,
-                        COALESCE(SUM(CASE WHEN type = 'm.room.encrypted' AND state_key IS NULL THEN 1 ELSE 0 END), 0) AS e2ee_event_count
-                    FROM event_batch
-
-                    UNION ALL
-
-                    SELECT null, 0, 0, 0
-                    WHERE NOT EXISTS (SELECT 1 FROM event_batch)
-                    LIMIT 1
-                )
-                UPDATE event_stats
-                SET
-                    total_event_count = total_event_count + (SELECT total_event_count FROM batch_stats),
-                    unencrypted_message_count = unencrypted_message_count + (SELECT unencrypted_message_count FROM batch_stats),
-                    e2ee_event_count = e2ee_event_count + (SELECT e2ee_event_count FROM batch_stats)
-                RETURNING
-                    (SELECT total_event_count FROM batch_stats) AS total_event_count,
-                    (SELECT max_stream_ordering FROM batch_stats) AS max_stream_ordering
+                SELECT room_id, room_version FROM rooms
+                WHERE room_id > ?
+                ORDER BY room_id
+                LIMIT ?
                 """,
-                (last_event_stream_ordering, stop_event_stream_ordering, batch_size),
+                (room_id_bound, batch_size),
             )
 
-            # Get the results of the update
-            (total_event_count, max_stream_ordering) = cast(
-                Tuple[int, Optional[int]], txn.fetchone()
-            )
+            # Find the next room ID to process, with a relevant room version.
+            room_ids: list[str] = []
+            max_room_id: str | None = None
+            for room_id, room_version_str in txn:
+                max_room_id = room_id
 
-            # Update the progress
+                # We only want to process rooms with a known room version that
+                # has strict canonical json validation enabled.
+                room_version = KNOWN_ROOM_VERSIONS.get(room_version_str)
+                if room_version and room_version.strict_canonicaljson:
+                    room_ids.append(room_id)
+
+            if max_room_id is None:
+                # The query did not return any rooms, so we are done.
+                return True, 0
+
+            # Update the progress to the last room ID we pulled from the DB,
+            # this ensures we always make progress.
             self.db_pool.updates._background_update_progress_txn(
                 txn,
-                _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE,
-                {
-                    "last_event_stream_ordering": max_stream_ordering,
-                    "stop_event_stream_ordering": stop_event_stream_ordering,
-                },
+                _BackgroundUpdates.FIXUP_MAX_DEPTH_CAP,
+                progress={"room_id": max_room_id},
             )
 
-            return total_event_count
+            if not room_ids:
+                # There were no rooms in this batch that required the fix.
+                return False, 0
 
-        num_rows_processed = await self.db_pool.runInteraction(
-            "_event_stats_populate_counts_bg_update",
-            _populate_txn,
+            clause, list_args = make_in_list_sql_clause(
+                self.database_engine, "room_id", room_ids
+            )
+            sql = f"""
+                UPDATE events SET topological_ordering = ?
+                WHERE topological_ordering > ? AND {clause}
+            """
+            args = [MAX_DEPTH, MAX_DEPTH]
+            args.extend(list_args)
+            txn.execute(sql, args)
+
+            return False, len(room_ids)
+
+        done, num_rooms = await self.db_pool.runInteraction(
+            "redo_max_depth_bg_update", redo_max_depth_bg_update_txn
         )
 
-        # No more rows to process, so our background update is complete.
-        if not num_rows_processed:
+        if done:
             await self.db_pool.updates._end_background_update(
-                _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE
+                _BackgroundUpdates.FIXUP_MAX_DEPTH_CAP
             )
 
-        return batch_size
+        return num_rooms
 
 
 def _resolve_stale_data_in_sliding_sync_tables(
@@ -2891,7 +2704,7 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
 
     # If we have nothing written to the `sliding_sync_joined_rooms` table, there is
     # nothing to clean up
-    row = cast(Optional[Tuple[int]], txn.fetchone())
+    row = cast(tuple[int] | None, txn.fetchone())
     max_stream_ordering_sliding_sync_joined_rooms_table = None
     depends_on = None
     if row is not None:
@@ -3017,7 +2830,7 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
 
     # If we have nothing written to the `sliding_sync_membership_snapshots` table,
     # there is nothing to clean up
-    row = cast(Optional[Tuple[int]], txn.fetchone())
+    row = cast(tuple[int] | None, txn.fetchone())
     max_stream_ordering_sliding_sync_membership_snapshots_table = None
     if row is not None:
         (max_stream_ordering_sliding_sync_membership_snapshots_table,) = row

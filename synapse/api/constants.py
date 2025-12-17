@@ -29,6 +29,19 @@ from typing import Final
 # the max size of a (canonical-json-encoded) event
 MAX_PDU_SIZE = 65536
 
+# The maximum allowed size of an HTTP request.
+# Other than media uploads, the biggest request we expect to see is a fully-loaded
+# /federation/v1/send request.
+#
+# The main thing in such a request is up to 50 PDUs, and up to 100 EDUs. PDUs are
+# limited to 65536 bytes (possibly slightly more if the sender didn't use canonical
+# json encoding); there is no specced limit to EDUs (see
+# https://github.com/matrix-org/matrix-doc/issues/3121).
+#
+# in short, we somewhat arbitrarily limit requests to 200 * 64K (about 12.5M)
+#
+MAX_REQUEST_SIZE = 200 * MAX_PDU_SIZE
+
 # Max/min size of ints in canonical JSON
 CANONICALJSON_MAX_INT = (2**53) - 1
 CANONICALJSON_MIN_INT = -CANONICALJSON_MAX_INT
@@ -45,6 +58,9 @@ MAX_USERID_LENGTH = 255
 
 # Constant value used for the pseudo-thread which is the main timeline.
 MAIN_TIMELINE: Final = "main"
+
+# MAX_INT + 1, so it always trumps any PL in canonical JSON.
+CREATOR_POWER_LEVEL = 2**53
 
 
 class Membership:
@@ -185,12 +201,18 @@ ServerNoticeLimitReached: Final = "m.server_notice.usage_limit_reached"
 
 class UserTypes:
     """Allows for user type specific behaviour. With the benefit of hindsight
-    'admin' and 'guest' users should also be UserTypes. Normal users are type None
+    'admin' and 'guest' users should also be UserTypes. Extra user types can be
+    added in the configuration. Normal users are type None or one of the extra
+    user types (if configured).
     """
 
     SUPPORT: Final = "support"
     BOT: Final = "bot"
-    ALL_USER_TYPES: Final = (SUPPORT, BOT)
+    ALL_BUILTIN_USER_TYPES: Final = (SUPPORT, BOT)
+    """
+    The user types that are built-in to Synapse. Extra user types can be
+    added in the configuration.
+    """
 
 
 class RelationTypes:
@@ -229,6 +251,8 @@ class EventContentFields:
     #
     # This is deprecated in MSC2175.
     ROOM_CREATOR: Final = "creator"
+    # MSC4289
+    ADDITIONAL_CREATORS: Final = "additional_creators"
 
     # The version of the room for `m.room.create` events.
     ROOM_VERSION: Final = "room_version"
@@ -256,12 +280,24 @@ class EventContentFields:
 
     TOMBSTONE_SUCCESSOR_ROOM: Final = "replacement_room"
 
+    # Used in m.room.topic events.
+    TOPIC: Final = "topic"
+    M_TOPIC: Final = "m.topic"
+    M_TEXT: Final = "m.text"
+
 
 class EventUnsignedContentFields:
     """Fields found inside the 'unsigned' data on events"""
 
     # Requesting user's membership, per MSC4115
     MEMBERSHIP: Final = "membership"
+
+
+class MTextFields:
+    """Fields found inside m.text content blocks."""
+
+    BODY: Final = "body"
+    MIMETYPE: Final = "mimetype"
 
 
 class RoomTypes:
@@ -280,6 +316,17 @@ class AccountDataTypes:
     IGNORED_USER_LIST: Final = "m.ignored_user_list"
     TAG: Final = "m.tag"
     PUSH_RULES: Final = "m.push_rules"
+    # MSC4155: Invite filtering
+    MSC4155_INVITE_PERMISSION_CONFIG: Final = (
+        "org.matrix.msc4155.invite_permission_config"
+    )
+    # MSC4380: Invite blocking
+    MSC4380_INVITE_PERMISSION_CONFIG: Final = (
+        "org.matrix.msc4380.invite_permission_config"
+    )
+    # Synapse-specific behaviour. See "Client-Server API Extensions" documentation
+    # in Admin API for more information.
+    SYNAPSE_ADMIN_CLIENT_CONFIG: Final = "io.element.synapse.admin_client_config"
 
 
 class HistoryVisibility:

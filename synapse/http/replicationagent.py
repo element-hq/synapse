@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Dict, Optional
+from typing import Optional
 
 from zope.interface import implementer
 
@@ -60,7 +60,7 @@ class ReplicationEndpointFactory:
     def __init__(
         self,
         reactor: ISynapseReactor,
-        instance_map: Dict[str, InstanceLocationConfig],
+        instance_map: dict[str, InstanceLocationConfig],
         context_factory: IPolicyForHTTPS,
     ) -> None:
         self.reactor = reactor
@@ -117,11 +117,11 @@ class ReplicationAgent(_AgentBase):
     def __init__(
         self,
         reactor: ISynapseReactor,
-        instance_map: Dict[str, InstanceLocationConfig],
+        instance_map: dict[str, InstanceLocationConfig],
         contextFactory: IPolicyForHTTPS,
-        connectTimeout: Optional[float] = None,
-        bindAddress: Optional[bytes] = None,
-        pool: Optional[HTTPConnectionPool] = None,
+        connectTimeout: float | None = None,
+        bindAddress: bytes | None = None,
+        pool: HTTPConnectionPool | None = None,
     ):
         """
         Create a ReplicationAgent.
@@ -149,7 +149,7 @@ class ReplicationAgent(_AgentBase):
         self,
         method: bytes,
         uri: bytes,
-        headers: Optional[Headers] = None,
+        headers: Headers | None = None,
         bodyProducer: Optional[IBodyProducer] = None,
     ) -> "defer.Deferred[IResponse]":
         """
@@ -180,9 +180,16 @@ class ReplicationAgent(_AgentBase):
         worker_name = parsedURI.netloc.decode("utf-8")
         key_scheme = self._endpointFactory.instance_map[worker_name].scheme()
         key_netloc = self._endpointFactory.instance_map[worker_name].netloc()
-        # This sets the Pool key to be:
-        #  (http(s), <host:port>) or (unix, <socket_path>)
-        key = (key_scheme, key_netloc)
+        # Build a connection pool key.
+        #
+        # `_AgentBase` expects this to be a three-tuple of `(scheme, host,
+        # port)` of type `bytes`. We don't have a real port when connecting via
+        # a Unix socket, so use `0`.
+        key = (
+            key_scheme.encode("ascii"),
+            key_netloc.encode("utf-8"),
+            0,
+        )
 
         # _requestWithEndpoint comes from _AgentBase class
         return self._requestWithEndpoint(
