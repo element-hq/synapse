@@ -223,6 +223,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         Args:
             room_id: The room to fetch sticky events in.
             from_stream_pos: The stream position to return events from. May be 0 for newly joined servers.
+                Exclusive.
         Returns:
             A list of event IDs, which may be empty.
         """
@@ -239,18 +240,19 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         now_ms = self.clock.time_msec()
         txn.execute(
             """
-            SELECT sticky_events.event_id, sticky_events.sender, events.stream_ordering FROM sticky_events
-            INNER JOIN events ON events.event_id = sticky_events.event_id
-            WHERE soft_failed=? AND expires_at > ? AND sticky_events.room_id = ?
+            SELECT event_id, sticky_events.sender
+            FROM sticky_events
+            INNER JOIN events USING (event_id)
+            WHERE
+                NOT soft_failed
+                AND expires_at > ?
+                AND sticky_events.room_id = ?
+                AND events.stream_ordering > ?
             """,
-            (False, now_ms, room_id),
+            (now_ms, room_id, from_stream_pos),
         )
-        rows = cast(list[tuple[str, str, int]], txn.fetchall())
-        return [
-            row[0]
-            for row in rows
-            if row[2] > from_stream_pos and self.hs.is_mine_id(row[1])
-        ]
+        rows = cast(list[tuple[str, str]], txn.fetchall())
+        return [event_id for event_id, sender in rows if self.hs.is_mine_id(sender)]
 
     async def reevaluate_soft_failed_sticky_events(
         self,
