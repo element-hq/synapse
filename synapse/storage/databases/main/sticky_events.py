@@ -11,6 +11,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import logging
+from itertools import chain
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -407,18 +408,13 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             #
             # Grab the set of senders that have been modified and see if any of them sent a soft-failed
             # sticky event. If they did, then we need to re-evaluate. If they didn't, then we don't need to.
-            new_membership_changes = set(
-                [
-                    skey
-                    for typ, skey in state_delta_for_room.to_insert
-                    if typ == EventTypes.Member
-                ]
-                + [
-                    skey
-                    for typ, skey in state_delta_for_room.to_delete
-                    if typ == EventTypes.Member
-                ]
-            )
+            new_membership_changes = {
+                membership_user_id
+                for event_type, membership_user_id in chain(
+                    state_delta_for_room.to_insert, state_delta_for_room.to_delete
+                )
+                if event_type == EventTypes.Member
+            }
 
             # pull out senders of sticky events in this room
             events_to_recheck: list[
