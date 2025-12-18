@@ -39,6 +39,7 @@ from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.engines.sqlite import Sqlite3Engine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.types import StateKey
 from synapse.types.state import StateFilter
 from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
@@ -480,21 +481,30 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             room_id: The room the event IDs are in.
             soft_failed_event_ids: The soft-failed events to re-evaluate.
         """
-        # Load all the soft-failed events to recheck, and pull out the precise state tuples we need
+        # Load all the soft-failed events to recheck
         soft_failed_event_map = await self.get_events(
             soft_failed_event_ids, allow_rejected=False
         )
-        needed_tuples: set[tuple[str, str]] = set()
-        for ev in soft_failed_event_map.values():
-            needed_tuples.update(event_auth.auth_types_for_event(ev.room_version, ev))
+        # What (state event type, state key) tuples are needed as auth events for the
+        # soft-failed events we are reconsidering?
+        # e.g. [('m.room.member', '@user:example.org'), ('m.room.power_levels', ''), ...]
+        needed_state_tuples_for_auth: set[StateKey] = set()
+        for soft_failed_event in soft_failed_event_map.values():
+            needed_state_tuples_for_auth.update(
+                event_auth.auth_types_for_event(
+                    soft_failed_event.room_version, soft_failed_event
+                )
+            )
 
         # We know the events are otherwise authorised, so we only need to load the needed tuples from
         # the current state to check if the events pass auth.
-        current_state_map = await self.get_partial_filtered_current_state_ids(
-            room_id, StateFilter.from_types(needed_tuples)
+        current_auth_state_map = await self.get_partial_filtered_current_state_ids(
+            room_id, StateFilter.from_types(needed_state_tuples_for_auth)
         )
-        current_state_ids_list = [e for _, e in current_state_map.items()]
-        current_auth_events = await self.get_events_as_list(current_state_ids_list)
+        current_auth_state_event_ids: list[str] = list(current_auth_state_map.values())
+        current_auth_events = await self.get_events_as_list(
+            current_auth_state_event_ids
+        )
         passing_event_ids: set[str] = set()
         for soft_failed_event in soft_failed_event_map.values():
             if soft_failed_event.internal_metadata.policy_server_spammy:
