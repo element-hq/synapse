@@ -540,10 +540,15 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         self, txn: LoggingTransaction, passing_event_ids: set[str]
     ) -> None:
         # Update the sticky events table so we notify downstream of the change in soft-failure status
-        new_stream_ids: list[tuple[str, int]] = [
-            (event_id, self._sticky_events_id_gen.get_next_txn(txn))
-            for event_id in passing_event_ids
-        ]
+        new_stream_ids: list[tuple[str, int]] = list(
+            zip(
+                passing_event_ids,
+                self._sticky_events_id_gen.get_next_mult_txn(
+                    txn, len(passing_event_ids)
+                ),
+                strict=True,
+            )
+        )
 
         self.db_pool.simple_update_many_txn(
             txn,
