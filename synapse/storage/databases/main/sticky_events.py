@@ -473,7 +473,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     ) -> None:
         """
         Recheck authorised but soft-failed events. The provided event IDs must have already passed
-        all auth checks (so the event isn't rejected) but soft-failure checks.
+        all auth checks (so the event isn't rejected) except for soft-failure checks.
 
         Args:
             txn: The SQL transaction
