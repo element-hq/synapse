@@ -1,4 +1,3 @@
-import time
 from typing import Callable, Collection
 from unittest import mock
 from unittest.mock import AsyncMock, Mock
@@ -457,8 +456,6 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
     @unittest.override_config({"experimental_features": {"msc4354_enabled": True}})
     def test_sends_sticky_events(self) -> None:
         """Test that we send sticky events in addition to the latest event in the room when catching up."""
-        # make the clock used when generating origin_server_ts the same as the clock used to check expiry
-        self.reactor.advance(time.time())
         per_dest_queue, sent_pdus = self.make_fake_destination_queue()
 
         # Make a room with a local user, and two servers. One will go offline

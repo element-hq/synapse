@@ -20,7 +20,6 @@
 #
 import itertools
 import logging
-import time
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -619,7 +618,7 @@ class SyncHandler:
             events are included, and a dict mapping from room_id to a list of
             sticky event IDs for that room.
         """
-        now = round(time.time() * 1000)
+        now = self.clock.time_msec()
         with Measure(
             self.clock, name="sticky_events_by_room", server_name=self.server_name
         ):

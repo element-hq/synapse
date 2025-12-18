@@ -11,7 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import logging
-import time
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -234,7 +233,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     def _get_sticky_event_ids_sent_by_self_txn(
         self, txn: LoggingTransaction, room_id: str, from_stream_pos: int
     ) -> list[str]:
-        now_ms = self._now()
+        now_ms = self.clock.time_msec()
         txn.execute(
             """
             SELECT sticky_events.event_id, sticky_events.sender, events.stream_ordering FROM sticky_events
@@ -288,7 +287,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         txn: LoggingTransaction,
         events: list[EventBase],
     ) -> None:
-        now_ms = self._now()
+        now_ms = self.clock.time_msec()
         # event, expires_at, stream_id
         sticky_events: list[tuple[EventBase, int, int]] = []
         for ev in events:
@@ -607,7 +606,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         await self.db_pool.runInteraction(
             "_delete_expired_sticky_events",
             self._delete_expired_sticky_events_txn,
-            self._now(),
+            self.clock.time_msec(),
         )
 
     def _delete_expired_sticky_events_txn(
@@ -619,9 +618,6 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             """,
             (now,),
         )
-
-    def _now(self) -> int:
-        return round(time.time() * 1000)
 
     def _run_background_cleanup(self) -> Deferred:
         return self.hs.run_as_background_process(
