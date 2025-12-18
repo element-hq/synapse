@@ -109,6 +109,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     async def get_sticky_events_in_rooms(
         self,
         room_ids: Collection[str],
+        *,
         from_id: int,
         to_id: int,
         now: int,

@@ -628,10 +628,10 @@ class SyncHandler:
 
             to_id, sticky_by_room = await self.store.get_sticky_events_in_rooms(
                 room_ids,
-                from_id,
-                now_token.sticky_events_key,
-                now,
-                StickyEvent.MAX_EVENTS_IN_SYNC,
+                from_id=from_id,
+                to_id=now_token.sticky_events_key,
+                now=now,
+                limit=StickyEvent.MAX_EVENTS_IN_SYNC,
             )
             now_token = now_token.copy_and_replace(StreamKeyType.STICKY_EVENTS, to_id)
 

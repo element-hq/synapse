@@ -1002,9 +1002,9 @@ class SlidingSyncExtensionHandler:
         from_id = from_token.stream_token.sticky_events_key if from_token else 0
         _, room_to_event_ids = await self.store.get_sticky_events_in_rooms(
             actual_room_ids,
-            from_id,
-            to_token.sticky_events_key,
-            now,
+            from_id=from_id,
+            to_id=to_token.sticky_events_key,
+            now=now,
             # We set no limit here because the client can control when they get sticky events.
             # Furthermore, it doesn't seem possible to set a limit with the internal API shape
             # as given, as we cannot manipulate the to_token.sticky_events_key sent to the client...
@@ -1013,20 +1013,20 @@ class SlidingSyncExtensionHandler:
         all_sticky_event_ids = {
             ev_id for evs in room_to_event_ids.values() for ev_id in evs
         }
-        event_map = await self.store.get_events(all_sticky_event_ids)
+        unfiltered_events = await self.store.get_events_as_list(all_sticky_event_ids)
         filtered_events = await filter_events_for_client(
             self._storage_controllers,
             sync_config.user.to_string(),
-            list(event_map.values()),
+            unfiltered_events,
             always_include_ids=frozenset(all_sticky_event_ids),
         )
-        event_map = {ev.event_id: ev for ev in filtered_events}
+        filtered_event_map = {ev.event_id: ev for ev in filtered_events}
         return SlidingSyncResult.Extensions.StickyEventsExtension(
             room_id_to_sticky_events={
                 room_id: {
-                    event_map[event_id]
+                    filtered_event_map[event_id]
                     for event_id in sticky_event_ids
-                    if event_id in event_map
+                    if event_id in filtered_event_map
                 }
                 for room_id, sticky_event_ids in room_to_event_ids.items()
             }
