@@ -465,19 +465,11 @@ class RestHelper:
         custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
     ) -> JsonDict:
         if txn_id is None:
-            txn_id = "m%s" % (str(time.time()))
+            txn_id = f"m{time.time()}"
 
-        path = (
-            "/_matrix/client/r0/rooms/%s/send/%s/%s?org.matrix.msc4354.sticky_duration_ms=%d"
-            % (
-                room_id,
-                type,
-                txn_id,
-                duration_ms,
-            )
-        )
+        path = f"/_matrix/client/r0/rooms/{room_id}/send/{type}/{txn_id}?org.matrix.msc4354.sticky_duration_ms={duration_ms}"
         if tok:
-            path = path + "&access_token=%s" % tok
+            path = path + f"&access_token={tok}"
 
         channel = make_request(
             self.reactor,
@@ -488,10 +480,8 @@ class RestHelper:
             custom_headers=custom_headers,
         )
 
-        assert channel.code == expect_code, "Expected: %d, got: %d, resp: %r" % (
-            expect_code,
-            channel.code,
-            channel.result["body"],
+        assert channel.code == expect_code, (
+            f"Expected: {expect_code}, got: {channel.code}, resp: {channel.result['body']!r}"
         )
 
         return channel.json_body
