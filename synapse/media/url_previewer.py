@@ -331,10 +331,16 @@ class UrlPreviewer:
                 # response failed or is incomplete.
                 og_from_html = parse_html_to_open_graph(tree)
 
-                # Compile the Open Graph response by using the scraped
-                # information from the HTML and overlaying any information
-                # from the oEmbed response.
-                og = {**og_from_html, **og_from_oembed}
+                # Compile an Open Graph response by combining the oEmbed response
+                # and the information from the HTML, with information in the HTML
+                # preferred.
+                #
+                # The ordering here is intentional: certain websites (especially
+                # SPA JavaScript-based ones) including Mastodon and YouTube provide
+                # almost complete OpenGraph descriptions but only stubs for oEmbed,
+                # with further oEmbed information being populated with JavaScript,
+                # that Synapse won't execute.
+                og = og_from_oembed | og_from_html
 
                 await self._precache_image_url(user, media_info, og)
             else:
