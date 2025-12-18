@@ -329,12 +329,8 @@ class EventBase(metaclass=abc.ABCMeta):
             return None
         sticky_duration_ms = sticky_obj.get("duration_ms", None)
         # MSC: Valid values are the integer range 0-MAX_DURATION_MS
-        if (
-            type(sticky_duration_ms) is int
-            and sticky_duration_ms >= 0
-            and sticky_duration_ms <= StickyEvent.MAX_DURATION_MS
-        ):
-            return sticky_duration_ms
+        if type(sticky_duration_ms) is int and sticky_duration_ms >= 0:
+            return min(sticky_duration_ms, StickyEvent.MAX_DURATION_MS)
         return None
 
     def __str__(self) -> str:
