@@ -382,21 +382,13 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             EventTypes.PowerLevels,
             EventTypes.Member,
         )
-        critical_auth_types_changed = set()
-        critical_auth_types_changed.update(
-            [
-                typ
-                for typ, _ in state_delta_for_room.to_delete
-                if typ in critical_auth_types
-            ]
-        )
-        critical_auth_types_changed.update(
-            [
-                typ
-                for typ, _ in state_delta_for_room.to_insert
-                if typ in critical_auth_types
-            ]
-        )
+        critical_auth_types_changed = {
+            typ
+            for typ, _ in chain(
+                state_delta_for_room.to_insert, state_delta_for_room.to_delete
+            )
+            if typ in critical_auth_types
+        }
         if len(critical_auth_types_changed) == 0:
             # No change to critical auth events => no way soft failure status could be different.
             return []
