@@ -1008,7 +1008,7 @@ class SlidingSyncExtensionHandler:
             # We set no limit here because the client can control when they get sticky events.
             # Furthermore, it doesn't seem possible to set a limit with the internal API shape
             # as given, as we cannot manipulate the to_token.sticky_events_key sent to the client...
-            limit=0,
+            limit=None,
         )
         all_sticky_event_ids = {
             ev_id for evs in room_to_event_ids.values() for ev_id in evs
