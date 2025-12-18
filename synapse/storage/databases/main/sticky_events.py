@@ -456,16 +456,15 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         # the act of seeing the ban event will cause the old PL event to be in the state delta, meaning
         # we will re-evaluate the sticky event due to the PL changing. We don't need to specially handle
         # this case.
-        events_to_recheck = await self.db_pool.simple_select_list(
+        return await self.db_pool.simple_select_onecol(
             table="sticky_events",
             keyvalues={
                 "room_id": room_id,
                 "soft_failed": True,
             },
-            retcols=("event_id",),
+            retcol="event_id",
             desc="_get_soft_failed_sticky_events_to_recheck",
         )
-        return [event_id for (event_id,) in events_to_recheck]
 
     async def _recheck_soft_failed_events(
         self,
