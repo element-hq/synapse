@@ -192,7 +192,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             limit: The maximum number of rows to return
 
         Returns:
-            list of (stream_id, room_id, event_id) tuples
+            list of (stream_id, room_id, event_id, soft_failed) tuples
         """
         return await self.db_pool.runInteraction(
             "get_updated_sticky_events",
@@ -207,7 +207,10 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     ) -> list[tuple[int, str, str, bool]]:
         txn.execute(
             """
-            SELECT stream_id, room_id, event_id, soft_failed FROM sticky_events WHERE stream_id > ? AND stream_id <= ? LIMIT ?
+            SELECT stream_id, room_id, event_id, soft_failed
+            FROM sticky_events
+            WHERE ? < stream_id AND stream_id <= ?
+            LIMIT ?
             """,
             (from_id, to_id, limit),
         )
