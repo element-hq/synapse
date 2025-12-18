@@ -416,7 +416,8 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                 if event_type == EventTypes.Member
             }
 
-            # pull out senders of sticky events in this room
+            # pull out sticky events that were sent in this room
+            # by those whose membership just changed
             events_to_recheck: list[
                 tuple[str]
             ] = await self.db_pool.simple_select_many_batch(
