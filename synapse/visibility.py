@@ -242,7 +242,7 @@ async def filter_events_for_client(
             if sticky_duration:
                 now = storage.main.clock.time_msec()
                 expires_at = min(cloned.origin_server_ts, now) + sticky_duration
-                if sticky_duration and expires_at > now:
+                if expires_at > now:
                     cloned.unsigned[EventUnsignedContentFields.STICKY_TTL] = (
                         expires_at - now
                     )
