@@ -691,7 +691,7 @@ class FederationServer(FederationBase):
         await self._event_auth_handler.assert_host_in_room(room_id, origin)
 
         extremities = await self.store.get_forward_extremities_for_room(room_id)
-        prev_event_ids = list(e[0] for e in extremities)
+        prev_event_ids = [e[0] for e in extremities]
         return {"prev_events": prev_event_ids}
 
     async def on_make_join_request(

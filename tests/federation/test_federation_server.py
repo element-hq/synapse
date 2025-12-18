@@ -395,7 +395,9 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
 
         # At this stage we should fail to get the extremities because we're not joined
         # and therefore can't see the events (`shared` history visibility).
-        channel = self.make_signed_federation_request("GET", self._make_endpoint_path(room_id))
+        channel = self.make_signed_federation_request(
+            "GET", self._make_endpoint_path(room_id)
+        )
         self.assertEqual(channel.code, HTTPStatus.FORBIDDEN, channel.json_body)
         self.assertEqual(channel.json_body["error"], "Host not in room.")
         self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
@@ -403,9 +405,20 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
         # Now join the room and try again
         # Note: we're expecting a linear room DAG, so there should be just one extremity
         self._remote_join(room_id, room_version)
-        channel = self.make_signed_federation_request("GET", self._make_endpoint_path(room_id))
+        channel = self.make_signed_federation_request(
+            "GET", self._make_endpoint_path(room_id)
+        )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
-        self.assertEqual(channel.json_body["extremities"], [self.get_success(self._storage_controllers.main.get_forward_extremities_for_room(room_id))[0][0]])
+        self.assertEqual(
+            channel.json_body["prev_events"],
+            [
+                self.get_success(
+                    self._storage_controllers.main.get_forward_extremities_for_room(
+                        room_id
+                    )
+                )[0][0]
+            ],
+        )
 
         # ACL the calling server and try again. This should cause an error getting extremities.
         self.helper.send_state(
@@ -419,28 +432,36 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
             tok=tok,
             expect_code=HTTPStatus.OK,
         )
-        channel = self.make_signed_federation_request("GET", self._make_endpoint_path(room_id))
+        channel = self.make_signed_federation_request(
+            "GET", self._make_endpoint_path(room_id)
+        )
         self.assertEqual(channel.code, HTTPStatus.FORBIDDEN, channel.json_body)
         self.assertEqual(channel.json_body["error"], "Server is banned from room")
         self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
 
     @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys()])
-    @override_config({"use_frozen_dicts": True, "experimental_features": {"msc4370_enabled": True}})
+    @override_config(
+        {"use_frozen_dicts": True, "experimental_features": {"msc4370_enabled": True}}
+    )
     def test_get_extremities_with_frozen_dicts(self, room_version: str) -> None:
         """Test GET /extremities with USE_FROZEN_DICTS=True"""
         self._test_get_extremities_common(room_version)
 
     @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys()])
-    @override_config({"use_frozen_dicts": False, "experimental_features": {"msc4370_enabled": True}})
+    @override_config(
+        {"use_frozen_dicts": False, "experimental_features": {"msc4370_enabled": True}}
+    )
     def test_get_extremities_without_frozen_dicts(self, room_version: str) -> None:
         """Test GET /extremities with USE_FROZEN_DICTS=True"""
         self._test_get_extremities_common(room_version)
 
     # note the lack of config-setting stuff on this test.
-    def test_get_extremities_unstable_not_enabled(self):
+    def test_get_extremities_unstable_not_enabled(self) -> None:
         """Test that GET /extremities returns M_UNRECOGNIZED when MSC4370 is not enabled"""
         # We shouldn't even have to create a room - the endpoint should just fail.
-        channel = self.make_signed_federation_request("GET", self._make_endpoint_path("!room:example.org"))
+        channel = self.make_signed_federation_request(
+            "GET", self._make_endpoint_path("!room:example.org")
+        )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.json_body)
         self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
 
