@@ -14,9 +14,7 @@ import logging
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
-    Any,
     Collection,
-    Iterable,
     cast,
 )
 
@@ -89,15 +87,6 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             sequence_name="sticky_events_sequence",
             writers=hs.config.worker.writers.events,
         )
-
-    def process_replication_rows(
-        self,
-        stream_name: str,
-        instance_name: str,
-        token: int,
-        rows: Iterable[Any],
-    ) -> None:
-        super().process_replication_rows(stream_name, instance_name, token, rows)
 
     def process_replication_position(
         self, stream_name: str, instance_name: str, token: int
