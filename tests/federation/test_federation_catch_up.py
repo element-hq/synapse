@@ -473,7 +473,7 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
 
         # now we send a sticky event that we expect to be bundled with the fwd extrem event
         sticky_event_id = self.helper.send_sticky_event(
-            room_1, "m.room.sticky", 60000, tok=u1_token
+            room_1, "m.room.sticky", duration_ms=60_000, tok=u1_token
         )["event_id"]
         # ..and other uninteresting events
         self.helper.send(room_1, "you hear me!!", tok=u1_token)

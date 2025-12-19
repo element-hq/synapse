@@ -457,6 +457,7 @@ class RestHelper:
         self,
         room_id: str,
         type: str,
+        *,
         duration_ms: int,
         content: dict | None = None,
         txn_id: str | None = None,
