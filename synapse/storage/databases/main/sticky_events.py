@@ -247,21 +247,22 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         self, txn: LoggingTransaction, room_id: str, from_stream_pos: int
     ) -> list[str]:
         now_ms = self.clock.time_msec()
+        sender_is_mine_like = "%:" + self.hs.hostname
         txn.execute(
             """
-            SELECT event_id, sticky_events.sender
+            SELECT event_id
             FROM sticky_events
             INNER JOIN events USING (event_id)
             WHERE
                 NOT soft_failed
                 AND expires_at > ?
                 AND sticky_events.room_id = ?
+                AND sticky_events.sender LIKE ?
                 AND events.stream_ordering > ?
             """,
-            (now_ms, room_id, from_stream_pos),
+            (now_ms, room_id, from_stream_pos, sender_is_mine_like),
         )
-        rows = cast(list[tuple[str, str]], txn.fetchall())
-        return [event_id for event_id, sender in rows if self.hs.is_mine_id(sender)]
+        return [cast(str, event_id) for (event_id,) in txn]
 
     async def reevaluate_soft_failed_sticky_events(
         self,
