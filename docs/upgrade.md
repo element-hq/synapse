@@ -117,6 +117,23 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.145.0
+
+## `user_may_join_room` Spam Checker module API callback update
+
+The [`user_may_join_room` spam checker module API
+callback](./modules/spam_checker_callbacks.md#user_may_join_room) was previously
+not called when a server administrator attempted to join a room. This behaviour
+has been updated so that the method is now called. However, server admins will
+still be able to join the room, regardless of the callback's return value.  This
+change purely allows modules to now track join events sent by server
+administrators.
+
+Please review any modules that use this method. Module authors can use the
+`is_user_admin` Module API method to restore any previous functionality that
+relied on joins by server administrators being treated separately from other
+users.
+
 # Upgrading to v1.144.0
 
 ## Worker support for unstable MSC4140 `/restart` endpoint
