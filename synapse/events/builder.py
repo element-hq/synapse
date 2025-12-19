@@ -90,6 +90,9 @@ class EventBuilder:
     content: JsonDict = attr.Factory(dict)
     unsigned: JsonDict = attr.Factory(dict)
     sticky: StickyEventField | None = None
+    """
+    Fields for MSC4354: Sticky Events
+    """
 
     # These only exist on a subset of events, so they raise AttributeError if
     # someone tries to get them when they don't exist.
