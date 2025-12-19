@@ -40,6 +40,8 @@ _First introduced in Synapse v1.37.0_
 
 _Changed in Synapse v1.61.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
 
+_Changed in Synapse v1.145.0: Previously this method would not be called if the requester was a server administrator._
+
 ```python
 async def user_may_join_room(user: str, room: str, is_invited: bool) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
@@ -49,9 +51,6 @@ Called when a user is trying to join a room. The user is represented by their Ma
 `!room:example.com`). The module is also given a boolean to indicate whether the user
 currently has a pending invite in the room.
 
-This callback isn't called if the join is performed by a server administrator, or in the
-context of a room creation.
-
 The callback must return one of:
   - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
     decide to reject it.
@@ -59,6 +58,15 @@ The callback must return one of:
     of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
   - (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
   - (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
+
+Joins of Server administrators may not be blocked by this callback. This method
+will be called in the case of a server administrator's join, but the return
+value will be ignored.
+
+This method will not be called for the room creator's join event
+generated during room creation, as blocking said join would result in a broken
+room. Use [`user_may_create_room`](#user_may_create_room) to block (or log)
+the creation of rooms (which always imply a join by the creator) instead.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
