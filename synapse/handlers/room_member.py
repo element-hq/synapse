@@ -1036,23 +1036,32 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 bypass_spam_checker = await self.auth.is_server_admin(requester)
 
             inviter = await self._get_inviter(target.to_string(), room_id)
-            if (
-                not bypass_spam_checker
-                # We assume that if the spam checker allowed the user to create
-                # a room then they're allowed to join it.
-                and not new_room
-            ):
-                spam_check = (
+
+            # Assume that if the spam checker allowed the user to create
+            # a room, then they're allowed to join it.
+            #
+            # We do skip the spam check in this case, as blocking the join for a
+            # room creator will result in a broken room.
+            if not new_room:
+                # Make sure we always invoke the spam checker, even if we've already
+                # determined the requester may bypass it. This allows module authors
+                # to still track join attempts.
+                spam_check_result = (
                     await self._spam_checker_module_callbacks.user_may_join_room(
                         target.to_string(), room_id, is_invited=inviter is not None
                     )
                 )
-                if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                if (
+                    # Did the spam checker block the join?
+                    spam_check_result != self._spam_checker_module_callbacks.NOT_SPAM
+                    # Is the requester allowed to bypass?
+                    and not bypass_spam_checker
+                ):
                     raise SynapseError(
                         403,
                         "Not allowed to join this room",
-                        errcode=spam_check[0],
-                        additional_fields=spam_check[1],
+                        errcode=spam_check_result[0],
+                        additional_fields=spam_check_result[1],
                     )
 
             # Check if a remote join should be performed.
