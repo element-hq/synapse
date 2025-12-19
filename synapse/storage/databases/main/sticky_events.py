@@ -21,7 +21,7 @@ from typing import (
 from twisted.internet.defer import Deferred
 
 from synapse import event_auth
-from synapse.api.constants import EventTypes, StickyEvent
+from synapse.api.constants import EventTypes
 from synapse.api.errors import AuthError
 from synapse.events import EventBase
 from synapse.events.snapshot import EventPersistencePair
@@ -315,21 +315,16 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             # We can't persist outlier sticky events as we don't know the room state at that event
             if ev.internal_metadata.is_outlier():
                 continue
-            # MSC: The presence of sticky.duration_ms with a valid value makes the event “sticky”
             sticky_duration = ev.sticky_duration()
-            if sticky_duration:
-                # MSC: The start time is min(now, origin_server_ts).
-                # This ensures that malicious origin timestamps cannot specify start times in the future.
-                # Calculate the end time as start_time + min(sticky.duration_ms, MAX_DURATION_MS).
-                expires_at = min(ev.origin_server_ts, now_ms) + min(
-                    ev.get_dict()[StickyEvent.FIELD_NAME]["duration_ms"],
-                    StickyEvent.MAX_DURATION_MS,
+            if sticky_duration is None:
+                continue
+            # Calculate the end time as start_time + effecitve sticky duration
+            expires_at = min(ev.origin_server_ts, now_ms) + sticky_duration
+            # Filter out already expired sticky events
+            if expires_at > now_ms:
+                sticky_events.append(
+                    (ev, expires_at, self._sticky_events_id_gen.get_next_txn(txn))
                 )
-                # filter out already expired sticky events
-                if expires_at > now_ms:
-                    sticky_events.append(
-                        (ev, expires_at, self._sticky_events_id_gen.get_next_txn(txn))
-                    )
         if len(sticky_events) == 0:
             return
         logger.info(

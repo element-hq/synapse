@@ -324,6 +324,13 @@ class EventBase(metaclass=abc.ABCMeta):
         self._dict = freeze(self._dict)
 
     def sticky_duration(self) -> int | None:
+        """
+        Returns the effective sticky duration of this event, or None
+        if the event does not have a sticky duration.
+        (Sticky Events are a MSC4354 feature.)
+
+        Clamps the sticky duration to the maximum allowed duration.
+        """
         sticky_obj = self.get_dict().get(StickyEvent.FIELD_NAME, None)
         if type(sticky_obj) is not dict:
             return None
