@@ -376,4 +376,8 @@ class StickyEvent:
     QUERY_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
     FIELD_NAME: Final = "msc4354_sticky"
     MAX_DURATION_MS: Final = 3600000  # 1 hour
+    """
+    Maximum stickiness duration as specified in MSC4354.
+    Ensures that data in the /sync response can go down and not grow unbounded.
+    """
     MAX_EVENTS_IN_SYNC: Final = 100
