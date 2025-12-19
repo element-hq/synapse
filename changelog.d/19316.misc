@@ -1,0 +1,1 @@
+Call `user_may_join_room` in the case of a server administrator attempting to join a room.
