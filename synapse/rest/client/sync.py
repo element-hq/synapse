@@ -618,6 +618,7 @@ class SyncRestServlet(RestServlet):
             result["ephemeral"] = {"events": ephemeral_events}
             result["unread_notifications"] = room.unread_notifications
             if room.sticky:
+                # TODO Are we meant to peel out events from the timeline here?
                 serialized_sticky = await self._event_serializer.serialize_events(
                     room.sticky, time_now, config=serialize_options
                 )
@@ -1108,7 +1109,8 @@ class SlidingSyncRestServlet(RestServlet):
         sticky_events: SlidingSyncResult.Extensions.StickyEventsExtension,
     ) -> JsonDict:
         time_now = self.clock.time_msec()
-        # Same as SSS timelines. TODO: support more options like /sync does.
+        # Same as SSS timelines.
+        #
         serialize_options = SerializeEventConfig(
             event_format=format_event_for_client_v2_without_room_id,
             requester=requester,
