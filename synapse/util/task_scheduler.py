@@ -336,11 +336,9 @@ class TaskScheduler:
         if not task:
             return
 
-        if task.status == TaskStatus.SCHEDULED:
-            await self.update_task(id, status=TaskStatus.CANCELLED)
-            return
-
-        if not task.status == TaskStatus.ACTIVE:
+        if not (
+            task.status == TaskStatus.ACTIVE or task.status == TaskStatus.SCHEDULED
+        ):
             return
 
         if self._run_background_tasks:
