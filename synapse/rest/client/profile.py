@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, SynapseError
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -67,22 +68,26 @@ class ProfileRestServlet(RestServlet):
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
 
+        self._per_user_limiter = Ratelimiter(
+            store=hs.get_datastores().main,
+            clock=hs.get_clock(),
+            cfg=hs.config.ratelimiting.rc_profile,
+        )
+
     async def on_GET(
         self, request: SynapseRequest, user_id: str
     ) -> tuple[int, JsonDict]:
-        requester_user = None
-
-        if self.hs.config.server.require_auth_for_profile_requests:
-            requester = await self.auth.get_user_by_req(request)
-            requester_user = requester.user
-
         if not UserID.is_valid(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
             )
 
         user = UserID.from_string(user_id)
-        await self.profile_handler.check_profile_query_allowed(user, requester_user)
+
+        requester = await self.auth.get_user_by_req(request)
+        await self._per_user_limiter.ratelimit(requester)
+        if self.hs.config.server.require_auth_for_profile_requests:
+            await self.profile_handler.check_profile_query_allowed(user, requester.user)
 
         ret = await self.profile_handler.get_profile(user_id)
 
@@ -116,15 +121,15 @@ class ProfileFieldRestServlet(RestServlet):
                 )
             )
 
+        self._per_user_limiter = Ratelimiter(
+            store=hs.get_datastores().main,
+            clock=hs.get_clock(),
+            cfg=hs.config.ratelimiting.rc_profile,
+        )
+
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> tuple[int, JsonDict]:
-        requester_user = None
-
-        if self.hs.config.server.require_auth_for_profile_requests:
-            requester = await self.auth.get_user_by_req(request)
-            requester_user = requester.user
-
         if not UserID.is_valid(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
@@ -143,7 +148,11 @@ class ProfileFieldRestServlet(RestServlet):
             )
 
         user = UserID.from_string(user_id)
-        await self.profile_handler.check_profile_query_allowed(user, requester_user)
+
+        requester = await self.auth.get_user_by_req(request)
+        await self._per_user_limiter.ratelimit(requester)
+        if self.hs.config.server.require_auth_for_profile_requests:
+            await self.profile_handler.check_profile_query_allowed(user, requester.user)
 
         if field_name == ProfileFields.DISPLAYNAME:
             field_value: JsonValue = await self.profile_handler.get_displayname(user)
