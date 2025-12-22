@@ -47,7 +47,7 @@ from synapse.types import (
     ThreadSubscriptionsToken,
     UserID,
 )
-from synapse.types.rest.client import SlidingSyncBody
+from synapse.types.rest.client import SlidingSyncBody, SlidingSyncStickyEventsToken
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -396,12 +396,31 @@ class SlidingSyncResult:
                     or bool(self.prev_batch)
                 )
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class StickyEventsExtension:
+            """The Sticky Events extension (MSC4354)
+
+            Attributes:
+                room_id_to_sticky_events: map (room_id -> [unexpired_sticky_events])
+                    The events are ordered by the sticky events stream.
+
+                    The events haven't yet been deduplicated to remove
+                    events that also appear in the timeline.
+            """
+
+            room_id_to_sticky_events: Mapping[str, list[EventBase]]
+            next_batch: SlidingSyncStickyEventsToken
+
+            def __bool__(self) -> bool:
+                return bool(self.room_id_to_sticky_events)
+
         to_device: ToDeviceExtension | None = None
         e2ee: E2eeExtension | None = None
         account_data: AccountDataExtension | None = None
         receipts: ReceiptsExtension | None = None
         typing: TypingExtension | None = None
         thread_subscriptions: ThreadSubscriptionsExtension | None = None
+        sticky_events: StickyEventsExtension | None = None
 
         def __bool__(self) -> bool:
             return bool(
@@ -411,6 +430,7 @@ class SlidingSyncResult:
                 or self.receipts
                 or self.typing
                 or self.thread_subscriptions
+                or self.sticky_events
             )
 
     next_pos: SlidingSyncStreamToken
