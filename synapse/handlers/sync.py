@@ -37,6 +37,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    StickyEvent,
 )
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
@@ -146,6 +147,7 @@ class JoinedSyncResult:
     state: StateMap[EventBase]
     ephemeral: list[JsonDict]
     account_data: list[JsonDict]
+    sticky: list[EventBase]
     unread_notifications: JsonDict
     unread_thread_notifications: JsonDict
     summary: JsonDict | None
@@ -156,7 +158,11 @@ class JoinedSyncResult:
         to tell if room needs to be part of the sync result.
         """
         return bool(
-            self.timeline or self.state or self.ephemeral or self.account_data
+            self.timeline
+            or self.state
+            or self.ephemeral
+            or self.account_data
+            or self.sticky
             # nb the notification count does not, er, count: if there's nothing
             # else in the result, we don't need to send it.
         )
@@ -595,6 +601,41 @@ class SyncHandler:
                 ephemeral_by_room.setdefault(room_id, []).append(event)
 
         return now_token, ephemeral_by_room
+
+    async def sticky_events_by_room(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        now_token: StreamToken,
+        since_token: StreamToken | None = None,
+    ) -> tuple[StreamToken, dict[str, list[str]]]:
+        """Get the sticky events for each room the user is in
+        Args:
+            sync_result_builder
+            now_token: Where the server is currently up to.
+            since_token: Where the server was when the client last synced.
+        Returns:
+            A tuple of the now StreamToken, updated to reflect the which sticky
+            events are included, and a dict mapping from room_id to a list
+            of sticky event IDs for that room (in sticky event stream order).
+        """
+        now = self.clock.time_msec()
+        with Measure(
+            self.clock, name="sticky_events_by_room", server_name=self.server_name
+        ):
+            from_id = since_token.sticky_events_key if since_token else 0
+
+            room_ids = sync_result_builder.joined_room_ids
+
+            to_id, sticky_by_room = await self.store.get_sticky_events_in_rooms(
+                room_ids,
+                from_id=from_id,
+                to_id=now_token.sticky_events_key,
+                now=now,
+                limit=StickyEvent.MAX_EVENTS_IN_SYNC,
+            )
+            now_token = now_token.copy_and_replace(StreamKeyType.STICKY_EVENTS, to_id)
+
+        return now_token, sticky_by_room
 
     async def _load_filtered_recents(
         self,
@@ -2163,6 +2204,13 @@ class SyncHandler:
             )
             sync_result_builder.now_token = now_token
 
+        sticky_by_room: dict[str, list[str]] = {}
+        if self.hs_config.experimental.msc4354_enabled:
+            now_token, sticky_by_room = await self.sticky_events_by_room(
+                sync_result_builder, now_token, since_token
+            )
+            sync_result_builder.now_token = now_token
+
         # 2. We check up front if anything has changed, if it hasn't then there is
         # no point in going further.
         if not sync_result_builder.full_state:
@@ -2173,7 +2221,7 @@ class SyncHandler:
                     tags_by_room = await self.store.get_updated_tags(
                         user_id, since_token.account_data_key
                     )
-                    if not tags_by_room:
+                    if not tags_by_room and not sticky_by_room:
                         logger.debug("no-oping sync")
                         return set(), set()
 
@@ -2211,6 +2259,7 @@ class SyncHandler:
                 ephemeral=ephemeral_by_room.get(room_entry.room_id, []),
                 tags=tags_by_room.get(room_entry.room_id),
                 account_data=account_data_by_room.get(room_entry.room_id, {}),
+                sticky_event_ids=sticky_by_room.get(room_entry.room_id, []),
                 always_include=sync_result_builder.full_state,
             )
             logger.debug("Generated room entry for %s", room_entry.room_id)
@@ -2597,6 +2646,7 @@ class SyncHandler:
         ephemeral: list[JsonDict],
         tags: Mapping[str, JsonMapping] | None,
         account_data: Mapping[str, JsonMapping],
+        sticky_event_ids: list[str],
         always_include: bool = False,
     ) -> None:
         """Populates the `joined` and `archived` section of `sync_result_builder`
@@ -2626,6 +2676,8 @@ class SyncHandler:
             tags: List of *all* tags for room, or None if there has been
                 no change.
             account_data: List of new account data for room
+            sticky_event_ids: MSC4354 sticky events in the room, if any.
+                In sticky event stream order.
             always_include: Always include this room in the sync response,
                 even if empty.
         """
@@ -2636,7 +2688,13 @@ class SyncHandler:
         events = room_builder.events
 
         # We want to shortcut out as early as possible.
-        if not (always_include or account_data or ephemeral or full_state):
+        if not (
+            always_include
+            or account_data
+            or ephemeral
+            or full_state
+            or sticky_event_ids
+        ):
             if events == [] and tags is None:
                 return
 
@@ -2728,6 +2786,7 @@ class SyncHandler:
                 or account_data_events
                 or ephemeral
                 or full_state
+                or sticky_event_ids
             ):
                 return
 
@@ -2774,6 +2833,25 @@ class SyncHandler:
 
             if room_builder.rtype == "joined":
                 unread_notifications: dict[str, int] = {}
+                sticky_events: list[EventBase] = []
+                if sticky_event_ids:
+                    # remove sticky events that are in the timeline, else we will needlessly duplicate
+                    # events. This is particularly important given the risk of sticky events spam since
+                    # anyone can send sticky events, so halving the bandwidth on average for each sticky
+                    # event is helpful.
+                    timeline = {ev.event_id for ev in batch.events}
+                    # Must preserve sticky event stream order
+                    sticky_event_ids = [
+                        e for e in sticky_event_ids if e not in timeline
+                    ]
+                    if sticky_event_ids:
+                        # Fetch and filter the sticky events
+                        sticky_events = await filter_and_transform_events_for_client(
+                            self._storage_controllers,
+                            sync_result_builder.sync_config.user.to_string(),
+                            await self.store.get_events_as_list(sticky_event_ids),
+                            always_include_ids=frozenset(sticky_event_ids),
+                        )
                 room_sync = JoinedSyncResult(
                     room_id=room_id,
                     timeline=batch,
@@ -2784,6 +2862,7 @@ class SyncHandler:
                     unread_thread_notifications={},
                     summary=summary,
                     unread_count=0,
+                    sticky=sticky_events,
                 )
 
                 if room_sync or always_include:
