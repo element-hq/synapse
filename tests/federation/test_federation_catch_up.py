@@ -946,3 +946,29 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         transaction = self.run_transaction(per_dest_queue)
         assert transaction is not None
         self.assertEqual([pdu.event_id for pdu in transaction.pdus], [sticky_id])
+
+    def test_historical_sticky_events_sent_to_newly_joined_server(self) -> None:
+        """
+        Tests that historical sticky events are sent (via `/send`) to a newly-joined server.
+        """
+        self.register_user("u1", "you the one")
+        u1_token = self.login("u1", "you the one")
+        room_id = self.helper.create_room_as("u1", tok=u1_token)
+        self._send_sticky(room_id, "sticky before join", u1_token)
+
+        # (Sanity-check) The federation sender does nothing because the server isn't joined the the room
+        self.reactor.advance(0)
+        self.assertEqual(self.pdus, [])
+
+        # host2 joins the room
+        self.get_success(
+            event_injection.inject_member_event(self.hs, room_id, "@user:host2", "join")
+        )
+
+        # The event is sent to the newly joined server via /send
+        self.reactor.advance(0)
+        # (PDUs don't carry an `event_id` in room v3+, so match on content)
+        self.assertIn(
+            "sticky before join",
+            [pdu["content"].get("body") for pdu in self.pdus],
+        )

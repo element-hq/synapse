@@ -1006,6 +1006,66 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             _get_backlogged_sticky_events_for_destination_txn,
         )
 
+    def mark_backlogged_sticky_events_for_newly_joined_servers_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        destinations: Set[str],
+    ) -> None:
+        """
+        For the given `destinations`, update the `destination_rooms_sticky_events_backlog`
+        table to mark this room as backlogged for those destinations if it contains
+        any sticky events.
+
+        This lets us remember that we need to send historical sticky events to the server.
+        """
+
+        if not destinations:
+            return
+
+        now_millis = self.clock.time_msec()
+
+        # Find the first unexpired, locally-originating sticky event in the room;
+        # the newly-joined servers need to be sent everything from there onwards.
+        txn.execute(
+            """
+            SELECT MIN(stream_id)
+            FROM sticky_events
+            WHERE room_id = ?
+                AND ? < expires_at
+                -- filter to locally-originating sticky events
+                AND sender LIKE ?
+            """,
+            (room_id, now_millis, user_is_local_like_pattern(self.hs)),
+        )
+        row = txn.fetchone()
+        # MIN() returns NULL over no rows
+        assert row is not None
+        min_sticky_events_stream_id: int | None
+        (min_sticky_events_stream_id,) = row
+
+        if min_sticky_events_stream_id is None:
+            # No sticky events in the room to send
+            return
+
+        txn.execute_batch(
+            """
+            INSERT INTO destination_rooms_sticky_events_backlog AS backlog
+                (destination, room_id, sticky_events_stream_position)
+            VALUES (?, ?, ?)
+            ON CONFLICT (destination, room_id)
+            DO
+                UPDATE SET sticky_events_stream_position = EXCLUDED.sticky_events_stream_position
+                -- Only move the position _backwards_
+                -- (Not sure there is a concrete race this fixes, but seems like good hygiene.)
+                WHERE EXCLUDED.sticky_events_stream_position < backlog.sticky_events_stream_position
+            """,
+            [
+                (destination, room_id, min_sticky_events_stream_id)
+                for destination in destinations
+            ],
+        )
+
     async def mark_backlogged_sticky_events_after_catchup_transaction(
         self,
         destination: str,
