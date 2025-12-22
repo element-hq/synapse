@@ -128,6 +128,79 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         )
         return cast(list[tuple[int, str, str, bool]], txn.fetchall())
 
+    def insert_sticky_events_txn(
+        self,
+        txn: LoggingTransaction,
+        events: list[EventBase],
+    ) -> None:
+        now_ms = self.clock.time_msec()
+        # event, expires_at
+        sticky_events: list[tuple[EventBase, int]] = []
+        for ev in events:
+            # MSC: Note: policy servers and other similar antispam techniques still apply to these events.
+            if ev.internal_metadata.policy_server_spammy:
+                continue
+            # We shouldn't be passed rejected events, but if we do, we filter them out too.
+            if ev.rejected_reason is not None:
+                continue
+            # We can't persist outlier sticky events as we don't know the room state at that event
+            if ev.internal_metadata.is_outlier():
+                continue
+            sticky_duration = ev.sticky_duration()
+            if sticky_duration is None:
+                continue
+            # Calculate the end time as start_time + effecitve sticky duration
+            expires_at = min(ev.origin_server_ts, now_ms) + sticky_duration
+            # Filter out already expired sticky events
+            if expires_at <= now_ms:
+                continue
+
+            sticky_events.append((ev, expires_at))
+
+        if len(sticky_events) == 0:
+            return
+
+        logger.info(
+            "inserting %d sticky events in room %s",
+            len(sticky_events),
+            sticky_events[0][0].room_id,
+        )
+
+        # Generate stream_ids in one go
+        sticky_events_with_ids = zip(
+            sticky_events,
+            self._sticky_events_id_gen.get_next_mult_txn(txn, len(sticky_events)),
+            strict=True,
+        )
+
+        self.db_pool.simple_insert_many_txn(
+            txn,
+            "sticky_events",
+            keys=(
+                "instance_name",
+                "stream_id",
+                "room_id",
+                "event_id",
+                "event_stream_ordering",
+                "sender",
+                "expires_at",
+                "soft_failed",
+            ),
+            values=[
+                (
+                    self._instance_name,
+                    stream_id,
+                    ev.room_id,
+                    ev.event_id,
+                    ev.internal_metadata.stream_ordering,
+                    ev.sender,
+                    expires_at,
+                    ev.internal_metadata.is_soft_failed(),
+                )
+                for (ev, expires_at), stream_id in sticky_events_with_ids
+            ],
+        )
+
     async def _delete_expired_sticky_events(self) -> None:
         logger.info("delete_expired_sticky_events")
         await self.db_pool.runInteraction(
