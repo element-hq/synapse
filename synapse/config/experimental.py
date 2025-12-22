@@ -597,5 +597,8 @@ class ExperimentalConfig(Config):
         # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
 
+        # MSC4354: Sticky Events
+        self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
+
         # MSC4380: Invite blocking
         self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
