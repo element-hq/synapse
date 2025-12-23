@@ -26,3 +26,8 @@ c4268e3da64f1abb5b31deaeb5769adb6510c0a7
 # Update black to 23.1.0 (https://github.com/matrix-org/synapse/pull/15103)
 9bb2eac71962970d02842bca441f4bcdbbf93a11
 
+# Use type hinting generics in standard collections (https://github.com/element-hq/synapse/pull/19046)
+fc244bb592aa481faf28214a2e2ce3bb4e95d990
+
+# Write union types as X | Y where possible (https://github.com/element-hq/synapse/pull/19111)
+fcac7e0282b074d4bd3414d1c9c181e9701875d9

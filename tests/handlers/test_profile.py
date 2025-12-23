@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Awaitable, Callable, Dict
+from typing import Any, Awaitable, Callable
 from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
@@ -30,7 +30,7 @@ from synapse.api.errors import AuthError, SynapseError
 from synapse.rest import admin
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -44,7 +44,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.mock_federation = AsyncMock()
         self.mock_registry = Mock()
 
-        self.query_handlers: Dict[str, Callable[[dict], Awaitable[JsonDict]]] = {}
+        self.query_handlers: dict[str, Callable[[dict], Awaitable[JsonDict]]] = {}
 
         def register_query_handler(
             query_type: str, handler: Callable[[dict], Awaitable[JsonDict]]
@@ -377,7 +377,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.get_success(self.handler.check_avatar_size_and_mime_type(remote_mxc))
         )
 
-    def _setup_local_files(self, names_and_props: Dict[str, Dict[str, Any]]) -> None:
+    def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 
         Args:

@@ -13,17 +13,19 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
-from synapse._pydantic_compat import (
+from pydantic import (
     AnyHttpUrl,
     Field,
     FilePath,
     StrictBool,
     StrictStr,
     ValidationError,
-    validator,
+    model_validator,
 )
+from typing_extensions import Self
+
 from synapse.config.experimental import read_secret_from_file_once
 from synapse.types import JsonDict
 from synapse.util.pydantic_models import ParseModel
@@ -33,27 +35,25 @@ from ._base import Config, ConfigError, RootConfig
 
 class MasConfigModel(ParseModel):
     enabled: StrictBool = False
-    endpoint: AnyHttpUrl = Field(default="http://localhost:8080")
-    secret: Optional[StrictStr] = Field(default=None)
-    secret_path: Optional[FilePath] = Field(default=None)
+    endpoint: AnyHttpUrl = AnyHttpUrl("http://localhost:8080")
+    secret: StrictStr | None = Field(default=None)
+    # We set `strict=False` to allow `str` instances.
+    secret_path: FilePath | None = Field(default=None, strict=False)
 
-    @validator("secret")
-    def validate_secret_is_set_if_enabled(cls, v: Any, values: dict) -> Any:
-        if values.get("enabled", False) and not values.get("secret_path") and not v:
+    @model_validator(mode="after")
+    def verify_secret(self) -> Self:
+        if not self.enabled:
+            return self
+        if not self.secret and not self.secret_path:
             raise ValueError(
-                "You must set a `secret` or `secret_path` when enabling Matrix Authentication Service integration."
+                "You must set a `secret` or `secret_path` when enabling the Matrix "
+                "Authentication Service integration."
             )
-
-        return v
-
-    @validator("secret_path")
-    def validate_secret_path_is_set_if_enabled(cls, v: Any, values: dict) -> Any:
-        if values.get("secret"):
+        if self.secret and self.secret_path:
             raise ValueError(
                 "`secret` and `secret_path` cannot be set at the same time."
             )
-
-        return v
+        return self
 
 
 class MasConfig(Config):

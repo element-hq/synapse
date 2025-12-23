@@ -20,7 +20,7 @@
 #
 
 from http import HTTPStatus
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import (
     Codes,
@@ -65,9 +65,9 @@ class PushRuleRestServlet(RestServlet):
             hs.get_instance_name() in hs.config.worker.writers.push_rules
         )
         self._push_rules_handler = hs.get_push_rules_handler()
-        self._push_rule_linearizer = Linearizer(name="push_rules")
+        self._push_rule_linearizer = Linearizer(name="push_rules", clock=hs.get_clock())
 
-    async def on_PUT(self, request: SynapseRequest, path: str) -> Tuple[int, JsonDict]:
+    async def on_PUT(self, request: SynapseRequest, path: str) -> tuple[int, JsonDict]:
         if not self._is_push_worker:
             raise Exception("Cannot handle PUT /push_rules on worker")
 
@@ -79,7 +79,7 @@ class PushRuleRestServlet(RestServlet):
 
     async def handle_put(
         self, request: SynapseRequest, path: str, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         spec = _rule_spec_from_path(path.split("/"))
         try:
             priority_class = _priority_class_from_spec(spec)
@@ -140,7 +140,7 @@ class PushRuleRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, path: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         if not self._is_push_worker:
             raise Exception("Cannot handle DELETE /push_rules on worker")
 
@@ -155,7 +155,7 @@ class PushRuleRestServlet(RestServlet):
         request: SynapseRequest,
         path: str,
         user_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         spec = _rule_spec_from_path(path.split("/"))
 
         namespaced_rule_id = f"global/{spec.template}/{spec.rule_id}"
@@ -170,7 +170,7 @@ class PushRuleRestServlet(RestServlet):
             else:
                 raise
 
-    async def on_GET(self, request: SynapseRequest, path: str) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest, path: str) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         requester.user.to_string()
 
@@ -196,7 +196,7 @@ class PushRuleRestServlet(RestServlet):
             raise UnrecognizedRequestError()
 
 
-def _rule_spec_from_path(path: List[str]) -> RuleSpec:
+def _rule_spec_from_path(path: list[str]) -> RuleSpec:
     """Turn a sequence of path components into a rule spec
 
     Args:
@@ -240,7 +240,7 @@ def _rule_spec_from_path(path: List[str]) -> RuleSpec:
 
 def _rule_tuple_from_request_object(
     rule_template: str, rule_id: str, req_obj: JsonDict
-) -> Tuple[List[JsonDict], List[Union[str, JsonDict]]]:
+) -> tuple[list[JsonDict], list[str | JsonDict]]:
     if rule_template == "postcontent":
         # postcontent is from MSC4306, which says that clients
         # cannot create their own postcontent rules right now.
@@ -279,7 +279,7 @@ def _rule_tuple_from_request_object(
     return conditions, actions
 
 
-def _filter_ruleset_with_path(ruleset: JsonDict, path: List[str]) -> JsonDict:
+def _filter_ruleset_with_path(ruleset: JsonDict, path: list[str]) -> JsonDict:
     if path == []:
         raise UnrecognizedRequestError(
             PushRuleRestServlet.SLIGHTLY_PEDANTIC_TRAILING_SLASH_ERROR

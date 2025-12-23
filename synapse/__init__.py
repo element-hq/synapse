@@ -24,7 +24,7 @@
 
 import os
 import sys
-from typing import Any, Dict
+from typing import Any
 
 from PIL import ImageFile
 
@@ -39,8 +39,8 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Note that we use an (unneeded) variable here so that pyupgrade doesn't nuke the
 # if-statement completely.
 py_version = sys.version_info
-if py_version < (3, 9):
-    print("Synapse requires Python 3.9 or above.")
+if py_version < (3, 10):
+    print("Synapse requires Python 3.10 or above.")
     sys.exit(1)
 
 # Allow using the asyncio reactor via env var.
@@ -70,7 +70,7 @@ try:
     from canonicaljson import register_preserialisation_callback
     from immutabledict import immutabledict
 
-    def _immutabledict_cb(d: immutabledict) -> Dict[str, Any]:
+    def _immutabledict_cb(d: immutabledict) -> dict[str, Any]:
         try:
             return d._dict
         except Exception:

@@ -20,14 +20,14 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from prometheus_client import Counter, Histogram
 
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.util import json_decoder, json_encoder
+from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
     from txredisapi import ConnectionHandler
@@ -73,7 +73,7 @@ class ExternalCache:
         self.server_name = hs.hostname
 
         if hs.config.redis.redis_enabled:
-            self._redis_connection: Optional["ConnectionHandler"] = (
+            self._redis_connection: "ConnectionHandler" | None = (
                 hs.get_outbound_redis_connection()
             )
         else:
@@ -121,7 +121,7 @@ class ExternalCache:
                     )
                 )
 
-    async def get(self, cache_name: str, key: str) -> Optional[Any]:
+    async def get(self, cache_name: str, key: str) -> Any | None:
         """Look up a key/value in the named cache."""
 
         if self._redis_connection is None:

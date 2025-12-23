@@ -31,7 +31,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

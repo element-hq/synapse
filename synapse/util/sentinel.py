@@ -12,9 +12,10 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-# Time-based constants.
-#
-# Laying these out incrementally, even if only some are required, helps with
-# readability and catching bugs.
-ONE_MINUTE_SECONDS = 60
-ONE_HOUR_SECONDS = 60 * ONE_MINUTE_SECONDS
+import enum
+
+
+class Sentinel(enum.Enum):
+    # defining a sentinel in this way allows mypy to correctly handle the
+    # type of a dictionary lookup and subsequent type narrowing.
+    UNSET_SENTINEL = object()

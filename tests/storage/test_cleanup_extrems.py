@@ -31,7 +31,7 @@ from synapse.server import HomeServer
 from synapse.storage import prepare_database
 from synapse.storage.types import Cursor
 from synapse.types import UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

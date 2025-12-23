@@ -17,7 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Tuple
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import quote
 
@@ -32,7 +32,7 @@ from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import JsonDict, UserID, UserProfile, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.storage.test_user_directory import GetUserDirectoryTables
@@ -313,7 +313,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
 
     def _create_rooms_and_inject_memberships(
         self, creator: str, token: str, joiner: str
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """Create a public and private room as a normal user.
         Then get the `joiner` into those rooms.
         """

@@ -23,7 +23,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.types import RoomAlias, RoomID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

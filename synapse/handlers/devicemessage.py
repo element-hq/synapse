@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from canonicaljson import encode_canonical_json
 
@@ -41,7 +41,7 @@ from synapse.logging.opentracing import (
     set_tag,
 )
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, get_domain_from_id
-from synapse.util import json_encoder
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -165,7 +165,7 @@ class DeviceMessageHandler:
         self,
         message_type: str,
         sender_user_id: str,
-        by_device: Dict[str, Dict[str, Any]],
+        by_device: dict[str, dict[str, Any]],
     ) -> None:
         """Checks inbound device messages for unknown remote devices, and if
         found marks the remote cache for the user as stale.
@@ -214,7 +214,7 @@ class DeviceMessageHandler:
         self,
         requester: Requester,
         message_type: str,
-        messages: Dict[str, Dict[str, JsonDict]],
+        messages: dict[str, dict[str, JsonDict]],
     ) -> None:
         """
         Handle a request from a user to send to-device message(s).
@@ -229,7 +229,7 @@ class DeviceMessageHandler:
         set_tag(SynapseTags.TO_DEVICE_TYPE, message_type)
         set_tag(SynapseTags.TO_DEVICE_SENDER, sender_user_id)
         local_messages = {}
-        remote_messages: Dict[str, Dict[str, Dict[str, JsonDict]]] = {}
+        remote_messages: dict[str, dict[str, dict[str, JsonDict]]] = {}
         for user_id, by_device in messages.items():
             if not UserID.is_valid(user_id):
                 logger.warning(
@@ -322,7 +322,7 @@ class DeviceMessageHandler:
         self,
         requester: Requester,
         device_id: str,
-        since_token: Optional[str],
+        since_token: str | None,
         limit: int,
     ) -> JsonDict:
         """Fetches up to `limit` events sent to `device_id` starting from `since_token`
@@ -409,9 +409,9 @@ class DeviceMessageHandler:
 def get_device_message_edu_contents(
     sender_user_id: str,
     message_type: str,
-    messages: Dict[str, Dict[str, JsonDict]],
-    context: Dict[str, Any],
-) -> List[JsonDict]:
+    messages: dict[str, dict[str, JsonDict]],
+    context: dict[str, Any],
+) -> list[JsonDict]:
     """
     This function takes a dictionary of to-device messages and splits them into several
     EDUs by recipient if necessary as the overall request can overrun the
@@ -508,7 +508,7 @@ def get_device_message_edu_contents(
 def create_new_to_device_edu_content(
     sender_user_id: str,
     message_type: str,
-    context: Dict[str, Any],
+    context: dict[str, Any],
     message_id: str = random_string(16),
 ) -> JsonDict:
     """

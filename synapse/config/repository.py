@@ -21,7 +21,7 @@
 
 import logging
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import attr
 
@@ -80,8 +80,8 @@ class MediaStorageProviderConfig:
 
 
 def parse_thumbnail_requirements(
-    thumbnail_sizes: List[JsonDict],
-) -> Dict[str, Tuple[ThumbnailRequirement, ...]]:
+    thumbnail_sizes: list[JsonDict],
+) -> dict[str, tuple[ThumbnailRequirement, ...]]:
     """Takes a list of dictionaries with "width", "height", and "method" keys
     and creates a map from image media types to the thumbnail size, thumbnailing
     method, and thumbnail media type to precalculate
@@ -92,7 +92,7 @@ def parse_thumbnail_requirements(
     Returns:
         Dictionary mapping from media type string to list of ThumbnailRequirement.
     """
-    requirements: Dict[str, List[ThumbnailRequirement]] = {}
+    requirements: dict[str, list[ThumbnailRequirement]] = {}
     for size in thumbnail_sizes:
         width = size["width"]
         height = size["height"]
@@ -120,11 +120,19 @@ def parse_thumbnail_requirements(
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
 class MediaUploadLimit:
-    """A limit on the amount of data a user can upload in a given time
-    period."""
+    """
+    Represents a limit on the amount of data a user can upload in a given time
+    period.
+
+    These can be configured through the `media_upload_limits` [config option](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#media_upload_limits)
+    or via the `get_media_upload_limits_for_user` module API [callback](https://element-hq.github.io/synapse/latest/modules/media_repository_callbacks.html#get_media_upload_limits_for_user).
+    """
 
     max_bytes: int
+    """The maximum number of bytes that can be uploaded in the given time period."""
+
     time_period_ms: int
+    """The time period in milliseconds."""
 
 
 class ContentRepositoryConfig(Config):
@@ -198,7 +206,7 @@ class ContentRepositoryConfig(Config):
         #
         # We don't create the storage providers here as not all workers need
         # them to be started.
-        self.media_storage_providers: List[tuple] = []
+        self.media_storage_providers: list[tuple] = []
 
         for i, provider_config in enumerate(storage_providers):
             # We special case the module "file_system" so as not to need to
@@ -290,7 +298,7 @@ class ContentRepositoryConfig(Config):
 
         self.enable_authenticated_media = config.get("enable_authenticated_media", True)
 
-        self.media_upload_limits: List[MediaUploadLimit] = []
+        self.media_upload_limits: list[MediaUploadLimit] = []
         for limit_config in config.get("media_upload_limits", []):
             time_period_ms = self.parse_duration(limit_config["time_period"])
             max_bytes = self.parse_size(limit_config["max_size"])

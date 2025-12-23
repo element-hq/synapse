@@ -13,7 +13,6 @@
 #
 
 import unittest
-from typing import Dict
 
 from synapse.util import MutableOverlayMapping
 
@@ -24,7 +23,7 @@ class TestMutableOverlayMapping(unittest.TestCase):
     def test_init(self) -> None:
         """Test initialization with different input types."""
         # Test with empty dict
-        empty_dict: Dict[str, int] = {}
+        empty_dict: dict[str, int] = {}
         mapping = MutableOverlayMapping(empty_dict)
         self.assertEqual(len(mapping), 0)
 

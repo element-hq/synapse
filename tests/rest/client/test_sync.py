@@ -20,7 +20,6 @@
 #
 import json
 import logging
-from typing import List
 
 from parameterized import parameterized
 
@@ -36,7 +35,7 @@ from synapse.api.constants import (
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.federation.transport.test_knocking import (
@@ -131,7 +130,7 @@ class SyncFilterTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(events), 1, [event["content"] for event in events])
         self.assertEqual(events[0]["content"]["body"], "with wrong label", events[0])
 
-    def _test_sync_filter_labels(self, sync_filter: str) -> List[JsonDict]:
+    def _test_sync_filter_labels(self, sync_filter: str) -> list[JsonDict]:
         user_id = self.register_user("kermit", "test")
         tok = self.login("kermit", "test")
 

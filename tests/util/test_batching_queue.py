@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Tuple
 
 from prometheus_client import Gauge
 
@@ -32,13 +31,12 @@ from synapse.util.batching_queue import (
     number_queued,
 )
 
-from tests.server import get_clock
-from tests.unittest import TestCase
+from tests.unittest import HomeserverTestCase
 
 
-class BatchingQueueTestCase(TestCase):
+class BatchingQueueTestCase(HomeserverTestCase):
     def setUp(self) -> None:
-        self.clock, hs_clock = get_clock()
+        super().setUp()
 
         # We ensure that we remove any existing metrics for "test_queue".
         try:
@@ -48,15 +46,15 @@ class BatchingQueueTestCase(TestCase):
         except KeyError:
             pass
 
-        self._pending_calls: List[Tuple[List[str], defer.Deferred]] = []
+        self._pending_calls: list[tuple[list[str], defer.Deferred]] = []
         self.queue: BatchingQueue[str, str] = BatchingQueue(
             name="test_queue",
-            server_name="test_server",
-            clock=hs_clock,
+            hs=self.hs,
+            clock=self.clock,
             process_batch_callback=self._process_queue,
         )
 
-    async def _process_queue(self, values: List[str]) -> str:
+    async def _process_queue(self, values: list[str]) -> str:
         d: "defer.Deferred[str]" = defer.Deferred()
         self._pending_calls.append((values, d))
         return await make_deferred_yieldable(d)
@@ -108,7 +106,7 @@ class BatchingQueueTestCase(TestCase):
         self.assertFalse(queue_d.called)
 
         # We should see a call to `_process_queue` after a reactor tick.
-        self.clock.pump([0])
+        self.reactor.pump([0])
 
         self.assertEqual(len(self._pending_calls), 1)
         self.assertEqual(self._pending_calls[0][0], ["foo"])
@@ -134,7 +132,7 @@ class BatchingQueueTestCase(TestCase):
 
         self._assert_metrics(queued=2, keys=1, in_flight=2)
 
-        self.clock.pump([0])
+        self.reactor.pump([0])
 
         # We should see only *one* call to `_process_queue`
         self.assertEqual(len(self._pending_calls), 1)
@@ -158,7 +156,7 @@ class BatchingQueueTestCase(TestCase):
         self.assertFalse(self._pending_calls)
 
         queue_d1 = defer.ensureDeferred(self.queue.add_to_queue("foo1"))
-        self.clock.pump([0])
+        self.reactor.pump([0])
 
         self.assertEqual(len(self._pending_calls), 1)
 
@@ -185,7 +183,7 @@ class BatchingQueueTestCase(TestCase):
         self._assert_metrics(queued=2, keys=1, in_flight=2)
 
         # We should now see a second call to `_process_queue`
-        self.clock.pump([0])
+        self.reactor.pump([0])
         self.assertEqual(len(self._pending_calls), 1)
         self.assertEqual(self._pending_calls[0][0], ["foo2", "foo3"])
         self.assertFalse(queue_d2.called)
@@ -206,9 +204,9 @@ class BatchingQueueTestCase(TestCase):
         self.assertFalse(self._pending_calls)
 
         queue_d1 = defer.ensureDeferred(self.queue.add_to_queue("foo1", key=1))
-        self.clock.pump([0])
+        self.reactor.pump([0])
         queue_d2 = defer.ensureDeferred(self.queue.add_to_queue("foo2", key=2))
-        self.clock.pump([0])
+        self.reactor.pump([0])
 
         # We queue up another item with key=2 to check that we will keep taking
         # things off the queue.
@@ -240,7 +238,7 @@ class BatchingQueueTestCase(TestCase):
         self.assertFalse(queue_d3.called)
 
         # We should now see a call `_pending_calls` for `foo3`
-        self.clock.pump([0])
+        self.reactor.pump([0])
         self.assertEqual(len(self._pending_calls), 1)
         self.assertEqual(self._pending_calls[0][0], ["foo3"])
         self.assertFalse(queue_d3.called)

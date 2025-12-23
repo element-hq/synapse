@@ -29,7 +29,7 @@ import synapse.rest.admin
 from synapse.api.constants import EduTypes
 from synapse.rest.client import events, login, room
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

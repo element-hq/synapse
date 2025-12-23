@@ -32,7 +32,7 @@ from synapse.media.storage_provider import (
 )
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.media.test_media_storage import small_png

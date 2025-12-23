@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -68,7 +68,7 @@ class ReplicationAddUserAccountDataRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str, account_data_type: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         max_stream_id = await self.handler.add_account_data_for_user(
             user_id, account_data_type, content["content"]
         )
@@ -106,7 +106,7 @@ class ReplicationRemoveUserAccountDataRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str, account_data_type: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         max_stream_id = await self.handler.remove_account_data_for_user(
             user_id, account_data_type
         )
@@ -153,7 +153,7 @@ class ReplicationAddRoomAccountDataRestServlet(ReplicationEndpoint):
         user_id: str,
         room_id: str,
         account_data_type: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         max_stream_id = await self.handler.add_account_data_to_room(
             user_id, room_id, account_data_type, content["content"]
         )
@@ -196,7 +196,7 @@ class ReplicationRemoveRoomAccountDataRestServlet(ReplicationEndpoint):
         user_id: str,
         room_id: str,
         account_data_type: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         max_stream_id = await self.handler.remove_account_data_for_room(
             user_id, room_id, account_data_type
         )
@@ -238,7 +238,7 @@ class ReplicationAddTagRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str, room_id: str, tag: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         max_stream_id = await self.handler.add_tag_to_room(
             user_id, room_id, tag, content["content"]
         )
@@ -276,7 +276,7 @@ class ReplicationRemoveTagRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str, room_id: str, tag: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         max_stream_id = await self.handler.remove_tag_from_room(
             user_id,
             room_id,

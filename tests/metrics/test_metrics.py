@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict, NoReturn, Protocol, Tuple
+from typing import NoReturn, Protocol
 
 from prometheus_client.core import Sample
 
@@ -35,7 +35,7 @@ from synapse.util.caches.deferred_cache import DeferredCache
 from tests import unittest
 
 
-def get_sample_labels_value(sample: Sample) -> Tuple[Dict[str, str], float]:
+def get_sample_labels_value(sample: Sample) -> tuple[dict[str, str], float]:
     """Extract the labels and values of a sample.
 
     prometheus_client 0.5 changed the sample type to a named tuple with more
@@ -54,7 +54,7 @@ def get_sample_labels_value(sample: Sample) -> Tuple[Dict[str, str], float]:
     # Otherwise fall back to treating it as a plain 3 tuple.
     else:
         # In older versions of prometheus_client Sample was a 3-tuple.
-        labels: Dict[str, str]
+        labels: dict[str, str]
         value: float
         _, labels, value = sample  # type: ignore[misc]
         return labels, value
@@ -127,7 +127,7 @@ class TestMauLimit(unittest.TestCase):
 
     def get_metrics_from_gauge(
         self, gauge: InFlightGauge
-    ) -> Dict[str, Dict[Tuple[str, ...], float]]:
+    ) -> dict[str, dict[tuple[str, ...], float]]:
         results = {}
 
         for r in gauge.collect():
@@ -164,7 +164,10 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
         """
         CACHE_NAME = "cache_metrics_test_fgjkbdfg"
         cache: DeferredCache[str, str] = DeferredCache(
-            name=CACHE_NAME, server_name=self.hs.hostname, max_entries=777
+            name=CACHE_NAME,
+            clock=self.hs.get_clock(),
+            server_name=self.hs.hostname,
+            max_entries=777,
         )
 
         metrics_map = get_latest_metrics()
@@ -212,10 +215,10 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
         """
         CACHE_NAME = "cache_metric_multiple_servers_test"
         cache1: DeferredCache[str, str] = DeferredCache(
-            name=CACHE_NAME, server_name="hs1", max_entries=777
+            name=CACHE_NAME, clock=self.clock, server_name="hs1", max_entries=777
         )
         cache2: DeferredCache[str, str] = DeferredCache(
-            name=CACHE_NAME, server_name="hs2", max_entries=777
+            name=CACHE_NAME, clock=self.clock, server_name="hs2", max_entries=777
         )
 
         metrics_map = get_latest_metrics()
@@ -381,7 +384,7 @@ class LaterGaugeTests(unittest.HomeserverTestCase):
         self.assertEqual(hs2_metric_value, "2.0")
 
 
-def get_latest_metrics() -> Dict[str, str]:
+def get_latest_metrics() -> dict[str, str]:
     """
     Collect the latest metrics from the registry and parse them into an easy to use map.
     The key includes the metric name and labels.

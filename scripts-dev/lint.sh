@@ -134,9 +134,6 @@ fi
 # Ensure the formatting of Rust code.
 cargo-fmt
 
-# Ensure all Pydantic models use strict types.
-./scripts-dev/check_pydantic_models.py lint
-
 # Ensure type hints are correct.
 mypy
 

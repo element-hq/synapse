@@ -20,7 +20,7 @@
 #
 
 
-from typing import Callable, List, Tuple, Type, Union
+from typing import Callable
 from unittest.mock import patch
 
 from zope.interface import implementer
@@ -58,18 +58,18 @@ def TestingESMTPTLSClientFactory(
 class _DummyMessageDelivery:
     def __init__(self) -> None:
         # (recipient, message) tuples
-        self.messages: List[Tuple[smtp.Address, bytes]] = []
+        self.messages: list[tuple[smtp.Address, bytes]] = []
 
     def receivedHeader(
         self,
-        helo: Tuple[bytes, bytes],
+        helo: tuple[bytes, bytes],
         origin: smtp.Address,
-        recipients: List[smtp.User],
+        recipients: list[smtp.User],
     ) -> None:
         return None
 
     def validateFrom(
-        self, helo: Tuple[bytes, bytes], origin: smtp.Address
+        self, helo: tuple[bytes, bytes], origin: smtp.Address
     ) -> smtp.Address:
         return origin
 
@@ -89,7 +89,7 @@ class _DummyMessage:
     def __init__(self, delivery: _DummyMessageDelivery, user: smtp.User):
         self._delivery = delivery
         self._user = user
-        self._buffer: List[bytes] = []
+        self._buffer: list[bytes] = []
 
     def lineReceived(self, line: bytes) -> None:
         self._buffer.append(line)
@@ -104,7 +104,7 @@ class _DummyMessage:
 
 
 class SendEmailHandlerTestCaseIPv4(HomeserverTestCase):
-    ip_class: Union[Type[IPv4Address], Type[IPv6Address]] = IPv4Address
+    ip_class: type[IPv4Address] | type[IPv6Address] = IPv4Address
 
     def setUp(self) -> None:
         super().setUp()

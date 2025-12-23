@@ -23,13 +23,8 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
-    FrozenSet,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Tuple,
     cast,
 )
 
@@ -45,12 +40,17 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.push_rule import PushRulesWorkerStore
-from synapse.storage.invite_rule import InviteRulesConfig
+from synapse.storage.invite_rule import (
+    AllowAllInviteRulesConfig,
+    InviteRulesConfig,
+    MSC4155InviteRulesConfig,
+    MSC4380InviteRulesConfig,
+)
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonMapping
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
 from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -109,6 +109,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         )
 
         self._msc4155_enabled = hs.config.experimental.msc4155_enabled
+        self._msc4380_enabled = hs.config.experimental.msc4380_enabled
 
     def get_max_account_data_stream_id(self) -> int:
         """Get the current max stream ID for account data stream
@@ -140,7 +141,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_global_account_data_for_user(
             txn: LoggingTransaction,
-        ) -> Dict[str, JsonDict]:
+        ) -> dict[str, JsonDict]:
             # The 'content != '{}' condition below prevents us from using
             # `simple_select_list_txn` here, as it doesn't support conditions
             # other than 'equals'.
@@ -185,7 +186,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_room_account_data_for_user_txn(
             txn: LoggingTransaction,
-        ) -> Dict[str, Dict[str, JsonMapping]]:
+        ) -> dict[str, dict[str, JsonMapping]]:
             # The 'content != '{}' condition below prevents us from using
             # `simple_select_list_txn` here, as it doesn't support conditions
             # other than 'equals'.
@@ -202,7 +203,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
             txn.execute(sql, (user_id,))
 
-            by_room: Dict[str, Dict[str, JsonMapping]] = {}
+            by_room: dict[str, dict[str, JsonMapping]] = {}
             for room_id, account_data_type, content in txn:
                 room_data = by_room.setdefault(room_id, {})
 
@@ -217,7 +218,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
     @cached(num_args=2, max_entries=5000, tree=True)
     async def get_global_account_data_by_type_for_user(
         self, user_id: str, data_type: str
-    ) -> Optional[JsonMapping]:
+    ) -> JsonMapping | None:
         """
         Returns:
             The account data.
@@ -237,7 +238,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_latest_stream_id_for_global_account_data_by_type_for_user(
         self, user_id: str, data_type: str
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Returns:
             The stream ID of the account data,
@@ -246,7 +247,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_latest_stream_id_for_global_account_data_by_type_for_user_txn(
             txn: LoggingTransaction,
-        ) -> Optional[int]:
+        ) -> int | None:
             sql = """
                 SELECT stream_id FROM account_data
                 WHERE user_id = ? AND account_data_type = ?
@@ -281,9 +282,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_account_data_for_room_txn(
             txn: LoggingTransaction,
-        ) -> Dict[str, JsonMapping]:
+        ) -> dict[str, JsonMapping]:
             rows = cast(
-                List[Tuple[str, str]],
+                list[tuple[str, str]],
                 self.db_pool.simple_select_list_txn(
                     txn,
                     table="room_account_data",
@@ -304,7 +305,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
     @cached(num_args=3, max_entries=5000, tree=True)
     async def get_account_data_for_room_and_type(
         self, user_id: str, room_id: str, account_data_type: str
-    ) -> Optional[JsonMapping]:
+    ) -> JsonMapping | None:
         """Get the client account_data of given type for a user for a room.
 
         Args:
@@ -317,7 +318,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_account_data_for_room_and_type_txn(
             txn: LoggingTransaction,
-        ) -> Optional[JsonDict]:
+        ) -> JsonDict | None:
             content_json = self.db_pool.simple_select_one_onecol_txn(
                 txn,
                 table="room_account_data",
@@ -338,7 +339,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_updated_global_account_data(
         self, last_id: int, current_id: int, limit: int
-    ) -> List[Tuple[int, str, str]]:
+    ) -> list[tuple[int, str, str]]:
         """Get the global account_data that has changed, for the account_data stream
 
         Args:
@@ -355,14 +356,14 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_updated_global_account_data_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[int, str, str]]:
+        ) -> list[tuple[int, str, str]]:
             sql = (
                 "SELECT stream_id, user_id, account_data_type"
                 " FROM account_data WHERE ? < stream_id AND stream_id <= ?"
                 " ORDER BY stream_id ASC LIMIT ?"
             )
             txn.execute(sql, (last_id, current_id, limit))
-            return cast(List[Tuple[int, str, str]], txn.fetchall())
+            return cast(list[tuple[int, str, str]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_updated_global_account_data", get_updated_global_account_data_txn
@@ -370,7 +371,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_updated_room_account_data(
         self, last_id: int, current_id: int, limit: int
-    ) -> List[Tuple[int, str, str, str]]:
+    ) -> list[tuple[int, str, str, str]]:
         """Get the global account_data that has changed, for the account_data stream
 
         Args:
@@ -387,14 +388,14 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_updated_room_account_data_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[int, str, str, str]]:
+        ) -> list[tuple[int, str, str, str]]:
             sql = (
                 "SELECT stream_id, user_id, room_id, account_data_type"
                 " FROM room_account_data WHERE ? < stream_id AND stream_id <= ?"
                 " ORDER BY stream_id ASC LIMIT ?"
             )
             txn.execute(sql, (last_id, current_id, limit))
-            return cast(List[Tuple[int, str, str, str]], txn.fetchall())
+            return cast(list[tuple[int, str, str, str]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_updated_room_account_data", get_updated_room_account_data_txn
@@ -402,7 +403,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_updated_global_account_data_for_user(
         self, user_id: str, stream_id: int
-    ) -> Dict[str, JsonMapping]:
+    ) -> dict[str, JsonMapping]:
         """Get all the global account_data that's changed for a user.
 
         Args:
@@ -415,7 +416,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_updated_global_account_data_for_user(
             txn: LoggingTransaction,
-        ) -> Dict[str, JsonMapping]:
+        ) -> dict[str, JsonMapping]:
             sql = """
                 SELECT account_data_type, content FROM account_data
                 WHERE user_id = ? AND stream_id > ?
@@ -437,7 +438,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_updated_room_account_data_for_user(
         self, user_id: str, stream_id: int
-    ) -> Dict[str, Dict[str, JsonMapping]]:
+    ) -> dict[str, dict[str, JsonMapping]]:
         """Get all the room account_data that's changed for a user.
 
         Args:
@@ -450,14 +451,14 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_updated_room_account_data_for_user_txn(
             txn: LoggingTransaction,
-        ) -> Dict[str, Dict[str, JsonMapping]]:
+        ) -> dict[str, dict[str, JsonMapping]]:
             sql = """
                 SELECT room_id, account_data_type, content FROM room_account_data
                 WHERE user_id = ? AND stream_id > ?
             """
             txn.execute(sql, (user_id, stream_id))
 
-            account_data_by_room: Dict[str, Dict[str, JsonMapping]] = {}
+            account_data_by_room: dict[str, dict[str, JsonMapping]] = {}
             for row in txn:
                 room_account_data = account_data_by_room.setdefault(row[0], {})
                 room_account_data[row[1]] = db_to_json(row[2])
@@ -484,7 +485,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         room_id: str,
         from_stream_id: int,
         to_stream_id: int,
-    ) -> Dict[str, JsonMapping]:
+    ) -> dict[str, JsonMapping]:
         """Get the room account_data that's changed for a user in a room.
 
         (> `from_stream_id` and <= `to_stream_id`)
@@ -501,14 +502,14 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_updated_room_account_data_for_user_for_room_txn(
             txn: LoggingTransaction,
-        ) -> Dict[str, JsonMapping]:
+        ) -> dict[str, JsonMapping]:
             sql = """
                 SELECT account_data_type, content FROM room_account_data
                 WHERE user_id = ? AND room_id = ? AND stream_id > ? AND stream_id <= ?
             """
             txn.execute(sql, (user_id, room_id, from_stream_id, to_stream_id))
 
-            room_account_data: Dict[str, JsonMapping] = {}
+            room_account_data: dict[str, JsonMapping] = {}
             for row in txn:
                 room_account_data[row[0]] = db_to_json(row[1])
 
@@ -526,7 +527,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         )
 
     @cached(max_entries=5000, iterable=True)
-    async def ignored_by(self, user_id: str) -> FrozenSet[str]:
+    async def ignored_by(self, user_id: str) -> frozenset[str]:
         """
         Get users which ignore the given user.
 
@@ -546,7 +547,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         )
 
     @cached(max_entries=5000, iterable=True)
-    async def ignored_users(self, user_id: str) -> FrozenSet[str]:
+    async def ignored_users(self, user_id: str) -> frozenset[str]:
         """
         Get users which the given user ignores.
 
@@ -567,20 +568,28 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_invite_config_for_user(self, user_id: str) -> InviteRulesConfig:
         """
-        Get the invite configuration for the current user.
+        Get the invite configuration for the given user.
 
         Args:
-            user_id:
+            user_id: The user whose invite configuration should be returned.
         """
+        if self._msc4380_enabled:
+            data = await self.get_global_account_data_by_type_for_user(
+                user_id, AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG
+            )
+            # If the user has an MSC4380-style config setting, prioritise that
+            # above an MSC4155 one
+            if data is not None:
+                return MSC4380InviteRulesConfig.from_account_data(data)
 
-        if not self._msc4155_enabled:
-            # This equates to allowing all invites, as if the setting was off.
-            return InviteRulesConfig(None)
+        if self._msc4155_enabled:
+            data = await self.get_global_account_data_by_type_for_user(
+                user_id, AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG
+            )
+            if data is not None:
+                return MSC4155InviteRulesConfig(data)
 
-        data = await self.get_global_account_data_by_type_for_user(
-            user_id, AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG
-        )
-        return InviteRulesConfig(data)
+        return AllowAllInviteRulesConfig()
 
     async def get_admin_client_config_for_user(self, user_id: str) -> AdminClientConfig:
         """

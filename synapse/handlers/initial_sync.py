@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import (
     AccountDataTypes,
@@ -69,10 +69,10 @@ class InitialSyncHandler:
         self.clock = hs.get_clock()
         self.validator = EventValidator()
         self.snapshot_cache: ResponseCache[
-            Tuple[
+            tuple[
                 str,
-                Optional[StreamToken],
-                Optional[StreamToken],
+                StreamToken | None,
+                StreamToken | None,
                 Direction,
                 int,
                 bool,
@@ -451,7 +451,7 @@ class InitialSyncHandler:
 
         presence_handler = self.hs.get_presence_handler()
 
-        async def get_presence() -> List[JsonDict]:
+        async def get_presence() -> list[JsonDict]:
             # If presence is disabled, return an empty list
             if not self.hs.config.server.presence_enabled:
                 return []
@@ -468,7 +468,7 @@ class InitialSyncHandler:
                 for s in states
             ]
 
-        async def get_receipts() -> List[JsonMapping]:
+        async def get_receipts() -> list[JsonMapping]:
             receipts = await self.store.get_linearized_receipts_for_room(
                 room_id, to_key=now_token.receipt_key
             )

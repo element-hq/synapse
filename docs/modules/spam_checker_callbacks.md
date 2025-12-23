@@ -195,12 +195,15 @@ _Changed in Synapse v1.132.0: Added the `room_config` argument. Callbacks that o
 async def user_may_create_room(user_id: str, room_config: synapse.module_api.JsonDict) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
-Called when processing a room creation request.
+Called when processing a room creation or room upgrade request.
 
 The arguments passed to this callback are:
 
 * `user_id`: The Matrix user ID of the user (e.g. `@alice:example.com`).
-* `room_config`: The contents of the body of a [/createRoom request](https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom) as a dictionary.
+* `room_config`: The contents of the body of the [`/createRoom` request](https://spec.matrix.org/v1.15/client-server-api/#post_matrixclientv3createroom) as a dictionary.
+  For a [room upgrade request](https://spec.matrix.org/v1.15/client-server-api/#post_matrixclientv3roomsroomidupgrade) it is a synthesised subset of what an equivalent
+  `/createRoom` request would have looked like. Specifically, it contains the `creation_content` (linking to the previous room) and `initial_state` (containing a
+  subset of the state of the previous room).
 
 The callback must return one of:
   - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
@@ -328,9 +331,9 @@ search results; otherwise return `False`.
 The profile is represented as a dictionary with the following keys:
 
 * `user_id: str`. The Matrix ID for this user.
-* `display_name: Optional[str]`. The user's display name, or `None` if this user
+* `display_name: str | None`. The user's display name, or `None` if this user
   has not set a display name.
-* `avatar_url: Optional[str]`. The `mxc://` URL to the user's avatar, or `None`
+* `avatar_url: str | None`. The `mxc://` URL to the user's avatar, or `None`
   if this user has not set an avatar.
 
 The module is given a copy of the original dictionary, so modifying it from within the
@@ -349,10 +352,10 @@ _First introduced in Synapse v1.37.0_
 
 ```python
 async def check_registration_for_spam(
-    email_threepid: Optional[dict],
-    username: Optional[str],
+    email_threepid: dict | None,
+    username: str | None,
     request_info: Collection[Tuple[str, str]],
-    auth_provider_id: Optional[str] = None,
+    auth_provider_id: str | None = None,
 ) -> "synapse.spam_checker_api.RegistrationBehaviour"
 ```
 
@@ -435,10 +438,10 @@ _First introduced in Synapse v1.87.0_
 ```python
 async def check_login_for_spam(
     user_id: str,
-    device_id: Optional[str],
-    initial_display_name: Optional[str],
-    request_info: Collection[Tuple[Optional[str], str]],
-    auth_provider_id: Optional[str] = None,
+    device_id: str | None,
+    initial_display_name: str | None,
+    request_info: Collection[tuple[str | None, str]],
+    auth_provider_id: str | None = None,
 ) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]
 ```
 
@@ -506,7 +509,7 @@ class ListSpamChecker:
             resource=IsUserEvilResource(config),
         )
 
-    async def check_event_for_spam(self, event: "synapse.events.EventBase") -> Union[Literal["NOT_SPAM"], Codes]:
+    async def check_event_for_spam(self, event: "synapse.events.EventBase") -> Literal["NOT_SPAM"] | Codes:
         if event.sender in self.evil_users:
           return Codes.FORBIDDEN
         else:

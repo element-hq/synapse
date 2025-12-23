@@ -1,6 +1,6 @@
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import RelationTypes
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
@@ -9,7 +9,7 @@ from synapse.storage.databases.main.thread_subscriptions import (
     AutomaticSubscriptionConflicted,
     ThreadSubscription,
 )
-from synapse.types import EventOrderings, UserID
+from synapse.types import EventOrderings, StreamKeyType, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -22,13 +22,14 @@ class ThreadSubscriptionsHandler:
         self.store = hs.get_datastores().main
         self.event_handler = hs.get_event_handler()
         self.auth = hs.get_auth()
+        self._notifier = hs.get_notifier()
 
     async def get_thread_subscription_settings(
         self,
         user_id: UserID,
         room_id: str,
         thread_root_event_id: str,
-    ) -> Optional[ThreadSubscription]:
+    ) -> ThreadSubscription | None:
         """Get thread subscription settings for a specific thread and user.
         Checks that the thread root is both a real event and also that it is visible
         to the user.
@@ -61,8 +62,8 @@ class ThreadSubscriptionsHandler:
         room_id: str,
         thread_root_event_id: str,
         *,
-        automatic_event_id: Optional[str],
-    ) -> Optional[int]:
+        automatic_event_id: str | None,
+    ) -> int | None:
         """Sets or updates a user's subscription settings for a specific thread root.
 
         Args:
@@ -132,11 +133,20 @@ class ThreadSubscriptionsHandler:
                 errcode=Codes.MSC4306_CONFLICTING_UNSUBSCRIPTION,
             )
 
+        if outcome is not None:
+            # wake up user streams (e.g. sliding sync) on the same worker
+            self._notifier.on_new_event(
+                StreamKeyType.THREAD_SUBSCRIPTIONS,
+                # outcome is a stream_id
+                outcome,
+                users=[user_id.to_string()],
+            )
+
         return outcome
 
     async def unsubscribe_user_from_thread(
         self, user_id: UserID, room_id: str, thread_root_event_id: str
-    ) -> Optional[int]:
+    ) -> int | None:
         """Clears a user's subscription settings for a specific thread root.
 
         Args:
@@ -162,8 +172,19 @@ class ThreadSubscriptionsHandler:
             logger.info("rejecting thread subscriptions change (thread not accessible)")
             raise NotFoundError("No such thread root")
 
-        return await self.store.unsubscribe_user_from_thread(
+        outcome = await self.store.unsubscribe_user_from_thread(
             user_id.to_string(),
             event.room_id,
             thread_root_event_id,
         )
+
+        if outcome is not None:
+            # wake up user streams (e.g. sliding sync) on the same worker
+            self._notifier.on_new_event(
+                StreamKeyType.THREAD_SUBSCRIPTIONS,
+                # outcome is a stream_id
+                outcome,
+                users=[user_id.to_string()],
+            )
+
+        return outcome

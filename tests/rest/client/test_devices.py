@@ -29,7 +29,7 @@ from synapse.rest import admin, devices, sync
 from synapse.rest.client import keys, login, register
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -494,7 +494,9 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         return self.hs
 
     def test_PUT_device(self) -> None:
-        self.register_appservice_user("alice", self.msc4190_service.token)
+        self.register_appservice_user(
+            "alice", self.msc4190_service.token, inhibit_login=True
+        )
         self.register_appservice_user("bob", self.pre_msc_service.token)
 
         channel = self.make_request(
@@ -531,18 +533,10 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # On the regular service, that API should not allow for the
-        # creation of new devices.
-        channel = self.make_request(
-            "PUT",
-            "/_matrix/client/v3/devices/AABBCCDD?user_id=@bob:test",
-            content={"display_name": "Bob's device"},
-            access_token=self.pre_msc_service.token,
-        )
-        self.assertEqual(channel.code, 404, channel.json_body)
-
     def test_DELETE_device(self) -> None:
-        self.register_appservice_user("alice", self.msc4190_service.token)
+        self.register_appservice_user(
+            "alice", self.msc4190_service.token, inhibit_login=True
+        )
 
         # There should be no device
         channel = self.make_request(
@@ -589,7 +583,9 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body, {"devices": []})
 
     def test_POST_delete_devices(self) -> None:
-        self.register_appservice_user("alice", self.msc4190_service.token)
+        self.register_appservice_user(
+            "alice", self.msc4190_service.token, inhibit_login=True
+        )
 
         # There should be no device
         channel = self.make_request(

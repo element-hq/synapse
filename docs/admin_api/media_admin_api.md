@@ -39,6 +39,67 @@ the use of the
 [List media uploaded by a user](user_admin_api.md#list-media-uploaded-by-a-user)
 Admin API.
 
+## Query a piece of media by ID
+
+This API returns information about a piece of local or cached remote media given the origin server name and media id. If
+information is requested for remote media which is not cached the endpoint will return 404. 
+
+Request:
+```http
+GET /_synapse/admin/v1/media/<origin>/<media_id>
+```
+
+The API returns a JSON body with media info like the following:
+
+Response:
+```json
+{
+  "media_info": {
+    "media_origin": "remote.com",
+    "user_id": null,
+    "media_id": "sdginwegWEG",
+    "media_type": "img/png",
+    "media_length": 67,
+    "upload_name":  "test.png",
+    "created_ts":  300,
+    "filesystem_id":  "wgeweg",
+    "url_cache": null,
+    "last_access_ts": 400,
+    "quarantined_by":  null,
+    "authenticated":  false,
+    "safe_from_quarantine": null,
+    "sha256": "ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a"
+  }
+}
+```
+
+## Listing all quarantined media
+
+This API returns a list of all quarantined media on the server. It is paginated, and can be scoped to either local or
+remote media. Note that the pagination values are also scoped to the request parameters - changing them but keeping the
+same pagination values will result in unexpected results.
+
+Request:
+```http
+GET /_synapse/admin/v1/media/quarantined?from=0&limit=100&kind=local
+```
+
+`from` and `limit` are optional parameters, and default to `0` and `100` respectively. They are the row index and number
+of rows to return - they are not timestamps.
+
+`kind` *MUST* either be `local` or `remote`.
+
+The API returns a JSON body containing MXC URIs for the quarantined media, like the following:
+
+```json
+{
+  "media": [
+    "mxc://localhost/xwvutsrqponmlkjihgfedcba",
+    "mxc://localhost/abcdefghijklmnopqrstuvwx"
+  ]
+}
+```
+
 # Quarantine media
 
 Quarantining media means that it is marked as inaccessible by users. It applies
@@ -53,6 +114,20 @@ is quarantined, Synapse will:
  - Quarantine any future media.
  - Quarantine any existing cached remote media.
  - Quarantine any future remote media.
+
+## Downloading quarantined media
+
+Normally, when media is quarantined, it will return a 404 error when downloaded.
+Admins can bypass this by adding `?admin_unsafely_bypass_quarantine=true`
+to the [normal download URL](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1mediadownloadservernamemediaid).
+
+Bypassing the quarantine check is not recommended. Media is typically quarantined
+to prevent harmful content from being served to users, which includes admins. Only
+set the bypass parameter if you intentionally want to access potentially harmful
+content.
+
+Non-admin users cannot bypass quarantine checks, even when specifying the above
+query parameter.
 
 ## Quarantining media by ID
 

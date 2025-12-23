@@ -15,7 +15,7 @@
 
 """Contains *incomplete* type hints for txredisapi."""
 
-from typing import Any, List, Optional, Type, Union
+from typing import Any
 
 from twisted.internet import protocol
 from twisted.internet.defer import Deferred
@@ -29,8 +29,8 @@ class RedisProtocol(protocol.Protocol):
         self,
         key: str,
         value: Any,
-        expire: Optional[int] = None,
-        pexpire: Optional[int] = None,
+        expire: int | None = None,
+        pexpire: int | None = None,
         only_if_not_exists: bool = False,
         only_if_exists: bool = False,
     ) -> "Deferred[None]": ...
@@ -38,8 +38,8 @@ class RedisProtocol(protocol.Protocol):
 
 class SubscriberProtocol(RedisProtocol):
     def __init__(self, *args: object, **kwargs: object): ...
-    password: Optional[str]
-    def subscribe(self, channels: Union[str, List[str]]) -> "Deferred[None]": ...
+    password: str | None
+    def subscribe(self, channels: str | list[str]) -> "Deferred[None]": ...
     def connectionMade(self) -> None: ...
     # type-ignore: twisted.internet.protocol.Protocol provides a default argument for
     # `reason`. txredisapi's LineReceiver Protocol doesn't. But that's fine: it's what's
@@ -49,12 +49,12 @@ class SubscriberProtocol(RedisProtocol):
 def lazyConnection(
     host: str = ...,
     port: int = ...,
-    dbid: Optional[int] = ...,
+    dbid: int | None = ...,
     reconnect: bool = ...,
     charset: str = ...,
-    password: Optional[str] = ...,
-    connectTimeout: Optional[int] = ...,
-    replyTimeout: Optional[int] = ...,
+    password: str | None = ...,
+    connectTimeout: int | None = ...,
+    replyTimeout: int | None = ...,
     convertNumbers: bool = ...,
 ) -> RedisProtocol: ...
 
@@ -69,19 +69,19 @@ class UnixConnectionHandler(ConnectionHandler): ...
 class RedisFactory(protocol.ReconnectingClientFactory):
     continueTrying: bool
     handler: ConnectionHandler
-    pool: List[RedisProtocol]
-    replyTimeout: Optional[int]
+    pool: list[RedisProtocol]
+    replyTimeout: int | None
     def __init__(
         self,
         uuid: str,
-        dbid: Optional[int],
+        dbid: int | None,
         poolsize: int,
         isLazy: bool = False,
-        handler: Type = ConnectionHandler,
+        handler: type = ConnectionHandler,
         charset: str = "utf-8",
-        password: Optional[str] = None,
-        replyTimeout: Optional[int] = None,
-        convertNumbers: Optional[int] = True,
+        password: str | None = None,
+        replyTimeout: int | None = None,
+        convertNumbers: int | None = True,
     ): ...
     def buildProtocol(self, addr: IAddress) -> RedisProtocol: ...
 
