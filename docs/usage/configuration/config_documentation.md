@@ -2057,7 +2057,7 @@ Default configuration:
 ```yaml
 rc_user_directory:
   per_second: 0.016
-  burst_count: 50.0
+  burst_count: 200.0
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
