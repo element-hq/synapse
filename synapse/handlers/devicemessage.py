@@ -509,11 +509,14 @@ def create_new_to_device_edu_content(
     sender_user_id: str,
     message_type: str,
     context: dict[str, Any],
-    message_id: str = random_string(16),
+    message_id: str | None,
 ) -> JsonDict:
     """
     Create a new `m.direct_to_device` EDU `content` object with a unique message ID.
     """
+    if message_id is None:
+        message_id = random_string(16)
+
     content = {
         "messages": {},
         "sender": sender_user_id,
