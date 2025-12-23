@@ -32,7 +32,7 @@ from twisted.internet import defer
 
 from synapse.api.constants import (
     MAX_EDUS_PER_TRANSACTION,
-    SYNAPSE_EDUS_PER_TRANSACTION,
+    NUMBER_OF_RESERVED_EDUS_PER_TRANSACTION,
     EduTypes,
 )
 from synapse.api.errors import (
@@ -800,7 +800,7 @@ class _TransactionQueueManager:
             to_device_edus,
             device_stream_id,
         ) = await self.queue._get_to_device_message_edus(
-            edu_limit - SYNAPSE_EDUS_PER_TRANSACTION
+            edu_limit - NUMBER_OF_RESERVED_EDUS_PER_TRANSACTION
         )
 
         if to_device_edus:

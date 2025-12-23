@@ -42,7 +42,8 @@ MAX_EDU_SIZE = 65536
 # This is defined in the Matrix spec and enforced by the receiver.
 MAX_EDUS_PER_TRANSACTION = 100
 # A transaction can contain up to 100 EDUs but synapse reserves 10 EDUs for other purposes
-SYNAPSE_EDUS_PER_TRANSACTION = 10
+# like trickling out some device list updates.
+NUMBER_OF_RESERVED_EDUS_PER_TRANSACTION = 10
 
 # The maximum allowed size of an HTTP request.
 # Other than media uploads, the biggest request we expect to see is a fully-loaded
