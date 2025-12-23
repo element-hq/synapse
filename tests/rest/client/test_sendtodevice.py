@@ -34,7 +34,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, sendtodevice, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 from tests.unittest import HomeserverTestCase, override_config
