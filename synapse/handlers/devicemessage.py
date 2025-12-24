@@ -288,25 +288,21 @@ class DeviceMessageHandler:
 
         last_stream_id = None
         for destination, messages in remote_messages.items():
-            edu_contents = get_device_message_edu_contents(
+            split_edu_contents = get_device_message_edu_contents(
                 sender_user_id, message_type, messages, context
             )
-            for edu_content in edu_contents:
-                remote_edu_content = {destination: edu_content}
+            for edu_contents in split_edu_contents:
                 # Add messages to the database.
                 # Retrieve the stream id of the last-processed to-device message.
                 last_stream_id = await self.store.add_messages_to_device_inbox(
-                    local_messages, remote_edu_content
+                    local_messages, {destination: edu_contents}
                 )
-
-            log_kv(
-                {
-                    "destination": destination,
-                    "message_ids": [
-                        edu_content["message_id"] for edu_content in edu_contents
-                    ],
-                }
-            )
+                log_kv(
+                    {
+                        "destination": destination,
+                        "message_id": edu_contents["message_id"],
+                    }
+                )
 
         if last_stream_id is not None:
             # Notify listeners that there are new to-device messages to process,
