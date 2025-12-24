@@ -284,12 +284,10 @@ class DeviceMessageHandler:
                 destination = get_domain_from_id(user_id)
                 remote_messages.setdefault(destination, {})[user_id] = by_device
 
-        context = get_active_span_text_map()
-
         last_stream_id = None
         for destination, messages in remote_messages.items():
             split_edu_contents = get_device_message_edu_contents(
-                sender_user_id, message_type, messages, context
+                sender_user_id, message_type, messages
             )
             for edu_contents in split_edu_contents:
                 # Add messages to the database.
@@ -408,7 +406,6 @@ def get_device_message_edu_contents(
     sender_user_id: str,
     message_type: str,
     messages: dict[str, dict[str, JsonDict]],
-    context: dict[str, Any],
 ) -> list[JsonDict]:
     """
     This function takes a dictionary of to-device messages and splits them into several
@@ -427,7 +424,7 @@ def get_device_message_edu_contents(
         Raises an EventSizeError if a single to-device message is too large
         to fit into an EDU.
     """
-
+    tracing_context = get_active_span_text_map()
     first_message_id = random_string(16)
     BASE_EDU_CONTENT = {
         "messages": {},
@@ -445,14 +442,16 @@ def get_device_message_edu_contents(
             }
         )
     )
-    BASE_EDU_CONTENT["org.matrix.opentracing_context"] = json_encoder.encode(context)
+    BASE_EDU_CONTENT["org.matrix.opentracing_context"] = json_encoder.encode(
+        tracing_context
+    )
 
     edu_contents = []
 
     current_edu_content: JsonDict = create_new_to_device_edu_content(
         sender_user_id,
         message_type,
-        context,
+        tracing_context,
         first_message_id,
     )
     current_edu_size = BASE_EDU_SIZE
@@ -482,7 +481,7 @@ def get_device_message_edu_contents(
             )
 
             current_edu_content = create_new_to_device_edu_content(
-                sender_user_id, message_type, context
+                sender_user_id, message_type, tracing_context
             )
 
             current_edu_size = BASE_EDU_SIZE
@@ -506,7 +505,7 @@ def get_device_message_edu_contents(
 def create_new_to_device_edu_content(
     sender_user_id: str,
     message_type: str,
-    context: dict[str, Any],
+    tracing_context: dict[str, Any],
     message_id: str | None = None,
 ) -> JsonDict:
     """
@@ -520,6 +519,6 @@ def create_new_to_device_edu_content(
         "sender": sender_user_id,
         "type": message_type,
         "message_id": message_id,
-        "org.matrix.opentracing_context": json_encoder.encode(context),
+        "org.matrix.opentracing_context": json_encoder.encode(tracing_context),
     }
     return content
