@@ -286,12 +286,19 @@ class DeviceMessageHandler:
 
         context = get_active_span_text_map()
 
-        remote_edu_contents = {}
+        last_stream_id = None
         for destination, messages in remote_messages.items():
             edu_contents = get_device_message_edu_contents(
                 sender_user_id, message_type, messages, context
             )
-            remote_edu_contents[destination] = edu_contents
+            for edu_content in edu_contents:
+                remote_edu_content = {destination: edu_content}
+                # Add messages to the database.
+                # Retrieve the stream id of the last-processed to-device message.
+                last_stream_id = await self.store.add_messages_to_device_inbox(
+                    local_messages, remote_edu_content
+                )
+
             log_kv(
                 {
                     "destination": destination,
@@ -301,17 +308,12 @@ class DeviceMessageHandler:
                 }
             )
 
-        # Add messages to the database.
-        # Retrieve the stream id of the last-processed to-device message.
-        last_stream_id = await self.store.add_messages_to_device_inbox(
-            local_messages, remote_edu_contents
-        )
-
-        # Notify listeners that there are new to-device messages to process,
-        # handing them the latest stream id.
-        self.notifier.on_new_event(
-            StreamKeyType.TO_DEVICE, last_stream_id, users=local_messages.keys()
-        )
+        if last_stream_id is not None:
+            # Notify listeners that there are new to-device messages to process,
+            # handing them the latest stream id.
+            self.notifier.on_new_event(
+                StreamKeyType.TO_DEVICE, last_stream_id, users=local_messages.keys()
+            )
 
         if self.federation_sender:
             # Enqueue a new federation transaction to send the new
@@ -509,7 +511,7 @@ def create_new_to_device_edu_content(
     sender_user_id: str,
     message_type: str,
     context: dict[str, Any],
-    message_id: str | None,
+    message_id: str | None = None,
 ) -> JsonDict:
     """
     Create a new `m.direct_to_device` EDU `content` object with a unique message ID.
