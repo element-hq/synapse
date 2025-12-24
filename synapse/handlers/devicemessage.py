@@ -284,16 +284,19 @@ class DeviceMessageHandler:
                 destination = get_domain_from_id(user_id)
                 remote_messages.setdefault(destination, {})[user_id] = by_device
 
-        last_stream_id = None
+        # Add local messages to the database.
+        # Retrieve the stream id of the last-processed to-device message.
+        last_stream_id = await self.store.add_messages_to_device_inbox(
+            local_messages, {}
+        )
         for destination, messages in remote_messages.items():
             split_edu_contents = get_device_message_edu_contents(
                 sender_user_id, message_type, messages
             )
             for edu_contents in split_edu_contents:
-                # Add messages to the database.
-                # Retrieve the stream id of the last-processed to-device message.
+                # Add remote messages to the database.
                 last_stream_id = await self.store.add_messages_to_device_inbox(
-                    local_messages, {destination: edu_contents}
+                    {}, {destination: edu_contents}
                 )
                 log_kv(
                     {
@@ -302,12 +305,11 @@ class DeviceMessageHandler:
                     }
                 )
 
-        if last_stream_id is not None:
-            # Notify listeners that there are new to-device messages to process,
-            # handing them the latest stream id.
-            self.notifier.on_new_event(
-                StreamKeyType.TO_DEVICE, last_stream_id, users=local_messages.keys()
-            )
+        # Notify listeners that there are new to-device messages to process,
+        # handing them the latest stream id.
+        self.notifier.on_new_event(
+            StreamKeyType.TO_DEVICE, last_stream_id, users=local_messages.keys()
+        )
 
         if self.federation_sender:
             # Enqueue a new federation transaction to send the new
