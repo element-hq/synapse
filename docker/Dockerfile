@@ -56,10 +56,10 @@ ENV UV_LINK_MODE=copy
 ARG POETRY_VERSION
 RUN --mount=type=cache,target=/root/.cache/uv \
   if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-    uvx --with poetry-plugin-export==1.9.0 \
-        poetry@${POETRY_VERSION} export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
+  uvx --with poetry-plugin-export==1.9.0 \
+  poetry@${POETRY_VERSION} export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
   else \
-    touch /synapse/requirements.txt; \
+  touch /synapse/requirements.txt; \
   fi
 
 ###
@@ -110,9 +110,9 @@ RUN \
   --mount=type=cache,target=/synapse/target,sharing=locked \
   --mount=type=cache,target=${CARGO_HOME}/registry,sharing=locked \
   if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-    uv pip install --prefix="/install" --no-deps /synapse[all]; \
+  uv pip install --prefix="/install" --no-deps /synapse[all]; \
   else \
-    uv pip install --prefix="/install" /synapse[all]; \
+  uv pip install --prefix="/install" /synapse[all]; \
   fi
 
 ###
@@ -135,31 +135,31 @@ RUN \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update -qq && \
   apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
-      curl \
-      gosu \
-      libjpeg62-turbo \
-      libpq5 \
-      libwebp7 \
-      xmlsec1 \
-      libjemalloc2 \
-    | grep '^\w' > /tmp/pkg-list && \
+  curl \
+  gosu \
+  libjpeg62-turbo \
+  libpq5 \
+  libwebp7 \
+  xmlsec1 \
+  libjemalloc2 \
+  | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
-    mkdir -p /tmp/debs-${arch} && \
-    chown _apt:root /tmp/debs-${arch} && \
-    cd /tmp/debs-${arch} && \
-    apt-get -o APT::Architecture="${arch}" download $(cat /tmp/pkg-list); \
+  mkdir -p /tmp/debs-${arch} && \
+  chown _apt:root /tmp/debs-${arch} && \
+  cd /tmp/debs-${arch} && \
+  apt-get -o APT::Architecture="${arch}" download $(cat /tmp/pkg-list); \
   done
 
 # Extract the debs for each architecture
 RUN \
   for arch in arm64 amd64; do \
-    mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
-    for deb in /tmp/debs-${arch}/*.deb; do \
-      package_name=$(dpkg-deb -I ${deb} | awk '/^ Package: .*$/ {print $2}'); \
-      echo "Extracting: ${package_name}"; \
-      dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
-      dpkg --extract $deb /install-${arch}; \
-    done; \
+  mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
+  for deb in /tmp/debs-${arch}/*.deb; do \
+  package_name=$(dpkg-deb -I ${deb} | awk '/^ Package: .*$/ {print $2}'); \
+  echo "Extracting: ${package_name}"; \
+  dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
+  dpkg --extract $deb /install-${arch}; \
+  done; \
   done
 
 
@@ -192,8 +192,8 @@ COPY ./docker/conf /conf
 # 8448: SS Matrix API port from Synapse
 EXPOSE 8008/tcp 8448/tcp
 # 9090: Metrics listener port (metrics must be enabled with SYNAPSE_ENABLE_METRICS=1)
-# Metrics for workers are exposed on ports starting from 9091 but since these are
-# dynamic we don't expose them by default.
+# Metrics for workers are on ports starting from 9091 but since these are dynamic we
+# don't expose them by default.
 EXPOSE 9090/tcp
 
 ENTRYPOINT ["/start.py"]
