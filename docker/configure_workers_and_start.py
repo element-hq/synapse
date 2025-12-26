@@ -764,13 +764,41 @@ def generate_worker_files(
 
     enable_metrics = environ.get("SYNAPSE_ENABLE_METRICS", "0") == "1"
 
+    # First read the original config file and extract the listeners block. Then we'll
+    # add another listener for replication. Later we'll write out the result to the
+    # shared config file.
+    listeners: list[Any]
+    if using_unix_sockets:
+        listeners = [
+            {
+                "path": MAIN_PROCESS_UNIX_SOCKET_PRIVATE_PATH,
+                "type": "http",
+                "resources": [{"names": ["replication"]}],
+            }
+        ]
+    else:
+        listeners = [
+            {
+                "port": MAIN_PROCESS_REPLICATION_PORT,
+                "bind_address": MAIN_PROCESS_LOCALHOST_ADDRESS,
+                "type": "http",
+                "resources": [{"names": ["replication"]}],
+            }
+        ]
+    with open(config_path) as file_stream:
+        original_config = yaml.safe_load(file_stream)
+        original_listeners = original_config.get("listeners")
+        if original_listeners:
+            listeners += original_listeners
+
     # The shared homeserver config. The contents of which will be inserted into the
     # base shared worker jinja2 template. This config file will be passed to all
     # workers, included Synapse's main process. It is intended mainly for disabling
     # functionality when certain workers are spun up, and adding a replication listener.
     shared_config: dict[str, Any] = {
+        "listeners": listeners,
         # Controls `enable_metrics: true`
-        enable_metrics: enable_metrics
+        enable_metrics: enable_metrics,
     }
 
     # List of dicts that describe workers.
