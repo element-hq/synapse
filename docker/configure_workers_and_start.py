@@ -51,7 +51,7 @@
 #     for testing.
 #   * `SYNAPSE_ENABLE_METRICS`: if set to `1`, the metrics listener will be enabled on the
 #      main and worker processes. Defaults to `0` (disabled). The main process will listen on
-#      port `9090` and workers on port `9091 + <worker index>`.
+#      port `19090` and workers on port `19091 + <worker index>`.
 #
 # NOTE: According to Complement's ENTRYPOINT expectations for a homeserver image (as defined
 # in the project's README), this script may be run multiple times, and functionality should
@@ -826,8 +826,8 @@ def generate_worker_files(
 
     # Start worker ports from this arbitrary port
     worker_port = 18009
-    # The main process metrics port is 9090, so start workers from 9091
-    worker_metrics_port = 9091
+    # The main process metrics port is 19090, so start workers from 19091
+    worker_metrics_port = 19091
 
     # A list of internal endpoints to healthcheck, starting with the main process
     # which exists even if no workers do.
