@@ -21,6 +21,7 @@ worker_listeners:
 {%- endfor %}
 {% endif %}
 
+{# Controlled by SYNAPSE_ENABLE_METRICS #}
 {% if metrics_port %}
   - type: metrics
     # Prometheus does not support Unix sockets so we don't bother with
