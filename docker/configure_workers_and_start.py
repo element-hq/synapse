@@ -836,10 +836,14 @@ def generate_worker_files(
             {"name": worker_name, "port": str(worker_port), "config_path": config_path}
         )
 
-        # Update the shared config with any worker_type specific options. The first of a
-        # given worker_type needs to stay assigned and not be replaced.
-        worker_config["shared_extra_conf"].update(shared_config)
-        shared_config = worker_config["shared_extra_conf"]
+        # Keep the `shared_config` up to date with the `shared_extra_conf` from each
+        # worker.
+        shared_config = {
+            **worker_config["shared_extra_conf"],
+            # We combine `shared_config` second to avoid overwriting existing keys
+            # because TODO: why?
+            **shared_config,
+        }
 
         if using_unix_sockets:
             healthcheck_urls.append(
