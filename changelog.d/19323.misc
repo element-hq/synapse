@@ -1,0 +1,1 @@
+Make it more clear how `shared_extra_conf` is combined in our Docker configuration scripts.
