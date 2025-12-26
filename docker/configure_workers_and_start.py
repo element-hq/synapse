@@ -840,6 +840,7 @@ def generate_worker_files(
         # given worker_type needs to stay assigned and not be replaced.
         worker_config["shared_extra_conf"].update(shared_config)
         shared_config = worker_config["shared_extra_conf"]
+
         if using_unix_sockets:
             healthcheck_urls.append(
                 f"--unix-socket /run/worker.{worker_port} http://localhost/health"
