@@ -49,6 +49,9 @@
 #         regardless of the SYNAPSE_LOG_LEVEL setting.
 #   * SYNAPSE_LOG_TESTING: if set, Synapse will log additional information useful
 #     for testing.
+#   * `SYNAPSE_ENABLE_METRICS`: if set to `1`, the metrics listener will be enabled on the
+#      main and worker processes. Defaults to `0` (disabled). The main process will listen on
+#      port `9090` and workers on port `9091 + <worker index>`.
 #
 # NOTE: According to Complement's ENTRYPOINT expectations for a homeserver image (as defined
 # in the project's README), this script may be run multiple times, and functionality should
@@ -759,11 +762,16 @@ def generate_worker_files(
     # Convenience helper for if using unix sockets instead of host:port
     using_unix_sockets = environ.get("SYNAPSE_USE_UNIX_SOCKET", False)
 
+    enable_metrics = environ.get("SYNAPSE_ENABLE_METRICS", "0") == "1"
+
     # The shared homeserver config. The contents of which will be inserted into the
     # base shared worker jinja2 template. This config file will be passed to all
     # workers, included Synapse's main process. It is intended mainly for disabling
     # functionality when certain workers are spun up, and adding a replication listener.
-    shared_config: dict[str, Any] = {}
+    shared_config: dict[str, Any] = {
+        # Controls `enable_metrics: true`
+        enable_metrics: enable_metrics
+    }
 
     # List of dicts that describe workers.
     # We pass this to the Supervisor template later to generate the appropriate
@@ -790,6 +798,8 @@ def generate_worker_files(
 
     # Start worker ports from this arbitrary port
     worker_port = 18009
+    # The main process metrics port is 9090, so start workers from 9091
+    worker_metrics_port = 9091
 
     # A list of internal endpoints to healthcheck, starting with the main process
     # which exists even if no workers do.
@@ -870,6 +880,10 @@ def generate_worker_files(
         # Write out the worker's logging config file
         log_config_filepath = generate_worker_log_config(environ, worker_name, data_dir)
 
+        if enable_metrics:
+            # Enable prometheus metrics endpoint on this worker
+            worker_config["metrics_port"] = worker_metrics_port
+
         # Then a worker config file
         convert(
             "/conf/worker.yaml.j2",
@@ -884,6 +898,7 @@ def generate_worker_files(
             nginx_upstreams.setdefault(worker_type, set()).add(worker_port)
 
         worker_port += 1
+        worker_metrics_port += 1
 
     # Build the nginx location config blocks
     nginx_location_config = ""

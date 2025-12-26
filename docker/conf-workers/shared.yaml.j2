@@ -20,4 +20,8 @@ app_service_config_files:
 {%- endfor %}
 {%- endif %}
 
+{% if enable_metrics %}
+enable_metrics: true
+{% endif %}
+
 {{ shared_worker_config }}
