@@ -798,7 +798,7 @@ def generate_worker_files(
     shared_config: dict[str, Any] = {
         "listeners": listeners,
         # Controls `enable_metrics: true`
-        enable_metrics: enable_metrics,
+        "enable_metrics": enable_metrics,
     }
 
     # List of dicts that describe workers.
