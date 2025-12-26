@@ -1,0 +1,1 @@
+Remove ununsed `listeners` from `shared_config` in Docker configuration script.
