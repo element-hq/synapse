@@ -530,6 +530,7 @@ class RootConfig:
             bind_port = 8448
             unsecure_port = 8008
 
+        # The default listeners
         if listeners is None:
             listeners = [
                 {
@@ -537,7 +538,6 @@ class RootConfig:
                     "tls": False,
                     "type": "http",
                     "x_forwarded": True,
-                    "bind_addresses": ["::1", "127.0.0.1"],
                     "resources": [
                         {"names": ["client", "federation"], "compress": False}
                     ],
@@ -550,7 +550,6 @@ class RootConfig:
                         "port": 19090,
                         "tls": False,
                         "type": "metrics",
-                        "bind_addresses": ["::1", "127.0.0.1"],
                     }
                 )
 
@@ -795,7 +794,9 @@ class RootConfig:
         generate_group.add_argument(
             "--enable-metrics",
             action="store_true",
-            help=("Enable the metrics listener on port 19090 and set `enable_metrics: true`"),
+            help=(
+                "Enable the metrics listener on port 19090 and set `enable_metrics: true`"
+            ),
         )
 
         cls.invoke_all_static("add_arguments", parser)
