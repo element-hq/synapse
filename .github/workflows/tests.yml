@@ -26,59 +26,59 @@ jobs:
       linting: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.linting }}
       linting_readme: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.linting_readme }}
     steps:
-    - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
-      id: filter
-      # We only check on PRs
-      if: startsWith(github.ref, 'refs/pull/')
-      with:
-        filters: |
-          rust:
-            - 'rust/**'
-            - 'Cargo.toml'
-            - 'Cargo.lock'
-            - '.rustfmt.toml'
-            - '.github/workflows/tests.yml'
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        # We only check on PRs
+        if: startsWith(github.ref, 'refs/pull/')
+        with:
+          filters: |
+            rust:
+              - 'rust/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.rustfmt.toml'
+              - '.github/workflows/tests.yml'
 
-          trial:
-            - 'synapse/**'
-            - 'tests/**'
-            - 'rust/**'
-            - '.ci/scripts/calculate_jobs.py'
-            - 'Cargo.toml'
-            - 'Cargo.lock'
-            - 'pyproject.toml'
-            - 'poetry.lock'
-            - '.github/workflows/tests.yml'
+            trial:
+              - 'synapse/**'
+              - 'tests/**'
+              - 'rust/**'
+              - '.ci/scripts/calculate_jobs.py'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'pyproject.toml'
+              - 'poetry.lock'
+              - '.github/workflows/tests.yml'
 
-          integration:
-            - 'synapse/**'
-            - 'rust/**'
-            - 'docker/**'
-            - 'Cargo.toml'
-            - 'Cargo.lock'
-            - 'pyproject.toml'
-            - 'poetry.lock'
-            - 'docker/**'
-            - '.ci/**'
-            - 'scripts-dev/complement.sh'
-            - '.github/workflows/tests.yml'
+            integration:
+              - 'synapse/**'
+              - 'rust/**'
+              - 'docker/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'pyproject.toml'
+              - 'poetry.lock'
+              - 'docker/**'
+              - '.ci/**'
+              - 'scripts-dev/complement.sh'
+              - '.github/workflows/tests.yml'
 
-          linting:
-            - 'synapse/**'
-            - 'docker/**'
-            - 'tests/**'
-            - 'scripts-dev/**'
-            - 'contrib/**'
-            - 'synmark/**'
-            - 'stubs/**'
-            - '.ci/**'
-            - 'mypy.ini'
-            - 'pyproject.toml'
-            - 'poetry.lock'
-            - '.github/workflows/tests.yml'
+            linting:
+              - 'synapse/**'
+              - 'docker/**'
+              - 'tests/**'
+              - 'scripts-dev/**'
+              - 'contrib/**'
+              - 'synmark/**'
+              - 'stubs/**'
+              - '.ci/**'
+              - 'mypy.ini'
+              - 'pyproject.toml'
+              - 'poetry.lock'
+              - '.github/workflows/tests.yml'
 
-          linting_readme:
-            - 'README.rst'
+            linting_readme:
+              - 'README.rst'
 
   check-sampleconfig:
     runs-on: ubuntu-latest
@@ -219,8 +219,8 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
-            components: clippy
-            toolchain: ${{ env.RUST_VERSION }}
+          components: clippy
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
       - run: cargo clippy -- -D warnings
@@ -238,8 +238,8 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
-            toolchain: nightly-2025-04-23
-            components: clippy
+          toolchain: nightly-2025-04-23
+          components: clippy
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
       - run: cargo clippy --all-features -- -D warnings
@@ -349,7 +349,6 @@ jobs:
             lint-rustfmt
             lint-readme
 
-
   calculate-test-jobs:
     if: ${{ !cancelled() && !failure() }} # Allow previous steps to be skipped, but not fail
     needs: linting-done
@@ -373,7 +372,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        job:  ${{ fromJson(needs.calculate-test-jobs.outputs.trial_test_matrix) }}
+        job: ${{ fromJson(needs.calculate-test-jobs.outputs.trial_test_matrix) }}
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -449,12 +448,12 @@ jobs:
 
       - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Prepare old deps
         # Note: we install using `uv` here, not poetry or pip to allow us to test with the
         # minimum version of all dependencies, both those explicitly specified and those
-        # implicitly brought in by the explicit dependencies. 
+        # implicitly brought in by the explicit dependencies.
         run: |
           pip install uv
           uv pip install --system --resolution=lowest .[all,test]
@@ -605,7 +604,6 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: postgres
 
-
   portdb:
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.integration == 'true'}} # Allow previous steps to be skipped, but not fail
     needs:
@@ -752,7 +750,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
-            toolchain: nightly-2022-12-01
+          toolchain: nightly-2022-12-01
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
       - run: cargo bench --no-run
