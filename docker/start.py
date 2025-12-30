@@ -184,7 +184,14 @@ def run_generate_config(environ: Mapping[str, str], ownership: str | None) -> No
 
     enable_metrics = False
     if enable_metrics_raw is not None:
-        enable_metrics = strtobool(enable_metrics_raw)
+        try:
+            enable_metrics = strtobool(enable_metrics_raw)
+        except ValueError:
+            error(
+                'Environment variable "SYNAPSE_ENABLE_METRICS" found but value "'
+                + enable_metrics_raw
+                + '" unrecognized; exiting.'
+            )
 
     # create a suitable log config from our template
     log_config_file = "%s/%s.log.config" % (config_dir, server_name)
