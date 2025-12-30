@@ -41,7 +41,11 @@ class ServerConfigTestCase(unittest.TestCase):
     def test_unsecure_listener_no_listeners_open_private_ports_false(self) -> None:
         conf = yaml.safe_load(
             ServerConfig(RootConfig()).generate_config_section(
-                "CONFDIR", "/data_dir_path", "che.org", False, None
+                config_dir_path="CONFDIR",
+                data_dir_path="/data_dir_path",
+                server_name="che.org",
+                open_private_ports=False,
+                listeners=None,
             )
         )
 
@@ -61,7 +65,11 @@ class ServerConfigTestCase(unittest.TestCase):
     def test_unsecure_listener_no_listeners_open_private_ports_true(self) -> None:
         conf = yaml.safe_load(
             ServerConfig(RootConfig()).generate_config_section(
-                "CONFDIR", "/data_dir_path", "che.org", True, None
+                config_dir_path="CONFDIR",
+                data_dir_path="/data_dir_path",
+                server_name="che.org",
+                open_private_ports=True,
+                listeners=None,
             )
         )
 
@@ -95,7 +103,11 @@ class ServerConfigTestCase(unittest.TestCase):
 
         conf = yaml.safe_load(
             ServerConfig(RootConfig()).generate_config_section(
-                "CONFDIR", "/data_dir_path", "this.one.listens", True, listeners
+                config_dir_path="CONFDIR",
+                data_dir_path="/data_dir_path",
+                server_name="this.one.listens",
+                open_private_ports=True,
+                listeners=listeners,
             )
         )
 
@@ -129,7 +141,11 @@ class ServerConfigTestCase(unittest.TestCase):
 
         conf = yaml.safe_load(
             ServerConfig(RootConfig()).generate_config_section(
-                "CONFDIR", "/data_dir_path", "this.one.listens", True, listeners
+                config_dir_path="CONFDIR",
+                data_dir_path="/data_dir_path",
+                server_name="this.one.listens",
+                open_private_ports=True,
+                listeners=listeners,
             )
         )
 

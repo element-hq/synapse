@@ -75,10 +75,16 @@ class MetricsConfig(Config):
                 )
 
     def generate_config_section(
-        self, report_stats: bool | None = None, **kwargs: Any
+        self,
+        report_stats: bool | None = None,
+        enable_metrics: bool = False,
+        **kwargs: Any,
     ) -> str:
         if report_stats is not None:
             res = "report_stats: %s\n" % ("true" if report_stats else "false")
         else:
             res = "\n"
+
+        res += f"enable_metrics: {'true' if enable_metrics else 'false'}\n"
+
         return res

@@ -77,7 +77,7 @@ The following environment variables are supported in `generate` mode:
   for testing.
 * `SYNAPSE_ENABLE_METRICS`: if set to `1`, the metrics listener will be enabled on the
   main and worker processes. Defaults to `0` (disabled). The main process will listen on
-  port `9090` and workers on port `9091 + <worker index>`.
+  port `19090` and workers on port `19091 + <worker index>`.
 
 ## Postgres
 
