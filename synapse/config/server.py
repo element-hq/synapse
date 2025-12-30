@@ -928,7 +928,6 @@ class ServerConfig(Config):
         data_dir_path: str,
         server_name: str,
         open_private_ports: bool = False,
-        enable_metrics: bool = False,
         listeners: list[dict] | None = None,
         **kwargs: Any,
     ) -> str:
