@@ -501,8 +501,11 @@ class RootConfig:
                 `enable_metrics: true`.
 
             listeners: A list of descriptions of the listeners synapse should
-                start with each of which specifies a port (int), a list of
-                resources (list(str)), tls (bool) and type (str). For example:
+                start with each of which specifies a port (int), a list of resources
+                (list(str)), tls (bool) and type (str). There is a default set of
+                listeners when `None`.
+
+                Example usage:
                 [{
                     "port": 8448,
                     "resources": [{"names": ["federation"]}],
