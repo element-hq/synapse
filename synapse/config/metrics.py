@@ -85,6 +85,8 @@ class MetricsConfig(Config):
         else:
             res = "\n"
 
-        res += f"enable_metrics: {'true' if enable_metrics else 'false'}\n"
+        # We avoid adding anything if it's `False` since that's the default
+        if enable_metrics:
+            res += "enable_metrics: true\n"
 
         return res
