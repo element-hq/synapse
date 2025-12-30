@@ -497,8 +497,8 @@ class RootConfig:
             open_private_ports: True to leave private ports (such as the non-TLS
                 HTTP listener) open to the internet.
 
-            enable_metrics: True to enable the metrics listener on port 19090 and set
-                `enable_metrics: true`.
+            enable_metrics: True to set `enable_metrics: true` and when using the
+                default set of listeners, will also add the metrics listener on port 19090.
 
             listeners: A list of descriptions of the listeners synapse should
                 start with each of which specifies a port (int), a list of resources
@@ -798,7 +798,8 @@ class RootConfig:
             "--enable-metrics",
             action="store_true",
             help=(
-                "Enable the metrics listener on port 19090 and set `enable_metrics: true`"
+                "Sets `enable_metrics: true` and when using the default set of listeners, "
+                "will also add the metrics listener on port 19090."
             ),
         )
 
