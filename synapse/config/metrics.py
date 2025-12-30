@@ -85,7 +85,8 @@ class MetricsConfig(Config):
         else:
             res = "\n"
 
-        # We avoid adding anything if it's `False` since that's the default
+        # We avoid adding anything if it's `False` since that's the default (less noise
+        # in the default generated config)
         if enable_metrics:
             res += "enable_metrics: true\n"
 
