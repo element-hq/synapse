@@ -143,9 +143,9 @@ Set `SYNAPSE_ENABLE_METRICS=1` to `enable_metrics: true` and setup the metrics l
 on the main and worker processes. Defaults to `0` (disabled). The main process will
 listen on port `19090` and workers on port `19091 + <worker index>`.
 
-To ease the complexity with the metrics setup, we also have a Prometheus service
-discovery endpoint
-available at `http://<synapse_container>:9469/metrics/service_discovery`.
+When using `docker/Dockerfile-workers`, to ease the complexity with the metrics setup,
+we also have a Prometheus service discovery endpoint available at
+`http://<synapse_container>:9469/metrics/service_discovery`.
 
 ```yaml
 global:
@@ -172,6 +172,6 @@ scrape_configs:
     # Reference:
     #  - https://prometheus.io/docs/prometheus/latest/http_sd/
     #  - https://prometheus.io/docs/prometheus/latest/configuration/configuration/#http_sd_config
-    http_sd_config:
-      url: 'http://localhost:9469/metrics/service_discovery'
+    http_sd_configs:
+      - url: 'http://localhost:9469/metrics/service_discovery'
 ```
