@@ -1020,8 +1020,8 @@ def generate_worker_files(
             body=body,
         )
 
-    # Provide a Prometheus service discovery endpoint to easily be able to pick up all
-    # of the workers
+    # Provide a Prometheus metrics service discovery endpoint to easily be able to pick
+    # up all of the workers
     nginx_prometheus_metrics_service_discovery = ""
     if enable_metrics:
         # Write JSON file for Prometheus service discovery pointing to all of the
@@ -1061,6 +1061,16 @@ def generate_worker_files(
             }
             for worker in requested_workers
         ]
+        # Add the main Synapse process as well
+        prometheus_http_service_discovery_content.append(
+            {
+                # Main process always serves metrics on port 19090
+                "targets": ["host.docker.internal:19090"],
+                "labels": {"job": "main"},
+            }
+        )
+
+        # Check to make sure the file doesn't already exist
         if os.path.isfile(PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH):
             error(
                 f"Prometheus service discovery file "
@@ -1069,12 +1079,13 @@ def generate_worker_files(
                 "Synapse workers we're setting up now."
             )
 
+        # Write the file
         with open(PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH, "w") as outfile:
             outfile.write(
                 json.dumps(prometheus_http_service_discovery_content, indent=4)
             )
 
-        # Add a nginx location to serve
+        # Add a nginx server/location to serve the JSON file
         nginx_prometheus_metrics_service_discovery = (
             NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY
         )
