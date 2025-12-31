@@ -371,8 +371,14 @@ NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY = (
     """
 server {
     listen 9469;
-    location /metrics/service_discovery {
+    location = /metrics/service_discovery {
         alias %s;
+        default_type application/json;
+    }
+
+    # Make the service discovery endpoint easy to find; redirect to the correct spot.
+    location = / {
+        return 302 /metrics/service_discovery;
     }
 }
 """
