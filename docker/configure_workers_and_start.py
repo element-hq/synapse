@@ -343,8 +343,16 @@ WORKERS_CONFIG: dict[str, dict[str, Any]] = {
 }
 
 # Templates for sections that may be inserted multiple times in config files
-NGINX_LOCATION_CONFIG_BLOCK = """
+NGINX_LOCATION_REGEX_CONFIG_BLOCK = """
     location ~* {endpoint} {{
+        proxy_pass {upstream};
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $host;
+    }}
+"""
+NGINX_LOCATION_EXACT_CONFIG_BLOCK = """
+    location = {endpoint} {{
         proxy_pass {upstream};
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -367,23 +375,22 @@ We serve this file with nginx so people can use it with `http_sd_config` in thei
 Prometheus config.
 """
 
-NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY = (
-    """
-server {
+NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY = """
+server {{
     listen 9469;
-    location = /metrics/service_discovery {
-        alias %s;
+    location = /metrics/service_discovery {{
+        alias {service_discovery_file_path};
         default_type application/json;
-    }
+    }}
 
     # Make the service discovery endpoint easy to find; redirect to the correct spot.
-    location = / {
+    location = / {{
         return 302 /metrics/service_discovery;
-    }
-}
+    }}
+
+    {metrics_proxy_locations}
+}}
 """
-    % PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH
-)
 """
 Setup the nginx config necessary to serve the JSON file for Prometheus service discovery
 (`http_sd_config`).
@@ -1003,7 +1010,7 @@ def generate_worker_files(
     # Build the nginx location config blocks
     nginx_location_config = ""
     for endpoint, upstream in nginx_locations.items():
-        nginx_location_config += NGINX_LOCATION_CONFIG_BLOCK.format(
+        nginx_location_config += NGINX_LOCATION_REGEX_CONFIG_BLOCK.format(
             endpoint=endpoint,
             upstream=upstream,
         )
@@ -1044,10 +1051,9 @@ def generate_worker_files(
         # Another reference: https://prometheus.io/docs/prometheus/latest/http_sd/
         prometheus_http_service_discovery_content = [
             {
-                "targets": [
-                    f"host.docker.internal:{worker_name_to_metrics_port_map[worker.worker_name]}"
-                ],
+                "targets": ["host.docker.internal:9469"],
                 "labels": {
+                    "instance": f"host.docker.internal:{worker_name_to_metrics_port_map[worker.worker_name]}",
                     # The downstream user should also configure `honor_labels: true` in
                     # their Prometheus config to prevent Prometheus from overwriting the
                     # `job` label.
@@ -1062,7 +1068,9 @@ def generate_worker_files(
                     # Reference:
                     # - https://prometheus.io/docs/concepts/jobs_instances/
                     # - https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config
-                    "job": worker.worker_base_name
+                    "job": worker.worker_base_name,
+                    # TODO: Maybe this works?
+                    "__metrics_path__": f"/metrics/worker/{worker.worker_name}",
                 },
             }
             for worker in requested_workers
@@ -1070,9 +1078,14 @@ def generate_worker_files(
         # Add the main Synapse process as well
         prometheus_http_service_discovery_content.append(
             {
-                # Main process always serves metrics on port 19090
-                "targets": ["host.docker.internal:19090"],
-                "labels": {"job": "main"},
+                "targets": ["host.docker.internal:9469"],
+                "labels": {
+                    # Main process always serves metrics on port 19090
+                    "instance": "host.docker.internal:19090",
+                    "job": "main",
+                    # TODO: Maybe this works?
+                    "__metrics_path__": f"/metrics/worker/{worker.worker_name}",
+                },
             }
         )
 
@@ -1091,9 +1104,28 @@ def generate_worker_files(
                 json.dumps(prometheus_http_service_discovery_content, indent=4)
             )
 
+        # Proxy all of the Synapse metrics endpoints through a central place so that
+        # people only need to expose the single 9469 port and service discovery can take
+        # care of the rest: `/metrics/worker/<worker_name>` ->
+        # http://localhost:19090/_synapse/metrics
+        #
+        # Build the nginx location config blocks
+        metrics_proxy_locations = ""
+        for worker in requested_workers:
+            metrics_proxy_locations += NGINX_LOCATION_EXACT_CONFIG_BLOCK.format(
+                endpoint=f"/metrics/worker/{worker.worker_name}",
+                upstream=f"http://localhost:{worker_name_to_metrics_port_map[worker.worker_name]}/_synapse/metrics",
+            )
+        # Add the main Synapse process as well
+        metrics_proxy_locations += NGINX_LOCATION_EXACT_CONFIG_BLOCK.format(
+            endpoint="/metrics/worker/main",
+            upstream="http://localhost:19090/_synapse/metrics",
+        )
+
         # Add a nginx server/location to serve the JSON file
-        nginx_prometheus_metrics_service_discovery = (
-            NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY
+        nginx_prometheus_metrics_service_discovery = NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY.format(
+            service_discovery_file_path=PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH,
+            metrics_proxy_locations=metrics_proxy_locations,
         )
 
     # Finally, we'll write out the config files.
