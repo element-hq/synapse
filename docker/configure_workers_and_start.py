@@ -75,6 +75,7 @@ from typing import (
     SupportsIndex,
 )
 
+import attr
 import yaml
 from jinja2 import Environment, FileSystemLoader
 
@@ -357,6 +358,16 @@ upstream {upstream_worker_base_name} {{
 """
 
 
+PROMETHEUS_METRICS_SERVICE_DISCOVERY = """
+server {
+    listen 9469;
+    location /metrics/service_discovery {
+        alias /data/prometheus_service_discovery.json;
+    }
+}
+"""
+
+
 # Utility functions
 def log(txt: str) -> None:
     print(txt)
@@ -616,9 +627,31 @@ def generate_base_homeserver_config() -> None:
     subprocess.run([sys.executable, "/start.py", "migrate_config"], check=True)
 
 
+@attr.s(auto_attribs=True)
+class ParsedWorker:
+    worker_name: str
+    """
+    ex.
+    `event_persister:2` -> `event_persister1` and `event_persister2`
+    `stream_writers=account_data+presence+receipts+to_device+typing"` -> `stream_writers`
+    """
+    worker_base_name: str
+    """
+    ex.
+    `event_persister:2` -> `event_persister`
+    `stream_writers=account_data+presence+receipts+to_device+typing"` -> `stream_writers`
+    """
+    worker_types: set[str]
+    """
+    ex.
+    `event_persister:2` -> `{"event_persister"}`
+    `stream_writers=account_data+presence+receipts+to_device+typing"` -> `{"account_data", "presence", "receipts","to_device", "typing"}
+    """
+
+
 def parse_worker_types(
     requested_worker_types: list[str],
-) -> dict[str, set[str]]:
+) -> dict[str, ParsedWorker]:
     """Read the desired list of requested workers and prepare the data for use in
         generating worker config files while also checking for potential gotchas.
 
@@ -641,7 +674,7 @@ def parse_worker_types(
     worker_type_shard_counter: dict[str, int] = defaultdict(int)
 
     # The final result of all this processing
-    dict_to_return: dict[str, set[str]] = {}
+    dict_to_return: dict[str, ParsedWorker] = {}
 
     # Handle any multipliers requested for given workers.
     multiple_processed_worker_types = apply_requested_multiplier_for_worker(
@@ -728,14 +761,18 @@ def parse_worker_types(
             # If this isn't the first worker, check that we don't have a confusing
             # mixture of worker types with the same base name.
             first_worker_with_base_name = dict_to_return[f"{worker_base_name}1"]
-            if first_worker_with_base_name != worker_types_set:
+            if first_worker_with_base_name.worker_types != worker_types_set:
                 error(
                     f"Can not use worker_name: '{worker_name}' for worker_type(s): "
                     f"{worker_types_set!r}. It is already in use by "
-                    f"worker_type(s): {first_worker_with_base_name!r}"
+                    f"worker_type(s): {first_worker_with_base_name.worker_types!r}"
                 )
 
-        dict_to_return[worker_name] = worker_types_set
+        dict_to_return[worker_name] = ParsedWorker(
+            worker_name=worker_name,
+            worker_base_name=worker_base_name,
+            worker_types=worker_types_set,
+        )
 
     return dict_to_return
 
@@ -744,7 +781,7 @@ def generate_worker_files(
     environ: Mapping[str, str],
     config_path: str,
     data_dir: str,
-    requested_worker_types: dict[str, set[str]],
+    requested_worker_types: dict[str, ParsedWorker],
 ) -> None:
     """Read the desired workers(if any) that is passed in and generate shared
         homeserver, nginx and supervisord configs.
@@ -754,8 +791,7 @@ def generate_worker_files(
         config_path: The location of the generated Synapse main worker config file.
         data_dir: The location of the synapse data directory. Where log and
             user-facing config files live.
-        requested_worker_types: A Dict containing requested workers in the format of
-            {'worker_name1': {'worker_type', ...}}
+        requested_worker_types: A Dict from worker name to `ParsedWorker`
     """
     # Note that yaml cares about indentation, so care should be taken to insert lines
     # into files at the correct indentation below.
@@ -955,6 +991,17 @@ def generate_worker_files(
             body=body,
         )
 
+    # Provide a Prometheus service discovery endpoint to easily be able to pick up all
+    # of the workers
+    nginx_prometheus_metrics_service_discovery = ""
+    if enable_metrics:
+        # TODO: Write JSON file
+
+        # Add a nginx location to serve
+        nginx_prometheus_metrics_service_discovery = (
+            PROMETHEUS_METRICS_SERVICE_DISCOVERY
+        )
+
     # Finally, we'll write out the config files.
 
     # log config for the master process
@@ -1007,6 +1054,7 @@ def generate_worker_files(
         tls_cert_path=os.environ.get("SYNAPSE_TLS_CERT"),
         tls_key_path=os.environ.get("SYNAPSE_TLS_KEY"),
         using_unix_sockets=using_unix_sockets,
+        nginx_prometheus_metrics_service_discovery=nginx_prometheus_metrics_service_discovery,
     )
 
     # Supervisord config
