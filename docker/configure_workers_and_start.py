@@ -628,7 +628,7 @@ def generate_base_homeserver_config() -> None:
 
 
 @attr.s(auto_attribs=True)
-class ParsedWorker:
+class Worker:
     worker_name: str
     """
     ex.
@@ -651,7 +651,7 @@ class ParsedWorker:
 
 def parse_worker_types(
     requested_worker_types: list[str],
-) -> dict[str, ParsedWorker]:
+) -> list[Worker]:
     """Read the desired list of requested workers and prepare the data for use in
         generating worker config files while also checking for potential gotchas.
 
@@ -659,10 +659,7 @@ def parse_worker_types(
         requested_worker_types: The list formed from the split environment variable
             containing the unprocessed requests for workers.
 
-    Returns: A dict of worker names to set of worker types. Format:
-        {'worker_name':
-            {'worker_type', 'worker_type2'}
-        }
+    Returns: A list of requested workers
     """
     # A counter of worker_base_name -> int. Used for determining the name for a given
     # worker when generating its config file, as each worker's name is just
@@ -673,8 +670,8 @@ def parse_worker_types(
     # more than a single worker for cases where multiples would be bad(e.g. presence).
     worker_type_shard_counter: dict[str, int] = defaultdict(int)
 
-    # The final result of all this processing
-    dict_to_return: dict[str, ParsedWorker] = {}
+    # Map from worker name to `Worker`
+    worker_dict: dict[str, Worker] = {}
 
     # Handle any multipliers requested for given workers.
     multiple_processed_worker_types = apply_requested_multiplier_for_worker(
@@ -760,7 +757,7 @@ def parse_worker_types(
         if worker_number > 1:
             # If this isn't the first worker, check that we don't have a confusing
             # mixture of worker types with the same base name.
-            first_worker_with_base_name = dict_to_return[f"{worker_base_name}1"]
+            first_worker_with_base_name = worker_dict[f"{worker_base_name}1"]
             if first_worker_with_base_name.worker_types != worker_types_set:
                 error(
                     f"Can not use worker_name: '{worker_name}' for worker_type(s): "
@@ -768,20 +765,20 @@ def parse_worker_types(
                     f"worker_type(s): {first_worker_with_base_name.worker_types!r}"
                 )
 
-        dict_to_return[worker_name] = ParsedWorker(
+        worker_dict[worker_name] = Worker(
             worker_name=worker_name,
             worker_base_name=worker_base_name,
             worker_types=worker_types_set,
         )
 
-    return dict_to_return
+    return list(worker_dict.values())
 
 
 def generate_worker_files(
     environ: Mapping[str, str],
     config_path: str,
     data_dir: str,
-    requested_worker_types: dict[str, ParsedWorker],
+    requested_workers: list[Worker],
 ) -> None:
     """Read the desired workers(if any) that is passed in and generate shared
         homeserver, nginx and supervisord configs.
@@ -791,7 +788,7 @@ def generate_worker_files(
         config_path: The location of the generated Synapse main worker config file.
         data_dir: The location of the synapse data directory. Where log and
             user-facing config files live.
-        requested_worker_types: A Dict from worker name to `ParsedWorker`
+        requested_workers: A list of requested workers
     """
     # Note that yaml cares about indentation, so care should be taken to insert lines
     # into files at the correct indentation below.
@@ -881,7 +878,9 @@ def generate_worker_files(
         healthcheck_urls = ["http://localhost:8080/health"]
 
     # Get the set of all worker types that we have configured
-    all_worker_types_in_use = set(chain(*requested_worker_types.values()))
+    all_worker_types_in_use = set(
+        chain(*[worker.worker_types for worker in requested_workers])
+    )
     # Map locations to upstreams (corresponding to worker types) in Nginx
     # but only if we use the appropriate worker type
     for worker_type in all_worker_types_in_use:
@@ -890,12 +889,12 @@ def generate_worker_files(
 
     # For each worker type specified by the user, create config values and write it's
     # yaml config file
-    for worker_name, worker_types_set in requested_worker_types.items():
+    for worker in requested_workers:
         # The collected and processed data will live here.
         worker_config: dict[str, Any] = {}
 
         # Merge all worker config templates for this worker into a single config
-        for worker_type in worker_types_set:
+        for worker_type in worker.worker_types:
             copy_of_template_config = WORKERS_CONFIG[worker_type].copy()
 
             # Merge worker type template configuration data. It's a combination of lists
@@ -905,10 +904,16 @@ def generate_worker_files(
             )
 
         # Replace placeholder names in the config template with the actual worker name.
-        worker_config = insert_worker_name_for_worker_config(worker_config, worker_name)
+        worker_config = insert_worker_name_for_worker_config(
+            worker_config, worker.worker_name
+        )
 
         worker_config.update(
-            {"name": worker_name, "port": str(worker_port), "config_path": config_path}
+            {
+                "name": worker.worker_name,
+                "port": str(worker_port),
+                "config_path": config_path,
+            }
         )
 
         # Keep the `shared_config` up to date with the `shared_extra_conf` from each
@@ -931,19 +936,21 @@ def generate_worker_files(
         # the `events` stream. For other workers, the worker name is the same
         # name of the stream they write to, but for some reason it is not the
         # case for event_persister.
-        if "event_persister" in worker_types_set:
-            worker_types_set.add("events")
+        if "event_persister" in worker.worker_types:
+            worker.worker_types.add("events")
 
         # Update the shared config with sharding-related options if necessary
         add_worker_roles_to_shared_config(
-            shared_config, worker_types_set, worker_name, worker_port
+            shared_config, worker.worker_types, worker.worker_name, worker_port
         )
 
         # Enable the worker in supervisord
         worker_descriptors.append(worker_config)
 
         # Write out the worker's logging config file
-        log_config_filepath = generate_worker_log_config(environ, worker_name, data_dir)
+        log_config_filepath = generate_worker_log_config(
+            environ, worker.worker_name, data_dir
+        )
 
         if enable_metrics:
             # Enable prometheus metrics endpoint on this worker
@@ -952,14 +959,14 @@ def generate_worker_files(
         # Then a worker config file
         convert(
             "/conf/worker.yaml.j2",
-            f"/conf/workers/{worker_name}.yaml",
+            f"/conf/workers/{worker.worker_name}.yaml",
             **worker_config,
             worker_log_config_filepath=log_config_filepath,
             using_unix_sockets=using_unix_sockets,
         )
 
         # Save this worker's port number to the correct nginx upstreams
-        for worker_type in worker_types_set:
+        for worker_type in worker.worker_types:
             nginx_upstreams.setdefault(worker_type, set()).add(worker_port)
 
         worker_port += 1
@@ -1019,7 +1026,7 @@ def generate_worker_files(
             if reg_path.suffix.lower() in (".yaml", ".yml")
         ]
 
-    workers_in_use = len(requested_worker_types) > 0
+    workers_in_use = len(requested_workers) > 0
 
     # If there are workers, add the main process to the instance_map too.
     if workers_in_use:
@@ -1155,15 +1162,20 @@ def main(args: list[str], environ: MutableMapping[str, str]) -> None:
         if not worker_types_env:
             # No workers, just the main process
             worker_types = []
-            requested_worker_types: dict[str, Any] = {}
+            requested_workers: list[Worker] = []
         else:
             # Split type names by comma, ignoring whitespace.
             worker_types = split_and_strip_string(worker_types_env, ",")
-            requested_worker_types = parse_worker_types(worker_types)
+            requested_workers = parse_worker_types(worker_types)
 
         # Always regenerate all other config files
         log("Generating worker config files")
-        generate_worker_files(environ, config_path, data_dir, requested_worker_types)
+        generate_worker_files(
+            environ=environ,
+            config_path=config_path,
+            data_dir=data_dir,
+            requested_workers=requested_workers,
+        )
 
         # Mark workers as being configured
         with open(mark_filepath, "w") as f:
