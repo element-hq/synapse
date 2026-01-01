@@ -1069,7 +1069,14 @@ def generate_worker_files(
                     # - https://prometheus.io/docs/concepts/jobs_instances/
                     # - https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config
                     "job": worker.worker_base_name,
-                    # TODO: Maybe this works?
+                    # This allows us to change the `metrics_path` on a per-target basis.
+                    # We want to grab the metrics from our nginx proxied location (setup
+                    # below).
+                    #
+                    # While there don't seem to be official docs on these special labels
+                    # (`__metrics_path__`, `__scheme__`, `__scrape_interval__`,
+                    # `__scrape_timeout__`), this discussion best summarizes how this
+                    # works: https://github.com/prometheus/prometheus/discussions/13217
                     "__metrics_path__": f"/metrics/worker/{worker.worker_name}",
                 },
             }
@@ -1083,8 +1090,7 @@ def generate_worker_files(
                     # Main process always serves metrics on port 19090
                     "instance": "host.docker.internal:19090",
                     "job": "main",
-                    # TODO: Maybe this works?
-                    "__metrics_path__": f"/metrics/worker/{worker.worker_name}",
+                    "__metrics_path__": "/metrics/worker/main",
                 },
             }
         )
