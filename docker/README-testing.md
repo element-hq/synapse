@@ -137,7 +137,7 @@ TLS certificate and key (respectively), both in PEM (textual) format.
 In this case, Nginx will additionally serve using HTTPS on port 8448.
 
 
-## Metrics
+### Metrics
 
 Set `SYNAPSE_ENABLE_METRICS=1` to configure `enable_metrics: true` and setup the
 `metrics` listener on the main and worker processes. Defaults to `0` (disabled). The
