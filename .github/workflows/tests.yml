@@ -708,14 +708,28 @@ jobs:
           go-version-file: complement/go.mod
 
         # use p=1 concurrency as GHA boxes are underpowered and don't like running tons of synapses at once.
-      - run: |
+      - name: Run Complement Tests
+        id: run_complement_tests
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
           set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | synapse/.ci/scripts/gotestfmt
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest.log
         shell: bash
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-        name: Run Complement Tests
+
+      - name: Formatted Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_complement_tests.outcome != 'skipped'
+        run: cat /tmp/gotest.log | gotestfmt -hide "successful-downloads,empty-packages"
 
   cargo-test:
     if: ${{ needs.changes.outputs.rust == 'true' }}

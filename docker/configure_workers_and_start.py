@@ -995,6 +995,10 @@ def generate_worker_files(
             # Enable prometheus metrics endpoint on this worker
             worker_config["metrics_port"] = worker_metrics_port
 
+        if enable_metrics:
+            # Enable prometheus metrics endpoint on this worker
+            worker_config["metrics_port"] = worker_metrics_port
+
         # Then a worker config file
         convert(
             "/conf/worker.yaml.j2",
