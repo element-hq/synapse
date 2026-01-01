@@ -392,12 +392,16 @@ server {{
 }}
 """
 """
-Setup the nginx config necessary to serve the JSON file for Prometheus service discovery
-(`http_sd_config`).
+Setup the nginx config necessary to serve the JSON file for Prometheus HTTP service discovery
+(`http_sd_config`). Served at `/metrics/service_discovery`.
 
 Reference:
  - https://prometheus.io/docs/prometheus/latest/http_sd/
  - https://prometheus.io/docs/prometheus/latest/configuration/configuration/#http_sd_config
+
+We also proxy all of the Synapse metrics endpoints through a central place so that
+people only need to expose the single 9469 port and service discovery can take care of
+the rest: `/metrics/worker/<worker_name>` -> http://localhost:19090/_synapse/metrics
 """
 
 
