@@ -1077,8 +1077,8 @@ def generate_worker_files(
                     # We want to grab the metrics from our nginx proxied location (setup
                     # below).
                     #
-                    # While there don't seem to be official docs on these special labels
-                    # (`__metrics_path__`, `__scheme__`, `__scrape_interval__`,
+                    # While there doesn't seem to be official docs on these special
+                    # labels (`__metrics_path__`, `__scheme__`, `__scrape_interval__`,
                     # `__scrape_timeout__`), this discussion best summarizes how this
                     # works: https://github.com/prometheus/prometheus/discussions/13217
                     "__metrics_path__": f"/metrics/worker/{worker.worker_name}",
