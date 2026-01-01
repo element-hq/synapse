@@ -1057,10 +1057,9 @@ def generate_worker_files(
             {
                 "targets": ["host.docker.internal:9469"],
                 "labels": {
-                    "instance": f"host.docker.internal:{worker_name_to_metrics_port_map[worker.worker_name]}",
                     # The downstream user should also configure `honor_labels: true` in
                     # their Prometheus config to prevent Prometheus from overwriting the
-                    # `job` label.
+                    # `job`/`instance` labels.
                     #
                     # > honor_labels controls how Prometheus handles conflicts between labels that are
                     # > already present in scraped data and labels that Prometheus would attach
@@ -1072,6 +1071,7 @@ def generate_worker_files(
                     # Reference:
                     # - https://prometheus.io/docs/concepts/jobs_instances/
                     # - https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config
+                    "instance": f"host.docker.internal:{worker_name_to_metrics_port_map[worker.worker_name]}",
                     "job": worker.worker_base_name,
                     # This allows us to change the `metrics_path` on a per-target basis.
                     # We want to grab the metrics from our nginx proxied location (setup
