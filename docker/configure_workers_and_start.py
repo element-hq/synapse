@@ -376,7 +376,10 @@ Prometheus config.
 """
 
 NGINX_HOST_PLACEHOLDER = "<HOST_PLACEHOLDER>"
-"""Will be replaced with the whatever host used to access the nginx metrics endpoint."""
+"""Will be replaced with the whatever hostname:port used to access the nginx metrics endpoint."""
+
+NGINX_HOSTNAME_PLACEHOLDER = "<HOSTNAME_PLACEHOLDER>"
+"""Will be replaced with the whatever hostname used to access the nginx metrics endpoint."""
 
 NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY = """
 server {{
@@ -395,6 +398,7 @@ server {{
         # `host.docker.internal:9469`, etc. Or perhaps it's even some randomly assigned
         # port mapping.
         sub_filter '{host_placeholder}' '$http_host';
+        sub_filter '{hostname_placeholder}' '$host';
         # By default, `ngx_http_sub_module` only works on `text/html` responses. We want
         # to find/replace in `application/JSON`.
         sub_filter_types application/json;
@@ -1094,7 +1098,7 @@ def generate_worker_files(
                     # Reference:
                     # - https://prometheus.io/docs/concepts/jobs_instances/
                     # - https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config
-                    "instance": f"host.docker.internal:{worker_name_to_metrics_port_map[worker.worker_name]}",
+                    "instance": f"{NGINX_HOSTNAME_PLACEHOLDER}:{worker_name_to_metrics_port_map[worker.worker_name]}",
                     "job": worker.worker_base_name,
                     # This allows us to change the `metrics_path` on a per-target basis.
                     # We want to grab the metrics from our nginx proxied location (setup
@@ -1115,7 +1119,7 @@ def generate_worker_files(
                 "targets": [NGINX_HOST_PLACEHOLDER],
                 "labels": {
                     # Main process always serves metrics on port 19090
-                    "instance": "host.docker.internal:19090",
+                    "instance": f"{NGINX_HOSTNAME_PLACEHOLDER}:19090",
                     "job": "main",
                     "__metrics_path__": "/metrics/worker/main",
                 },
@@ -1159,6 +1163,7 @@ def generate_worker_files(
         nginx_prometheus_metrics_service_discovery = NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY.format(
             service_discovery_file_path=PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH,
             host_placeholder=NGINX_HOST_PLACEHOLDER,
+            hostname_placeholder=NGINX_HOSTNAME_PLACEHOLDER,
             metrics_proxy_locations=metrics_proxy_locations,
         )
 
