@@ -188,7 +188,13 @@ COPY --from=builder  --exclude=.lock /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 
-EXPOSE 8008/tcp 8009/tcp 8448/tcp
+# 8008: CS Matrix API port from Synapse
+# 8448: SS Matrix API port from Synapse
+EXPOSE 8008/tcp 8448/tcp
+# 19090: Metrics listener port for the main process (metrics must be enabled with
+# SYNAPSE_ENABLE_METRICS=1). Metrics for workers are on ports starting from 19091 but
+# since these are dynamic we don't expose them by default.
+EXPOSE 19090/tcp
 
 ENTRYPOINT ["/start.py"]
 

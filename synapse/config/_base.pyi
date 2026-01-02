@@ -146,6 +146,7 @@ class RootConfig:
         generate_secrets: bool = ...,
         report_stats: bool | None = ...,
         open_private_ports: bool = ...,
+        enable_metrics: bool = ...,
         listeners: Any | None = ...,
         tls_certificate_path: str | None = ...,
         tls_private_key_path: str | None = ...,
