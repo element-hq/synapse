@@ -375,12 +375,31 @@ We serve this file with nginx so people can use it with `http_sd_config` in thei
 Prometheus config.
 """
 
+NGINX_HOST_PLACEHOLDER = "<HOST_PLACEHOLDER>"
+"""Will be replaced with the whatever host used to access the nginx metrics endpoint."""
+
 NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY = """
 server {{
     listen 9469;
     location = /metrics/service_discovery {{
         alias {service_discovery_file_path};
         default_type application/json;
+
+        # Find/replace the host placeholder with the actual host used to access this
+        # endpoint.
+        #
+        # We want to reflect back whatever host the client used to access this file.
+        # For example, if they accessed it via `localhost:9469`, then they
+        # can also reach all of the proxied metrics endpoints at the same address.
+        # Or if it's Prometheus in another container, it will access this via
+        # `host.docker.internal:9469`, etc. Or perhaps it's even some randomly assigned
+        # port mapping.
+        sub_filter '{host_placeholder}' '$http_host';
+        # By default, `ngx_http_sub_module` only works on `text/html` responses. We want
+        # to find/replace in `application/JSON`.
+        sub_filter_types application/json;
+        # Replace all occurences
+        sub_filter_once off;
     }}
 
     # Make the service discovery endpoint easy to find; redirect to the correct spot.
@@ -1059,7 +1078,7 @@ def generate_worker_files(
         # Another reference: https://prometheus.io/docs/prometheus/latest/http_sd/
         prometheus_http_service_discovery_content = [
             {
-                "targets": ["host.docker.internal:9469"],
+                "targets": [NGINX_HOST_PLACEHOLDER],
                 "labels": {
                     # The downstream user should also configure `honor_labels: true` in
                     # their Prometheus config to prevent Prometheus from overwriting the
@@ -1093,7 +1112,7 @@ def generate_worker_files(
         # Add the main Synapse process as well
         prometheus_http_service_discovery_content.append(
             {
-                "targets": ["host.docker.internal:9469"],
+                "targets": [NGINX_HOST_PLACEHOLDER],
                 "labels": {
                     # Main process always serves metrics on port 19090
                     "instance": "host.docker.internal:19090",
@@ -1139,6 +1158,7 @@ def generate_worker_files(
         # Add a nginx server/location to serve the JSON file
         nginx_prometheus_metrics_service_discovery = NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY.format(
             service_discovery_file_path=PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH,
+            host_placeholder=NGINX_HOST_PLACEHOLDER,
             metrics_proxy_locations=metrics_proxy_locations,
         )
 
