@@ -1,0 +1,1 @@
+Server admins can bypass the quarantine media check when downloading media by setting the `admin_unsafely_bypass_quarantine` query parameter to `true` on Client-Server API media download requests.

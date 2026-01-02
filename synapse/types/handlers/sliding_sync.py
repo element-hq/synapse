@@ -49,11 +49,20 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.rest.client import SlidingSyncBody
+from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
 
 logger = logging.getLogger(__name__)
+
+# How often to update the last seen timestamp for lazy members.
+#
+# We don't update the timestamp every time to avoid hammering the DB with
+# writes, and we don't need the timestamp to be precise (as it is used to evict
+# old entries that haven't been used in a while).
+LAZY_MEMBERS_UPDATE_INTERVAL = Duration(hours=1)
 
 
 class SlidingSyncConfig(SlidingSyncBody):
@@ -892,6 +901,69 @@ class PerConnectionState:
 
 
 @attr.s(auto_attribs=True)
+class RoomLazyMembershipChanges:
+    """Changes to lazily-loaded room memberships for a given room."""
+
+    returned_user_id_to_last_seen_ts_map: Mapping[str, int | None] = attr.Factory(dict)
+    """Map from user ID to timestamp for users whose membership we have lazily
+    loaded in this room an request. The timestamp indicates the time we
+    previously needed the membership, or None if we sent it down for the first
+    time in this request.
+
+    We track a *rough* `last_seen_ts` for each user in each room which indicates
+    when we last would've sent their member state to the client. This is used so
+    that we can remove members which haven't been seen for a while to save
+    space.
+
+    Note: this will include users whose membership we would have sent down but
+    didn't due to us having previously sent them.
+    """
+
+    invalidated_user_ids: AbstractSet[str] = attr.Factory(set)
+    """Set of user IDs whose latest membership we have *not* sent down"""
+
+    def get_returned_user_ids_to_update(self, clock: Clock) -> StrCollection:
+        """Get the user IDs whose last seen timestamp we need to update in the
+        database.
+
+        This is a subset of user IDs in `returned_user_id_to_last_seen_ts_map`,
+        whose timestamp is either None (first time we've sent them) or older
+        than `LAZY_MEMBERS_UPDATE_INTERVAL`.
+
+        We only update the timestamp in the database every so often to avoid
+        hammering the DB with writes. We don't need the timestamp to be precise,
+        as the timestamp is used to evict old entries that haven't been used in
+        a while.
+        """
+
+        now_ms = clock.time_msec()
+        return [
+            user_id
+            for user_id, last_seen_ts in self.returned_user_id_to_last_seen_ts_map.items()
+            if last_seen_ts is None
+            or now_ms - last_seen_ts >= LAZY_MEMBERS_UPDATE_INTERVAL.as_millis()
+        ]
+
+    def has_updates(self, clock: Clock) -> bool:
+        """Check if there are any updates to the lazy membership changes.
+
+        Called to check if we need to persist changes to the lazy membership
+        state for the room. We want to avoid persisting the state if there are
+        no changes, to avoid unnecessary writes (and cache misses due to new
+        connection position).
+        """
+
+        # We consider there to be updates if there are any invalidated user
+        # IDs...
+        if self.invalidated_user_ids:
+            return True
+
+        # ...or if any of the returned user IDs need their last seen timestamp
+        # updating in the database.
+        return bool(self.get_returned_user_ids_to_update(clock))
+
+
+@attr.s(auto_attribs=True)
 class MutablePerConnectionState(PerConnectionState):
     """A mutable version of `PerConnectionState`"""
 
@@ -903,12 +975,28 @@ class MutablePerConnectionState(PerConnectionState):
 
     room_configs: typing.ChainMap[str, RoomSyncConfig]
 
-    def has_updates(self) -> bool:
+    # A map from room ID to the lazily-loaded memberships needed for the
+    # request in that room.
+    room_lazy_membership: dict[str, RoomLazyMembershipChanges] = attr.Factory(dict)
+
+    def has_updates(self, clock: Clock) -> bool:
+        """Check if there are any updates to the per-connection state that need
+        persisting.
+
+        It is important that we don't spuriously do persistence, as that will
+        always generate a new connection position which will invalidate some of
+        the caches. It doesn't need to be perfect, but we should avoid always
+        generating new connection positions when doing lazy loading
+        """
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
             or bool(self.account_data.get_updates())
             or bool(self.get_room_config_updates())
+            or any(
+                change.has_updates(clock)
+                for change in self.room_lazy_membership.values()
+            )
         )
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:

@@ -81,6 +81,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource
 from twisted.web.server import Request, Site
 
+from synapse.api.constants import MAX_REQUEST_SIZE
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
@@ -146,7 +147,7 @@ class FakeChannel:
     _reactor: MemoryReactorClock
     result: dict = attr.Factory(dict)
     _ip: str = "127.0.0.1"
-    _producer: IPullProducer | IPushProducer | None = None
+    _producer: Optional[Union[IPullProducer, IPushProducer]] = None
     resource_usage: ContextResourceUsage | None = None
     _request: Request | None = None
 
@@ -241,14 +242,13 @@ class FakeChannel:
 
     def loseConnection(self) -> None:
         self.unregisterProducer()
-        self.transport.loseConnection()
 
     # Type ignore: mypy doesn't like the fact that producer isn't an IProducer.
     def registerProducer(self, producer: IProducer, streaming: bool) -> None:
         # TODO This should ensure that the IProducer is an IPushProducer or
         # IPullProducer, unfortunately twisted.protocols.basic.FileSender does
         # implement those, but doesn't declare it.
-        self._producer = cast(IPushProducer | IPullProducer, producer)
+        self._producer = cast(Union[IPushProducer, IPullProducer], producer)
         self.producerStreaming = streaming
 
         def _produce() -> None:
@@ -428,18 +428,29 @@ def make_request(
 
     channel = FakeChannel(site, reactor, ip=client_ip)
 
-    req = request(channel, site, our_server_name="test_server")
+    req = request(
+        channel,
+        site,
+        our_server_name="test_server",
+        max_request_body_size=MAX_REQUEST_SIZE,
+    )
     channel.request = req
 
     req.content = BytesIO(content)
     # Twisted expects to be at the end of the content when parsing the request.
     req.content.seek(0, SEEK_END)
 
-    # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
-    # bodies if the Content-Length header is missing
-    req.requestHeaders.addRawHeader(
-        b"Content-Length", str(len(content)).encode("ascii")
-    )
+    # If `Content-Length` was passed in as a custom header, don't automatically add it
+    # here.
+    if custom_headers is None or not any(
+        (k if isinstance(k, bytes) else k.encode("ascii")) == b"Content-Length"
+        for k, _ in custom_headers
+    ):
+        # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
+        # bodies if the Content-Length header is missing
+        req.requestHeaders.addRawHeader(
+            b"Content-Length", str(len(content)).encode("ascii")
+        )
 
     if access_token:
         req.requestHeaders.addRawHeader(
@@ -841,7 +852,7 @@ class FakeTransport:
     """Test reactor
     """
 
-    _protocol: IProtocol | None = None
+    _protocol: Optional[IProtocol] = None
     """The Protocol which is producing data for this transport. Optional, but if set
     will get called back for connectionLost() notifications etc.
     """
@@ -860,7 +871,7 @@ class FakeTransport:
     disconnected = False
     connected = True
     buffer: bytes = b""
-    producer: IPushProducer | None = None
+    producer: Optional[IPushProducer] = None
     autoflush: bool = True
 
     def getPeer(self) -> IPv4Address | IPv6Address:
@@ -1062,7 +1073,7 @@ def setup_test_homeserver(
     cleanup_func: Callable[[Callable[[], Optional["Deferred[None]"]]], None],
     server_name: str = "test",
     config: HomeServerConfig | None = None,
-    reactor: ISynapseReactor | None = None,
+    reactor: Optional[ISynapseReactor] = None,
     homeserver_to_use: type[HomeServer] = TestHomeServer,
     db_txn_limit: int | None = None,
     **extra_homeserver_attributes: Any,

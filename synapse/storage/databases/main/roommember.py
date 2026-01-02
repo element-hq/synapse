@@ -747,6 +747,27 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return frozenset(room_ids)
 
+    async def get_memberships_for_user(self, user_id: str) -> dict[str, str]:
+        """Returns a dict of room_id to membership state for a given user.
+
+        If a remote user only returns rooms this server is currently
+        participating in.
+        """
+
+        rows = cast(
+            list[tuple[str, str]],
+            await self.db_pool.simple_select_list(
+                "current_state_events",
+                keyvalues={
+                    "type": EventTypes.Member,
+                    "state_key": user_id,
+                },
+                retcols=["room_id", "membership"],
+                desc="get_memberships_for_user",
+            ),
+        )
+        return dict(rows)
+
     @cached(max_entries=500000, iterable=True)
     async def get_rooms_for_user(self, user_id: str) -> frozenset[str]:
         """Returns a set of room_ids the user is currently joined to.

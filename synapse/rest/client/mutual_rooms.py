@@ -19,8 +19,11 @@
 #
 #
 import logging
+from bisect import bisect
 from http import HTTPStatus
 from typing import TYPE_CHECKING
+
+from unpaddedbase64 import decode_base64, encode_base64
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
@@ -35,10 +38,34 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+MUTUAL_ROOMS_BATCH_LIMIT = 100
+
+
+def _parse_mutual_rooms_batch_token_args(args: dict[bytes, list[bytes]]) -> str | None:
+    from_batches = parse_strings_from_args(args, "from")
+    if not from_batches:
+        return None
+    if len(from_batches) > 1:
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST,
+            "Duplicate from query parameter",
+            errcode=Codes.INVALID_PARAM,
+        )
+    if from_batches[0]:
+        try:
+            return decode_base64(from_batches[0]).decode("utf-8")
+        except Exception:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Malformed from token",
+                errcode=Codes.INVALID_PARAM,
+            )
+    return None
+
 
 class UserMutualRoomsServlet(RestServlet):
     """
-    GET /uk.half-shot.msc2666/user/mutual_rooms?user_id={user_id} HTTP/1.1
+    GET /uk.half-shot.msc2666/user/mutual_rooms?user_id={user_id}&from={token} HTTP/1.1
     """
 
     PATTERNS = client_patterns(
@@ -56,6 +83,7 @@ class UserMutualRoomsServlet(RestServlet):
         args: dict[bytes, list[bytes]] = request.args  # type: ignore
 
         user_ids = parse_strings_from_args(args, "user_id", required=True)
+        from_batch = _parse_mutual_rooms_batch_token_args(args)
 
         if len(user_ids) > 1:
             raise SynapseError(
@@ -64,29 +92,52 @@ class UserMutualRoomsServlet(RestServlet):
                 errcode=Codes.INVALID_PARAM,
             )
 
-        # We don't do batching, so a batch token is illegal by default
-        if b"batch_token" in args:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Unknown batch_token",
-                errcode=Codes.INVALID_PARAM,
-            )
-
         user_id = user_ids[0]
 
         requester = await self.auth.get_user_by_req(request)
         if user_id == requester.user.to_string():
             raise SynapseError(
-                HTTPStatus.UNPROCESSABLE_ENTITY,
+                HTTPStatus.BAD_REQUEST,
                 "You cannot request a list of shared rooms with yourself",
-                errcode=Codes.INVALID_PARAM,
+                errcode=Codes.UNKNOWN,
             )
 
-        rooms = await self.store.get_mutual_rooms_between_users(
-            frozenset((requester.user.to_string(), user_id))
+        # Sort here instead of the database function, so that we don't expose
+        # clients to any unrelated changes to the sorting algorithm.
+        rooms = sorted(
+            await self.store.get_mutual_rooms_between_users(
+                frozenset((requester.user.to_string(), user_id))
+            )
         )
 
-        return 200, {"joined": list(rooms)}
+        if from_batch:
+            # A from_batch token was provided, so cut off any rooms where the ID is
+            # lower than or equal to the token. This method doesn't care whether the
+            # provided token room still exists, nor whether it's even a real room ID.
+            #
+            # However, if rooms with a lower ID are added after the token was issued,
+            # they will not be included until the client makes a new request without a
+            # from token. This is considered acceptable, as clients generally won't
+            # persist these results for long periods.
+            rooms = rooms[bisect(rooms, from_batch) :]
+
+        if len(rooms) <= MUTUAL_ROOMS_BATCH_LIMIT:
+            # We've reached the end of the list, don't return a batch token
+            return 200, {"joined": rooms}
+
+        rooms = rooms[:MUTUAL_ROOMS_BATCH_LIMIT]
+        # We use urlsafe unpadded base64 encoding for the batch token in order to
+        # handle funny room IDs in old pre-v12 rooms properly. We also truncate it
+        # to stay within the 255-character limit of opaque tokens.
+        next_batch = encode_base64(rooms[-1].encode("utf-8"), urlsafe=True)[:255]
+        # Due to the truncation, it is technically possible to have conflicting next
+        # batches by creating hundreds of rooms with the same 191 character prefix
+        # in the room ID. In the event that some silly user does that, don't let
+        # them paginate further.
+        if next_batch == from_batch:
+            return 200, {"joined": rooms}
+
+        return 200, {"joined": list(rooms), "next_batch": next_batch}
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
