@@ -211,7 +211,7 @@ class MediaStorage:
 
         Actually yields a 2-tuple (file, media_filepath,), where file is a file
         like object that can be written to and media_filepath is the absolute path
-        of file on disk.
+        of the file on disk.
 
         media_filepath can be used to read the contents from after upload, e.g. to
         generate thumbnails.

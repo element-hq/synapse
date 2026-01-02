@@ -776,10 +776,18 @@ class MediaRepository:
         except SynapseError:
             raise
         except Exception as e:
-            # An exception may be because we downloaded media in another
-            # process, so let's check if we magically have the media.
-            media_info = await self.store.get_cached_remote_media(server_name, media_id)
-            if not media_info:
+            # If this is a constraint violation, it means another worker
+            # downloaded the media first. We should fetch the existing media info.
+            if isinstance(e, self.store.database_engine.module.IntegrityError):
+                # The file has already been cleaned up in _download_remote_file
+                # Just fetch the existing media info
+                media_info = await self.store.get_cached_remote_media(
+                    server_name, media_id
+                )
+                if not media_info:
+                    # This shouldn't happen, but let's raise an error if it does
+                    raise SynapseError(500, "Failed to fetch remote media")
+            else:
                 raise e
 
         file_id = media_info.filesystem_id
@@ -799,6 +807,39 @@ class MediaRepository:
 
         responder = await self.media_storage.fetch_media(file_info)
         return responder, media_info
+
+    async def _store_remote_media_with_cleanup(
+        self,
+        server_name: str,
+        media_id: str,
+        media_type: str,
+        time_now_ms: int,
+        upload_name: str | None,
+        media_length: int,
+        filesystem_id: str,
+        sha256: str,
+        fname: str,
+    ) -> None:
+        """Store remote media in database and clean up file on constraint violation."""
+        try:
+            await self.store.store_cached_remote_media(
+                origin=server_name,
+                media_id=media_id,
+                media_type=media_type,
+                time_now_ms=time_now_ms,
+                upload_name=upload_name,
+                media_length=media_length,
+                filesystem_id=filesystem_id,
+                sha256=sha256,
+            )
+        except self.store.database_engine.module.IntegrityError:
+            # Another worker downloaded the media first. Clean up our file.
+            try:
+                os.remove(fname)
+            except Exception:
+                pass
+            # Re-raise so the caller can handle it
+            raise
 
     async def _download_remote_file(
         self,
@@ -884,26 +925,21 @@ class MediaRepository:
             upload_name = get_filename_from_headers(headers)
             time_now_ms = self.clock.time_msec()
 
-            # Multiple remote media download requests can race (when using
-            # multiple media repos), so this may throw a violation constraint
-            # exception. If it does we'll delete the newly downloaded file from
-            # disk (as we're in the ctx manager).
-            #
-            # However: we've already called `finish()` so we may have also
-            # written to the storage providers. This is preferable to the
-            # alternative where we call `finish()` *after* this, where we could
-            # end up having an entry in the DB but fail to write the files to
-            # the storage providers.
-            await self.store.store_cached_remote_media(
-                origin=server_name,
-                media_id=media_id,
-                media_type=media_type,
-                time_now_ms=time_now_ms,
-                upload_name=upload_name,
-                media_length=length,
-                filesystem_id=file_id,
-                sha256=sha256writer.hexdigest(),
-            )
+        # Multiple remote media download requests can race (when using
+        # multiple media repos), so this may throw a violation constraint
+        # exception. If it does we'll delete the newly downloaded file from
+        # disk.
+        await self._store_remote_media_with_cleanup(
+            server_name=server_name,
+            media_id=media_id,
+            media_type=media_type,
+            time_now_ms=time_now_ms,
+            upload_name=upload_name,
+            media_length=length,
+            filesystem_id=file_id,
+            sha256=sha256writer.hexdigest(),
+            fname=fname,
+        )
 
         logger.info("Stored remote media in file %r", fname)
 
@@ -1017,26 +1053,21 @@ class MediaRepository:
             upload_name = get_filename_from_headers(headers)
             time_now_ms = self.clock.time_msec()
 
-            # Multiple remote media download requests can race (when using
-            # multiple media repos), so this may throw a violation constraint
-            # exception. If it does we'll delete the newly downloaded file from
-            # disk (as we're in the ctx manager).
-            #
-            # However: we've already called `finish()` so we may have also
-            # written to the storage providers. This is preferable to the
-            # alternative where we call `finish()` *after* this, where we could
-            # end up having an entry in the DB but fail to write the files to
-            # the storage providers.
-            await self.store.store_cached_remote_media(
-                origin=server_name,
-                media_id=media_id,
-                media_type=media_type,
-                time_now_ms=time_now_ms,
-                upload_name=upload_name,
-                media_length=length,
-                filesystem_id=file_id,
-                sha256=sha256writer.hexdigest(),
-            )
+        # Multiple remote media download requests can race (when using
+        # multiple media repos), so this may throw a violation constraint
+        # exception. If it does we'll delete the newly downloaded file from
+        # disk.
+        await self._store_remote_media_with_cleanup(
+            server_name=server_name,
+            media_id=media_id,
+            media_type=media_type,
+            time_now_ms=time_now_ms,
+            upload_name=upload_name,
+            media_length=length,
+            filesystem_id=file_id,
+            sha256=sha256writer.hexdigest(),
+            fname=fname,
+        )
 
         logger.debug("Stored remote media in file %r", fname)
 
