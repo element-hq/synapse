@@ -275,8 +275,8 @@ class WaitingLock:
 
     def _get_next_retry_interval(self) -> float:
         next = self._retry_interval
-        self._retry_interval = max(5, next * 2)
-        if self._retry_interval > Duration(minutes=10).as_secs():  # >7 iterations
+        self._retry_interval = min(Duration(minutes=15).as_secs(), next * 2)
+        if self._retry_interval > Duration(minutes=10).as_secs():  # >12 iterations
             logger.warning(
                 "Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 self._retry_interval,
@@ -362,8 +362,8 @@ class WaitingMultiLock:
 
     def _get_next_retry_interval(self) -> float:
         next = self._retry_interval
-        self._retry_interval = max(5, next * 2)
-        if self._retry_interval > Duration(minutes=10).as_secs():  # >7 iterations
+        self._retry_interval = min(Duration(minutes=15).as_secs(), next * 2)
+        if self._retry_interval > Duration(minutes=10).as_secs():  # >12 iterations
             logger.warning(
                 "Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 self._retry_interval,
