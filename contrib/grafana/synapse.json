@@ -13315,6 +13315,30 @@
         "useTags": false
       },
       {
+        "current": {},
+        "datasource": {
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "",
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "name": "server_name",
+        "options": [],
+        "query": {
+          "query": "label_values(synapse_util_metrics_block_ru_utime_seconds_total, server_name)",
+          "refId": "Prometheus-instance-Variable-Query"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
         "allFormat": "regex wildcard",
         "allValue": "",
         "current": {},
