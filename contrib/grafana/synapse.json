@@ -541,7 +541,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "rate(process_cpu_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+          "expr": "rate(process_cpu_seconds_total{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -651,7 +651,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "process_resident_memory_bytes{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+          "expr": "process_resident_memory_bytes{job=~\"$job\",index=~\"$index\"} * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 2,
@@ -664,7 +664,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(process_resident_memory_bytes{instance=\"$instance\",job=~\"$job\",index=~\"$index\"})",
+          "expr": "sum(process_resident_memory_bytes{job=~\"$job\",index=~\"$index\"}) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
           "hide": true,
           "interval": "",
           "legendFormat": "total",
@@ -785,7 +785,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "synapse_build_info{instance=\"$instance\", job=\"synapse\"} - 1",
+          "expr": "(\n  synapse_build_info{job=\"synapse\"} * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"my.docker.synapse.server\"}\n) - 1",
           "legendFormat": "version {{version}}",
           "range": true,
           "refId": "deployed_synapse_versions"
@@ -857,7 +857,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "process_open_fds{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+          "expr": "process_open_fds{job=~\"$job\",index=~\"$index\"} * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
           "format": "time_series",
           "hide": false,
           "interval": "",
@@ -870,7 +870,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "process_max_fds{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+          "expr": "process_max_fds{job=~\"$job\",index=~\"$index\"} * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
           "format": "time_series",
           "hide": true,
           "interval": "",
@@ -1000,7 +1000,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(process_cpu_system_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(process_cpu_system_seconds_total{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} system ",
@@ -1013,7 +1013,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(process_cpu_user_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(process_cpu_user_seconds_total{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -1176,7 +1176,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.999, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.999, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",job=~\"$job\"}[$bucket_size])) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "{{job}}-{{index}} 99.9%",
@@ -1188,7 +1188,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.99, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",job=~\"$job\"}[$bucket_size])) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -1202,7 +1202,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.95, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.95, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",job=~\"$job\"}[$bucket_size])) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -1214,7 +1214,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.90, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.90, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",job=~\"$job\"}[$bucket_size])) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} 90%",
@@ -1225,7 +1225,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(python_twisted_reactor_tick_time_sum{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size]) / rate(python_twisted_reactor_tick_time_count{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size])",
+              "expr": "(\n\trate(python_twisted_reactor_tick_time_sum{index=~\"$index\",job=~\"$job\"}[$bucket_size]) * on(instance) group_left(server_name)\n\tinstance_to_server_name_mapping{server_name=\"$server_name\"}\n) / (\n\trate(python_twisted_reactor_tick_time_count{index=~\"$index\",job=~\"$job\"}[$bucket_size]) * on(instance) group_left(server_name)\n\tinstance_to_server_name_mapping{server_name=\"$server_name\"}\n)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} mean",
@@ -1293,7 +1293,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "process_resident_memory_bytes{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "process_resident_memory_bytes{job=~\"$job\",index=~\"$index\"} * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -1306,7 +1306,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(process_resident_memory_bytes{instance=\"$instance\",job=~\"$job\",index=~\"$index\"})",
+              "expr": "sum by (server_name) (\n  process_resident_memory_bytes{job=~\"$job\",index=~\"$index\"} * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"$server_name\"}\n)",
               "interval": "",
               "legendFormat": "total",
               "refId": "B"
@@ -1405,7 +1405,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "scrape_duration_seconds{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "scrape_duration_seconds{job=~\"$job\",index=~\"$index\"} * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -1514,7 +1514,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "min_over_time(up{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "min_over_time(up{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{job}}-{{index}}",
@@ -1527,7 +1527,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "synapse_build_info{instance=\"$instance\", job=\"synapse\"} - 1",
+              "expr": "(\n  synapse_build_info{job=\"synapse\"} * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"my.docker.synapse.server\"}\n) - 1",
               "hide": false,
               "legendFormat": "version {{version}}",
               "range": true,
@@ -9207,7 +9207,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(python_gc_time_sum{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[10m])",
+              "expr": "rate(python_gc_time_sum{job=~\"$job\",index=~\"$index\"}[10m]) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "instant": false,
               "intervalFactor": 1,
@@ -9306,7 +9306,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(python_gc_time_sum{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/rate(python_gc_time_count[$bucket_size])",
+              "expr": "(\n  rate(python_gc_time_sum{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"$server_name\"}\n) / (\n  rate(python_gc_time_count{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"$server_name\"}\n)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{job}} {{index}} gen {{gen}} ",
@@ -9408,7 +9408,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "python_gc_counts{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}",
+              "expr": "python_gc_counts{job=~\"$job\",index=~\"$index\"} * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} gen {{gen}}",
@@ -9502,7 +9502,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(python_gc_unreachable_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/rate(python_gc_time_count{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "(\n  rate(python_gc_unreachable_total{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"$server_name\"}\n) / (\n  rate(python_gc_time_count{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"$server_name\"}\n)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} gen {{gen}}",
@@ -9594,7 +9594,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(python_gc_time_count{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(python_gc_time_count{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on(instance) group_left(server_name)\ninstance_to_server_name_mapping{server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} gen {{gen}}",
