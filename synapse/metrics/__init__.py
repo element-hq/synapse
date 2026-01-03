@@ -659,6 +659,23 @@ build_info.labels(
     " ".join([platform.system(), platform.release()]),
 ).set(1)
 
+
+instance_to_server_name_mapping = Gauge(
+    "instance_to_server_name_mapping",
+    "Maps `instance`s to `server_name`s they host",
+    # `instance` will automatically be set by Prometheus
+    labelnames=[SERVER_NAME_LABEL],
+)
+"""
+Maps `instance`s to `server_name`s they host.
+
+The `instance` will automatically be set by Prometheus and is the `<host>:<port>` part
+of the target's URL that was scraped.
+
+This is useful as it allows us to correlate process-level metrics (like `process_*`,
+`python_*`, etc) with homeservers.
+"""
+
 # 3PID send info
 threepid_send_requests = Histogram(
     "synapse_threepid_send_requests_with_tries",
