@@ -31,7 +31,7 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, UserID
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -190,7 +190,7 @@ class EventHandler:
         # The user is peeking if they aren't in the room already
         is_peeking = not is_user_in_room
 
-        filtered = await filter_events_for_client(
+        filtered = await filter_and_transform_events_for_client(
             self._storage_controllers,
             user.to_string(),
             [event],
