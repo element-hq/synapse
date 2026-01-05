@@ -506,7 +506,8 @@ class NewActiveTaskCommand(_SimpleCommand):
 
 
 class CancelTaskCommand(_SimpleCommand):
-    """Sent to inform instance handling background tasks that a task has been cancelled and should be terminated.
+    """Sent to inform the instance handling background tasks that a task
+    has been cancelled and should be terminated.
 
     Format::
 

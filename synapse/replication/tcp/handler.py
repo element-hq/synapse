@@ -881,7 +881,7 @@ class ReplicationCommandHandler:
         self.send_command(NewActiveTaskCommand(task_id))
 
     def send_cancel_task(self, task_id: str) -> None:
-        """Called when a scheduled task has been cancelled annd should be terminated."""
+        """Called when a scheduled task has been cancelled and should be terminated."""
         self.send_command(CancelTaskCommand(task_id))
 
 
