@@ -154,6 +154,14 @@ class MediaRepository:
             self.hs, self.filepaths, storage_providers, local_provider
         )
 
+        # Log a warning if there are no storage backends configured
+        if not hs.config.media.enable_local_media_storage and not storage_providers:
+            logger.warning(
+                "Local media storage is disabled and no media_storage_providers are "
+                "configured. All media requests will return 404 errors as there is "
+                "no storage backend available."
+            )
+
         self.clock.looping_call(
             self._start_update_recently_accessed, UPDATE_RECENTLY_ACCESSED_TS
         )
