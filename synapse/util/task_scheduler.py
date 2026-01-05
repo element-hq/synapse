@@ -335,11 +335,15 @@ class TaskScheduler:
         """
         task = await self.get_task(id)
         if not task:
+            logger.debug("Can't cancel task %s because it doesn't exist in the DB", id)
             return
 
         if not (
             task.status == TaskStatus.ACTIVE or task.status == TaskStatus.SCHEDULED
         ):
+            logger.debug(
+                "Can't cancel task %s because it is neither ACTIVE not SCHEDULED", id
+            )
             return
 
         if self._run_background_tasks:
