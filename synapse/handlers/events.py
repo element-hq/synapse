@@ -156,7 +156,9 @@ class EventHandler:
         event_id: str,
         show_redacted: bool = False,
     ) -> EventBase | None:
-        """Retrieve a single specified event.
+        """Retrieve a single specified event on behalf of a user.
+        The event will be transformed in a user-specific and time-specific way,
+        e.g. having unsigned metadata added or being erased depending on who is accessing.
 
         Args:
             user: The local user requesting the event
@@ -198,4 +200,4 @@ class EventHandler:
         if not filtered:
             raise AuthError(403, "You don't have permission to access that event.")
 
-        return event
+        return filtered[0]
