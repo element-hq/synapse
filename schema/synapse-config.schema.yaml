@@ -2344,6 +2344,10 @@ properties:
       Enable the local on-disk media storage provider. When disabled, media is
       stored only in configured `media_storage_providers` and temporary files are
       used for processing.
+      
+      **Warning:** If this option is set to `false` and no `media_storage_providers`
+      are configured, all media requests will return 404 errors as there will be
+      no storage backend available.
     default: true
     examples:
       - false
