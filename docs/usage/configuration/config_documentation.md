@@ -2041,6 +2041,25 @@ rc_room_creation:
   burst_count: 5.0
 ```
 ---
+### `rc_user_directory`
+
+*(object)* This option allows admins to ratelimit searches in the user directory.
+
+_Added in Synapse 1.145.0._
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_user_directory:
+  per_second: 0.016
+  burst_count: 200.0
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 *(integer)* Sets outgoing federation transaction frequency for sending read-receipts, per-room.
