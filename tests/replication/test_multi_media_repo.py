@@ -502,7 +502,8 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.finish()
 
         self.pump(0.1)
-
+        # With local storage disabled and no storage providers,
+        # we expect a 404 error
         self.assertEqual(channel1.code, 404, channel1.result["body"])
 
         # Now respond to the second with the same content.
