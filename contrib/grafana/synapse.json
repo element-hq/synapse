@@ -785,7 +785,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(\n  synapse_build_info{job=\"synapse\"} * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"my.docker.synapse.server\"}\n) - 1",
+          "expr": "(\n  synapse_build_info{job=\"synapse\"} * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"$server_name\"}\n) - 1",
           "legendFormat": "version {{version}}",
           "range": true,
           "refId": "deployed_synapse_versions"
@@ -1527,7 +1527,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "(\n  synapse_build_info{job=\"synapse\"} * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"my.docker.synapse.server\"}\n) - 1",
+              "expr": "(\n  synapse_build_info{job=\"synapse\"} * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"$server_name\"}\n) - 1",
               "hide": false,
               "legendFormat": "version {{version}}",
               "range": true,
