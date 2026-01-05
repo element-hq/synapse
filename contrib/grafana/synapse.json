@@ -53,7 +53,7 @@
           "uid": "${DS_PROMETHEUS}"
         },
         "enable": true,
-        "expr": "changes(process_start_time_seconds{instance=\"$instance\",job=~\"synapse\"}[$bucket_size]) * on (instance, job) group_left(version) synapse_build_info{instance=\"$instance\",job=\"synapse\"}",
+        "expr": "(\n  changes(process_start_time_seconds{job=\"synapse\"}[$bucket_size]) * on(instance) group_left(server_name)\n  instance_to_server_name_mapping{server_name=\"$server_name\"}\n) * on (instance) group_left(version) synapse_build_info{job=\"synapse\"}",
         "iconColor": "purple",
         "name": "deploys",
         "titleFormat": "Deployed {{version}}"
