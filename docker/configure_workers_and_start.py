@@ -879,8 +879,8 @@ def generate_worker_files(
         # worker.
         shared_config = {
             **worker_config["shared_extra_conf"],
-            # We combine `shared_config` second to avoid overwriting existing keys
-            # because TODO: why?
+            # We combine `shared_config` second to avoid overwriting existing keys just
+            # for sanity sake (always use the first worker).
             **shared_config,
         }
 
