@@ -808,6 +808,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                             for (device_id, msg) in messages_by_device.items()
                         ],
                     )
+
                 for user_id, messages_by_device in edu["messages"].items():
                     for device_id, msg in messages_by_device.items():
                         with start_active_span("store_outgoing_to_device_message"):
