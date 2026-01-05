@@ -112,6 +112,7 @@ class TaskScheduler:
         self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
+        # A map between a task's ID and a deferred linked to the task
         self._running_tasks: dict[str, defer.Deferred] = {}
         # A map between action names and their registered function
         self._actions: dict[
@@ -348,8 +349,8 @@ class TaskScheduler:
 
     async def on_cancel_task(self, id: str) -> None:
         if id in self._running_tasks:
-            defer = self._running_tasks[id]
-            defer.cancel()
+            deferred = self._running_tasks[id]
+            deferred.cancel()
             self._running_tasks.pop(id)
         await self.update_task(id, status=TaskStatus.CANCELLED)
 
@@ -518,5 +519,5 @@ class TaskScheduler:
             return
 
         await self.update_task(task.id, status=TaskStatus.ACTIVE)
-        defer = self.hs.run_as_background_process(f"task-{task.action}", wrapper)
-        self._running_tasks[task.id] = defer
+        deferred = self.hs.run_as_background_process(f"task-{task.action}", wrapper)
+        self._running_tasks[task.id] = deferred
