@@ -1,0 +1,1 @@
+Add a way to expose metrics from the Docker image (`SYNAPSE_ENABLE_METRICS`).
