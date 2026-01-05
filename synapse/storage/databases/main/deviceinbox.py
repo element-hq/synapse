@@ -792,6 +792,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             )
 
             for destination, edu in remote_messages_by_destination.items():
+                # print(edu)
                 if issue9533_logger.isEnabledFor(logging.DEBUG):
                     issue9533_logger.debug(
                         "Queued outgoing to-device messages with "
@@ -807,7 +808,6 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                             for (device_id, msg) in messages_by_device.items()
                         ],
                     )
-
                 for user_id, messages_by_device in edu["messages"].items():
                     for device_id, msg in messages_by_device.items():
                         with start_active_span("store_outgoing_to_device_message"):

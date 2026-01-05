@@ -290,18 +290,21 @@ class DeviceMessageHandler:
             local_messages, {}
         )
         for destination, messages in remote_messages.items():
-            split_edu_contents = get_device_message_edu_contents(
+            split_edus = get_split_device_message_edus(
                 sender_user_id, message_type, messages
             )
-            for edu_contents in split_edu_contents:
+            for edu in split_edus:
+                edu["org.matrix.opentracing_context"] = json_encoder.encode(
+                    get_active_span_text_map()
+                )
                 # Add remote messages to the database.
                 last_stream_id = await self.store.add_messages_to_device_inbox(
-                    {}, {destination: edu_contents}
+                    {}, {destination: edu}
                 )
                 log_kv(
                     {
                         "destination": destination,
-                        "message_id": edu_contents["message_id"],
+                        "message_id": edu["message_id"],
                     }
                 )
 
@@ -404,7 +407,7 @@ class DeviceMessageHandler:
         }
 
 
-def get_device_message_edu_contents(
+def get_split_device_message_edus(
     sender_user_id: str,
     message_type: str,
     messages: dict[str, dict[str, JsonDict]],
@@ -419,108 +422,81 @@ def get_device_message_edu_contents(
         sender_user_id: The user that is sending the to-device messages.
         message_type: The type of to-device messages that are being sent.
         messages: A dictionary containing recipients mapped to messages intended for them.
-        context: The span context for opentracing
 
     Returns:
         A list of dictionary containing the EDUs of to-device messages
         Raises an EventSizeError if a single to-device message is too large
         to fit into an EDU.
     """
-    tracing_context = get_active_span_text_map()
-    first_message_id = random_string(16)
-    BASE_EDU_CONTENT = {
-        "messages": {},
-        "sender": sender_user_id,
-        "type": message_type,
-        "message_id": first_message_id,
-    }
-    # This is the size of the full EDU without any messages and without the
-    # opentracing context as this is not sent as part of the transaction
-    BASE_EDU_SIZE = len(
-        encode_canonical_json(
-            {
-                "edu_type": "m.direct_to_device",
-                "content": BASE_EDU_CONTENT,
-            }
+    split_edus: list[JsonDict] = []
+
+    current_edu_content: dict[str, JsonDict] = create_new_to_device_edu_content(
+        sender_user_id, message_type, messages
+    )
+
+    if len(encode_canonical_json(current_edu_content)) < MAX_EDU_SIZE:
+        # let's optimize the more common case where everything fits in an EDU
+        split_edus.append(current_edu_content)
+    else:
+        # Otherwise we fall back to something quite slower where we add messages one
+        # recipient at a time, and check the full size everytime
+        current_edu_content = create_new_to_device_edu_content(
+            sender_user_id, message_type
         )
-    )
-    BASE_EDU_CONTENT["org.matrix.opentracing_context"] = json_encoder.encode(
-        tracing_context
-    )
+        for recipient, messages_by_device in messages.items():
+            current_edu_content["messages"][recipient] = messages_by_device
+            if len(encode_canonical_json(current_edu_content)) > MAX_EDU_SIZE:
+                current_edu_content["messages"].pop(recipient)
+                split_edus.append(current_edu_content)
+                if len(current_edu_content["messages"]) == 0:
+                    raise EventSizeError(
+                        f"device message to {recipient} too large to fit in a single EDU",
+                        unpersistable=True,
+                    )
 
-    edu_contents = []
+                logger.debug(
+                    "Splitting %d to-device messages from %s into EDU (message_id=%s), (total EDUs so far: %d)",
+                    len(current_edu_content["messages"]),
+                    sender_user_id,
+                    current_edu_content["message_id"],
+                    len(split_edus),
+                )
 
-    current_edu_content: JsonDict = create_new_to_device_edu_content(
-        sender_user_id,
-        message_type,
-        tracing_context,
-        first_message_id,
-    )
-    current_edu_size = BASE_EDU_SIZE
-
-    for recipient, message in messages.items():
-        # As curly braces is already taken into account in BASE_EDU_CONTENT["messages"]
-        # we remove 2 for those and add 1 for the comma per message
-        message_entry_size = len(encode_canonical_json({recipient: message})) - 2 + 1
-
-        if BASE_EDU_SIZE + message_entry_size > MAX_EDU_SIZE:
-            raise EventSizeError(
-                f"device message to {recipient} too large to fit in a single EDU",
-                unpersistable=True,
-            )
+                current_edu_content = create_new_to_device_edu_content(
+                    sender_user_id, message_type, {recipient: messages_by_device}
+                )
 
         if len(current_edu_content["messages"]) > 0:
-            message_entry_size += 1  # Add 1 for the comma
-
-        if current_edu_size + message_entry_size > MAX_EDU_SIZE:
-            edu_contents.append(current_edu_content)
+            split_edus.append(current_edu_content)
             logger.debug(
-                "Splitting %d to-device messages from %s into EDU (message_id=%s), (total EDUs so far: %d)",
+                "Splitting remaining %d device messages from %s into EDU (message_id=%s), (total EDUs so far: %d)",
                 len(current_edu_content["messages"]),
                 sender_user_id,
                 current_edu_content["message_id"],
-                len(edu_contents),
+                len(split_edus),
             )
 
-            current_edu_content = create_new_to_device_edu_content(
-                sender_user_id, message_type, tracing_context
-            )
-
-            current_edu_size = BASE_EDU_SIZE
-
-        current_edu_content["messages"][recipient] = message
-        current_edu_size += message_entry_size
-
-    if len(current_edu_content["messages"]) > 0:
-        edu_contents.append(current_edu_content)
-        logger.debug(
-            "Splitting remaining %d device messages from %s into EDU (message_id=%s), (total EDUs so far: %d)",
-            len(current_edu_content["messages"]),
-            sender_user_id,
-            current_edu_content["message_id"],
-            len(edu_contents),
-        )
-
-    return edu_contents
+    return split_edus
 
 
 def create_new_to_device_edu_content(
     sender_user_id: str,
     message_type: str,
-    tracing_context: dict[str, Any],
+    messages: dict[str, Any] | None = None,
     message_id: str | None = None,
 ) -> JsonDict:
     """
     Create a new `m.direct_to_device` EDU `content` object with a unique message ID.
     """
+    if messages is None:
+        messages = {}
     if message_id is None:
         message_id = random_string(16)
 
     content = {
-        "messages": {},
         "sender": sender_user_id,
         "type": message_type,
         "message_id": message_id,
-        "org.matrix.opentracing_context": json_encoder.encode(tracing_context),
+        "messages": messages,
     }
     return content
