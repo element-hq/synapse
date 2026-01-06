@@ -3362,7 +3362,7 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
         pl = self.helper.get_state(
             room_id, EventTypes.PowerLevels, tok=self.creator_tok
         )
-        self.assertEquals(pl["users"][self.admin_user], 100)
+        self.assertEqual(pl["users"][self.admin_user], 100)
 
     def test_v12_room_with_many_user_pls(self) -> None:
         """Test that you can be promoted to the admin user's PL in v12 rooms that contain a range of user PLs."""
@@ -3395,7 +3395,7 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
         pl = self.helper.get_state(
             room_id, EventTypes.PowerLevels, tok=self.creator_tok
         )
-        self.assertEquals(pl["users"][self.admin_user], 100)
+        self.assertEqual(pl["users"][self.admin_user], 100)
 
 
 class BlockRoomTestCase(unittest.HomeserverTestCase):
