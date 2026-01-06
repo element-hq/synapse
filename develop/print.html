@@ -5924,6 +5924,13 @@ Setting this to a high value allows users to report content quickly, possibly in
 <pre><code class="language-yaml">enable_media_repo: false
 </code></pre>
 <hr />
+<h3 id="enable_local_media_storage"><a class="header" href="#enable_local_media_storage"><code>enable_local_media_storage</code></a></h3>
+<p><em>(boolean)</em> Enable the local on-disk media storage provider. When disabled, media is stored only in configured <code>media_storage_providers</code> and temporary files are used for processing.
+<strong>Warning:</strong> If this option is set to <code>false</code> and no <code>media_storage_providers</code> are configured, all media requests will return 404 errors as there will be no storage backend available. Defaults to <code>true</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">enable_local_media_storage: false
+</code></pre>
+<hr />
 <h3 id="media_store_path"><a class="header" href="#media_store_path"><code>media_store_path</code></a></h3>
 <p><em>(string)</em> Directory where uploaded images and attachments are stored. Defaults to <code>&quot;media_store&quot;</code>.</p>
 <p>Example configuration:</p>
