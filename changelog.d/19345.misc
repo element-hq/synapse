@@ -1,0 +1,1 @@
+Replace usage of deprecated `assertEquals` with `assertEqual` in unit test code.
