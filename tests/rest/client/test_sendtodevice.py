@@ -208,7 +208,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
             server_logger.disabled = server_logger_was_disabled
 
     def test_transaction_splitting(self) -> None:
-        """Test that a bunch of to-device messages are split into multiple transactions if they are too many EDUs"""
+        """Test that a bunch of to-device messages are split into multiple transactions if there are too many EDUs"""
         # FIXME: Because huge log line is triggered in this test,
         # trial breaks, sometimes (flakily) failing the test run.
         # ref: https://github.com/twisted/twisted/issues/12482
