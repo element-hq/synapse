@@ -441,8 +441,8 @@ class DeviceHandler:
         user_id: str,
         device_id: str | None,
         device_data: JsonDict,
-        initial_device_display_name: str | None = None,
-        keys_for_device: JsonDict | None = None,
+        initial_device_display_name: str | None,
+        keys_for_device: JsonDict,
     ) -> str:
         """Store a dehydrated device for a user, optionally storing the keys associated with
         it as well.  If the user had a previous dehydrated device, it is removed.
