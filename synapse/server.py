@@ -149,7 +149,7 @@ from synapse.media.media_repository import MediaRepository
 from synapse.metrics import (
     SERVER_NAME_LABEL,
     all_later_gauges_to_clean_up_on_shutdown,
-    instance_to_server_name_mapping,
+    synapse_server_name_to_instance_mapping,
     register_threadpool,
 )
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -364,7 +364,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._background_processes: set[defer.Deferred[Any | None]] = set()
 
         # For every server we spawn in the process, track it in the metrics
-        instance_to_server_name_mapping.labels(
+        synapse_server_name_to_instance_mapping.labels(
             **{SERVER_NAME_LABEL: self.hostname}
         ).set(1)
 

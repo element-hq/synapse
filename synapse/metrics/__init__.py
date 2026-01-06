@@ -660,14 +660,14 @@ build_info.labels(
 ).set(1)
 
 
-instance_to_server_name_mapping = Gauge(
-    "instance_to_server_name_mapping",
-    "Maps `instance`s to `server_name`s they host",
+synapse_server_name_to_instance_mapping = Gauge(
+    "synapse_server_name_to_instance_mapping",
+    "Maps Synapse `server_name`s to the `instance`s they're hosted on",
     # `instance` will automatically be set by Prometheus
     labelnames=[SERVER_NAME_LABEL],
 )
 """
-Maps `instance`s to `server_name`s they host.
+Maps Synapse `server_name`s to the `instance`s they're hosted on.
 
 The `instance` will automatically be set by Prometheus and is the `<host>:<port>` part
 of the target's URL that was scraped.
