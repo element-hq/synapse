@@ -510,7 +510,7 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
                 device_id=None,
                 device_data={"device_data": {"foo": "bar"}},
                 initial_device_display_name="dehydrated device",
-                keys_for_device={}
+                keys_for_device={},
             )
         )
 
