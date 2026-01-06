@@ -143,9 +143,9 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # ref: https://github.com/twisted/twisted/issues/12482
         # To remove this, we would need to fix the above issue and
         # update, including in olddeps (so several years' wait).
-        server_logger = logging.getLogger("synapse.storage.SQL")
-        server_logger_was_disabled = server_logger.disabled
-        server_logger.disabled = True
+        sql_logger = logging.getLogger("synapse.storage.SQL")
+        sql_logger_was_disabled = sql_logger.disabled
+        sql_logger.disabled = True
         try:
             mock_send_transaction: AsyncMock = (
                 self.federation_transport_client.send_transaction
