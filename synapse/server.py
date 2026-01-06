@@ -149,8 +149,8 @@ from synapse.media.media_repository import MediaRepository
 from synapse.metrics import (
     SERVER_NAME_LABEL,
     all_later_gauges_to_clean_up_on_shutdown,
-    synapse_server_name_to_instance_mapping,
     register_threadpool,
+    synapse_server_name_to_instance_mapping,
 )
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
