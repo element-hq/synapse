@@ -497,6 +497,9 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
         self.store = hs.get_datastores().main
         return hs
 
+    @unittest.override_config(
+        {"experimental_features": {"msc2697_enabled": True}}
+    )
     def test_dehydrate_and_rehydrate_device(self) -> None:
         user_id = "@boris:dehydration"
 

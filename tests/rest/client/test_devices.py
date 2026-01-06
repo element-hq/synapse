@@ -85,6 +85,9 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         self.registration = hs.get_registration_handler()
         self.message_handler = hs.get_device_message_handler()
 
+    @unittest.override_config(
+        {"experimental_features": {"msc2697_enabled": True}}
+    )
     def test_PUT(self) -> None:
         """Sanity-check that we can PUT a dehydrated device.
 
