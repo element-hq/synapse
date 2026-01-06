@@ -2111,6 +2111,16 @@ Example configuration:
 enable_media_repo: false
 ```
 ---
+### `enable_local_media_storage`
+
+*(boolean)* Enable the local on-disk media storage provider. When disabled, media is stored only in configured `media_storage_providers` and temporary files are used for processing.
+**Warning:** If this option is set to `false` and no `media_storage_providers` are configured, all media requests will return 404 errors as there will be no storage backend available. Defaults to `true`.
+
+Example configuration:
+```yaml
+enable_local_media_storage: false
+```
+---
 ### `media_store_path`
 
 *(string)* Directory where uploaded images and attachments are stored. Defaults to `"media_store"`.
