@@ -123,27 +123,23 @@ Example Prometheus target for Synapse with workers:
     static_configs:
       - targets: ["my.server.here:port"]
         labels:
-          instance: "my.server"
           job: "master"
           index: 1
       - targets: ["my.workerserver.here:port"]
         labels:
-          instance: "my.server"
           job: "generic_worker"
           index: 1
       - targets: ["my.workerserver.here:port"]
         labels:
-          instance: "my.server"
           job: "generic_worker"
           index: 2
       - targets: ["my.workerserver.here:port"]
         labels:
-          instance: "my.server"
           job: "media_repository"
           index: 1
 ```
 
-Labels (`instance`, `job`, `index`) can be defined as anything.
+Labels (`job`, `index`) can be defined as anything.
 The labels are used to group graphs in grafana.
 
 ## Renaming of metrics & deprecation of old names in 1.2
