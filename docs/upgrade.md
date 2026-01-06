@@ -117,6 +117,16 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.146.0
+
+## Removal of MSC2697 (Legacy) Dehydrated devices
+
+The endpoints for
+[MSC2697](https://github.com/matrix-org/matrix-spec-proposals/pull/2697) have now
+been removed, since the MSC is closed. Developers who rely on this feature should
+migrate to [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814)
+which introduces support for a newer version of dehydrated devices.
+
 # Upgrading to v1.144.0
 
 ## Worker support for unstable MSC4140 `/restart` endpoint
