@@ -18,8 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from http import HTTPStatus
-
 from twisted.internet.defer import ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
