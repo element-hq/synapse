@@ -1,3 +1,1 @@
-MSC2697 (Dehydrated devices) is now disabled by default, and is due to be removed entirely in a future release.
-You may still enable the feature under `experimental_features.msc2697_enabled` but developers are encouraged
-to instead use MSC3814. 
+MSC2697 (Dehydrated devices) is now disabled by default, and is due to be removed entirely in a future release. You can enable the feature under `experimental_features.msc2697_enabled` but developers are encouraged to instead use MSC3814.
