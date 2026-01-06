@@ -1528,7 +1528,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         device_id: str,
         device_data: JsonDict,
         time_now: int,
-        keys: dict | None = None,
+        keys: dict,
     ) -> str | None:
         """Store a dehydrated device for a user.
 
