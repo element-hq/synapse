@@ -125,7 +125,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
         _ = self.register_user("u1", "pass")
         user1_tok = self.login("u1", "pass", "d1")
 
-        # send the message
+        # Create a message that is over the `MAX_EDU_SIZE`
         test_msg = {"foo": "a" * MAX_EDU_SIZE}
         channel = self.make_request(
             "PUT",
