@@ -322,7 +322,7 @@ class MessageHandler:
             current_membership,
             _,
         ) = await self.store.get_local_current_membership_for_user_in_room(
-            user_id, event_id
+            user_id, room_id
         )
         return current_membership == Membership.JOIN
 
