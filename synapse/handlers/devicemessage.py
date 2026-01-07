@@ -426,59 +426,58 @@ def get_split_device_message_edus(
     Returns:
         A list of dictionary containing the EDUs of to-device messages
 
-        Raises:
-            EventSizeError: If a single to-device message is too large to fit into an
-                EDU.
+    Raises:
+        EventSizeError: If a single to-device message is too large to fit into an
+            EDU.
     """
-    split_edus: list[JsonDict] = []
+    split_edus_content: list[JsonDict] = []
 
-    current_edu_content: dict[str, JsonDict] = create_new_to_device_edu_content(
-        sender_user_id, message_type, messages
-    )
+    # Convert messages dict to a list of (recipient, messages_by_device) pairs
+    message_items = list(messages.items())
 
-    if len(encode_canonical_json(current_edu_content)) < MAX_EDU_SIZE:
-        # let's optimize the more common case where everything fits in an EDU
-        split_edus.append(current_edu_content)
-    else:
-        # Otherwise we fall back to something quite slower where we add messages one
-        # recipient at a time, and check the full size everytime
-        current_edu_content = create_new_to_device_edu_content(
-            sender_user_id, message_type
-        )
-        for recipient, messages_by_device in messages.items():
-            current_edu_content["messages"][recipient] = messages_by_device
-            if len(encode_canonical_json(current_edu_content)) > MAX_EDU_SIZE:
-                current_edu_content["messages"].pop(recipient)
-                split_edus.append(current_edu_content)
-                if len(current_edu_content["messages"]) == 0:
+    while message_items:
+        edu_messages = {}
+        # Start by trying to fit all remaining messages
+        target_count = len(message_items)
+
+        while target_count > 0:
+            # Take the first target_count messages
+            edu_messages = dict(message_items[:target_count])
+            edu_content = create_new_to_device_edu_content(
+                sender_user_id, message_type, edu_messages
+            )
+            # Let's add the whole EDU structure before testing the size
+            edu = {
+                "content": edu_content,
+                "edu_type": "m.direct_to_device",
+            }
+
+            if len(encode_canonical_json(edu)) <= MAX_EDU_SIZE:
+                # It fits! Add this EDU and remove these messages from the list
+                split_edus_content.append(edu_content)
+                message_items = message_items[target_count:]
+
+                logger.debug(
+                    "Created EDU with %d recipients from %s (message_id=%s), (total EDUs so far: %d)",
+                    target_count,
+                    sender_user_id,
+                    edu_content["message_id"],
+                    len(split_edus_content),
+                )
+                break
+            else:
+                if target_count == 1:
+                    # Single recipient's messages are too large
+                    recipient = message_items[0][0]
                     raise EventSizeError(
                         f"device message to {recipient} too large to fit in a single EDU",
                         unpersistable=True,
                     )
 
-                logger.debug(
-                    "Splitting %d to-device messages from %s into EDU (message_id=%s), (total EDUs so far: %d)",
-                    len(current_edu_content["messages"]),
-                    sender_user_id,
-                    current_edu_content["message_id"],
-                    len(split_edus),
-                )
+                # Halve the number of messages and try again
+                target_count = target_count // 2
 
-                current_edu_content = create_new_to_device_edu_content(
-                    sender_user_id, message_type, {recipient: messages_by_device}
-                )
-
-        if len(current_edu_content["messages"]) > 0:
-            split_edus.append(current_edu_content)
-            logger.debug(
-                "Splitting remaining %d device messages from %s into EDU (message_id=%s), (total EDUs so far: %d)",
-                len(current_edu_content["messages"]),
-                sender_user_id,
-                current_edu_content["message_id"],
-                len(split_edus),
-            )
-
-    return split_edus
+    return split_edus_content
 
 
 def create_new_to_device_edu_content(
