@@ -64,9 +64,8 @@ jobs:
           tar zxf htmltest_0.17.0_linux_amd64.tar.gz
 
       - name: Test links with htmltest
-        # Build the book with `./` as the site URL (to make checks on 404.html possible)
-        # Then run htmltest (without checking external links since that involves the network and is slow).
         run: |
+          # Build the book with `./` as the site URL (to make checks on 404.html possible)
           MDBOOK_OUTPUT__HTML__SITE_URL="./" mdbook build
 
           # Delete the contents of the print.html file, as it can raise false
