@@ -342,7 +342,7 @@ class TaskScheduler:
             task.status == TaskStatus.ACTIVE or task.status == TaskStatus.SCHEDULED
         ):
             logger.debug(
-                "Can't cancel task %s because it is neither ACTIVE not SCHEDULED", id
+                "Can't cancel task %s because it is neither ACTIVE nor SCHEDULED", id
             )
             return
 
