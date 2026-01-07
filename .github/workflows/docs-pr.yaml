@@ -21,7 +21,7 @@ jobs:
       - name: Setup mdbook
         uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
         with:
-          mdbook-version: '0.4.17'
+          mdbook-version: '0.5.2'
 
       - name: Setup python
         uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
@@ -55,7 +55,7 @@ jobs:
       - name: Setup mdbook
         uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
         with:
-          mdbook-version: '0.4.17'
+          mdbook-version: '0.5.2'
 
       - name: Setup htmltest
         run: |
