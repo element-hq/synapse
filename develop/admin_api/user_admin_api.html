@@ -1,50 +1,70 @@
 <!DOCTYPE HTML>
-<html lang="en" class="sidebar-visible no-js light">
+<html lang="en" class="light sidebar-visible" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
         <title>Users - Synapse</title>
+
+
         <!-- Custom HTML head -->
-        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="../favicon.svg">
-        <link rel="shortcut icon" href="../favicon.png">
-        <link rel="stylesheet" href="../css/variables.css">
-        <link rel="stylesheet" href="../css/general.css">
-        <link rel="stylesheet" href="../css/chrome.css">
-        <link rel="stylesheet" href="../css/print.css" media="print">
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
         <!-- Fonts -->
-        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="../fonts/fonts.css">
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="../highlight.css">
-        <link rel="stylesheet" href="../tomorrow-night.css">
-        <link rel="stylesheet" href="../ayu-highlight.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../docs/website_files/table-of-contents.css">
-        <link rel="stylesheet" href="../docs/website_files/remove-nav-buttons.css">
-        <link rel="stylesheet" href="../docs/website_files/indent-section-headers.css">
-        <link rel="stylesheet" href="../docs/website_files/version-picker.css">
+        <link rel="stylesheet" href="../docs/website_files/indent-section-headers-3390f960.css">
+        <link rel="stylesheet" href="../docs/website_files/version-picker-ddc5216e.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-ad6b5e04.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-4dc10a98.js"></script>
     </head>
     <body>
-        <!-- Provide site root to javascript -->
-        <script type="text/javascript">
-            var path_to_root = "../";
-            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
-        </script>
-
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
-        <script type="text/javascript">
+        <script>
             try {
-                var theme = localStorage.getItem('mdbook-theme');
-                var sidebar = localStorage.getItem('mdbook-sidebar');
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
                 if (theme.startsWith('"') && theme.endsWith('"')) {
                     localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
                 }
+
                 if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
                     localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
                 }
@@ -52,113 +72,131 @@
         </script>
 
         <!-- Set the theme before any content is loaded, prevents flash -->
-        <script type="text/javascript">
-            var theme;
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
-            var html = document.querySelector('html');
-            html.classList.remove('no-js')
+            const html = document.documentElement;
             html.classList.remove('light')
             html.classList.add(theme);
-            html.classList.add('js');
+            html.classList.add("js");
         </script>
 
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
         <!-- Hide / unhide sidebar before it is displayed -->
-        <script type="text/javascript">
-            var html = document.querySelector('html');
-            var sidebar = 'hidden';
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
-        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
-            <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><li class="part-title">Introduction</li><li class="chapter-item expanded "><a href="../welcome_and_overview.html">Welcome and Overview</a></li><li class="chapter-item expanded affix "><li class="part-title">Setup</li><li class="chapter-item expanded "><a href="../setup/installation.html">Installation</a></li><li class="chapter-item expanded "><a href="../setup/security.html">Security</a></li><li class="chapter-item expanded "><a href="../postgres.html">Using Postgres</a></li><li class="chapter-item expanded "><a href="../reverse_proxy.html">Configuring a Reverse Proxy</a></li><li class="chapter-item expanded "><a href="../setup/forward_proxy.html">Configuring a Forward/Outbound Proxy</a></li><li class="chapter-item expanded "><a href="../turn-howto.html">Configuring a Turn Server</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../setup/turn/coturn.html">coturn TURN server</a></li><li class="chapter-item expanded "><a href="../setup/turn/eturnal.html">eturnal TURN server</a></li></ol></li><li class="chapter-item expanded "><a href="../delegate.html">Delegation</a></li><li class="chapter-item expanded affix "><li class="part-title">Upgrading</li><li class="chapter-item expanded "><a href="../upgrade.html">Upgrading between Synapse Versions</a></li><li class="chapter-item expanded affix "><li class="part-title">Usage</li><li class="chapter-item expanded "><a href="../federate.html">Federation</a></li><li class="chapter-item expanded "><a href="../usage/configuration/index.html">Configuration</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../usage/configuration/config_documentation.html">Configuration Manual</a></li><li class="chapter-item expanded "><a href="../usage/configuration/homeserver_sample_config.html">Homeserver Sample Config File</a></li><li class="chapter-item expanded "><a href="../usage/configuration/logging_sample_config.html">Logging Sample Config File</a></li><li class="chapter-item expanded "><a href="../structured_logging.html">Structured Logging</a></li><li class="chapter-item expanded "><a href="../templates.html">Templates</a></li><li class="chapter-item expanded "><a href="../usage/configuration/user_authentication/index.html">User Authentication</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../usage/configuration/user_authentication/single_sign_on/index.html">Single-Sign On</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../openid.html">OpenID Connect</a></li><li class="chapter-item expanded "><a href="../usage/configuration/user_authentication/single_sign_on/saml.html">SAML</a></li><li class="chapter-item expanded "><a href="../usage/configuration/user_authentication/single_sign_on/cas.html">CAS</a></li><li class="chapter-item expanded "><a href="../sso_mapping_providers.html">SSO Mapping Providers</a></li></ol></li><li class="chapter-item expanded "><a href="../password_auth_providers.html">Password Auth Providers</a></li><li class="chapter-item expanded "><a href="../jwt.html">JSON Web Tokens</a></li><li class="chapter-item expanded "><a href="../usage/configuration/user_authentication/refresh_tokens.html">Refresh Tokens</a></li></ol></li><li class="chapter-item expanded "><a href="../CAPTCHA_SETUP.html">Registration Captcha</a></li><li class="chapter-item expanded "><a href="../application_services.html">Application Services</a></li><li class="chapter-item expanded "><a href="../server_notices.html">Server Notices</a></li><li class="chapter-item expanded "><a href="../consent_tracking.html">Consent Tracking</a></li><li class="chapter-item expanded "><a href="../user_directory.html">User Directory</a></li><li class="chapter-item expanded "><a href="../message_retention_policies.html">Message Retention Policies</a></li><li class="chapter-item expanded "><a href="../modules/index.html">Pluggable Modules</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../modules/writing_a_module.html">Writing a module</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../modules/spam_checker_callbacks.html">Spam checker callbacks</a></li><li class="chapter-item expanded "><a href="../modules/third_party_rules_callbacks.html">Third-party rules callbacks</a></li><li class="chapter-item expanded "><a href="../modules/presence_router_callbacks.html">Presence router callbacks</a></li><li class="chapter-item expanded "><a href="../modules/account_validity_callbacks.html">Account validity callbacks</a></li><li class="chapter-item expanded "><a href="../modules/password_auth_provider_callbacks.html">Password auth provider callbacks</a></li><li class="chapter-item expanded "><a href="../modules/background_update_controller_callbacks.html">Background update controller callbacks</a></li><li class="chapter-item expanded "><a href="../modules/account_data_callbacks.html">Account data callbacks</a></li><li class="chapter-item expanded "><a href="../modules/add_extra_fields_to_client_events_unsigned.html">Add extra fields to client events unsigned section callbacks</a></li><li class="chapter-item expanded "><a href="../modules/media_repository_callbacks.html">Media repository callbacks</a></li><li class="chapter-item expanded "><a href="../modules/ratelimit_callbacks.html">Ratelimit callbacks</a></li><li class="chapter-item expanded "><a href="../modules/porting_legacy_module.html">Porting a legacy module to the new interface</a></li></ol></li></ol></li><li class="chapter-item expanded "><a href="../workers.html">Workers</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../synctl_workers.html">Using synctl with Workers</a></li><li class="chapter-item expanded "><a href="../systemd-with-workers/index.html">Systemd</a></li></ol></li></ol></li><li class="chapter-item expanded "><a href="../usage/administration/index.html">Administration</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../usage/administration/backups.html">Backups</a></li><li class="chapter-item expanded "><a href="../usage/administration/admin_api/index.html">Admin API</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../admin_api/account_validity.html">Account Validity</a></li><li class="chapter-item expanded "><a href="../usage/administration/admin_api/background_updates.html">Background Updates</a></li><li class="chapter-item expanded "><a href="../admin_api/fetch_event.html">Fetch Event</a></li><li class="chapter-item expanded "><a href="../admin_api/event_reports.html">Event Reports</a></li><li class="chapter-item expanded "><a href="../admin_api/experimental_features.html">Experimental Features</a></li><li class="chapter-item expanded "><a href="../admin_api/media_admin_api.html">Media</a></li><li class="chapter-item expanded "><a href="../admin_api/purge_history_api.html">Purge History</a></li><li class="chapter-item expanded "><a href="../admin_api/register_api.html">Register Users</a></li><li class="chapter-item expanded "><a href="../usage/administration/admin_api/registration_tokens.html">Registration Tokens</a></li><li class="chapter-item expanded "><a href="../admin_api/room_membership.html">Manipulate Room Membership</a></li><li class="chapter-item expanded "><a href="../admin_api/rooms.html">Rooms</a></li><li class="chapter-item expanded "><a href="../admin_api/scheduled_tasks.html">Scheduled tasks</a></li><li class="chapter-item expanded "><a href="../admin_api/server_notices.html">Server Notices</a></li><li class="chapter-item expanded "><a href="../admin_api/statistics.html">Statistics</a></li><li class="chapter-item expanded "><a href="../admin_api/user_admin_api.html" class="active">Users</a></li><li class="chapter-item expanded "><a href="../admin_api/version_api.html">Server Version</a></li><li class="chapter-item expanded "><a href="../usage/administration/admin_api/federation.html">Federation</a></li><li class="chapter-item expanded "><a href="../admin_api/client_server_api_extensions.html">Client-Server API Extensions</a></li></ol></li><li class="chapter-item expanded "><a href="../manhole.html">Manhole</a></li><li class="chapter-item expanded "><a href="../metrics-howto.html">Monitoring</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../usage/administration/monitoring/reporting_homeserver_usage_statistics.html">Reporting Homeserver Usage Statistics</a></li></ol></li><li class="chapter-item expanded "><a href="../usage/administration/monthly_active_users.html">Monthly Active Users</a></li><li class="chapter-item expanded "><a href="../usage/administration/understanding_synapse_through_grafana_graphs.html">Understanding Synapse Through Grafana Graphs</a></li><li class="chapter-item expanded "><a href="../usage/administration/useful_sql_for_admins.html">Useful SQL for Admins</a></li><li class="chapter-item expanded "><a href="../usage/administration/database_maintenance_tools.html">Database Maintenance Tools</a></li><li class="chapter-item expanded "><a href="../usage/administration/state_groups.html">State Groups</a></li><li class="chapter-item expanded "><a href="../usage/administration/request_log.html">Request log format</a></li><li class="chapter-item expanded "><a href="../usage/administration/admin_faq.html">Admin FAQ</a></li><li class="chapter-item expanded "><div>Scripts</div></li></ol></li><li class="chapter-item expanded "><li class="part-title">Development</li><li class="chapter-item expanded "><a href="../development/contributing_guide.html">Contributing Guide</a></li><li class="chapter-item expanded "><a href="../code_style.html">Code Style</a></li><li class="chapter-item expanded "><a href="../development/reviews.html">Reviewing Code</a></li><li class="chapter-item expanded "><a href="../development/releases.html">Release Cycle</a></li><li class="chapter-item expanded "><a href="../development/git.html">Git Usage</a></li><li class="chapter-item expanded "><div>Testing</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="../development/demo.html">Demo scripts</a></li></ol></li><li class="chapter-item expanded "><a href="../opentracing.html">OpenTracing</a></li><li class="chapter-item expanded "><a href="../development/database_schema.html">Database Schemas</a></li><li class="chapter-item expanded "><a href="../development/experimental_features.html">Experimental features</a></li><li class="chapter-item expanded "><a href="../development/dependencies.html">Dependency management</a></li><li class="chapter-item expanded "><div>Synapse Architecture</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="../development/synapse_architecture/cancellation.html">Cancellation</a></li><li class="chapter-item expanded "><a href="../log_contexts.html">Log Contexts</a></li><li class="chapter-item expanded "><a href="../replication.html">Replication</a></li><li class="chapter-item expanded "><a href="../development/synapse_architecture/streams.html">Streams</a></li><li class="chapter-item expanded "><a href="../tcp_replication.html">TCP Replication</a></li><li class="chapter-item expanded "><a href="../development/synapse_architecture/faster_joins.html">Faster remote joins</a></li></ol></li><li class="chapter-item expanded "><a href="../development/internal_documentation/index.html">Internal Documentation</a></li><li><ol class="section"><li class="chapter-item expanded "><div>Single Sign-On</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="../development/saml.html">SAML</a></li><li class="chapter-item expanded "><a href="../development/cas.html">CAS</a></li></ol></li><li class="chapter-item expanded "><a href="../development/room-dag-concepts.html">Room DAG concepts</a></li><li class="chapter-item expanded "><div>State Resolution</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="../auth_chain_difference_algorithm.html">The Auth Chain Difference Algorithm</a></li></ol></li><li class="chapter-item expanded "><a href="../media_repository.html">Media Repository</a></li><li class="chapter-item expanded "><a href="../room_and_user_statistics.html">Room and User Statistics</a></li><li class="chapter-item expanded "><div>Releasing</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="../development/internal_documentation/release_notes_review_checklist.html">Release Notes Review Checklist</a></li></ol></li></ol></li><li class="chapter-item expanded "><div>Scripts</div></li><li class="chapter-item expanded affix "><li class="part-title">Other</li><li class="chapter-item expanded "><a href="../deprecation_policy.html">Dependency Deprecation Policy</a></li><li class="chapter-item expanded "><a href="../other/running_synapse_on_single_board_computers.html">Running Synapse on a Single-Board Computer</a></li></ol>
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
             </div>
-            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
-        <div id="page-wrapper" class="page-wrapper">
+        <div id="mdbook-page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
-                <div id="menu-bar" class="menu-bar sticky bordered">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
-                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
-                            <i class="fa fa-bars"></i>
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
                         </button>
-                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
-                            <i class="fa fa-paint-brush"></i>
-                        </button>
-                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
-                            <li role="none"><button role="menuitem" class="theme" id="light">Light (default)</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
-                            <i class="fa fa-search"></i>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
                         </button>
-                        <div class="version-picker">
-                            <div class="dropdown">
-                                <div class="select">
-                                    <span></span>
-                                    <i class="fa fa-chevron-down"></i>
-                                </div>
-                                <input type="hidden" name="version">
-                                <ul class="dropdown-menu">
-                                    <!-- Versions will be added dynamically in version-picker.js -->
-                                </ul>
+                    </div>
+
+                    <!-- BEGIN CUSTOM SYNAPSE MODIFICATIONS -->
+                    <div class="version-picker">
+                        <div class="dropdown">
+                            <div class="select">
+                                <span></span>
+                                <i class="fa fa-chevron-down"></i>
                             </div>
+                            <input type="hidden" name="version">
+                            <ul class="dropdown-menu">
+                                <!-- Versions will be added dynamically in version-picker.js -->
+                            </ul>
                         </div>
                     </div>
+                    <!-- END CUSTOM SYNAPSE MODIFICATIONS -->
 
                     <h1 class="menu-title">Synapse</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
-                            <i id="print-button" class="fa fa-print"></i>
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
                         <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
-                            <i id="git-repository-button" class="fa fa-github"></i>
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
                         </a>
-                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/admin_api/user_admin_api.md" title="Suggest an edit" aria-label="Suggest an edit">
-                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/admin_api/user_admin_api.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <span class=fa-svg id="git-edit-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M421.7 220.3l-11.3 11.3-22.6 22.6-205 205c-6.6 6.6-14.8 11.5-23.8 14.1L30.8 511c-8.4 2.5-17.5 .2-23.7-6.1S-1.5 489.7 1 481.2L38.7 353.1c2.6-9 7.5-17.2 14.1-23.8l205-205 22.6-22.6 11.3-11.3 33.9 33.9 62.1 62.1 33.9 33.9zM96 353.9l-9.3 9.3c-.9 .9-1.6 2.1-2 3.4l-25.3 86 86-25.3c1.3-.4 2.5-1.1 3.4-2l9.3-9.3H112c-8.8 0-16-7.2-16-16V353.9zM453.3 19.3l39.4 39.4c25 25 25 65.5 0 90.5l-14.5 14.5-22.6 22.6-11.3 11.3-33.9-33.9-62.1-62.1L314.3 67.7l11.3-11.3 22.6-22.6 14.5-14.5c25-25 65.5-25 90.5 0z"/></svg></span>
                         </a>
+
                     </div>
                 </div>
 
-                <div id="search-wrapper" class="hidden">
-                    <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
                     </form>
-                    <div id="searchresults-outer" class="searchresults-outer hidden">
-                        <div id="searchresults-header" class="searchresults-header"></div>
-                        <ul id="searchresults">
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
                         </ul>
                     </div>
                 </div>
+
                 <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
-                <script type="text/javascript">
-                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
-                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
-                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
                         link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
                     });
                 </script>
 
-                <div id="content" class="content">
+                <div id="mdbook-content" class="content">
                     <main>
-                        <!-- Page table of contents -->
-                        <div class="sidetoc">
-                            <nav class="pagetoc"></nav>
-                        </div>
-
                         <h1 id="user-admin-api"><a class="header" href="#user-admin-api">User Admin API</a></h1>
 <p>To use it, you will need to authenticate by providing an <code>access_token</code>
 for a server admin: see <a href="../usage/administration/admin_api/">Admin API</a>.</p>
@@ -169,47 +207,47 @@ for a server admin: see <a href="../usage/administration/admin_api/">Admin API</
 </code></pre>
 <p>It returns a JSON body like the following:</p>
 <pre><code class="language-jsonc">{
-    &quot;name&quot;: &quot;@user:example.com&quot;,
-    &quot;displayname&quot;: &quot;User&quot;, // can be null if not set
-    &quot;threepids&quot;: [
+    "name": "@user:example.com",
+    "displayname": "User", // can be null if not set
+    "threepids": [
         {
-            &quot;medium&quot;: &quot;email&quot;,
-            &quot;address&quot;: &quot;&lt;user_mail_1&gt;&quot;,
-            &quot;added_at&quot;: 1586458409743,
-            &quot;validated_at&quot;: 1586458409743
+            "medium": "email",
+            "address": "&lt;user_mail_1&gt;",
+            "added_at": 1586458409743,
+            "validated_at": 1586458409743
         },
         {
-            &quot;medium&quot;: &quot;email&quot;,
-            &quot;address&quot;: &quot;&lt;user_mail_2&gt;&quot;,
-            &quot;added_at&quot;: 1586458409743,
-            &quot;validated_at&quot;: 1586458409743
+            "medium": "email",
+            "address": "&lt;user_mail_2&gt;",
+            "added_at": 1586458409743,
+            "validated_at": 1586458409743
         }
     ],
-    &quot;avatar_url&quot;: &quot;&lt;avatar_url&gt;&quot;,  // can be null if not set
-    &quot;is_guest&quot;: 0,
-    &quot;admin&quot;: 0,
-    &quot;deactivated&quot;: 0,
-    &quot;erased&quot;: false,
-    &quot;shadow_banned&quot;: 0,
-    &quot;creation_ts&quot;: 1560432506,
-    &quot;last_seen_ts&quot;: 1732919539393,
-    &quot;appservice_id&quot;: null,
-    &quot;consent_server_notice_sent&quot;: null,
-    &quot;consent_version&quot;: null,
-    &quot;consent_ts&quot;: null,
-    &quot;external_ids&quot;: [
+    "avatar_url": "&lt;avatar_url&gt;",  // can be null if not set
+    "is_guest": 0,
+    "admin": 0,
+    "deactivated": 0,
+    "erased": false,
+    "shadow_banned": 0,
+    "creation_ts": 1560432506,
+    "last_seen_ts": 1732919539393,
+    "appservice_id": null,
+    "consent_server_notice_sent": null,
+    "consent_version": null,
+    "consent_ts": null,
+    "external_ids": [
         {
-            &quot;auth_provider&quot;: &quot;&lt;provider1&gt;&quot;,
-            &quot;external_id&quot;: &quot;&lt;user_id_provider_1&gt;&quot;
+            "auth_provider": "&lt;provider1&gt;",
+            "external_id": "&lt;user_id_provider_1&gt;"
         },
         {
-            &quot;auth_provider&quot;: &quot;&lt;provider2&gt;&quot;,
-            &quot;external_id&quot;: &quot;&lt;user_id_provider_2&gt;&quot;
+            "auth_provider": "&lt;provider2&gt;",
+            "external_id": "&lt;user_id_provider_2&gt;"
         }
     ],
-    &quot;user_type&quot;: null,
-    &quot;locked&quot;: false,
-    &quot;suspended&quot;: false
+    "user_type": null,
+    "locked": false,
+    "suspended": false
 }
 </code></pre>
 <p>URL parameters:</p>
@@ -224,34 +262,34 @@ specific <code>user_id</code>.</p>
 </code></pre>
 <p>with a body of:</p>
 <pre><code class="language-json">{
-    &quot;password&quot;: &quot;user_password&quot;,
-    &quot;logout_devices&quot;: false,
-    &quot;displayname&quot;: &quot;Alice Marigold&quot;,
-    &quot;avatar_url&quot;: &quot;mxc://example.com/abcde12345&quot;,
-    &quot;threepids&quot;: [
+    "password": "user_password",
+    "logout_devices": false,
+    "displayname": "Alice Marigold",
+    "avatar_url": "mxc://example.com/abcde12345",
+    "threepids": [
         {
-            &quot;medium&quot;: &quot;email&quot;,
-            &quot;address&quot;: &quot;alice@example.com&quot;
+            "medium": "email",
+            "address": "alice@example.com"
         },
         {
-            &quot;medium&quot;: &quot;email&quot;,
-            &quot;address&quot;: &quot;alice@domain.org&quot;
+            "medium": "email",
+            "address": "alice@domain.org"
         }
     ],
-    &quot;external_ids&quot;: [
+    "external_ids": [
         {
-            &quot;auth_provider&quot;: &quot;example&quot;,
-            &quot;external_id&quot;: &quot;12345&quot;
+            "auth_provider": "example",
+            "external_id": "12345"
         },
         {
-            &quot;auth_provider&quot;: &quot;example2&quot;,
-            &quot;external_id&quot;: &quot;abc54321&quot;
+            "auth_provider": "example2",
+            "external_id": "abc54321"
         }
     ],
-    &quot;admin&quot;: false,
-    &quot;deactivated&quot;: false,
-    &quot;user_type&quot;: null,
-    &quot;locked&quot;: false
+    "admin": false,
+    "deactivated": false,
+    "user_type": null,
+    "locked": false
 }
 </code></pre>
 <p>Returns HTTP status code:</p>
@@ -266,31 +304,31 @@ specific <code>user_id</code>.</p>
 <p>Body parameters:</p>
 <ul>
 <li>
-<p><code>password</code> - <strong>string</strong>, optional. If provided, the user's password is updated and all
+<p><code>password</code> - <strong>string</strong>, optional. If provided, the user’s password is updated and all
 devices are logged out, unless <code>logout_devices</code> is set to <code>false</code>.</p>
 </li>
 <li>
-<p><code>logout_devices</code> - <strong>bool</strong>, optional, defaults to <code>true</code>. If set to <code>false</code>, devices aren't
+<p><code>logout_devices</code> - <strong>bool</strong>, optional, defaults to <code>true</code>. If set to <code>false</code>, devices aren’t
 logged out even when <code>password</code> is provided.</p>
 </li>
 <li>
-<p><code>displayname</code> - <strong>string</strong>, optional. If set to an empty string (<code>&quot;&quot;</code>), the user's display name
+<p><code>displayname</code> - <strong>string</strong>, optional. If set to an empty string (<code>""</code>), the user’s display name
 will be removed.</p>
 </li>
 <li>
 <p><code>avatar_url</code> - <strong>string</strong>, optional. Must be a
 <a href="https://matrix.org/docs/spec/client_server/r0.6.0#matrix-content-mxc-uris">MXC URI</a>.
-If set to an empty string (<code>&quot;&quot;</code>), the user's avatar is removed.</p>
+If set to an empty string (<code>""</code>), the user’s avatar is removed.</p>
 </li>
 <li>
-<p><code>threepids</code> - <strong>array</strong>, optional. If provided, the user's third-party IDs (email, msisdn) are
+<p><code>threepids</code> - <strong>array</strong>, optional. If provided, the user’s third-party IDs (email, msisdn) are
 entirely replaced with the given list. Each item in the array is an object with the following
 fields:</p>
 <ul>
 <li><code>medium</code> - <strong>string</strong>, required. The type of third-party ID, either <code>email</code> or <code>msisdn</code> (phone number).</li>
 <li><code>address</code> - <strong>string</strong>, required. The third-party ID itself, e.g. <code>alice@example.com</code> for <code>email</code> or
-<code>447470274584</code> (for a phone number with country code &quot;44&quot;) and <code>19254857364</code> (for a phone number
-with country code &quot;1&quot;) for <code>msisdn</code>.
+<code>447470274584</code> (for a phone number with country code “44”) and <code>19254857364</code> (for a phone number
+with country code “1”) for <code>msisdn</code>.
 Note: If a threepid is removed from a user via this option, Synapse will also attempt to remove
 that threepid from any identity servers it is aware has a binding for it.</li>
 </ul>
@@ -319,7 +357,7 @@ granting them access to the Admin API, among other things.</p>
 It is possible to have active users without a password, e.g. when authenticating with OIDC is configured.
 You must check yourself whether a password is required when reactivating a user or not.</li>
 <li>It is not possible to set a password if the config option <code>password_config.localdb_enabled</code> is set <code>false</code>.
-Users' passwords are wiped upon account deactivation, hence the need to set a new one here.</li>
+Users’ passwords are wiped upon account deactivation, hence the need to set a new one here.</li>
 </ul>
 <p>Note: a user cannot be erased with this API. For more details on
 deactivating and erasing users see <a href="#deactivate-account">Deactivate Account</a>.</p>
@@ -342,35 +380,35 @@ By default, the response is ordered by ascending user ID.</p>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-    &quot;users&quot;: [
+    "users": [
         {
-            &quot;name&quot;: &quot;&lt;user_id1&gt;&quot;,
-            &quot;is_guest&quot;: 0,
-            &quot;admin&quot;: 0,
-            &quot;user_type&quot;: null,
-            &quot;deactivated&quot;: 0,
-            &quot;erased&quot;: false,
-            &quot;shadow_banned&quot;: 0,
-            &quot;displayname&quot;: &quot;&lt;User One&gt;&quot;,
-            &quot;avatar_url&quot;: null,
-            &quot;creation_ts&quot;: 1560432668000,
-            &quot;locked&quot;: false
+            "name": "&lt;user_id1&gt;",
+            "is_guest": 0,
+            "admin": 0,
+            "user_type": null,
+            "deactivated": 0,
+            "erased": false,
+            "shadow_banned": 0,
+            "displayname": "&lt;User One&gt;",
+            "avatar_url": null,
+            "creation_ts": 1560432668000,
+            "locked": false
         }, {
-            &quot;name&quot;: &quot;&lt;user_id2&gt;&quot;,
-            &quot;is_guest&quot;: 0,
-            &quot;admin&quot;: 1,
-            &quot;user_type&quot;: null,
-            &quot;deactivated&quot;: 0,
-            &quot;erased&quot;: false,
-            &quot;shadow_banned&quot;: 0,
-            &quot;displayname&quot;: &quot;&lt;User Two&gt;&quot;,
-            &quot;avatar_url&quot;: &quot;&lt;avatar_url&gt;&quot;,
-            &quot;creation_ts&quot;: 1561550621000,
-            &quot;locked&quot;: false
+            "name": "&lt;user_id2&gt;",
+            "is_guest": 0,
+            "admin": 1,
+            "user_type": null,
+            "deactivated": 0,
+            "erased": false,
+            "shadow_banned": 0,
+            "displayname": "&lt;User Two&gt;",
+            "avatar_url": "&lt;avatar_url&gt;",
+            "creation_ts": 1561550621000,
+            "locked": false
         }
     ],
-    &quot;next_token&quot;: &quot;100&quot;,
-    &quot;total&quot;: 200
+    "next_token": "100",
+    "total": 200
 }
 </code></pre>
 <p>To paginate, check for <code>next_token</code> and if present, call the endpoint again
@@ -433,8 +471,8 @@ Setting this value to <code>b</code> will reverse the above sort order. Defaults
 </li>
 <li>
 <p><code>not_user_type</code> - Exclude certain user types, such as bot users, from the request.
-Can be provided multiple times. Possible values are <code>bot</code>, <code>support</code> or &quot;empty string&quot;.
-&quot;empty string&quot; here means to exclude users without a type.</p>
+Can be provided multiple times. Possible values are <code>bot</code>, <code>support</code> or “empty string”.
+“empty string” here means to exclude users without a type.</p>
 </li>
 <li>
 <p><code>locked</code> - string representing a bool - Is optional and if <code>true</code> will <strong>include</strong> locked users.
@@ -460,10 +498,10 @@ This allows user type specific behaviour. There are also types <code>support</co
 <li><code>deactivated</code> - bool - Status if that user has been marked as deactivated.</li>
 <li><code>erased</code> - bool - Status if that user has been marked as erased.</li>
 <li><code>shadow_banned</code> - bool - Status if that user has been marked as shadow banned.</li>
-<li><code>displayname</code> - string - The user's display name if they have set one.</li>
-<li><code>avatar_url</code> - string -  The user's avatar URL if they have set one.</li>
-<li><code>creation_ts</code> - integer - The user's creation timestamp in ms.</li>
-<li><code>last_seen_ts</code> - integer - The user's last activity timestamp in ms.</li>
+<li><code>displayname</code> - string - The user’s display name if they have set one.</li>
+<li><code>avatar_url</code> - string -  The user’s avatar URL if they have set one.</li>
+<li><code>creation_ts</code> - integer - The user’s creation timestamp in ms.</li>
+<li><code>last_seen_ts</code> - integer - The user’s last activity timestamp in ms.</li>
 <li><code>locked</code> - bool - Status if that user has been marked as locked. Note: Introduced in v1.93.</li>
 </ul>
 </li>
@@ -497,21 +535,21 @@ users are not filtered by deactivation status.</li>
 API Whois</a>.</p>
 <p>It returns a JSON body like the following:</p>
 <pre><code class="language-json">{
-    &quot;user_id&quot;: &quot;&lt;user_id&gt;&quot;,
-    &quot;devices&quot;: {
-        &quot;&quot;: {
-            &quot;sessions&quot;: [
+    "user_id": "&lt;user_id&gt;",
+    "devices": {
+        "": {
+            "sessions": [
                 {
-                    &quot;connections&quot;: [
+                    "connections": [
                         {
-                            &quot;ip&quot;: &quot;1.2.3.4&quot;,
-                            &quot;last_seen&quot;: 1417222374433,
-                            &quot;user_agent&quot;: &quot;Mozilla/5.0 ...&quot;
+                            "ip": "1.2.3.4",
+                            "last_seen": 1417222374433,
+                            "user_agent": "Mozilla/5.0 ..."
                         },
                         {
-                            &quot;ip&quot;: &quot;1.2.3.10&quot;,
-                            &quot;last_seen&quot;: 1417222374500,
-                            &quot;user_agent&quot;: &quot;Dalvik/2.1.0 ...&quot;
+                            "ip": "1.2.3.10",
+                            "last_seen": 1417222374500,
+                            "user_agent": "Dalvik/2.1.0 ..."
                         }
                     ]
                 }
@@ -533,7 +571,7 @@ were sent, but hidden from users joining the room afterwards.</p>
 </code></pre>
 <p>with a body of:</p>
 <pre><code class="language-json">{
-    &quot;erase&quot;: true
+    "erase": true
 }
 </code></pre>
 <p>The erase parameter is optional and defaults to <code>false</code>.
@@ -562,8 +600,8 @@ An empty body may be passed for backwards compatibility.</p>
 <p>The following additional actions are performed during deactivation if <code>erase</code>
 is set to <code>true</code>:</p>
 <ul>
-<li>Remove the user's display name</li>
-<li>Remove the user's avatar URL</li>
+<li>Remove the user’s display name</li>
+<li>Remove the user’s avatar URL</li>
 <li>Mark the user as erased</li>
 </ul>
 <p>The following actions are <strong>NOT</strong> performed. The list may be incomplete.</p>
@@ -571,25 +609,25 @@ is set to <code>true</code>:</p>
 <li>Remove mappings of SSO IDs</li>
 <li><a href="#delete-media-uploaded-by-a-user">Delete media uploaded</a> by user (included avatar images)</li>
 <li>Delete sent and received messages</li>
-<li>Remove the user's creation (registration) timestamp</li>
+<li>Remove the user’s creation (registration) timestamp</li>
 <li><a href="#override-ratelimiting-for-users">Remove rate limit overrides</a></li>
 <li>Remove from monthly active users</li>
-<li>Remove user's consent information (consent version and timestamp)</li>
+<li>Remove user’s consent information (consent version and timestamp)</li>
 </ul>
 <h2 id="suspendunsuspend-account"><a class="header" href="#suspendunsuspend-account">Suspend/Unsuspend Account</a></h2>
-<p>This API allows an admin to suspend/unsuspend an account. While an account is suspended, the user is 
-prohibited from sending invites, joining or knocking on rooms, sending messages, changing profile data, and redacting messages other than their own. </p>
+<p>This API allows an admin to suspend/unsuspend an account. While an account is suspended, the user is
+prohibited from sending invites, joining or knocking on rooms, sending messages, changing profile data, and redacting messages other than their own.</p>
 <p>The api is:</p>
 <pre><code>PUT /_synapse/admin/v1/suspend/&lt;user_id&gt;
 </code></pre>
 <p>with a body of:</p>
 <pre><code class="language-json">{
-    &quot;suspend&quot;: true
+    "suspend": true
 }
 </code></pre>
 <p>To unsuspend a user, use the same endpoint with a body of:</p>
 <pre><code class="language-json">{
-  &quot;suspend&quot;: false
+  "suspend": false
 }
 </code></pre>
 <h2 id="reset-password"><a class="header" href="#reset-password">Reset password</a></h2>
@@ -600,8 +638,8 @@ prohibited from sending invites, joining or knocking on rooms, sending messages,
 </code></pre>
 <p>with a body of:</p>
 <pre><code class="language-json">{
-   &quot;new_password&quot;: &quot;&lt;secret&gt;&quot;,
-   &quot;logout_devices&quot;: true
+   "new_password": "&lt;secret&gt;",
+   "logout_devices": true
 }
 </code></pre>
 <p>The parameter <code>new_password</code> is required.
@@ -613,7 +651,7 @@ The parameter <code>logout_devices</code> is optional and defaults to <code>true
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-    &quot;admin&quot;: true
+    "admin": true
 }
 </code></pre>
 <h2 id="change-whether-a-user-is-a-server-administrator-or-not"><a class="header" href="#change-whether-a-user-is-a-server-administrator-or-not">Change whether a user is a server administrator or not</a></h2>
@@ -624,22 +662,22 @@ The parameter <code>logout_devices</code> is optional and defaults to <code>true
 </code></pre>
 <p>with a body of:</p>
 <pre><code class="language-json">{
-    &quot;admin&quot;: true
+    "admin": true
 }
 </code></pre>
 <h2 id="list-room-memberships-of-a-user"><a class="header" href="#list-room-memberships-of-a-user">List room memberships of a user</a></h2>
 <p>Gets a list of room memberships for a specific <code>user_id</code>. This
 endpoint differs from
 <a href="#list-joined-rooms-of-a-user"><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/joined_rooms</code></a>
-in that it returns rooms with memberships other than &quot;join&quot;.</p>
+in that it returns rooms with memberships other than “join”.</p>
 <p>The API is:</p>
 <pre><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/memberships
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">    {
-        &quot;memberships&quot;: {
-            &quot;!DuGcnbhHGaSZQoNQR:matrix.org&quot;: &quot;join&quot;,
-            &quot;!ZtSaPCawyWtxfWiIy:matrix.org&quot;: &quot;leave&quot;,
+        "memberships": {
+            "!DuGcnbhHGaSZQoNQR:matrix.org": "join",
+            "!ZtSaPCawyWtxfWiIy:matrix.org": "leave",
         }
     }
 </code></pre>
@@ -669,11 +707,11 @@ invite, etc.) are also possible.</p>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">    {
-        &quot;joined_rooms&quot;: [
-            &quot;!DuGcnbhHGaSZQoNQR:matrix.org&quot;,
-            &quot;!ZtSaPCawyWtxfWiIy:matrix.org&quot;
+        "joined_rooms": [
+            "!DuGcnbhHGaSZQoNQR:matrix.org",
+            "!ZtSaPCawyWtxfWiIy:matrix.org"
         ],
-        &quot;total&quot;: 2
+        "total": 2
     }
 </code></pre>
 <p>The server returns the list of rooms of which the user and the server
@@ -711,7 +749,7 @@ into timestamps and vice versa.</li>
 </ul>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-  &quot;invite_count&quot;: 30
+  "invite_count": 30
 }
 </code></pre>
 <p><em>Added in Synapse 1.122.0</em></p>
@@ -736,7 +774,7 @@ into timestamps and vice versa.</li>
 </ul>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-  &quot;cumulative_joined_room_count&quot;: 30
+  "cumulative_joined_room_count": 30
 }
 </code></pre>
 <p><em>Added in Synapse 1.122.0</em></p>
@@ -747,47 +785,47 @@ into timestamps and vice versa.</li>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-    &quot;account_data&quot;: {
-        &quot;global&quot;: {
-            &quot;m.secret_storage.key.LmIGHTg5W&quot;: {
-                &quot;algorithm&quot;: &quot;m.secret_storage.v1.aes-hmac-sha2&quot;,
-                &quot;iv&quot;: &quot;fwjNZatxg==&quot;,
-                &quot;mac&quot;: &quot;eWh9kNnLWZUNOgnc=&quot;
+    "account_data": {
+        "global": {
+            "m.secret_storage.key.LmIGHTg5W": {
+                "algorithm": "m.secret_storage.v1.aes-hmac-sha2",
+                "iv": "fwjNZatxg==",
+                "mac": "eWh9kNnLWZUNOgnc="
             },
-            &quot;im.vector.hide_profile&quot;: {
-                &quot;hide_profile&quot;: true
+            "im.vector.hide_profile": {
+                "hide_profile": true
             },
-            &quot;org.matrix.preview_urls&quot;: {
-                &quot;disable&quot;: false
+            "org.matrix.preview_urls": {
+                "disable": false
             },
-            &quot;im.vector.riot.breadcrumb_rooms&quot;: {
-                &quot;rooms&quot;: [
-                    &quot;!LxcBDAsDUVAfJDEo:matrix.org&quot;,
-                    &quot;!MAhRxqasbItjOqxu:matrix.org&quot;
+            "im.vector.riot.breadcrumb_rooms": {
+                "rooms": [
+                    "!LxcBDAsDUVAfJDEo:matrix.org",
+                    "!MAhRxqasbItjOqxu:matrix.org"
                 ]
             },
-            &quot;m.accepted_terms&quot;: {
-                &quot;accepted&quot;: [
-                    &quot;https://example.org/somewhere/privacy-1.2-en.html&quot;,
-                    &quot;https://example.org/somewhere/terms-2.0-en.html&quot;
+            "m.accepted_terms": {
+                "accepted": [
+                    "https://example.org/somewhere/privacy-1.2-en.html",
+                    "https://example.org/somewhere/terms-2.0-en.html"
                 ]
             },
-            &quot;im.vector.setting.breadcrumbs&quot;: {
-                &quot;recent_rooms&quot;: [
-                    &quot;!MAhRxqasbItqxuEt:matrix.org&quot;,
-                    &quot;!ZtSaPCawyWtxiImy:matrix.org&quot;
+            "im.vector.setting.breadcrumbs": {
+                "recent_rooms": [
+                    "!MAhRxqasbItqxuEt:matrix.org",
+                    "!ZtSaPCawyWtxiImy:matrix.org"
                 ]
             }
         },
-        &quot;rooms&quot;: {
-            &quot;!GUdfZSHUJibpiVqHYd:matrix.org&quot;: {
-                &quot;m.fully_read&quot;: {
-                    &quot;event_id&quot;: &quot;$156334540fYIhZ:matrix.org&quot;
+        "rooms": {
+            "!GUdfZSHUJibpiVqHYd:matrix.org": {
+                "m.fully_read": {
+                    "event_id": "$156334540fYIhZ:matrix.org"
                 }
             },
-            &quot;!tOZwOOiqwCYQkLhV:matrix.org&quot;: {
-                &quot;m.fully_read&quot;: {
-                    &quot;event_id&quot;: &quot;$xjsIyp4_NaVl2yPvIZs_k1Jl8tsC_Sp23wjqXPno&quot;
+            "!tOZwOOiqwCYQkLhV:matrix.org": {
+                "m.fully_read": {
+                    "event_id": "$xjsIyp4_NaVl2yPvIZs_k1Jl8tsC_Sp23wjqXPno"
                 }
             }
         }
@@ -824,40 +862,40 @@ The newest media is on top. You can change the order with parameters
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-  &quot;media&quot;: [
+  "media": [
     {
-      &quot;created_ts&quot;: 100400,
-      &quot;last_access_ts&quot;: null,
-      &quot;media_id&quot;: &quot;qXhyRzulkwLsNHTbpHreuEgo&quot;,
-      &quot;media_length&quot;: 67,
-      &quot;media_type&quot;: &quot;image/png&quot;,
-      &quot;quarantined_by&quot;: null,
-      &quot;safe_from_quarantine&quot;: false,
-      &quot;upload_name&quot;: &quot;test1.png&quot;
+      "created_ts": 100400,
+      "last_access_ts": null,
+      "media_id": "qXhyRzulkwLsNHTbpHreuEgo",
+      "media_length": 67,
+      "media_type": "image/png",
+      "quarantined_by": null,
+      "safe_from_quarantine": false,
+      "upload_name": "test1.png"
     },
     {
-      &quot;created_ts&quot;: 200400,
-      &quot;last_access_ts&quot;: null,
-      &quot;media_id&quot;: &quot;FHfiSnzoINDatrXHQIXBtahw&quot;,
-      &quot;media_length&quot;: 67,
-      &quot;media_type&quot;: &quot;image/png&quot;,
-      &quot;quarantined_by&quot;: null,
-      &quot;safe_from_quarantine&quot;: false,
-      &quot;upload_name&quot;: &quot;test2.png&quot;
+      "created_ts": 200400,
+      "last_access_ts": null,
+      "media_id": "FHfiSnzoINDatrXHQIXBtahw",
+      "media_length": 67,
+      "media_type": "image/png",
+      "quarantined_by": null,
+      "safe_from_quarantine": false,
+      "upload_name": "test2.png"
     },
     {
-      &quot;created_ts&quot;: 300400,
-      &quot;last_access_ts&quot;: 300700,
-      &quot;media_id&quot;: &quot;BzYNLRUgGHphBkdKGbzXwbjX&quot;,
-      &quot;media_length&quot;: 1337,
-      &quot;media_type&quot;: &quot;application/octet-stream&quot;,
-      &quot;quarantined_by&quot;: null,
-      &quot;safe_from_quarantine&quot;: false,
-      &quot;upload_name&quot;: null
+      "created_ts": 300400,
+      "last_access_ts": 300700,
+      "media_id": "BzYNLRUgGHphBkdKGbzXwbjX",
+      "media_length": 1337,
+      "media_type": "application/octet-stream",
+      "quarantined_by": null,
+      "safe_from_quarantine": false,
+      "upload_name": null
     }
   ],
-  &quot;next_token&quot;: 3,
-  &quot;total&quot;: 2
+  "next_token": 3,
+  "total": 2
 }
 </code></pre>
 <p>To paginate, check for <code>next_token</code> and if present, call the endpoint again
@@ -948,10 +986,10 @@ The newest media is deleted first. You can change the order with parameters
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-  &quot;deleted_media&quot;: [
-    &quot;abcdefghijklmnopqrstuvwx&quot;
+  "deleted_media": [
+    "abcdefghijklmnopqrstuvwx"
   ],
-  &quot;total&quot;: 1
+  "total": 1
 }
 </code></pre>
 <p>The following fields are returned in the JSON response body:</p>
@@ -980,7 +1018,7 @@ do not expire. Note that this API does not allow a user to login as themselves
 (to create more tokens).</p>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-    &quot;access_token&quot;: &quot;&lt;opaque_access_token_string&gt;&quot;
+    "access_token": "&lt;opaque_access_token_string&gt;"
 }
 </code></pre>
 <p>This API does <em>not</em> generate a new device for the user, and so will not appear
@@ -1007,7 +1045,7 @@ as Synapse cannot perform UIA is not possible in these circumstances.</p>
 this will return with status code <code>404 Not Found</code>.</p>
 <p>Otherwise, a response body like the following is returned, with status <code>200 OK</code>:</p>
 <pre><code class="language-json">{
-    &quot;updatable_without_uia_before_ms&quot;: 1234567890
+    "updatable_without_uia_before_ms": 1234567890
 }
 </code></pre>
 <p>The response body is a JSON object with a single field:</p>
@@ -1025,27 +1063,27 @@ going through UIA.</li>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-  &quot;devices&quot;: [
+  "devices": [
     {
-      &quot;device_id&quot;: &quot;QBUAZIFURK&quot;,
-      &quot;display_name&quot;: &quot;android&quot;,
-      &quot;last_seen_ip&quot;: &quot;1.2.3.4&quot;,
-      &quot;last_seen_user_agent&quot;: &quot;Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0&quot;,
-      &quot;last_seen_ts&quot;: 1474491775024,
-      &quot;user_id&quot;: &quot;&lt;user_id&gt;&quot;,
-      &quot;dehydrated&quot;: false
+      "device_id": "QBUAZIFURK",
+      "display_name": "android",
+      "last_seen_ip": "1.2.3.4",
+      "last_seen_user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
+      "last_seen_ts": 1474491775024,
+      "user_id": "&lt;user_id&gt;",
+      "dehydrated": false
     },
     {
-      &quot;device_id&quot;: &quot;AUIECTSRND&quot;,
-      &quot;display_name&quot;: &quot;ios&quot;,
-      &quot;last_seen_ip&quot;: &quot;1.2.3.5&quot;,
-      &quot;last_seen_user_agent&quot;: &quot;Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0&quot;,
-      &quot;last_seen_ts&quot;: 1474491775025,
-      &quot;user_id&quot;: &quot;&lt;user_id&gt;&quot;,
-      &quot;dehydrated&quot;: false
+      "device_id": "AUIECTSRND",
+      "display_name": "ios",
+      "last_seen_ip": "1.2.3.5",
+      "last_seen_user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
+      "last_seen_ts": 1474491775025,
+      "user_id": "&lt;user_id&gt;",
+      "dehydrated": false
     }
   ],
-  &quot;total&quot;: 2
+  "total": 2
 }
 </code></pre>
 <p><strong>Parameters</strong></p>
@@ -1074,7 +1112,7 @@ devices was last seen. (May be a few minutes out of date, for efficiency reasons
 </ul>
 </li>
 <li>
-<p><code>total</code> - Total number of user's devices.</p>
+<p><code>total</code> - Total number of user’s devices.</p>
 </li>
 </ul>
 <h3 id="create-a-device"><a class="header" href="#create-a-device">Create a device</a></h3>
@@ -1084,7 +1122,7 @@ exists already.</p>
 <pre><code>POST /_synapse/admin/v2/users/&lt;user_id&gt;/devices
 
 {
-  &quot;device_id&quot;: &quot;QBUAZIFURK&quot;
+  "device_id": "QBUAZIFURK"
 }
 </code></pre>
 <p>An empty JSON dict is returned.</p>
@@ -1104,9 +1142,9 @@ any access token associated with them.</p>
 <pre><code>POST /_synapse/admin/v2/users/&lt;user_id&gt;/delete_devices
 
 {
-  &quot;devices&quot;: [
-    &quot;QBUAZIFURK&quot;,
-    &quot;AUIECTSRND&quot;
+  "devices": [
+    "QBUAZIFURK",
+    "AUIECTSRND"
   ]
 }
 </code></pre>
@@ -1127,12 +1165,12 @@ any access token associated with them.</p>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-  &quot;device_id&quot;: &quot;&lt;device_id&gt;&quot;,
-  &quot;display_name&quot;: &quot;android&quot;,
-  &quot;last_seen_ip&quot;: &quot;1.2.3.4&quot;,
-  &quot;last_seen_user_agent&quot;: &quot;Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0&quot;,
-  &quot;last_seen_ts&quot;: 1474491775024,
-  &quot;user_id&quot;: &quot;&lt;user_id&gt;&quot;
+  "device_id": "&lt;device_id&gt;",
+  "display_name": "android",
+  "last_seen_ip": "1.2.3.4",
+  "last_seen_user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
+  "last_seen_ts": 1474491775024,
+  "user_id": "&lt;user_id&gt;"
 }
 </code></pre>
 <p><strong>Parameters</strong></p>
@@ -1164,7 +1202,7 @@ devices was last seen. (May be a few minutes out of date, for efficiency reasons
 <pre><code>PUT /_synapse/admin/v2/users/&lt;user_id&gt;/devices/&lt;device_id&gt;
 
 {
-  &quot;display_name&quot;: &quot;My other phone&quot;
+  "display_name": "My other phone"
 }
 </code></pre>
 <p>An empty JSON dict is returned.</p>
@@ -1201,21 +1239,21 @@ and invalidates any access token associated with it.</p>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-  &quot;pushers&quot;: [
+  "pushers": [
     {
-      &quot;app_display_name&quot;:&quot;HTTP Push Notifications&quot;,
-      &quot;app_id&quot;:&quot;m.http&quot;,
-      &quot;data&quot;: {
-        &quot;url&quot;:&quot;example.com&quot;
+      "app_display_name":"HTTP Push Notifications",
+      "app_id":"m.http",
+      "data": {
+        "url":"example.com"
       },
-      &quot;device_display_name&quot;:&quot;pushy push&quot;,
-      &quot;kind&quot;:&quot;http&quot;,
-      &quot;lang&quot;:&quot;None&quot;,
-      &quot;profile_tag&quot;:&quot;&quot;,
-      &quot;pushkey&quot;:&quot;a@example.com&quot;
+      "device_display_name":"pushy push",
+      "kind":"http",
+      "lang":"None",
+      "profile_tag":"",
+      "pushkey":"a@example.com"
     }
   ],
-  &quot;total&quot;: 1
+  "total": 1
 }
 </code></pre>
 <p><strong>Parameters</strong></p>
@@ -1259,11 +1297,11 @@ what device owns this pusher.</p>
 this pusher executes.</p>
 </li>
 <li>
-<p><code>kind</code> - string -  The kind of pusher. &quot;http&quot; is a pusher that sends HTTP pokes.</p>
+<p><code>kind</code> - string -  The kind of pusher. “http” is a pusher that sends HTTP pokes.</p>
 </li>
 <li>
 <p><code>lang</code> - string - The preferred language for receiving notifications
-(e.g. 'en' or 'en-US')</p>
+(e.g. ‘en’ or ‘en-US’)</p>
 </li>
 <li>
 <p><code>profile_tag</code> - string - This string determines which set of device specific rules
@@ -1282,7 +1320,7 @@ Max length, 512 bytes.</p>
 <p>See also the
 <a href="https://matrix.org/docs/spec/client_server/latest#get-matrix-client-r0-pushers">Client-Server API Spec on pushers</a>.</p>
 <h2 id="controlling-whether-a-user-is-shadow-banned"><a class="header" href="#controlling-whether-a-user-is-shadow-banned">Controlling whether a user is shadow-banned</a></h2>
-<p>Shadow-banning is a useful tool for moderating malicious or egregiously abusive users. 
+<p>Shadow-banning is a useful tool for moderating malicious or egregiously abusive users.
 A shadow-banned users receives successful responses to their client-server API requests,
 but the events are not propagated into rooms. This can be an effective tool as it
 (hopefully) takes longer for the user to realise they are being moderated before
@@ -1313,8 +1351,8 @@ There are specific APIs to set, get and delete a ratelimit.</p>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-  &quot;messages_per_second&quot;: 0,
-  &quot;burst_count&quot;: 0
+  "messages_per_second": 0,
+  "burst_count": 0
 }
 </code></pre>
 <p><strong>Parameters</strong></p>
@@ -1340,8 +1378,8 @@ being limited.</li>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-  &quot;messages_per_second&quot;: 0,
-  &quot;burst_count&quot;: 0
+  "messages_per_second": 0,
+  "burst_count": 0
 }
 </code></pre>
 <p><strong>Parameters</strong></p>
@@ -1357,7 +1395,7 @@ be performed in a second. Defaults to <code>0</code>.</li>
 <li><code>burst_count</code> - positive integer, optional. How many actions that can be performed
 before being limited. Defaults to <code>0</code>.</li>
 </ul>
-<p>To disable users' ratelimit set both values to <code>0</code>.</p>
+<p>To disable users’ ratelimit set both values to <code>0</code>.</p>
 <p><strong>Response</strong></p>
 <p>The following fields are returned in the JSON response body:</p>
 <ul>
@@ -1396,7 +1434,7 @@ for more information.</p>
 </code></pre>
 <p>When a user matched the given ID for the given provider, an HTTP code <code>200</code> with a response body like the following is returned:</p>
 <pre><code class="language-json">{
-    &quot;user_id&quot;: &quot;@hello:example.org&quot;
+    "user_id": "@hello:example.org"
 }
 </code></pre>
 <p><strong>Parameters</strong></p>
@@ -1409,8 +1447,8 @@ for more information.</p>
 <p><strong>Errors</strong></p>
 <p>Returns a <code>404</code> HTTP status code if no user was found, with a response body like this:</p>
 <pre><code class="language-json">{
-    &quot;errcode&quot;:&quot;M_NOT_FOUND&quot;,
-    &quot;error&quot;:&quot;User not found&quot;
+    "errcode":"M_NOT_FOUND",
+    "error":"User not found"
 }
 </code></pre>
 <p><em>Added in Synapse 1.68.0.</em></p>
@@ -1420,7 +1458,7 @@ for more information.</p>
 </code></pre>
 <p>When a user matched the given address for the given medium, an HTTP code <code>200</code> with a response body like the following is returned:</p>
 <pre><code class="language-json">{
-    &quot;user_id&quot;: &quot;@hello:example.org&quot;
+    "user_id": "@hello:example.org"
 }
 </code></pre>
 <p><strong>Parameters</strong></p>
@@ -1433,8 +1471,8 @@ for more information.</p>
 <p><strong>Errors</strong></p>
 <p>Returns a <code>404</code> HTTP status code if no user was found, with a response body like this:</p>
 <pre><code class="language-json">{
-    &quot;errcode&quot;:&quot;M_NOT_FOUND&quot;,
-    &quot;error&quot;:&quot;User not found&quot;
+    "errcode":"M_NOT_FOUND",
+    "error":"User not found"
 }
 </code></pre>
 <p><em>Added in Synapse 1.72.0.</em></p>
@@ -1444,19 +1482,19 @@ redactions for a local user. By default, we puppet the user who sent the message
 Redactions for non-local users are issued using the admin user, and will fail in rooms where the
 admin user is not admin/does not have the specified power level to issue redactions. An option
 is provided to override the default and allow the admin to issue the redactions in all cases.</p>
-<p>The API is </p>
+<p>The API is</p>
 <pre><code>POST /_synapse/admin/v1/user/$user_id/redact
 
 {
-  &quot;rooms&quot;: [&quot;!roomid1&quot;, &quot;!roomid2&quot;]
+  "rooms": ["!roomid1", "!roomid2"]
 }
 </code></pre>
 <p>If an empty list is provided as the key for <code>rooms</code>, all events in all the rooms the user is member of will be redacted,
-otherwise all the events in the rooms provided in the request will be redacted. </p>
+otherwise all the events in the rooms provided in the request will be redacted.</p>
 <p>The API starts redaction process running, and returns immediately with a JSON body with
 a redact id which can be used to query the status of the redaction process:</p>
 <pre><code class="language-json">{
-    &quot;redact_id&quot;: &quot;&lt;opaque id&gt;&quot;
+    "redact_id": "&lt;opaque id&gt;"
 }
 </code></pre>
 <p><strong>Parameters</strong></p>
@@ -1466,20 +1504,20 @@ a redact id which can be used to query the status of the redaction process:</p>
 </ul>
 <p>The following JSON body parameter must be provided:</p>
 <ul>
-<li><code>rooms</code> - A list of rooms to redact the user's events in. If an empty list is provided all events in all rooms
+<li><code>rooms</code> - A list of rooms to redact the user’s events in. If an empty list is provided all events in all rooms
 the user is a member of will be redacted</li>
 </ul>
 <p>The following JSON body parameters are optional:</p>
 <ul>
-<li><code>reason</code> - Reason the redaction is being requested, ie &quot;spam&quot;, &quot;abuse&quot;, etc. This will be included in each redaction event, and be visible to users.</li>
-<li><code>limit</code> - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided.</li>
+<li><code>reason</code> - Reason the redaction is being requested, ie “spam”, “abuse”, etc. This will be included in each redaction event, and be visible to users.</li>
+<li><code>limit</code> - a limit on the number of the user’s events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided.</li>
 <li><code>use_admin</code> - If set to <code>true</code>, the admin user is used to issue the redactions, rather than puppeting the user. Useful
 when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in rooms
 where the admin does not have the sufficient power level to issue the redactions.</li>
 </ul>
 <p><em>Added in Synapse 1.116.0.</em></p>
 <h2 id="check-the-status-of-a-redaction-process"><a class="header" href="#check-the-status-of-a-redaction-process">Check the status of a redaction process</a></h2>
-<p>It is possible to query the status of the background task for redacting a user's events.
+<p>It is possible to query the status of the background task for redacting a user’s events.
 The status can be queried up to 24 hours after completion of the task,
 or until Synapse is restarted (whichever happens first).</p>
 <p>The API is:</p>
@@ -1487,8 +1525,8 @@ or until Synapse is restarted (whichever happens first).</p>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code>{
-  &quot;status&quot;: &quot;active&quot;,
-  &quot;failed_redactions&quot;: [],
+  "status": "active",
+  "failed_redactions": [],
 }
 </code></pre>
 <p><strong>Parameters</strong></p>
@@ -1500,7 +1538,7 @@ or until Synapse is restarted (whichever happens first).</p>
 <p>The following fields are returned in the JSON response body:</p>
 <ul>
 <li><code>status</code> - string - one of scheduled/active/completed/failed, indicating the status of the redaction job</li>
-<li><code>failed_redactions</code> - dictionary - the keys of the dict are event ids the process was unable to redact, if any, and the values are 
+<li><code>failed_redactions</code> - dictionary - the keys of the dict are event ids the process was unable to redact, if any, and the values are
 the corresponding error that caused the redaction to fail</li>
 </ul>
 <p><em>Added in Synapse 1.116.0.</em></p>
@@ -1510,11 +1548,13 @@ the corresponding error that caused the redaction to fail</li>
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
                             <a rel="prev" href="../admin_api/statistics.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                                <i class="fa fa-angle-left"></i>
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
-                            <a rel="next" href="../admin_api/version_api.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-                                <i class="fa fa-angle-right"></i>
+
+                            <a rel="next prefetch" href="../admin_api/version_api.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
+
                         <div style="clear: both"></div>
                     </nav>
                 </div>
@@ -1522,28 +1562,43 @@ the corresponding error that caused the redaction to fail</li>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
                     <a rel="prev" href="../admin_api/statistics.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                        <i class="fa fa-angle-left"></i>
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
-                    <a rel="next" href="../admin_api/version_api.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-                        <i class="fa fa-angle-right"></i>
+
+                    <a rel="next prefetch" href="../admin_api/version_api.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
 
         </div>
 
-        <script type="text/javascript">
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
             window.playground_copyable = true;
         </script>
-        <script src="../elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="../mark.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="../searcher.js" type="text/javascript" charset="utf-8"></script>
-        <script src="../clipboard.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="../highlight.js" type="text/javascript" charset="utf-8"></script>
-        <script src="../book.js" type="text/javascript" charset="utf-8"></script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
-        <script type="text/javascript" src="../docs/website_files/table-of-contents.js"></script>
-        <script type="text/javascript" src="../docs/website_files/version-picker.js"></script>
-        <script type="text/javascript" src="../docs/website_files/version.js"></script>
+        <script src="../docs/website_files/version-picker-a1e40922.js"></script>
+        <script src="../docs/website_files/version-d2c738f4.js"></script>
+
+
+
+    </div>
     </body>
 </html>

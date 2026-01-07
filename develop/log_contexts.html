@@ -1,50 +1,70 @@
 <!DOCTYPE HTML>
-<html lang="en" class="sidebar-visible no-js light">
+<html lang="en" class="light sidebar-visible" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
         <title>Log Contexts - Synapse</title>
+
+
         <!-- Custom HTML head -->
-        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon.svg">
-        <link rel="shortcut icon" href="favicon.png">
-        <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-        <link rel="stylesheet" href="css/print.css" media="print">
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-2459343d.css">
+        <link rel="stylesheet" href="css/chrome-ae938929.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="docs/website_files/table-of-contents.css">
-        <link rel="stylesheet" href="docs/website_files/remove-nav-buttons.css">
-        <link rel="stylesheet" href="docs/website_files/indent-section-headers.css">
-        <link rel="stylesheet" href="docs/website_files/version-picker.css">
+        <link rel="stylesheet" href="docs/website_files/indent-section-headers-3390f960.css">
+        <link rel="stylesheet" href="docs/website_files/version-picker-ddc5216e.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-ad6b5e04.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-4dc10a98.js"></script>
     </head>
     <body>
-        <!-- Provide site root to javascript -->
-        <script type="text/javascript">
-            var path_to_root = "";
-            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
-        </script>
-
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
-        <script type="text/javascript">
+        <script>
             try {
-                var theme = localStorage.getItem('mdbook-theme');
-                var sidebar = localStorage.getItem('mdbook-sidebar');
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
                 if (theme.startsWith('"') && theme.endsWith('"')) {
                     localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
                 }
+
                 if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
                     localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
                 }
@@ -52,116 +72,134 @@
         </script>
 
         <!-- Set the theme before any content is loaded, prevents flash -->
-        <script type="text/javascript">
-            var theme;
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
-            var html = document.querySelector('html');
-            html.classList.remove('no-js')
+            const html = document.documentElement;
             html.classList.remove('light')
             html.classList.add(theme);
-            html.classList.add('js');
+            html.classList.add("js");
         </script>
 
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
         <!-- Hide / unhide sidebar before it is displayed -->
-        <script type="text/javascript">
-            var html = document.querySelector('html');
-            var sidebar = 'hidden';
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
-        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
-            <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><li class="part-title">Introduction</li><li class="chapter-item expanded "><a href="welcome_and_overview.html">Welcome and Overview</a></li><li class="chapter-item expanded affix "><li class="part-title">Setup</li><li class="chapter-item expanded "><a href="setup/installation.html">Installation</a></li><li class="chapter-item expanded "><a href="setup/security.html">Security</a></li><li class="chapter-item expanded "><a href="postgres.html">Using Postgres</a></li><li class="chapter-item expanded "><a href="reverse_proxy.html">Configuring a Reverse Proxy</a></li><li class="chapter-item expanded "><a href="setup/forward_proxy.html">Configuring a Forward/Outbound Proxy</a></li><li class="chapter-item expanded "><a href="turn-howto.html">Configuring a Turn Server</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="setup/turn/coturn.html">coturn TURN server</a></li><li class="chapter-item expanded "><a href="setup/turn/eturnal.html">eturnal TURN server</a></li></ol></li><li class="chapter-item expanded "><a href="delegate.html">Delegation</a></li><li class="chapter-item expanded affix "><li class="part-title">Upgrading</li><li class="chapter-item expanded "><a href="upgrade.html">Upgrading between Synapse Versions</a></li><li class="chapter-item expanded affix "><li class="part-title">Usage</li><li class="chapter-item expanded "><a href="federate.html">Federation</a></li><li class="chapter-item expanded "><a href="usage/configuration/index.html">Configuration</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="usage/configuration/config_documentation.html">Configuration Manual</a></li><li class="chapter-item expanded "><a href="usage/configuration/homeserver_sample_config.html">Homeserver Sample Config File</a></li><li class="chapter-item expanded "><a href="usage/configuration/logging_sample_config.html">Logging Sample Config File</a></li><li class="chapter-item expanded "><a href="structured_logging.html">Structured Logging</a></li><li class="chapter-item expanded "><a href="templates.html">Templates</a></li><li class="chapter-item expanded "><a href="usage/configuration/user_authentication/index.html">User Authentication</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="usage/configuration/user_authentication/single_sign_on/index.html">Single-Sign On</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="openid.html">OpenID Connect</a></li><li class="chapter-item expanded "><a href="usage/configuration/user_authentication/single_sign_on/saml.html">SAML</a></li><li class="chapter-item expanded "><a href="usage/configuration/user_authentication/single_sign_on/cas.html">CAS</a></li><li class="chapter-item expanded "><a href="sso_mapping_providers.html">SSO Mapping Providers</a></li></ol></li><li class="chapter-item expanded "><a href="password_auth_providers.html">Password Auth Providers</a></li><li class="chapter-item expanded "><a href="jwt.html">JSON Web Tokens</a></li><li class="chapter-item expanded "><a href="usage/configuration/user_authentication/refresh_tokens.html">Refresh Tokens</a></li></ol></li><li class="chapter-item expanded "><a href="CAPTCHA_SETUP.html">Registration Captcha</a></li><li class="chapter-item expanded "><a href="application_services.html">Application Services</a></li><li class="chapter-item expanded "><a href="server_notices.html">Server Notices</a></li><li class="chapter-item expanded "><a href="consent_tracking.html">Consent Tracking</a></li><li class="chapter-item expanded "><a href="user_directory.html">User Directory</a></li><li class="chapter-item expanded "><a href="message_retention_policies.html">Message Retention Policies</a></li><li class="chapter-item expanded "><a href="modules/index.html">Pluggable Modules</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="modules/writing_a_module.html">Writing a module</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="modules/spam_checker_callbacks.html">Spam checker callbacks</a></li><li class="chapter-item expanded "><a href="modules/third_party_rules_callbacks.html">Third-party rules callbacks</a></li><li class="chapter-item expanded "><a href="modules/presence_router_callbacks.html">Presence router callbacks</a></li><li class="chapter-item expanded "><a href="modules/account_validity_callbacks.html">Account validity callbacks</a></li><li class="chapter-item expanded "><a href="modules/password_auth_provider_callbacks.html">Password auth provider callbacks</a></li><li class="chapter-item expanded "><a href="modules/background_update_controller_callbacks.html">Background update controller callbacks</a></li><li class="chapter-item expanded "><a href="modules/account_data_callbacks.html">Account data callbacks</a></li><li class="chapter-item expanded "><a href="modules/add_extra_fields_to_client_events_unsigned.html">Add extra fields to client events unsigned section callbacks</a></li><li class="chapter-item expanded "><a href="modules/media_repository_callbacks.html">Media repository callbacks</a></li><li class="chapter-item expanded "><a href="modules/ratelimit_callbacks.html">Ratelimit callbacks</a></li><li class="chapter-item expanded "><a href="modules/porting_legacy_module.html">Porting a legacy module to the new interface</a></li></ol></li></ol></li><li class="chapter-item expanded "><a href="workers.html">Workers</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="synctl_workers.html">Using synctl with Workers</a></li><li class="chapter-item expanded "><a href="systemd-with-workers/index.html">Systemd</a></li></ol></li></ol></li><li class="chapter-item expanded "><a href="usage/administration/index.html">Administration</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="usage/administration/backups.html">Backups</a></li><li class="chapter-item expanded "><a href="usage/administration/admin_api/index.html">Admin API</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="admin_api/account_validity.html">Account Validity</a></li><li class="chapter-item expanded "><a href="usage/administration/admin_api/background_updates.html">Background Updates</a></li><li class="chapter-item expanded "><a href="admin_api/fetch_event.html">Fetch Event</a></li><li class="chapter-item expanded "><a href="admin_api/event_reports.html">Event Reports</a></li><li class="chapter-item expanded "><a href="admin_api/experimental_features.html">Experimental Features</a></li><li class="chapter-item expanded "><a href="admin_api/media_admin_api.html">Media</a></li><li class="chapter-item expanded "><a href="admin_api/purge_history_api.html">Purge History</a></li><li class="chapter-item expanded "><a href="admin_api/register_api.html">Register Users</a></li><li class="chapter-item expanded "><a href="usage/administration/admin_api/registration_tokens.html">Registration Tokens</a></li><li class="chapter-item expanded "><a href="admin_api/room_membership.html">Manipulate Room Membership</a></li><li class="chapter-item expanded "><a href="admin_api/rooms.html">Rooms</a></li><li class="chapter-item expanded "><a href="admin_api/scheduled_tasks.html">Scheduled tasks</a></li><li class="chapter-item expanded "><a href="admin_api/server_notices.html">Server Notices</a></li><li class="chapter-item expanded "><a href="admin_api/statistics.html">Statistics</a></li><li class="chapter-item expanded "><a href="admin_api/user_admin_api.html">Users</a></li><li class="chapter-item expanded "><a href="admin_api/version_api.html">Server Version</a></li><li class="chapter-item expanded "><a href="usage/administration/admin_api/federation.html">Federation</a></li><li class="chapter-item expanded "><a href="admin_api/client_server_api_extensions.html">Client-Server API Extensions</a></li></ol></li><li class="chapter-item expanded "><a href="manhole.html">Manhole</a></li><li class="chapter-item expanded "><a href="metrics-howto.html">Monitoring</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="usage/administration/monitoring/reporting_homeserver_usage_statistics.html">Reporting Homeserver Usage Statistics</a></li></ol></li><li class="chapter-item expanded "><a href="usage/administration/monthly_active_users.html">Monthly Active Users</a></li><li class="chapter-item expanded "><a href="usage/administration/understanding_synapse_through_grafana_graphs.html">Understanding Synapse Through Grafana Graphs</a></li><li class="chapter-item expanded "><a href="usage/administration/useful_sql_for_admins.html">Useful SQL for Admins</a></li><li class="chapter-item expanded "><a href="usage/administration/database_maintenance_tools.html">Database Maintenance Tools</a></li><li class="chapter-item expanded "><a href="usage/administration/state_groups.html">State Groups</a></li><li class="chapter-item expanded "><a href="usage/administration/request_log.html">Request log format</a></li><li class="chapter-item expanded "><a href="usage/administration/admin_faq.html">Admin FAQ</a></li><li class="chapter-item expanded "><div>Scripts</div></li></ol></li><li class="chapter-item expanded "><li class="part-title">Development</li><li class="chapter-item expanded "><a href="development/contributing_guide.html">Contributing Guide</a></li><li class="chapter-item expanded "><a href="code_style.html">Code Style</a></li><li class="chapter-item expanded "><a href="development/reviews.html">Reviewing Code</a></li><li class="chapter-item expanded "><a href="development/releases.html">Release Cycle</a></li><li class="chapter-item expanded "><a href="development/git.html">Git Usage</a></li><li class="chapter-item expanded "><div>Testing</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="development/demo.html">Demo scripts</a></li></ol></li><li class="chapter-item expanded "><a href="opentracing.html">OpenTracing</a></li><li class="chapter-item expanded "><a href="development/database_schema.html">Database Schemas</a></li><li class="chapter-item expanded "><a href="development/experimental_features.html">Experimental features</a></li><li class="chapter-item expanded "><a href="development/dependencies.html">Dependency management</a></li><li class="chapter-item expanded "><div>Synapse Architecture</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="development/synapse_architecture/cancellation.html">Cancellation</a></li><li class="chapter-item expanded "><a href="log_contexts.html" class="active">Log Contexts</a></li><li class="chapter-item expanded "><a href="replication.html">Replication</a></li><li class="chapter-item expanded "><a href="development/synapse_architecture/streams.html">Streams</a></li><li class="chapter-item expanded "><a href="tcp_replication.html">TCP Replication</a></li><li class="chapter-item expanded "><a href="development/synapse_architecture/faster_joins.html">Faster remote joins</a></li></ol></li><li class="chapter-item expanded "><a href="development/internal_documentation/index.html">Internal Documentation</a></li><li><ol class="section"><li class="chapter-item expanded "><div>Single Sign-On</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="development/saml.html">SAML</a></li><li class="chapter-item expanded "><a href="development/cas.html">CAS</a></li></ol></li><li class="chapter-item expanded "><a href="development/room-dag-concepts.html">Room DAG concepts</a></li><li class="chapter-item expanded "><div>State Resolution</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="auth_chain_difference_algorithm.html">The Auth Chain Difference Algorithm</a></li></ol></li><li class="chapter-item expanded "><a href="media_repository.html">Media Repository</a></li><li class="chapter-item expanded "><a href="room_and_user_statistics.html">Room and User Statistics</a></li><li class="chapter-item expanded "><div>Releasing</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="development/internal_documentation/release_notes_review_checklist.html">Release Notes Review Checklist</a></li></ol></li></ol></li><li class="chapter-item expanded "><div>Scripts</div></li><li class="chapter-item expanded affix "><li class="part-title">Other</li><li class="chapter-item expanded "><a href="deprecation_policy.html">Dependency Deprecation Policy</a></li><li class="chapter-item expanded "><a href="other/running_synapse_on_single_board_computers.html">Running Synapse on a Single-Board Computer</a></li></ol>
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
             </div>
-            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
-        <div id="page-wrapper" class="page-wrapper">
+        <div id="mdbook-page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
-                <div id="menu-bar" class="menu-bar sticky bordered">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
-                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
-                            <i class="fa fa-bars"></i>
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
                         </button>
-                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
-                            <i class="fa fa-paint-brush"></i>
-                        </button>
-                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
-                            <li role="none"><button role="menuitem" class="theme" id="light">Light (default)</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
-                            <i class="fa fa-search"></i>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
                         </button>
-                        <div class="version-picker">
-                            <div class="dropdown">
-                                <div class="select">
-                                    <span></span>
-                                    <i class="fa fa-chevron-down"></i>
-                                </div>
-                                <input type="hidden" name="version">
-                                <ul class="dropdown-menu">
-                                    <!-- Versions will be added dynamically in version-picker.js -->
-                                </ul>
+                    </div>
+
+                    <!-- BEGIN CUSTOM SYNAPSE MODIFICATIONS -->
+                    <div class="version-picker">
+                        <div class="dropdown">
+                            <div class="select">
+                                <span></span>
+                                <i class="fa fa-chevron-down"></i>
                             </div>
+                            <input type="hidden" name="version">
+                            <ul class="dropdown-menu">
+                                <!-- Versions will be added dynamically in version-picker.js -->
+                            </ul>
                         </div>
                     </div>
+                    <!-- END CUSTOM SYNAPSE MODIFICATIONS -->
 
                     <h1 class="menu-title">Synapse</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
-                            <i id="print-button" class="fa fa-print"></i>
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
                         <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
-                            <i id="git-repository-button" class="fa fa-github"></i>
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
                         </a>
-                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/log_contexts.md" title="Suggest an edit" aria-label="Suggest an edit">
-                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/log_contexts.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <span class=fa-svg id="git-edit-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M421.7 220.3l-11.3 11.3-22.6 22.6-205 205c-6.6 6.6-14.8 11.5-23.8 14.1L30.8 511c-8.4 2.5-17.5 .2-23.7-6.1S-1.5 489.7 1 481.2L38.7 353.1c2.6-9 7.5-17.2 14.1-23.8l205-205 22.6-22.6 11.3-11.3 33.9 33.9 62.1 62.1 33.9 33.9zM96 353.9l-9.3 9.3c-.9 .9-1.6 2.1-2 3.4l-25.3 86 86-25.3c1.3-.4 2.5-1.1 3.4-2l9.3-9.3H112c-8.8 0-16-7.2-16-16V353.9zM453.3 19.3l39.4 39.4c25 25 25 65.5 0 90.5l-14.5 14.5-22.6 22.6-11.3 11.3-33.9-33.9-62.1-62.1L314.3 67.7l11.3-11.3 22.6-22.6 14.5-14.5c25-25 65.5-25 90.5 0z"/></svg></span>
                         </a>
+
                     </div>
                 </div>
 
-                <div id="search-wrapper" class="hidden">
-                    <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
                     </form>
-                    <div id="searchresults-outer" class="searchresults-outer hidden">
-                        <div id="searchresults-header" class="searchresults-header"></div>
-                        <ul id="searchresults">
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
                         </ul>
                     </div>
                 </div>
+
                 <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
-                <script type="text/javascript">
-                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
-                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
-                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
                         link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
                     });
                 </script>
 
-                <div id="content" class="content">
+                <div id="mdbook-content" class="content">
                     <main>
-                        <!-- Page table of contents -->
-                        <div class="sidetoc">
-                            <nav class="pagetoc"></nav>
-                        </div>
-
                         <h1 id="log-contexts"><a class="header" href="#log-contexts">Log Contexts</a></h1>
 <p>To help track the processing of individual requests, synapse uses a
-'<code>log context</code>' to track which request it is handling at any given
+‘<code>log context</code>’ to track which request it is handling at any given
 moment. This is done via a thread-local variable; a <code>logging.Filter</code> is
 then used to fish the information back out of the thread-local variable
 and add it to each log record.</p>
@@ -173,8 +211,8 @@ the current log context (as well as providing the <code>LoggingContextFilter</co
 class).</p>
 <p>Asynchronous functions make the whole thing complicated, so this document describes
 how it all works, and how to write code which follows the rules.</p>
-<p>In this document, &quot;awaitable&quot; refers to any object which can be <code>await</code>ed. In the context of
-Synapse, that normally means either a coroutine or a Twisted 
+<p>In this document, “awaitable” refers to any object which can be <code>await</code>ed. In the context of
+Synapse, that normally means either a coroutine or a Twisted
 <a href="https://twistedmatrix.com/documents/current/api/twisted.internet.defer.Deferred.html"><code>Deferred</code></a>.</p>
 <h2 id="logcontexts-without-asynchronous-code"><a class="header" href="#logcontexts-without-asynchronous-code">Logcontexts without asynchronous code</a></h2>
 <p>In the absence of any asynchronous voodoo, things are simple enough. As with
@@ -189,12 +227,12 @@ def handle_request(request_id):
     try:
         request_context.request = request_id
         do_request_handling()
-        logger.debug(&quot;finished&quot;)
+        logger.debug("finished")
     finally:
         context.set_current_context(calling_context)
 
 def do_request_handling():
-    logger.debug(&quot;phew&quot;)  # this will be logged against request_id
+    logger.debug("phew")  # this will be logged against request_id
 </code></pre>
 <p>LoggingContext implements the context management methods, so the above
 can be written much more succinctly as:</p>
@@ -202,22 +240,22 @@ can be written much more succinctly as:</p>
     with context.LoggingContext() as request_context:
         request_context.request = request_id
         do_request_handling()
-        logger.debug(&quot;finished&quot;)
+        logger.debug("finished")
 
 def do_request_handling():
-    logger.debug(&quot;phew&quot;)
+    logger.debug("phew")
 </code></pre>
 <h3 id="the-sentinel-context"><a class="header" href="#the-sentinel-context">The <code>sentinel</code> context</a></h3>
 <p>The default logcontext is <code>synapse.logging.context.SENTINEL_CONTEXT</code>, which is an empty
 sentinel value to represent the root logcontext. This is what is used when there is no
-other logcontext set. The phrase &quot;clear/reset the logcontext&quot; means to set the current
+other logcontext set. The phrase “clear/reset the logcontext” means to set the current
 logcontext to the <code>sentinel</code> logcontext.</p>
 <p>No CPU/database usage metrics are recorded against the <code>sentinel</code> logcontext.</p>
 <p>Ideally, nothing from the Synapse homeserver would be logged against the <code>sentinel</code>
 logcontext as we want to know which server the logs came from. In practice, this is not
 always the case yet especially outside of request handling.</p>
 <p>Global things outside of Synapse (e.g. Twisted reactor code) should run in the
-<code>sentinel</code> logcontext. It's only when it calls into application code that a logcontext
+<code>sentinel</code> logcontext. It’s only when it calls into application code that a logcontext
 gets activated. This means the reactor should be started in the <code>sentinel</code> logcontext,
 and any time an awaitable yields control back to the reactor, it should reset the
 logcontext to be the <code>sentinel</code> logcontext. This is important to avoid leaking the
@@ -232,7 +270,7 @@ blocking operation, and returns an awaitable:</p>
     with context.LoggingContext() as request_context:
         request_context.request = request_id
         await do_request_handling()
-        logger.debug(&quot;finished&quot;)
+        logger.debug("finished")
 </code></pre>
 <p>In the above flow:</p>
 <ul>
@@ -257,12 +295,12 @@ logcontext before running any callbacks.</li>
 </ul>
 </blockquote>
 <p>That sounds complicated, but actually it means a lot of code (including
-the example above) &quot;just works&quot;. There are two cases:</p>
+the example above) “just works”. There are two cases:</p>
 <ul>
 <li>
 <p>If <code>do_request_handling</code> returns a completed awaitable, then the
 logcontext will still be in place. In this case, execution will
-continue immediately after the <code>await</code>; the &quot;finished&quot; line will
+continue immediately after the <code>await</code>; the “finished” line will
 be logged against the right context, and the <code>with</code> block restores
 the original context before we return to the caller.</p>
 </li>
@@ -270,13 +308,13 @@ the original context before we return to the caller.</p>
 <p>If the returned awaitable is incomplete, <code>do_request_handling</code> clears
 the logcontext before returning. The logcontext is therefore clear
 when <code>handle_request</code> <code>await</code>s the awaitable.</p>
-<p>Once <code>do_request_handling</code>'s awaitable completes, it will reinstate
+<p>Once <code>do_request_handling</code>’s awaitable completes, it will reinstate
 the logcontext, before running the second half of <code>handle_request</code>,
-so again the &quot;finished&quot; line will be logged against the right context,
+so again the “finished” line will be logged against the right context,
 and the <code>with</code> block restores the original context.</p>
 </li>
 </ul>
-<p>As an aside, it's worth noting that <code>handle_request</code> follows our rules</p>
+<p>As an aside, it’s worth noting that <code>handle_request</code> follows our rules</p>
 <ul>
 <li>though that only matters if the caller has its own logcontext which it
 cares about.</li>
@@ -288,7 +326,7 @@ implementing these rules.</p>
 it as soon as possible. Do not pass go; do not do any logging; do not
 call any other functions.</p>
 <pre><code class="language-python">async def fun():
-    logger.debug(&quot;starting&quot;)
+    logger.debug("starting")
     await do_some_stuff()       # just like this
 
     coro = more_stuff()
@@ -300,7 +338,7 @@ call any other functions.</p>
 to where the logcontext was set, this will make things work out ok:
 provided <code>do_some_stuff</code> and <code>more_stuff</code> follow the rules above, then
 so will <code>fun</code>.</p>
-<p>It's all too easy to forget to <code>await</code>: for instance if we forgot that
+<p>It’s all too easy to forget to <code>await</code>: for instance if we forgot that
 <code>do_some_stuff</code> returned an awaitable, we might plough on regardless. This
 leads to a mess; it will probably work itself out eventually, but not
 before a load of stuff has been logged against the wrong context.
@@ -322,7 +360,7 @@ def get_sleep_deferred(seconds):
     reactor.callLater(seconds, d.callback, None)
     return d
 </code></pre>
-<p>That doesn't follow the rules, but we can fix it by calling it through
+<p>That doesn’t follow the rules, but we can fix it by calling it through
 <code>context.make_deferred_yieldable</code>:</p>
 <pre><code class="language-python">async def sleep(seconds):
     return await context.make_deferred_yieldable(get_sleep_deferred(seconds))
@@ -341,89 +379,89 @@ sentinel before returning. This means our calling function will continue with th
 sentinel logcontext instead of the logcontext it was started with (bad).</p>
 <p><strong>Issue 2:</strong> The second issue is that the current logcontext that called the deferred
 callback could finish before the callback finishes (bad).</p>
-<p>In the following example, the deferred callback is called with the &quot;main&quot; logcontext and
+<p>In the following example, the deferred callback is called with the “main” logcontext and
 runs until we yield control back to the reactor in the <code>await</code> inside <code>clock.sleep(0)</code>.
 Since <code>clock.sleep(0)</code> follows our logcontext rules, it sets the logcontext to the
 sentinel before yielding control back to the reactor. Our <code>main</code> function continues with
-the sentinel logcontext (first bad thing) instead of the &quot;main&quot; logcontext. Then the
-<code>with LoggingContext(&quot;main&quot;)</code> block exits, finishing the &quot;main&quot; logcontext and yielding
+the sentinel logcontext (first bad thing) instead of the “main” logcontext. Then the
+<code>with LoggingContext("main")</code> block exits, finishing the “main” logcontext and yielding
 control back to the reactor again. Finally, later on when <code>clock.sleep(0)</code> completes,
-our <code>with LoggingContext(&quot;competing&quot;)</code> block exits, and restores the previous &quot;main&quot;
+our <code>with LoggingContext("competing")</code> block exits, and restores the previous “main”
 logcontext which has already finished, resulting in <code>WARNING: Re-starting finished log context main</code> and leaking the <code>main</code> logcontext into the reactor which will then
 erronously be associated with the next task the reactor picks up.</p>
 <pre><code class="language-python">async def competing_callback():
-    # Since this is run with the &quot;main&quot; logcontext, when the &quot;competing&quot;
-    # logcontext exits, it will restore the previous &quot;main&quot; logcontext which has
-    # already finished and results in &quot;WARNING: Re-starting finished log context main&quot;
+    # Since this is run with the "main" logcontext, when the "competing"
+    # logcontext exits, it will restore the previous "main" logcontext which has
+    # already finished and results in "WARNING: Re-starting finished log context main"
     # and leaking the `main` logcontext into the reactor.
-    with LoggingContext(&quot;competing&quot;):
+    with LoggingContext("competing"):
         await clock.sleep(0)
 
 def main():
-    with LoggingContext(&quot;main&quot;):
+    with LoggingContext("main"):
         d = defer.Deferred()
         d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
-        # Call the callback within the &quot;main&quot; logcontext.
+        # Call the callback within the "main" logcontext.
         d.callback(None)
         # Bad: This will be logged against sentinel logcontext
-        logger.debug(&quot;ugh&quot;)
+        logger.debug("ugh")
 
 main()
 </code></pre>
-<p><strong>Solution 1:</strong> We could of course fix this by following the general rule of &quot;always
-await your awaitables&quot;:</p>
+<p><strong>Solution 1:</strong> We could of course fix this by following the general rule of “always
+await your awaitables”:</p>
 <pre><code class="language-python">async def main():
-    with LoggingContext(&quot;main&quot;):
+    with LoggingContext("main"):
         d = defer.Deferred()
         d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
         d.callback(None)
-        # Wait for `d` to finish before continuing so the &quot;main&quot; logcontext is
+        # Wait for `d` to finish before continuing so the "main" logcontext is
         # still active. This works because `d` already follows our logcontext
         # rules. If not, we would also have to use `make_deferred_yieldable(d)`.
         await d
-        # Good: This will be logged against the &quot;main&quot; logcontext
-        logger.debug(&quot;phew&quot;)
+        # Good: This will be logged against the "main" logcontext
+        logger.debug("phew")
 </code></pre>
 <p><strong>Solution 2:</strong> We could also fix this by surrounding the call to <code>d.callback</code> with a
 <code>PreserveLoggingContext</code>, which will reset the logcontext to the sentinel before calling
-the callback, and restore the &quot;main&quot; logcontext afterwards before continuing the <code>main</code>
-function. This solves the problem because when the &quot;competing&quot; logcontext exits, it will
+the callback, and restore the “main” logcontext afterwards before continuing the <code>main</code>
+function. This solves the problem because when the “competing” logcontext exits, it will
 restore the sentinel logcontext which is never finished by its nature, so there is no
 warning and no leakage into the reactor.</p>
 <pre><code class="language-python">async def main():
-    with LoggingContext(&quot;main&quot;):
+    with LoggingContext("main"):
         d = defer.Deferred()
         d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
         d.callback(None)
         with PreserveLoggingContext():
             # Call the callback with the sentinel logcontext.
             d.callback(None)
-        # Good: This will be logged against the &quot;main&quot; logcontext
-        logger.debug(&quot;phew&quot;)
+        # Good: This will be logged against the "main" logcontext
+        logger.debug("phew")
 </code></pre>
-<p><strong>Solution 3:</strong> But let's say you <em>do</em> want to run (fire-and-forget) the deferred
+<p><strong>Solution 3:</strong> But let’s say you <em>do</em> want to run (fire-and-forget) the deferred
 callback in the current context without running into issues:</p>
 <p>We can solve the first issue by using <code>run_in_background(...)</code> to run the callback in
 the current logcontext and it handles the magic behind the scenes of a) restoring the
 calling logcontext before returning to the caller and b) resetting the logcontext to the
 sentinel after the deferred completes and we yield control back to the reactor to avoid
 leaking the logcontext into the reactor.</p>
-<p>To solve the second issue, we can extend the lifetime of the &quot;main&quot; logcontext by
-avoiding the <code>LoggingContext</code>'s context manager lifetime methods
-(<code>__enter__</code>/<code>__exit__</code>). We can still set &quot;main&quot; as the current logcontext by using
-<code>PreserveLoggingContext</code> and passing in the &quot;main&quot; logcontext.</p>
+<p>To solve the second issue, we can extend the lifetime of the “main” logcontext by
+avoiding the <code>LoggingContext</code>’s context manager lifetime methods
+(<code>__enter__</code>/<code>__exit__</code>). We can still set “main” as the current logcontext by using
+<code>PreserveLoggingContext</code> and passing in the “main” logcontext.</p>
 <pre><code class="language-python">async def main():
-    main_context = LoggingContext(&quot;main&quot;)
+    main_context = LoggingContext("main")
     with PreserveLoggingContext(main_context):
         d = defer.Deferred()
         d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
-        # The whole lambda will be run in the &quot;main&quot; logcontext. But we're using
+        # The whole lambda will be run in the "main" logcontext. But we're using
         # a trick to return the deferred `d` itself so that `run_in_background`
         # will wait on that to complete and reset the logcontext to the sentinel
-        # when it does to avoid leaking the &quot;main&quot; logcontext into the reactor.
+        # when it does to avoid leaking the "main" logcontext into the reactor.
         run_in_background(lambda: (d.callback(None), d)[1])
-        # Good: This will be logged against the &quot;main&quot; logcontext
-        logger.debug(&quot;phew&quot;)
+        # Good: This will be logged against the "main" logcontext
+        logger.debug("phew")
 
 ...
 
@@ -431,14 +469,14 @@ avoiding the <code>LoggingContext</code>'s context manager lifetime methods
 # point. This allows us to catch bugs if we later try to erroneously restart a finished
 # logcontext.
 #
-# Since the &quot;main&quot; logcontext stores the `LoggingContext.previous_context` when it is
+# Since the "main" logcontext stores the `LoggingContext.previous_context` when it is
 # created, we can wrap this call in `PreserveLoggingContext()` to restore the correct
 # previous logcontext. Our goal is to have the calling context remain unchanged after
-# finishing the &quot;main&quot; logcontext.
+# finishing the "main" logcontext.
 with PreserveLoggingContext():
-    # Finish the &quot;main&quot; logcontext
+    # Finish the "main" logcontext
     with main_context:
-        # Empty block - We're just trying to call `__exit__` on the &quot;main&quot; context
+        # Empty block - We're just trying to call `__exit__` on the "main" context
         # manager to finish it. We can't call `__exit__` directly as the code expects us
         # to `__enter__` before calling `__exit__` to `start`/`stop` things
         # appropriately. And in any case, it's probably best not to call the internal
@@ -469,13 +507,13 @@ its result. That might look a bit like this:</p>
     # *don't* do this
     background_operation()
 
-    logger.debug(&quot;Request handling complete&quot;)
+    logger.debug("Request handling complete")
 
 async def background_operation():
     await first_background_step()
-    logger.debug(&quot;Completed first step&quot;)
+    logger.debug("Completed first step")
     await second_background_step()
-    logger.debug(&quot;Completed second step&quot;)
+    logger.debug("Completed second step")
 </code></pre>
 <p>The above code does a couple of steps in the background after
 <code>do_request_handling</code> has finished. The log lines are still logged
@@ -483,8 +521,8 @@ against the <code>request_context</code> logcontext, which may or may not be
 desirable. There are two big problems with the above, however. The first
 problem is that, if <code>background_operation</code> returns an incomplete
 awaitable, it will expect its caller to <code>await</code> immediately, so will have
-cleared the logcontext. In this example, that means that 'Request
-handling complete' will be logged without any context.</p>
+cleared the logcontext. In this example, that means that ‘Request
+handling complete’ will be logged without any context.</p>
 <p>The second problem, which is potentially even worse, is that when the
 awaitable returned by <code>background_operation</code> completes, it will restore
 the original logcontext. There is nothing waiting on that awaitable, so
@@ -505,18 +543,18 @@ current logcontext before continuing the foreground process:</p>
         background_operation()
 
     # this will now be logged against the request context
-    logger.debug(&quot;Request handling complete&quot;)
+    logger.debug("Request handling complete")
 </code></pre>
 <p>Obviously that option means that the operations done in
 <code>background_operation</code> would be not be logged against a logcontext
 (though that might be fixed by setting a different logcontext via a
 <code>with LoggingContext(...)</code> in <code>background_operation</code>).</p>
 <p>The second option is to use <code>context.run_in_background</code>, which wraps a
-function so that it doesn't reset the logcontext even when it returns
+function so that it doesn’t reset the logcontext even when it returns
 an incomplete awaitable, and adds a callback to the returned awaitable to
 reset the logcontext. In other words, it turns a function that follows
 the Synapse rules about logcontexts and awaitables into one which behaves
-more like an external function --- the opposite operation to that
+more like an external function — the opposite operation to that
 described in the previous section. It can be used like this:</p>
 <pre><code class="language-python">async def do_request_handling():
     await foreground_operation()
@@ -524,7 +562,7 @@ described in the previous section. It can be used like this:</p>
     context.run_in_background(background_operation)
 
     # this will now be logged against the request context
-    logger.debug(&quot;Request handling complete&quot;)
+    logger.debug("Request handling complete")
 </code></pre>
 <h2 id="passing-synapse-deferreds-into-third-party-functions"><a class="header" href="#passing-synapse-deferreds-into-third-party-functions">Passing synapse deferreds into third-party functions</a></h2>
 <p>A typical example of this is where we want to collect together two or
@@ -569,7 +607,7 @@ chains which get orphaned and garbage-collected.</p>
 
 def on_something_interesting():
     for d in listener_queue:
-        d.callback(&quot;foo&quot;)
+        d.callback("foo")
 
 async def await_something_interesting():
     new_awaitable = defer.Deferred()
@@ -579,34 +617,34 @@ async def await_something_interesting():
         await new_awaitable
 </code></pre>
 <p>Obviously, the idea here is that we have a bunch of things which are
-waiting for an event. (It's just an example of the problem here, but a
+waiting for an event. (It’s just an example of the problem here, but a
 relatively common one.)</p>
-<p>Now let's imagine two further things happen. First of all, whatever was
+<p>Now let’s imagine two further things happen. First of all, whatever was
 waiting for the interesting thing goes away. (Perhaps the request times
 out, or something <em>even more</em> interesting happens.)</p>
-<p>Secondly, let's suppose that we decide that the interesting thing is
+<p>Secondly, let’s suppose that we decide that the interesting thing is
 never going to happen, and we reset the listener queue:</p>
 <pre><code class="language-python">def reset_listener_queue():
     listener_queue.clear()
 </code></pre>
 <p>So, both ends of the awaitable chain have now dropped their references,
 and the awaitable chain is now orphaned, and will be garbage-collected at
-some point. Note that <code>await_something_interesting</code> is a coroutine, 
+some point. Note that <code>await_something_interesting</code> is a coroutine,
 which Python implements as a generator function.  When Python
-garbage-collects generator functions, it gives them a chance to 
+garbage-collects generator functions, it gives them a chance to
 clean up by making the <code>await</code> (or <code>yield</code>) raise a <code>GeneratorExit</code>
 exception. In our case, that means that the <code>__exit__</code> handler of
 <code>PreserveLoggingContext</code> will carefully restore the request context, but
 there is now nothing waiting for its return, so the request context is
 never cleared.</p>
 <p>To reiterate, this problem only arises when <em>both</em> ends of a awaitable
-chain are dropped. Dropping the the reference to an awaitable you're
-supposed to be awaiting is bad practice, so this doesn't
+chain are dropped. Dropping the the reference to an awaitable you’re
+supposed to be awaiting is bad practice, so this doesn’t
 actually happen too much. Unfortunately, when it does happen, it will
 lead to leaked logcontexts which are incredibly hard to track down.</p>
 <h2 id="debugging-logcontext-issues"><a class="header" href="#debugging-logcontext-issues">Debugging logcontext issues</a></h2>
 <p>Debugging logcontext issues can be tricky as leaking or losing a logcontext will surface
-downstream and can point to an unrelated part of the codebase. It's best to enable debug
+downstream and can point to an unrelated part of the codebase. It’s best to enable debug
 logging for <code>synapse.logging.context.debug</code> (needs to be explicitly configured) and go
 backwards in the logs from the point where the issue is observed to find the root cause.</p>
 <p><code>log.config.yaml</code></p>
@@ -621,11 +659,13 @@ backwards in the logs from the point where the issue is observed to find the roo
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
                             <a rel="prev" href="development/synapse_architecture/cancellation.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                                <i class="fa fa-angle-left"></i>
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
-                            <a rel="next" href="replication.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-                                <i class="fa fa-angle-right"></i>
+
+                            <a rel="next prefetch" href="replication.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
+
                         <div style="clear: both"></div>
                     </nav>
                 </div>
@@ -633,28 +673,43 @@ backwards in the logs from the point where the issue is observed to find the roo
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
                     <a rel="prev" href="development/synapse_architecture/cancellation.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                        <i class="fa fa-angle-left"></i>
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
-                    <a rel="next" href="replication.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-                        <i class="fa fa-angle-right"></i>
+
+                    <a rel="next prefetch" href="replication.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
 
         </div>
 
-        <script type="text/javascript">
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
             window.playground_copyable = true;
         </script>
-        <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
-        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
-        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-c2a407aa.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
-        <script type="text/javascript" src="docs/website_files/table-of-contents.js"></script>
-        <script type="text/javascript" src="docs/website_files/version-picker.js"></script>
-        <script type="text/javascript" src="docs/website_files/version.js"></script>
+        <script src="docs/website_files/version-picker-a1e40922.js"></script>
+        <script src="docs/website_files/version-d2c738f4.js"></script>
+
+
+
+    </div>
     </body>
 </html>

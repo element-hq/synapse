@@ -1,50 +1,70 @@
 <!DOCTYPE HTML>
-<html lang="en" class="sidebar-visible no-js light">
+<html lang="en" class="light sidebar-visible" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
         <title>Upgrading between Synapse Versions - Synapse</title>
+
+
         <!-- Custom HTML head -->
-        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon.svg">
-        <link rel="shortcut icon" href="favicon.png">
-        <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-        <link rel="stylesheet" href="css/print.css" media="print">
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-2459343d.css">
+        <link rel="stylesheet" href="css/chrome-ae938929.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="docs/website_files/table-of-contents.css">
-        <link rel="stylesheet" href="docs/website_files/remove-nav-buttons.css">
-        <link rel="stylesheet" href="docs/website_files/indent-section-headers.css">
-        <link rel="stylesheet" href="docs/website_files/version-picker.css">
+        <link rel="stylesheet" href="docs/website_files/indent-section-headers-3390f960.css">
+        <link rel="stylesheet" href="docs/website_files/version-picker-ddc5216e.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-ad6b5e04.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-4dc10a98.js"></script>
     </head>
     <body>
-        <!-- Provide site root to javascript -->
-        <script type="text/javascript">
-            var path_to_root = "";
-            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
-        </script>
-
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
-        <script type="text/javascript">
+        <script>
             try {
-                var theme = localStorage.getItem('mdbook-theme');
-                var sidebar = localStorage.getItem('mdbook-sidebar');
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
                 if (theme.startsWith('"') && theme.endsWith('"')) {
                     localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
                 }
+
                 if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
                     localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
                 }
@@ -52,113 +72,131 @@
         </script>
 
         <!-- Set the theme before any content is loaded, prevents flash -->
-        <script type="text/javascript">
-            var theme;
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
-            var html = document.querySelector('html');
-            html.classList.remove('no-js')
+            const html = document.documentElement;
             html.classList.remove('light')
             html.classList.add(theme);
-            html.classList.add('js');
+            html.classList.add("js");
         </script>
 
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
         <!-- Hide / unhide sidebar before it is displayed -->
-        <script type="text/javascript">
-            var html = document.querySelector('html');
-            var sidebar = 'hidden';
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
-        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
-            <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><li class="part-title">Introduction</li><li class="chapter-item expanded "><a href="welcome_and_overview.html">Welcome and Overview</a></li><li class="chapter-item expanded affix "><li class="part-title">Setup</li><li class="chapter-item expanded "><a href="setup/installation.html">Installation</a></li><li class="chapter-item expanded "><a href="setup/security.html">Security</a></li><li class="chapter-item expanded "><a href="postgres.html">Using Postgres</a></li><li class="chapter-item expanded "><a href="reverse_proxy.html">Configuring a Reverse Proxy</a></li><li class="chapter-item expanded "><a href="setup/forward_proxy.html">Configuring a Forward/Outbound Proxy</a></li><li class="chapter-item expanded "><a href="turn-howto.html">Configuring a Turn Server</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="setup/turn/coturn.html">coturn TURN server</a></li><li class="chapter-item expanded "><a href="setup/turn/eturnal.html">eturnal TURN server</a></li></ol></li><li class="chapter-item expanded "><a href="delegate.html">Delegation</a></li><li class="chapter-item expanded affix "><li class="part-title">Upgrading</li><li class="chapter-item expanded "><a href="upgrade.html" class="active">Upgrading between Synapse Versions</a></li><li class="chapter-item expanded affix "><li class="part-title">Usage</li><li class="chapter-item expanded "><a href="federate.html">Federation</a></li><li class="chapter-item expanded "><a href="usage/configuration/index.html">Configuration</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="usage/configuration/config_documentation.html">Configuration Manual</a></li><li class="chapter-item expanded "><a href="usage/configuration/homeserver_sample_config.html">Homeserver Sample Config File</a></li><li class="chapter-item expanded "><a href="usage/configuration/logging_sample_config.html">Logging Sample Config File</a></li><li class="chapter-item expanded "><a href="structured_logging.html">Structured Logging</a></li><li class="chapter-item expanded "><a href="templates.html">Templates</a></li><li class="chapter-item expanded "><a href="usage/configuration/user_authentication/index.html">User Authentication</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="usage/configuration/user_authentication/single_sign_on/index.html">Single-Sign On</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="openid.html">OpenID Connect</a></li><li class="chapter-item expanded "><a href="usage/configuration/user_authentication/single_sign_on/saml.html">SAML</a></li><li class="chapter-item expanded "><a href="usage/configuration/user_authentication/single_sign_on/cas.html">CAS</a></li><li class="chapter-item expanded "><a href="sso_mapping_providers.html">SSO Mapping Providers</a></li></ol></li><li class="chapter-item expanded "><a href="password_auth_providers.html">Password Auth Providers</a></li><li class="chapter-item expanded "><a href="jwt.html">JSON Web Tokens</a></li><li class="chapter-item expanded "><a href="usage/configuration/user_authentication/refresh_tokens.html">Refresh Tokens</a></li></ol></li><li class="chapter-item expanded "><a href="CAPTCHA_SETUP.html">Registration Captcha</a></li><li class="chapter-item expanded "><a href="application_services.html">Application Services</a></li><li class="chapter-item expanded "><a href="server_notices.html">Server Notices</a></li><li class="chapter-item expanded "><a href="consent_tracking.html">Consent Tracking</a></li><li class="chapter-item expanded "><a href="user_directory.html">User Directory</a></li><li class="chapter-item expanded "><a href="message_retention_policies.html">Message Retention Policies</a></li><li class="chapter-item expanded "><a href="modules/index.html">Pluggable Modules</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="modules/writing_a_module.html">Writing a module</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="modules/spam_checker_callbacks.html">Spam checker callbacks</a></li><li class="chapter-item expanded "><a href="modules/third_party_rules_callbacks.html">Third-party rules callbacks</a></li><li class="chapter-item expanded "><a href="modules/presence_router_callbacks.html">Presence router callbacks</a></li><li class="chapter-item expanded "><a href="modules/account_validity_callbacks.html">Account validity callbacks</a></li><li class="chapter-item expanded "><a href="modules/password_auth_provider_callbacks.html">Password auth provider callbacks</a></li><li class="chapter-item expanded "><a href="modules/background_update_controller_callbacks.html">Background update controller callbacks</a></li><li class="chapter-item expanded "><a href="modules/account_data_callbacks.html">Account data callbacks</a></li><li class="chapter-item expanded "><a href="modules/add_extra_fields_to_client_events_unsigned.html">Add extra fields to client events unsigned section callbacks</a></li><li class="chapter-item expanded "><a href="modules/media_repository_callbacks.html">Media repository callbacks</a></li><li class="chapter-item expanded "><a href="modules/ratelimit_callbacks.html">Ratelimit callbacks</a></li><li class="chapter-item expanded "><a href="modules/porting_legacy_module.html">Porting a legacy module to the new interface</a></li></ol></li></ol></li><li class="chapter-item expanded "><a href="workers.html">Workers</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="synctl_workers.html">Using synctl with Workers</a></li><li class="chapter-item expanded "><a href="systemd-with-workers/index.html">Systemd</a></li></ol></li></ol></li><li class="chapter-item expanded "><a href="usage/administration/index.html">Administration</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="usage/administration/backups.html">Backups</a></li><li class="chapter-item expanded "><a href="usage/administration/admin_api/index.html">Admin API</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="admin_api/account_validity.html">Account Validity</a></li><li class="chapter-item expanded "><a href="usage/administration/admin_api/background_updates.html">Background Updates</a></li><li class="chapter-item expanded "><a href="admin_api/fetch_event.html">Fetch Event</a></li><li class="chapter-item expanded "><a href="admin_api/event_reports.html">Event Reports</a></li><li class="chapter-item expanded "><a href="admin_api/experimental_features.html">Experimental Features</a></li><li class="chapter-item expanded "><a href="admin_api/media_admin_api.html">Media</a></li><li class="chapter-item expanded "><a href="admin_api/purge_history_api.html">Purge History</a></li><li class="chapter-item expanded "><a href="admin_api/register_api.html">Register Users</a></li><li class="chapter-item expanded "><a href="usage/administration/admin_api/registration_tokens.html">Registration Tokens</a></li><li class="chapter-item expanded "><a href="admin_api/room_membership.html">Manipulate Room Membership</a></li><li class="chapter-item expanded "><a href="admin_api/rooms.html">Rooms</a></li><li class="chapter-item expanded "><a href="admin_api/scheduled_tasks.html">Scheduled tasks</a></li><li class="chapter-item expanded "><a href="admin_api/server_notices.html">Server Notices</a></li><li class="chapter-item expanded "><a href="admin_api/statistics.html">Statistics</a></li><li class="chapter-item expanded "><a href="admin_api/user_admin_api.html">Users</a></li><li class="chapter-item expanded "><a href="admin_api/version_api.html">Server Version</a></li><li class="chapter-item expanded "><a href="usage/administration/admin_api/federation.html">Federation</a></li><li class="chapter-item expanded "><a href="admin_api/client_server_api_extensions.html">Client-Server API Extensions</a></li></ol></li><li class="chapter-item expanded "><a href="manhole.html">Manhole</a></li><li class="chapter-item expanded "><a href="metrics-howto.html">Monitoring</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="usage/administration/monitoring/reporting_homeserver_usage_statistics.html">Reporting Homeserver Usage Statistics</a></li></ol></li><li class="chapter-item expanded "><a href="usage/administration/monthly_active_users.html">Monthly Active Users</a></li><li class="chapter-item expanded "><a href="usage/administration/understanding_synapse_through_grafana_graphs.html">Understanding Synapse Through Grafana Graphs</a></li><li class="chapter-item expanded "><a href="usage/administration/useful_sql_for_admins.html">Useful SQL for Admins</a></li><li class="chapter-item expanded "><a href="usage/administration/database_maintenance_tools.html">Database Maintenance Tools</a></li><li class="chapter-item expanded "><a href="usage/administration/state_groups.html">State Groups</a></li><li class="chapter-item expanded "><a href="usage/administration/request_log.html">Request log format</a></li><li class="chapter-item expanded "><a href="usage/administration/admin_faq.html">Admin FAQ</a></li><li class="chapter-item expanded "><div>Scripts</div></li></ol></li><li class="chapter-item expanded "><li class="part-title">Development</li><li class="chapter-item expanded "><a href="development/contributing_guide.html">Contributing Guide</a></li><li class="chapter-item expanded "><a href="code_style.html">Code Style</a></li><li class="chapter-item expanded "><a href="development/reviews.html">Reviewing Code</a></li><li class="chapter-item expanded "><a href="development/releases.html">Release Cycle</a></li><li class="chapter-item expanded "><a href="development/git.html">Git Usage</a></li><li class="chapter-item expanded "><div>Testing</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="development/demo.html">Demo scripts</a></li></ol></li><li class="chapter-item expanded "><a href="opentracing.html">OpenTracing</a></li><li class="chapter-item expanded "><a href="development/database_schema.html">Database Schemas</a></li><li class="chapter-item expanded "><a href="development/experimental_features.html">Experimental features</a></li><li class="chapter-item expanded "><a href="development/dependencies.html">Dependency management</a></li><li class="chapter-item expanded "><div>Synapse Architecture</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="development/synapse_architecture/cancellation.html">Cancellation</a></li><li class="chapter-item expanded "><a href="log_contexts.html">Log Contexts</a></li><li class="chapter-item expanded "><a href="replication.html">Replication</a></li><li class="chapter-item expanded "><a href="development/synapse_architecture/streams.html">Streams</a></li><li class="chapter-item expanded "><a href="tcp_replication.html">TCP Replication</a></li><li class="chapter-item expanded "><a href="development/synapse_architecture/faster_joins.html">Faster remote joins</a></li></ol></li><li class="chapter-item expanded "><a href="development/internal_documentation/index.html">Internal Documentation</a></li><li><ol class="section"><li class="chapter-item expanded "><div>Single Sign-On</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="development/saml.html">SAML</a></li><li class="chapter-item expanded "><a href="development/cas.html">CAS</a></li></ol></li><li class="chapter-item expanded "><a href="development/room-dag-concepts.html">Room DAG concepts</a></li><li class="chapter-item expanded "><div>State Resolution</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="auth_chain_difference_algorithm.html">The Auth Chain Difference Algorithm</a></li></ol></li><li class="chapter-item expanded "><a href="media_repository.html">Media Repository</a></li><li class="chapter-item expanded "><a href="room_and_user_statistics.html">Room and User Statistics</a></li><li class="chapter-item expanded "><div>Releasing</div></li><li><ol class="section"><li class="chapter-item expanded "><a href="development/internal_documentation/release_notes_review_checklist.html">Release Notes Review Checklist</a></li></ol></li></ol></li><li class="chapter-item expanded "><div>Scripts</div></li><li class="chapter-item expanded affix "><li class="part-title">Other</li><li class="chapter-item expanded "><a href="deprecation_policy.html">Dependency Deprecation Policy</a></li><li class="chapter-item expanded "><a href="other/running_synapse_on_single_board_computers.html">Running Synapse on a Single-Board Computer</a></li></ol>
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
             </div>
-            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
-        <div id="page-wrapper" class="page-wrapper">
+        <div id="mdbook-page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
-                <div id="menu-bar" class="menu-bar sticky bordered">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
-                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
-                            <i class="fa fa-bars"></i>
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
                         </button>
-                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
-                            <i class="fa fa-paint-brush"></i>
-                        </button>
-                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
-                            <li role="none"><button role="menuitem" class="theme" id="light">Light (default)</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
-                            <i class="fa fa-search"></i>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
                         </button>
-                        <div class="version-picker">
-                            <div class="dropdown">
-                                <div class="select">
-                                    <span></span>
-                                    <i class="fa fa-chevron-down"></i>
-                                </div>
-                                <input type="hidden" name="version">
-                                <ul class="dropdown-menu">
-                                    <!-- Versions will be added dynamically in version-picker.js -->
-                                </ul>
+                    </div>
+
+                    <!-- BEGIN CUSTOM SYNAPSE MODIFICATIONS -->
+                    <div class="version-picker">
+                        <div class="dropdown">
+                            <div class="select">
+                                <span></span>
+                                <i class="fa fa-chevron-down"></i>
                             </div>
+                            <input type="hidden" name="version">
+                            <ul class="dropdown-menu">
+                                <!-- Versions will be added dynamically in version-picker.js -->
+                            </ul>
                         </div>
                     </div>
+                    <!-- END CUSTOM SYNAPSE MODIFICATIONS -->
 
                     <h1 class="menu-title">Synapse</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
-                            <i id="print-button" class="fa fa-print"></i>
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
                         <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
-                            <i id="git-repository-button" class="fa fa-github"></i>
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
                         </a>
-                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/upgrade.md" title="Suggest an edit" aria-label="Suggest an edit">
-                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/upgrade.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <span class=fa-svg id="git-edit-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M421.7 220.3l-11.3 11.3-22.6 22.6-205 205c-6.6 6.6-14.8 11.5-23.8 14.1L30.8 511c-8.4 2.5-17.5 .2-23.7-6.1S-1.5 489.7 1 481.2L38.7 353.1c2.6-9 7.5-17.2 14.1-23.8l205-205 22.6-22.6 11.3-11.3 33.9 33.9 62.1 62.1 33.9 33.9zM96 353.9l-9.3 9.3c-.9 .9-1.6 2.1-2 3.4l-25.3 86 86-25.3c1.3-.4 2.5-1.1 3.4-2l9.3-9.3H112c-8.8 0-16-7.2-16-16V353.9zM453.3 19.3l39.4 39.4c25 25 25 65.5 0 90.5l-14.5 14.5-22.6 22.6-11.3 11.3-33.9-33.9-62.1-62.1L314.3 67.7l11.3-11.3 22.6-22.6 14.5-14.5c25-25 65.5-25 90.5 0z"/></svg></span>
                         </a>
+
                     </div>
                 </div>
 
-                <div id="search-wrapper" class="hidden">
-                    <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
                     </form>
-                    <div id="searchresults-outer" class="searchresults-outer hidden">
-                        <div id="searchresults-header" class="searchresults-header"></div>
-                        <ul id="searchresults">
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
                         </ul>
                     </div>
                 </div>
+
                 <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
-                <script type="text/javascript">
-                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
-                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
-                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
                         link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
                     });
                 </script>
 
-                <div id="content" class="content">
+                <div id="mdbook-content" class="content">
                     <main>
-                        <!-- Page table of contents -->
-                        <div class="sidetoc">
-                            <nav class="pagetoc"></nav>
-                        </div>
-
                         <h1 id="upgrading-synapse"><a class="header" href="#upgrading-synapse">Upgrading Synapse</a></h1>
 <p>Before upgrading check if any special steps are required to upgrade from
 the version you currently have installed to the current version of
@@ -192,20 +230,20 @@ version by running:</p>
 <code>git pull</code> to do this.</p>
 </li>
 <li>
-<p>If you're running Synapse in a virtualenv, make sure to activate it before
+<p>If you’re running Synapse in a virtualenv, make sure to activate it before
 upgrading. For example, if Synapse is installed in a virtualenv in <code>~/synapse/env</code> then
 run:</p>
 <pre><code class="language-bash">source ~/synapse/env/bin/activate
 pip install --upgrade .
 </code></pre>
-<p>Include any relevant extras between square brackets, e.g. <code>pip install --upgrade &quot;.[postgres,oidc]&quot;</code>.</p>
+<p>Include any relevant extras between square brackets, e.g. <code>pip install --upgrade ".[postgres,oidc]"</code>.</p>
 </li>
 <li>
-<p>If you're using <code>poetry</code> to manage a Synapse installation, run:</p>
+<p>If you’re using <code>poetry</code> to manage a Synapse installation, run:</p>
 <pre><code class="language-bash">poetry install
 </code></pre>
 <p>Include any relevant extras with <code>--extras</code>, e.g. <code>poetry install --extras postgres --extras oidc</code>.
-It's probably easiest to run <code>poetry install --extras all</code>.</p>
+It’s probably easiest to run <code>poetry install --extras all</code>.</p>
 </li>
 <li>
 <p>Restart Synapse:</p>
@@ -250,7 +288,12 @@ The following table gives the version ranges and the earliest version they can
 be rolled back to. E.g. Synapse versions v1.58.0 through v1.61.1 can be rolled
 back safely to v1.57.0, but starting with v1.62.0 it is only safe to roll back to
 v1.61.0.</p>
-<table><thead><tr><th>Versions</th><th>Compatible version</th></tr></thead><tbody>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Versions</th><th>Compatible version</th></tr>
+</thead>
+<tbody>
 <tr><td>v1.0.0 – v1.2.1</td><td>v1.0.0</td></tr>
 <tr><td>v1.3.0 – v1.8.0</td><td>v1.3.0</td></tr>
 <tr><td>v1.9.0 – v1.12.4</td><td>v1.9.0</td></tr>
@@ -268,7 +311,9 @@ v1.61.0.</p>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
 <tr><td>v1.105.1 – v1.144.0</td><td>v1.100.0</td></tr>
-</tbody></table>
+</tbody>
+</table>
+</div>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
 version and the latest so that you can update your dependencies, environment,
@@ -304,7 +349,7 @@ disabled by default.  If you rely on this unstable endpoint, you must now set
 using it.</p>
 <h1 id="upgrading-to-v11430"><a class="header" href="#upgrading-to-v11430">Upgrading to v1.143.0</a></h1>
 <h2 id="dropping-support-for-postgresql-13"><a class="header" href="#dropping-support-for-postgresql-13">Dropping support for PostgreSQL 13</a></h2>
-<p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we've dropped
+<p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we’ve dropped
 support for PostgreSQL 13, as it is no longer supported upstream.
 This release of Synapse requires PostgreSQL 14+.</p>
 <h1 id="upgrading-to-v11420"><a class="header" href="#upgrading-to-v11420">Upgrading to v1.142.0</a></h1>
@@ -354,7 +399,7 @@ need to update their implementation to call <code>/register</code> with
 <p>The <code>run_as_background_process</code> function is now a method of the <code>ModuleApi</code> class. If
 you were using the function directly from the module API, it will continue to work fine
 but the background process metrics will not include an accurate <code>server_name</code> label.
-This kind of metric labeling isn't relevant for many use cases and is used to
+This kind of metric labeling isn’t relevant for many use cases and is used to
 differentiate Synapse instances running in the same Python process (relevant to Synapse
 Pro: Small Hosts). We recommend updating your usage to use the new
 <code>ModuleApi.run_as_background_process</code> method to stay on top of future changes.</p>
@@ -363,19 +408,19 @@ Pro: Small Hosts). We recommend updating your usage to use the new
 <p>Before:</p>
 <pre><code class="language-python">class MyModule:
     def __init__(self, module_api: ModuleApi) -&gt; None:
-        run_as_background_process(__name__ + &quot;:setup_database&quot;, self.setup_database)
+        run_as_background_process(__name__ + ":setup_database", self.setup_database)
 </code></pre>
 <p>After:</p>
 <pre><code class="language-python">class MyModule:
     def __init__(self, module_api: ModuleApi) -&gt; None:
-        module_api.run_as_background_process(__name__ + &quot;:setup_database&quot;, self.setup_database)
+        module_api.run_as_background_process(__name__ + ":setup_database", self.setup_database)
 </code></pre>
 </details>
 <h2 id="metric-labels-have-changed-on-synapse_federation_last_received_pdu_time-and-synapse_federation_last_sent_pdu_time"><a class="header" href="#metric-labels-have-changed-on-synapse_federation_last_received_pdu_time-and-synapse_federation_last_sent_pdu_time">Metric labels have changed on <code>synapse_federation_last_received_pdu_time</code> and <code>synapse_federation_last_sent_pdu_time</code></a></h2>
 <p>Previously, the <code>synapse_federation_last_received_pdu_time</code> and
 <code>synapse_federation_last_sent_pdu_time</code> metrics both used the <code>server_name</code> label to
 differentiate between different servers that we send and receive events from.</p>
-<p>Since we're now using the <code>server_name</code> label to differentiate between different Synapse
+<p>Since we’re now using the <code>server_name</code> label to differentiate between different Synapse
 homeserver instances running in the same process, these metrics have been changed as follows:</p>
 <ul>
 <li><code>synapse_federation_last_received_pdu_time</code> now uses the <code>origin_server_name</code> label</li>
@@ -396,7 +441,7 @@ This stable integration requires MAS 0.20.0 or later.</p>
   endpoint: http://localhost:8080
   # The shared secret used to authenticate MAS requests, must be the same as `matrix.secret` in the MAS configuration
   # See https://element-hq.github.io/matrix-authentication-service/reference/configuration.html#matrix
-  secret: &quot;asecurerandomsecretstring&quot;
+  secret: "asecurerandomsecretstring"
 </code></pre>
 <p>They must remove the <code>experimental_features.msc3861</code> configuration option from their configuration.</p>
 <p>They can also remove the client previously used by Synapse <a href="https://element-hq.github.io/matrix-authentication-service/reference/configuration.html#clients">in the MAS configuration</a> as it is no longer in use.</p>
@@ -425,11 +470,11 @@ be abused without moderation.</p>
 <p>To keep the previous behavior of allowing publication by default, add the
 following to the config:</p>
 <pre><code class="language-yaml">room_list_publication_rules:
-  - &quot;action&quot;: &quot;allow&quot;
+  - "action": "allow"
 </code></pre>
 <h2 id="change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository"><a class="header" href="#change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository">Change of signing key expiry date for the Debian/Ubuntu package repository</a></h2>
 <p>Administrators using the Debian/Ubuntu packages from <code>packages.matrix.org</code>,
-please be aware that we have recently updated the expiry date on the repository's GPG signing key,
+please be aware that we have recently updated the expiry date on the repository’s GPG signing key,
 but this change must be imported into your keyring.</p>
 <p>If you have the <code>matrix-org-archive-keyring</code> package installed and it updates before the current key expires, this should
 happen automatically.</p>
@@ -440,7 +485,7 @@ will need to get a fresh copy of the keys. You can do so with:</p>
 <p>The old version of the key will expire on <code>2025-03-15</code>.</p>
 <h1 id="upgrading-to-v11220"><a class="header" href="#upgrading-to-v11220">Upgrading to v1.122.0</a></h1>
 <h2 id="dropping-support-for-postgresql-11-and-12"><a class="header" href="#dropping-support-for-postgresql-11-and-12">Dropping support for PostgreSQL 11 and 12</a></h2>
-<p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we've dropped
+<p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we’ve dropped
 support for PostgreSQL 11 and 12, as they are no longer supported upstream.
 This release of Synapse requires PostgreSQL 13+.</p>
 <h1 id="upgrading-to-v11200"><a class="header" href="#upgrading-to-v11200">Upgrading to v1.120.0</a></h1>
@@ -524,9 +569,9 @@ are being removed in this release of Synapse:</p>
 <li><a href="https://element-hq.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_http_port"><code>worker_replication_http_port</code></a></li>
 <li><a href="https://element-hq.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_http_tls"><code>worker_replication_http_tls</code></a></li>
 </ul>
-<p>Please ensure that you have migrated to using <code>main</code> on your shared configuration's <code>instance_map</code>
+<p>Please ensure that you have migrated to using <code>main</code> on your shared configuration’s <code>instance_map</code>
 (or create one if necessary). This is required if you have <em><strong>any</strong></em> workers at all;
-administrators of single-process (monolith) installations don't need to do anything.</p>
+administrators of single-process (monolith) installations don’t need to do anything.</p>
 <p>For an illustrative example, please see <a href="#upgrading-to-v1840">Upgrading to v1.84.0</a> below.</p>
 <h1 id="upgrading-to-v1860"><a class="header" href="#upgrading-to-v1860">Upgrading to v1.86.0</a></h1>
 <h2 id="minimum-supported-rust-version-3"><a class="header" href="#minimum-supported-rust-version-3">Minimum supported Rust version</a></h2>
@@ -534,7 +579,7 @@ administrators of single-process (monolith) installations don't need to do anyth
 Users building from source will need to ensure their <code>rustc</code> version is up to
 date.</p>
 <h1 id="upgrading-to-v1850"><a class="header" href="#upgrading-to-v1850">Upgrading to v1.85.0</a></h1>
-<h2 id="application-service-registration-with-user-property-deprecation"><a class="header" href="#application-service-registration-with-user-property-deprecation">Application service registration with &quot;user&quot; property deprecation</a></h2>
+<h2 id="application-service-registration-with-user-property-deprecation"><a class="header" href="#application-service-registration-with-user-property-deprecation">Application service registration with “user” property deprecation</a></h2>
 <p>Application services should ensure they call the <code>/register</code> endpoint with a
 <code>username</code> property. The legacy <code>user</code> property is considered deprecated and
 should no longer be included.</p>
@@ -636,13 +681,13 @@ change.</p>
 <h2 id="the-on_threepid_bind-module-callback-method-has-been-deprecated"><a class="header" href="#the-on_threepid_bind-module-callback-method-has-been-deprecated">The <code>on_threepid_bind</code> module callback method has been deprecated</a></h2>
 <p>Synapse v1.79.0 deprecates the
 <a href="modules/third_party_rules_callbacks.html#on_threepid_bind"><code>on_threepid_bind</code></a>
-&quot;third-party rules&quot; Synapse module callback method in favour of a new module method,
+“third-party rules” Synapse module callback method in favour of a new module method,
 <a href="modules/third_party_rules_callbacks.html#on_add_user_third_party_identifier"><code>on_add_user_third_party_identifier</code></a>.
 <code>on_threepid_bind</code> will be removed in a future version of Synapse. You should check whether any Synapse
 modules in use in your deployment are making use of <code>on_threepid_bind</code>, and update them where possible.</p>
 <p>The arguments and functionality of the new method are the same.</p>
-<p>The justification behind the name change is that the old method's name, <code>on_threepid_bind</code>, was
-misleading. A user is considered to &quot;bind&quot; their third-party ID to their Matrix ID only if they
+<p>The justification behind the name change is that the old method’s name, <code>on_threepid_bind</code>, was
+misleading. A user is considered to “bind” their third-party ID to their Matrix ID only if they
 do so via an <a href="https://spec.matrix.org/latest/identity-service-api/">identity server</a>
 (so that users on other homeservers may find them). But this method was not called in that case -
 it was only called when a user added a third-party identifier on the local homeserver.</p>
@@ -693,7 +738,7 @@ include or specify ICU as an explicit dependency.</p>
 in order to fix missing or erroneous entries.</p>
 <p>When this update begins, the user directory will be cleared out and rebuilt from
 scratch. User directory lookups will be incomplete until the rebuild completes.
-Admins can monitor the rebuild's progress by using the
+Admins can monitor the rebuild’s progress by using the
 <a href="usage/administration/admin_api/background_updates.html#status">Background update Admin API</a>.</p>
 <h1 id="upgrading-to-v1730"><a class="header" href="#upgrading-to-v1730">Upgrading to v1.73.0</a></h1>
 <h2 id="legacy-prometheus-metric-names-have-now-been-removed"><a class="header" href="#legacy-prometheus-metric-names-have-now-been-removed">Legacy Prometheus metric names have now been removed</a></h2>
@@ -712,7 +757,7 @@ metric names which were missed when legacy metrics were disabled by default.</p>
 for more context.</p>
 <h1 id="upgrading-to-v1720"><a class="header" href="#upgrading-to-v1720">Upgrading to v1.72.0</a></h1>
 <h2 id="dropping-support-for-postgresql-10"><a class="header" href="#dropping-support-for-postgresql-10">Dropping support for PostgreSQL 10</a></h2>
-<p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we've dropped
+<p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we’ve dropped
 support for PostgreSQL 10, as it is no longer supported upstream.</p>
 <p>This release of Synapse requires PostgreSQL 11+.</p>
 <h1 id="upgrading-to-v1710"><a class="header" href="#upgrading-to-v1710">Upgrading to v1.71.0</a></h1>
@@ -724,19 +769,19 @@ support for PostgreSQL 10, as it is no longer supported upstream.</p>
 <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3905">MSC3905</a>), Synapse now
 only considers local users to be interesting. In other words, the <code>users</code> namespace
 regex is only be applied against local users of the homeserver.</p>
-<p>Please note, this probably doesn't affect the expected behavior of your application
+<p>Please note, this probably doesn’t affect the expected behavior of your application
 service, since an interesting local user in a room still means all messages in the room
 (from local or remote users) will still be considered interesting. And matching a room
 with the <code>rooms</code> or <code>aliases</code> namespace regex will still consider all events sent in the
 room to be interesting to the application service.</p>
-<p>If one of your application service's <code>users</code> regex was intending to match a remote user,
+<p>If one of your application service’s <code>users</code> regex was intending to match a remote user,
 this will no longer match as you expect. The behavioral mismatch between matching all
 local users and some remote users is why the spec was changed/clarified and this
 caveat is no longer supported.</p>
 <h2 id="legacy-prometheus-metric-names-are-now-disabled-by-default"><a class="header" href="#legacy-prometheus-metric-names-are-now-disabled-by-default">Legacy Prometheus metric names are now disabled by default</a></h2>
 <p>Synapse v1.71.0 disables legacy Prometheus metric names by default.
 For administrators that still rely on them and have not yet had chance to update their
-uses of the metrics, it's still possible to specify <code>enable_legacy_metrics: true</code> in
+uses of the metrics, it’s still possible to specify <code>enable_legacy_metrics: true</code> in
 the configuration to re-enable them temporarily.</p>
 <p>Synapse v1.73.0 will <strong>remove legacy metric names altogether</strong> and at that point,
 it will no longer be possible to re-enable them.</p>
@@ -757,7 +802,7 @@ with one of the names being older but non-compliant with OpenMetrics and Prometh
 and one of the names being newer but compliant.</p>
 <p>Synapse v1.71.0 will turn the old metric names off <em>by default</em>.
 For administrators that still rely on them and have not had chance to update their
-uses of the metrics, it's possible to specify <code>enable_legacy_metrics: true</code> in
+uses of the metrics, it’s possible to specify <code>enable_legacy_metrics: true</code> in
 the configuration to re-enable them temporarily.</p>
 <p>Synapse v1.73.0 will <strong>remove legacy metric names altogether</strong> and it will no longer
 be possible to re-enable them.</p>
@@ -777,7 +822,7 @@ be remove in v1.71.0:</p>
     self,
     user_id: str,
     duration_in_ms: int = (2 * 60 * 1000),
-    auth_provider_id: str = &quot;&quot;,
+    auth_provider_id: str = "",
     auth_provider_session_id: Optional[str] = None,
 ) -&gt; str:
     ...
@@ -798,7 +843,7 @@ administrators find modules using it.</p>
 <p>Two changes announced in the upgrade notes for v1.67.0 have now landed in v1.68.0.</p>
 <h2 id="sqlite-version-requirement"><a class="header" href="#sqlite-version-requirement">SQLite version requirement</a></h2>
 <p>Synapse now requires a SQLite version of 3.27.0 or higher if SQLite is configured as
-Synapse's database.</p>
+Synapse’s database.</p>
 <p>Installations using</p>
 <ul>
 <li>Docker images <a href="https://hub.docker.com/r/matrixdotorg/synapse">from <code>matrixdotorg</code></a>,</li>
@@ -845,7 +890,7 @@ versions 3.22 to 3.26.</p>
 <p>Those using Docker images or Debian packages from Matrix.org will not be
 affected. If you have installed from source, you should check the version of
 SQLite used by Python with:</p>
-<pre><code class="language-shell">python -c &quot;import sqlite3; print(sqlite3.sqlite_version)&quot;
+<pre><code class="language-shell">python -c "import sqlite3; print(sqlite3.sqlite_version)"
 </code></pre>
 <p>If this is too old, refer to your distribution for advice on upgrading.</p>
 <h1 id="upgrading-to-v1660"><a class="header" href="#upgrading-to-v1660">Upgrading to v1.66.0</a></h1>
@@ -895,7 +940,7 @@ include the updated library.</p>
 <li><code>check_media_file_for_spam</code></li>
 </ul>
 <p>For each of these methods, the previous callback signature has been deprecated.</p>
-<p>Whereas callbacks used to return <code>bool</code>, they should now return <code>Union[&quot;synapse.module_api.NOT_SPAM&quot;, &quot;synapse.module_api.errors.Codes&quot;]</code>.</p>
+<p>Whereas callbacks used to return <code>bool</code>, they should now return <code>Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]</code>.</p>
 <p>For instance, if your module implements <code>user_may_join_room</code> as follows:</p>
 <pre><code class="language-python">async def user_may_join_room(self, user_id: str, room_id: str, is_invited: bool)
     if ...:
@@ -940,7 +985,7 @@ this could fail, with either of these errors:</p>
 <pre><code>synapse.storage.background_updates - 623 - INFO - background_updates-0 - Adding index state_group_edges_unique_idx to state_group_edges
 synapse.storage.background_updates - 282 - ERROR - background_updates-0 - Error doing update
 ...
-psycopg2.errors.UniqueViolation: could not create unique index &quot;state_group_edges_unique_idx&quot;
+psycopg2.errors.UniqueViolation: could not create unique index "state_group_edges_unique_idx"
 DETAIL:  Key (state_group, prev_state_group)=(2, 1) is duplicated.
 </code></pre>
 <p>(The numbers may be different.)</p>
@@ -992,7 +1037,7 @@ has queries that can be used to check a database for this problem in advance.</p
 </details>
 <h2 id="new-signature-for-the-spam-checker-callback-check_event_for_spam"><a class="header" href="#new-signature-for-the-spam-checker-callback-check_event_for_spam">New signature for the spam checker callback <code>check_event_for_spam</code></a></h2>
 <p>The previous signature has been deprecated.</p>
-<p>Whereas <code>check_event_for_spam</code> callbacks used to return <code>Union[str, bool]</code>, they should now return <code>Union[&quot;synapse.module_api.NOT_SPAM&quot;, &quot;synapse.module_api.errors.Codes&quot;]</code>.</p>
+<p>Whereas <code>check_event_for_spam</code> callbacks used to return <code>Union[str, bool]</code>, they should now return <code>Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]</code>.</p>
 <p>This is part of an ongoing refactoring of the SpamChecker API to make it less ambiguous and more powerful.</p>
 <p>If your module implements <code>check_event_for_spam</code> as follows:</p>
 <pre><code class="language-python">async def check_event_for_spam(event):
@@ -1025,17 +1070,17 @@ as this functionality was disabled on the main process with <code>notify_appserv
 Further, the <code>synapse.app.user_dir</code> worker application type allowed you to configure
 a single worker to be responsible for updating the user directory, as long as this
 was disabled on the main process with <code>update_user_directory: False</code>.</p>
-<p>To unify Synapse's worker types, the <code>synapse.app.appservice</code> worker application
+<p>To unify Synapse’s worker types, the <code>synapse.app.appservice</code> worker application
 type and the <code>notify_appservices</code> configuration option have been deprecated.
 The <code>synapse.app.user_dir</code> worker application type and <code>update_user_directory</code>
 configuration option have also been deprecated.</p>
-<p>To get the same functionality as was provided by the deprecated options, it's now recommended that the <code>synapse.app.generic_worker</code>
+<p>To get the same functionality as was provided by the deprecated options, it’s now recommended that the <code>synapse.app.generic_worker</code>
 worker application type is used and that the <code>notify_appservices_from_worker</code> and/or
 <code>update_user_directory_from_worker</code> options are set to the name of a worker.</p>
 <p>For the time being, the old options can be used alongside the new options to make
 it easier to transition between the two configurations, however please note that:</p>
 <ul>
-<li>the options must not contradict each other (otherwise Synapse won't start); and</li>
+<li>the options must not contradict each other (otherwise Synapse won’t start); and</li>
 <li>the <code>notify_appservices</code> and <code>update_user_directory</code> options will be removed in a future release of Synapse.</li>
 </ul>
 <p>Please see the <a href="workers.html#notifying-application-services"><em>Notifying Application Services</em></a> and
@@ -1090,7 +1135,7 @@ and then upgraded again to v1.57.0 or later.</p>
 <h1 id="upgrading-to-v1560"><a class="header" href="#upgrading-to-v1560">Upgrading to v1.56.0</a></h1>
 <h2 id="open-registration-without-verification-is-now-disabled-by-default"><a class="header" href="#open-registration-without-verification-is-now-disabled-by-default">Open registration without verification is now disabled by default</a></h2>
 <p>Synapse will refuse to start if registration is enabled without email, captcha, or token-based verification unless the new config
-flag <code>enable_registration_without_verification</code> is set to &quot;true&quot;.</p>
+flag <code>enable_registration_without_verification</code> is set to “true”.</p>
 <h2 id="groupscommunities-feature-has-been-deprecated"><a class="header" href="#groupscommunities-feature-has-been-deprecated">Groups/communities feature has been deprecated</a></h2>
 <p>The non-standard groups/communities feature in Synapse has been deprecated and will
 be disabled by default in Synapse v1.58.0.</p>
@@ -1108,7 +1153,7 @@ for more information and instructions on how to fix a database with incorrect va
 <p>The <code>synctl</code> script
 <a href="https://github.com/matrix-org/synapse/pull/12140">has been made</a> an
 <a href="https://packaging.python.org/en/latest/specifications/entry-points/">entry point</a>
-and no longer exists at the root of Synapse's source tree. If you wish to use
+and no longer exists at the root of Synapse’s source tree. If you wish to use
 <code>synctl</code> to manage your homeserver, you should invoke <code>synctl</code> directly, e.g.
 <code>synctl start</code> instead of <code>./synctl start</code> or <code>/path/to/synctl start</code>.</p>
 <p>You will need to ensure <code>synctl</code> is on your <code>PATH</code>.</p>
@@ -1118,7 +1163,7 @@ and no longer exists at the root of Synapse's source tree. If you wish to use
 <a href="https://hub.docker.com/r/matrixdotorg/synapse">docker images</a>
 provided by Matrix.org.</li>
 <li>When installing from a wheel, sdist, or PyPI, a <code>synctl</code> executable is added
-to your Python installation's <code>bin</code>. This should be on your <code>PATH</code>
+to your Python installation’s <code>bin</code>. This should be on your <code>PATH</code>
 automatically, though you might need to activate a virtual environment
 depending on how you installed Synapse.</li>
 </ul>
@@ -1138,7 +1183,7 @@ which was deprecated in Synapse v1.23.0. If your logging configuration contains
 are no longer supported and configuring them is a now a configuration error.</p>
 <p>Configuring a non-HTTP(S) <code>web_client_location</code> configuration is is now a
 configuration error. Since the <code>webclient</code> listener is no longer supported, this
-setting only applies to the root path <code>/</code> of Synapse's web server and no longer
+setting only applies to the root path <code>/</code> of Synapse’s web server and no longer
 the <code>/_matrix/client/</code> path.</p>
 <h2 id="stablisation-of-msc3231"><a class="header" href="#stablisation-of-msc3231">Stablisation of MSC3231</a></h2>
 <p>The unstable validity-check endpoint for the
@@ -1196,7 +1241,7 @@ will become a configuration error in Synapse v1.53.0.</p>
 <h1 id="upgrading-to-v1500"><a class="header" href="#upgrading-to-v1500">Upgrading to v1.50.0</a></h1>
 <h2 id="dropping-support-for-old-python-and-postgres-versions"><a class="header" href="#dropping-support-for-old-python-and-postgres-versions">Dropping support for old Python and Postgres versions</a></h2>
 <p>In line with our <a href="deprecation_policy.html">deprecation policy</a>,
-we've dropped support for Python 3.6 and PostgreSQL 9.6, as they are no
+we’ve dropped support for Python 3.6 and PostgreSQL 9.6, as they are no
 longer supported upstream.</p>
 <p>This release of Synapse requires Python 3.7+ and PostgreSQL 10+.</p>
 <h1 id="upgrading-to-v1470"><a class="header" href="#upgrading-to-v1470">Upgrading to v1.47.0</a></h1>
@@ -1219,7 +1264,7 @@ room.</p>
 <h1 id="upgrading-to-v1450"><a class="header" href="#upgrading-to-v1450">Upgrading to v1.45.0</a></h1>
 <h2 id="changes-required-to-media-storage-provider-modules-when-reading-from-the-synapse-configuration-object"><a class="header" href="#changes-required-to-media-storage-provider-modules-when-reading-from-the-synapse-configuration-object">Changes required to media storage provider modules when reading from the Synapse configuration object</a></h2>
 <p>Media storage provider modules that read from the Synapse configuration object (i.e. that
-read the value of <code>hs.config.[...]</code>) now need to specify the configuration section they're
+read the value of <code>hs.config.[...]</code>) now need to specify the configuration section they’re
 reading from. This means that if a module reads the value of e.g. <code>hs.config.media_store_path</code>,
 it needs to replace it with <code>hs.config.media.media_store_path</code>.</p>
 <h1 id="upgrading-to-v1440"><a class="header" href="#upgrading-to-v1440">Upgrading to v1.44.0</a></h1>
@@ -1341,16 +1386,16 @@ file</a>.</p>
 should simply remove it from your configuration file. The default value
 used to be:</p>
 <pre><code class="language-yaml">room_invite_state_types:
-   - &quot;m.room.join_rules&quot;
-   - &quot;m.room.canonical_alias&quot;
-   - &quot;m.room.avatar&quot;
-   - &quot;m.room.encryption&quot;
-   - &quot;m.room.name&quot;
+   - "m.room.join_rules"
+   - "m.room.canonical_alias"
+   - "m.room.avatar"
+   - "m.room.encryption"
+   - "m.room.name"
 </code></pre>
 <p>If you have customised this value, you should remove
 <code>room_invite_state_types</code> and configure <code>room_prejoin_state</code> instead.</p>
 <h1 id="upgrading-to-v1330"><a class="header" href="#upgrading-to-v1330">Upgrading to v1.33.0</a></h1>
-<h2 id="account-validity-html-templates-can-now-display-a-users-expiration-date"><a class="header" href="#account-validity-html-templates-can-now-display-a-users-expiration-date">Account Validity HTML templates can now display a user's expiration date</a></h2>
+<h2 id="account-validity-html-templates-can-now-display-a-users-expiration-date"><a class="header" href="#account-validity-html-templates-can-now-display-a-users-expiration-date">Account Validity HTML templates can now display a user’s expiration date</a></h2>
 <p>This may affect you if you have enabled the account validity feature,
 and have made use of a custom HTML template specified by the
 <code>account_validity.template_dir</code> or
@@ -1380,12 +1425,12 @@ Instructions for doing so are provided
 <a href="https://github.com/matrix-org/synapse/pull/9854#issuecomment-823472183">here</a>.</p>
 <h2 id="dropping-support-for-old-python-postgres-and-sqlite-versions"><a class="header" href="#dropping-support-for-old-python-postgres-and-sqlite-versions">Dropping support for old Python, Postgres and SQLite versions</a></h2>
 <p>In line with our <a href="deprecation_policy.html">deprecation policy</a>,
-we've dropped support for Python 3.5 and PostgreSQL 9.5, as they are no
+we’ve dropped support for Python 3.5 and PostgreSQL 9.5, as they are no
 longer supported upstream.</p>
 <p>This release of Synapse requires Python 3.6+ and PostgreSQL 9.6+ or
 SQLite 3.22+.</p>
 <h2 id="removal-of-old-list-accounts-admin-api"><a class="header" href="#removal-of-old-list-accounts-admin-api">Removal of old List Accounts Admin API</a></h2>
-<p>The deprecated v1 &quot;list accounts&quot; admin API
+<p>The deprecated v1 “list accounts” admin API
 (<code>GET /_synapse/admin/v1/users/&lt;user_id&gt;</code>) has been removed in this
 version.</p>
 <p>The <a href="admin_api/user_admin_api.html#list-accounts">v2 list accounts API</a>
@@ -1427,7 +1472,7 @@ identity providers:</p>
 <p>If your server is configured for single sign-on via an OpenID
 Connect or OAuth2 identity provider, you will need to add
 <code>[synapse public baseurl]/_synapse/client/oidc/callback</code> to the list
-of permitted &quot;redirect URIs&quot; at the identity provider.</p>
+of permitted “redirect URIs” at the identity provider.</p>
 <p>See the <a href="openid.html">OpenID docs</a> for more information on setting
 up OpenID Connect.</p>
 </li>
@@ -1435,21 +1480,21 @@ up OpenID Connect.</p>
 <p>If your server is configured for single sign-on via a SAML2 identity
 provider, you will need to add
 <code>[synapse public baseurl]/_synapse/client/saml2/authn_response</code> as a
-permitted &quot;ACS location&quot; (also known as &quot;allowed callback URLs&quot;)
+permitted “ACS location” (also known as “allowed callback URLs”)
 at the identity provider.</p>
-<p>The &quot;Issuer&quot; in the &quot;AuthnRequest&quot; to the SAML2 identity
+<p>The “Issuer” in the “AuthnRequest” to the SAML2 identity
 provider is also updated to
 <code>[synapse public baseurl]/_synapse/client/saml2/metadata.xml</code>. If
 your SAML2 identity provider uses this property to validate or
 otherwise identify Synapse, its configuration will need to be
 updated to use the new URL. Alternatively you could create a new,
-separate &quot;EntityDescriptor&quot; in your SAML2 identity provider with
-the new URLs and leave the URLs in the existing &quot;EntityDescriptor&quot;
+separate “EntityDescriptor” in your SAML2 identity provider with
+the new URLs and leave the URLs in the existing “EntityDescriptor”
 as they were.</p>
 </li>
 </ul>
 <h2 id="changes-to-html-templates"><a class="header" href="#changes-to-html-templates">Changes to HTML templates</a></h2>
-<p>The HTML templates for SSO and email notifications now have <a href="https://jinja.palletsprojects.com/en/2.11.x/api/#autoescaping">Jinja2's
+<p>The HTML templates for SSO and email notifications now have <a href="https://jinja.palletsprojects.com/en/2.11.x/api/#autoescaping">Jinja2’s
 autoescape</a>
 enabled for files ending in <code>.html</code>, <code>.htm</code>, and <code>.xml</code>. If you have
 customised these templates and see issues when viewing them you might
@@ -1515,13 +1560,13 @@ DELETE FROM event_auth_chains;
 </li>
 <li>
 <p>Mark the deltas as not run (so they will re-run on upgrade).</p>
-<pre><code class="language-sql">DELETE FROM applied_schema_deltas WHERE version = 59 AND file = &quot;59/01ignored_user.py&quot;;
-DELETE FROM applied_schema_deltas WHERE version = 59 AND file = &quot;59/06chain_cover_index.sql&quot;;
+<pre><code class="language-sql">DELETE FROM applied_schema_deltas WHERE version = 59 AND file = "59/01ignored_user.py";
+DELETE FROM applied_schema_deltas WHERE version = 59 AND file = "59/06chain_cover_index.sql";
 </code></pre>
 </li>
 <li>
 <p>Downgrade Synapse by following the instructions for your
-installation method in the &quot;Rolling back to older versions&quot;
+installation method in the “Rolling back to older versions”
 section above.</p>
 </li>
 </ol>
@@ -1571,7 +1616,7 @@ class MyMappingProvider:
         sso_user_id = ...
         localpart = map_username_to_mxid_localpart(sso_user_id)
 
-        return {&quot;localpart&quot;: localpart}
+        return {"localpart": localpart}
 </code></pre>
 <h2 id="removal-historical-synapse-admin-api"><a class="header" href="#removal-historical-synapse-admin-api">Removal historical Synapse Admin API</a></h2>
 <p>Historically, the Synapse Admin API has been accessible under:</p>
@@ -1623,10 +1668,14 @@ has been updated to include reverse proxy directives for
 <code>/_synapse/client/*</code> endpoints. As the user password reset flow now uses
 endpoints under this prefix, <strong>you must update your reverse proxy
 configurations for user password reset to work</strong>.</p>
-<p>Additionally, note that the <a href="workers.html">Synapse worker documentation</a> has been updated to</p>
-<p>:   state that the <code>/_synapse/client/password_reset/email/submit_token</code>
+<dl>
+<dt id="additionally-note-that-the-synapse-worker-documentation-has-been-updated-to"><a class="header" href="#additionally-note-that-the-synapse-worker-documentation-has-been-updated-to">Additionally, note that the <a href="workers.html">Synapse worker documentation</a> has been updated to</a></dt>
+<dd>
+<p>state that the <code>/_synapse/client/password_reset/email/submit_token</code>
 endpoint can be handled</p>
-<p>by all workers. If you make use of Synapse's worker feature, please
+</dd>
+</dl>
+<p>by all workers. If you make use of Synapse’s worker feature, please
 update your reverse proxy configuration to reflect this change.</p>
 <h2 id="new-html-templates"><a class="header" href="#new-html-templates">New HTML templates</a></h2>
 <p>A new HTML template,
@@ -1683,10 +1732,16 @@ taking place.</p>
 <p>A bug was introduced in Synapse 1.4.0 which could cause the room
 directory to be incomplete or empty if Synapse was upgraded directly
 from v1.2.1 or earlier, to versions between v1.4.0 and v1.12.x.</p>
-<p>This will <em>not</em> be a problem for Synapse installations which were:</p>
-<p>:   -   created at v1.4.0 or later,
--   upgraded via v1.3.x, or
--   upgraded straight from v1.2.1 or earlier to v1.13.0 or later.</p>
+<dl>
+<dt id="this-will-not-be-a-problem-for-synapse-installations-which-were"><a class="header" href="#this-will-not-be-a-problem-for-synapse-installations-which-were">This will <em>not</em> be a problem for Synapse installations which were:</a></dt>
+<dd>
+<ul>
+<li>created at v1.4.0 or later,</li>
+<li>upgraded via v1.3.x, or</li>
+<li>upgraded straight from v1.2.1 or earlier to v1.13.0 or later.</li>
+</ul>
+</dd>
+</dl>
 <p>If completeness of the room directory is a concern, installations which
 are affected can be repaired as follows:</p>
 <ol>
@@ -1734,7 +1789,7 @@ to:</p>
 </li>
 <li>
 <p>Downgrade Synapse by following the instructions for your
-installation method in the &quot;Rolling back to older versions&quot;
+installation method in the “Rolling back to older versions”
 section above.</p>
 </li>
 </ol>
@@ -1855,12 +1910,12 @@ with their account, for a number of reasons:</p>
 recovery.</li>
 <li>in the case of email, to receive notifications of missed messages.</li>
 </ul>
-<p>Before an email address or phone number can be added to a user's
+<p>Before an email address or phone number can be added to a user’s
 account, or before such an address is used to carry out a
 password-reset, Synapse must confirm the operation with the owner of the
 email address or phone number. It does this by sending an email or text
 giving the user a link or token to confirm receipt. This process is
-known as '3pid verification'. ('3pid', or 'threepid', stands for
+known as ‘3pid verification’. (‘3pid’, or ‘threepid’, stands for
 third-party identifier, and we use it to refer to external identifiers
 such as email addresses and phone numbers.)</p>
 <p>Previous versions of Synapse delegated the task of 3pid verification to
@@ -1959,7 +2014,7 @@ release.</p>
 back to v1.3.1, subject to the following:</p>
 <ul>
 <li>
-<p>The 'room statistics' engine was heavily reworked in this release
+<p>The ‘room statistics’ engine was heavily reworked in this release
 (see <a href="https://github.com/matrix-org/synapse/pull/5971">#5971</a>),
 including significant changes to the database schema, which are not
 easily reverted. This will cause the room statistics engine to stop
@@ -1972,7 +2027,7 @@ avoided by setting the following in <code>homeserver.yaml</code>:</p>
 <pre><code class="language-yaml">stats:
   enabled: false
 </code></pre>
-<p>Don't forget to re-enable it when you upgrade again, in preparation
+<p>Don’t forget to re-enable it when you upgrade again, in preparation
 for its use in the room directory!</p>
 </li>
 </ul>
@@ -1992,7 +2047,7 @@ handling, significantly reducing memory usage.</p>
 <p>If you use current versions of the Matrix.org-distributed Debian
 packages or Docker images, action is not required.</p>
 <p>If you install Synapse in a Python virtual environment, please see
-&quot;Upgrading to v0.34.0&quot; for notes on setting up a new virtualenv under
+“Upgrading to v0.34.0” for notes on setting up a new virtualenv under
 Python 3.</p>
 <h2 id="minimum-postgresql-version"><a class="header" href="#minimum-postgresql-version">Minimum PostgreSQL Version</a></h2>
 <p>If using PostgreSQL under Synapse, you will need to use PostgreSQL 9.5
@@ -2124,10 +2179,10 @@ continue to use Python 2 for the time being.</p>
 <li>
 <p>This release removes the <code>riot.im</code> from the default list of trusted
 identity servers.</p>
-<p>If <code>riot.im</code> is in your homeserver's list of
+<p>If <code>riot.im</code> is in your homeserver’s list of
 <code>trusted_third_party_id_servers</code>, you should remove it. It was added
 in case a hypothetical future identity server was put there. If you
-don't remove it, users may be unable to deactivate their accounts.</p>
+don’t remove it, users may be unable to deactivate their accounts.</p>
 </li>
 <li>
 <p>This release no longer installs the (unmaintained) Matrix Console
@@ -2182,17 +2237,17 @@ too big of a security risk to ignore, and so the ability to register
 with the HS remotely has been removed.</p>
 <p>It has been replaced by specifying a list of application service
 registrations in <code>homeserver.yaml</code>:</p>
-<pre><code class="language-yaml">app_service_config_files: [&quot;registration-01.yaml&quot;, &quot;registration-02.yaml&quot;]
+<pre><code class="language-yaml">app_service_config_files: ["registration-01.yaml", "registration-02.yaml"]
 </code></pre>
 <p>Where <code>registration-01.yaml</code> looks like:</p>
-<pre><code class="language-yaml">url: &lt;String&gt;  # e.g. &quot;https://my.application.service.com&quot;
+<pre><code class="language-yaml">url: &lt;String&gt;  # e.g. "https://my.application.service.com"
 as_token: &lt;String&gt;
 hs_token: &lt;String&gt;
 sender_localpart: &lt;String&gt;  # This is a new field which denotes the user_id localpart when using the AS token
 namespaces:
   users:
     - exclusive: &lt;Boolean&gt;
-      regex: &lt;String&gt;  # e.g. &quot;@prefix_.*&quot;
+      regex: &lt;String&gt;  # e.g. "@prefix_.*"
   aliases:
     - exclusive: &lt;Boolean&gt;
       regex: &lt;String&gt;
@@ -2205,7 +2260,7 @@ namespaces:
 <pre><code>static/client/register/register_config.js
 
   window.matrixRegistrationConfig = {
-      recaptcha_public_key: &quot;YOUR_PUBLIC_KEY&quot;
+      recaptcha_public_key: "YOUR_PUBLIC_KEY"
   };
 </code></pre>
 <p>This is required in order to support registration fallback (typically
@@ -2250,7 +2305,7 @@ in the webclient package by running:</p>
 </code></pre>
 <p>This release completely changes the database schema and so requires
 upgrading it before starting the new version of the homeserver.</p>
-<p>The script &quot;database-prepare-for-0.5.0.sh&quot; should be used to upgrade
+<p>The script “database-prepare-for-0.5.0.sh” should be used to upgrade
 the database. This will save all user information, such as logins and
 profiles, but will otherwise purge the database. This includes messages,
 which rooms the home server was a member of and room alias mappings.</p>
@@ -2261,7 +2316,7 @@ to resolve any resulting conflicts during the upgrade process.</p>
 <p>Before running the command the homeserver should be first completely
 shutdown. To run it, simply specify the location of the database, e.g.:</p>
 <blockquote>
-<p>./scripts/database-prepare-for-0.5.0.sh &quot;homeserver.db&quot;</p>
+<p>./scripts/database-prepare-for-0.5.0.sh “homeserver.db”</p>
 </blockquote>
 <p>Once this has successfully completed it will be safe to restart the
 homeserver. You may notice that the homeserver takes a few seconds
@@ -2318,21 +2373,21 @@ SSL certificate to use. Once done you can run the home server using:</p>
 <p>See the README.rst for more information.</p>
 <p>Also note that some config options have been renamed, including:</p>
 <ul>
-<li>&quot;host&quot; to &quot;server-name&quot;</li>
-<li>&quot;database&quot; to &quot;database-path&quot;</li>
-<li>&quot;port&quot; to &quot;bind-port&quot; and &quot;unsecure-port&quot;</li>
+<li>“host” to “server-name”</li>
+<li>“database” to “database-path”</li>
+<li>“port” to “bind-port” and “unsecure-port”</li>
 </ul>
 <h1 id="upgrading-to-v001"><a class="header" href="#upgrading-to-v001">Upgrading to v0.0.1</a></h1>
 <p>This release completely changes the database schema and so requires
 upgrading it before starting the new version of the homeserver.</p>
-<p>The script &quot;database-prepare-for-0.0.1.sh&quot; should be used to upgrade
+<p>The script “database-prepare-for-0.0.1.sh” should be used to upgrade
 the database. This will save all user information, such as logins and
 profiles, but will otherwise purge the database. This includes messages,
 which rooms the home server was a member of and room alias mappings.</p>
 <p>Before running the command the homeserver should be first completely
 shutdown. To run it, simply specify the location of the database, e.g.:</p>
 <blockquote>
-<p>./scripts/database-prepare-for-0.0.1.sh &quot;homeserver.db&quot;</p>
+<p>./scripts/database-prepare-for-0.0.1.sh “homeserver.db”</p>
 </blockquote>
 <p>Once this has successfully completed it will be safe to restart the
 homeserver. You may notice that the homeserver takes a few seconds
@@ -2347,11 +2402,13 @@ in the local HS will automatically rejoin the room.</p>
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
                             <a rel="prev" href="delegate.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                                <i class="fa fa-angle-left"></i>
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
-                            <a rel="next" href="federate.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-                                <i class="fa fa-angle-right"></i>
+
+                            <a rel="next prefetch" href="federate.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
+
                         <div style="clear: both"></div>
                     </nav>
                 </div>
@@ -2359,28 +2416,43 @@ in the local HS will automatically rejoin the room.</p>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
                     <a rel="prev" href="delegate.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                        <i class="fa fa-angle-left"></i>
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
-                    <a rel="next" href="federate.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-                        <i class="fa fa-angle-right"></i>
+
+                    <a rel="next prefetch" href="federate.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
 
         </div>
 
-        <script type="text/javascript">
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
             window.playground_copyable = true;
         </script>
-        <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
-        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
-        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-c2a407aa.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
-        <script type="text/javascript" src="docs/website_files/table-of-contents.js"></script>
-        <script type="text/javascript" src="docs/website_files/version-picker.js"></script>
-        <script type="text/javascript" src="docs/website_files/version.js"></script>
+        <script src="docs/website_files/version-picker-a1e40922.js"></script>
+        <script src="docs/website_files/version-d2c738f4.js"></script>
+
+
+
+    </div>
     </body>
 </html>
