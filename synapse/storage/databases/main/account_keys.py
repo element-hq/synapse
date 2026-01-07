@@ -18,7 +18,7 @@
 #
 #
 
-from typing import TYPE_CHECKING, Collection, Dict, List, Tuple, cast
+from typing import TYPE_CHECKING, Collection, cast
 
 from signedjson.key import (
     decode_signing_key_base64,
@@ -36,7 +36,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
-from synapse.types import get_domain_from_id, get_localpart_from_id
+from synapse.types import get_domain_from_id
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -53,7 +53,7 @@ class AccountKeysStore(SQLBaseStore):
 
     async def get_or_create_account_key_user_id_for_account_name_user_id(
         self, account_name_user_id: str
-    ) -> Tuple[str, SigningKey]:
+    ) -> tuple[str, SigningKey]:
         """
         Get or create an account key for the given account name user ID.
         The user ID must belong to this server.
@@ -89,7 +89,7 @@ class AccountKeysStore(SQLBaseStore):
             return row[0], decode_account_key(row[1])
 
         # create a new account key for this account inside a txn to ensure we lock correctly.
-        def create_key_txn(txn: LoggingTransaction) -> Tuple[str, str]:
+        def create_key_txn(txn: LoggingTransaction) -> tuple[str, str]:
             key, public_key_str = generate_account_key()
             account_key_user_id = (
                 f"@{public_key_str}:{get_domain_from_id(account_name_user_id)}"
@@ -111,7 +111,7 @@ class AccountKeysStore(SQLBaseStore):
             )
             sql = "SELECT account_key_user_id, account_key FROM account_keys WHERE account_name_user_id = ?"
             txn.execute(sql, (account_name_user_id,))
-            return cast(Tuple[str, str], txn.fetchone())
+            return cast(tuple[str, str], txn.fetchone())
 
         row = await self.db_pool.runInteraction(
             "get_or_create_account_key_user_id_for_account_name_user_id.create_key_txn",
@@ -122,7 +122,7 @@ class AccountKeysStore(SQLBaseStore):
     async def get_account_name_user_ids_for_account_key_user_ids(
         self,
         account_key_user_ids: Collection[str],
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """
         Fetch the verified account name user IDs for the given account key user IDs. Unknown account key
         user IDs will be omitted from the dict.
@@ -140,10 +140,10 @@ class AccountKeysStore(SQLBaseStore):
             self.database_engine, "account_key_user_id", account_key_user_ids
         )
 
-        def f(txn: LoggingTransaction) -> List[Tuple[str, str]]:
+        def f(txn: LoggingTransaction) -> list[tuple[str, str]]:
             sql = f"SELECT account_key_user_id, account_name_user_id FROM account_keys WHERE {clause} AND account_name_user_id IS NOT NULL"
             txn.execute(sql, args)
-            return cast(List[Tuple[str, str]], txn.fetchall())
+            return cast(list[tuple[str, str]], txn.fetchall())
 
         rows = await self.db_pool.runInteraction(
             "get_account_name_user_ids_for_account_key_user_ids", f
@@ -151,7 +151,7 @@ class AccountKeysStore(SQLBaseStore):
         return {row[0]: row[1] for row in rows}
 
 
-def generate_account_key() -> Tuple[SigningKey, str]:
+def generate_account_key() -> tuple[SigningKey, str]:
     signing_key = generate_signing_key("1")
     verify_key_str = encode_base64(get_verify_key(signing_key).encode(), urlsafe=True)
     return signing_key, verify_key_str

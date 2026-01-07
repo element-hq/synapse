@@ -46,7 +46,7 @@ from immutabledict import immutabledict
 from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
 from typing_extensions import Self
-from unpaddedbase64 import decode_base64
+from unpaddedbase64 import decode_base64, encode_base64
 from zope.interface import Interface
 
 from twisted.internet.defer import CancelledError
@@ -354,6 +354,24 @@ class UserID(DomainSpecificString):
     """Structure representing a user ID."""
 
     SIGIL = "@"
+
+    @classmethod
+    def from_verify_key(
+        cls: type["UserID"], domain: str, verify_key: VerifyKey
+    ) -> "UserID":
+        """
+        Converts an MSC4243 account key into a valid user ID.
+
+        Args:
+            domain: The unverified domain associated with this verify key
+            verify_key: The ed25519 public key for this user
+        Returns:
+            A valid MSC4243 user ID.
+        """
+        # We cannot use signedjson.encode_verify_key_base64 because that does not do URL-safe base64
+        # encoding.
+        verify_key_str = encode_base64(verify_key.encode(), urlsafe=True)
+        return UserID.from_string(f"@{verify_key_str}:{domain}")
 
 
 @attr.s(slots=True, frozen=True, repr=False)

@@ -51,7 +51,7 @@ from synapse.logging.context import (
 )
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -409,27 +409,31 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         """
         room_version = RoomVersions.MSC4243v12
 
-        # Make a signing key and replace the key ID from '1' to be the base64 public key
+        # Make a signing key
         signing_key = signedjson.key.generate_signing_key("1")
-        verify_key_str = encode_verify_key_base64(get_verify_key(signing_key))
-        signing_key.version = verify_key_str
         domain = "can.be.anything.com"
-        signing_user_id = f"@{verify_key_str}:{domain}"
+        # Derive a user ID from the signing key
+        signing_user_id = UserID.from_verify_key(domain, get_verify_key(signing_key))
 
         event_dict = {
             "type": "m.room.create",
             "state_key": "",
-            "sender": signing_user_id,
+            "sender": signing_user_id.to_string(),
             "content": {
                 "room_version": room_version.identifier,
             },
         }
         event_dict["signatures"] = compute_event_signature(
-            room_version, event_dict, signature_name=domain, signing_key=signing_key
+            room_version,
+            event_dict,
+            signature_name=signing_user_id.localpart,
+            signing_key=signing_key,
         )
         event = make_event_from_dict(event_dict, room_version)
-        kr = keyring.Keyring(self.hs, key_fetchers=None)
-        self.get_success(kr.verify_event_for_account_key(signing_user_id, event))
+        kr = keyring.Keyring(self.hs, test_only_key_fetchers=[])
+        self.get_success(
+            kr.verify_event_for_account_key(signing_user_id.to_string(), event)
+        )
 
 
 @logcontext_clean

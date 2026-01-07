@@ -84,7 +84,7 @@ class VerifyJsonRequest:
     get_json_object: Callable[[], JsonDict]
     minimum_valid_until_ts: int
     key_ids: list[str]
-    key_ids_are_public_keys: bool = False
+    server_name_is_public_key: bool = False
 
     @staticmethod
     def from_json_object(
@@ -120,7 +120,7 @@ class VerifyJsonRequest:
             lambda: prune_event_dict(event.room_version, event.get_pdu_json()),
             minimum_valid_until_ms,
             key_ids=key_ids,
-            key_ids_are_public_keys=False,
+            server_name_is_public_key=False,
         )
 
 
@@ -314,21 +314,19 @@ class Keyring:
         """
         assert event.room_version.msc4243_account_keys
         user_id = UserID.from_string(user_id_str)
-        key_ids = list(event.signatures.get(user_id.domain, []))
-        # only keep the key ID that matches the desired user ID we want to verify as.
-        # Events can be signed by multiple parties e.g invites, restricted joins
-        expected_key_id = "ed25519:" + user_id.localpart
+        key_ids = list(event.signatures.get(user_id.localpart, []))
+        expected_key_id = "ed25519:1"
         key_ids = [key_id for key_id in key_ids if key_id == expected_key_id]
         assert len(key_ids) == 1  # the user must have signed the event.
         await self.process_request(
             VerifyJsonRequest(
-                user_id.domain,
+                user_id.localpart,  # the server name is the localpart which is a public key
                 # We defer creating the redacted json object, as it uses a lot more
                 # memory than the Event object itself.
                 lambda: prune_event_dict(event.room_version, event.get_pdu_json()),
                 0,  # No validity times
                 key_ids=key_ids,
-                key_ids_are_public_keys=True,
+                server_name_is_public_key=True,
             )
         )
 
@@ -345,17 +343,15 @@ class Keyring:
                 Codes.UNAUTHORIZED,
             )
 
-        if verify_request.key_ids_are_public_keys:
+        if verify_request.server_name_is_public_key:
             # No need to fetch keys as we have them already.
             assert len(verify_request.key_ids) == 1
-            key_id = verify_request.key_ids[0]
-            key_bytes = decode_base64(key_id.removeprefix("ed25519:"))
-            verify_key = decode_verify_key_bytes(key_id, key_bytes)
-            await self._process_json(verify_key, verify_request)
+            key_bytes = decode_base64(verify_request.server_name)
+            verify_key = decode_verify_key_bytes(verify_request.key_ids[0], key_bytes)
+            await self.process_json(verify_key, verify_request)
             return
 
         found_keys: dict[str, FetchKeyResult] = {}
-
 
         # If we are the originating server, short-circuit the key-fetch for any keys
         # we already have

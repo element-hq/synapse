@@ -26,7 +26,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.types import get_localpart_from_id
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -45,7 +45,10 @@ class AccountKeysTestCase(unittest.HomeserverTestCase):
         # asserts the localpart is unpadded urlsafe base64
         self.assertRegex(key_user_id, r"^@[A-Za-z0-9\-_]{43}:test$")
         # asserts the public key is the localpart
-        self.assertEquals(encode_base64(get_verify_key(key).encode(), urlsafe=True), get_localpart_from_id(key_user_id))
+        self.assertEquals(
+            encode_base64(get_verify_key(key).encode(), urlsafe=True),
+            get_localpart_from_id(key_user_id),
+        )
         # asserts the key ID is 1
         self.assertEquals(key.version, "1")
         # assert that repeated calls return the same key
