@@ -425,8 +425,10 @@ def get_split_device_message_edus(
 
     Returns:
         A list of dictionary containing the EDUs of to-device messages
-        Raises an EventSizeError if a single to-device message is too large
-        to fit into an EDU.
+
+        Raises:
+            EventSizeError: If a single to-device message is too large to fit into an
+                EDU.
     """
     split_edus: list[JsonDict] = []
 
