@@ -413,10 +413,10 @@ def get_split_device_message_edus(
     messages: dict[str, dict[str, JsonDict]],
 ) -> list[JsonDict]:
     """
-    This function takes a dictionary of to-device messages and splits them into several
-    EDUs by recipient if necessary as the overall request can overrun the
+    This function takes many to-device messages and fits/splits them into several EDUs
+    as necessary. We split the messages up as the overall request can overrun the
     `max_request_body_size` and prevent outbound federation traffic because of the size
-    of the transaction (cf. MAX_EDU_SIZE).
+    of the transaction (cf. `MAX_EDU_SIZE`).
 
     Args:
         sender_user_id: The user that is sending the to-device messages.
