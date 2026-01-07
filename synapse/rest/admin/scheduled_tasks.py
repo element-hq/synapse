@@ -42,6 +42,9 @@ class ScheduledTasksRestServlet(RestServlet):
         action_name = parse_string(request, "action_name")
         resource_id = parse_string(request, "resource_id")
         status = parse_string(request, "status")
+        # fallback to avoid breaking existing usage ( API doc didn't match the code...)
+        if status is None:
+            status = parse_string(request, "job_status")
         max_timestamp = parse_integer(request, "max_timestamp")
 
         actions = [action_name] if action_name else None
