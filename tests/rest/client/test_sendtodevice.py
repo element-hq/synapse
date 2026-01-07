@@ -137,7 +137,10 @@ class SendToDeviceTestCase(HomeserverTestCase):
         self.assertEqual(Codes.TOO_LARGE, channel.json_body["errcode"])
 
     def test_edu_splitting(self) -> None:
-        """Test that a bunch of to-device messages are split into multiple EDUs if they are too large"""
+        """
+        Test that a bunch of to-device messages are split over multiple EDUs if they are
+        collectively too large to fit into a single EDU
+        """
         # FIXME: Because huge log line is triggered in this test,
         # trial breaks, sometimes (flakily) failing the test run.
         # ref: https://github.com/twisted/twisted/issues/12482
