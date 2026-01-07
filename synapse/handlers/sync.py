@@ -78,7 +78,7 @@ from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 from synapse.util.metrics import Measure
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -679,7 +679,7 @@ class SyncHandler:
                         )
                     )
 
-                recents = await filter_events_for_client(
+                recents = await filter_and_transform_events_for_client(
                     self._storage_controllers,
                     sync_config.user.to_string(),
                     recents,
@@ -789,7 +789,7 @@ class SyncHandler:
                         )
                     )
 
-                loaded_recents = await filter_events_for_client(
+                loaded_recents = await filter_and_transform_events_for_client(
                     self._storage_controllers,
                     sync_config.user.to_string(),
                     loaded_recents,

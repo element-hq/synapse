@@ -28,7 +28,7 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 from tests import unittest
 from tests.unittest import override_config
@@ -163,7 +163,7 @@ class RetentionTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(2, len(events), "events retrieved from database")
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 storage_controllers,
                 self.user_id,
                 events,

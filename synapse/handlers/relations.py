@@ -40,7 +40,7 @@ from synapse.storage.databases.main.relations import ThreadsNextBatch, _RelatedE
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, UserID
 from synapse.util.async_helpers import gather_results
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -154,7 +154,7 @@ class RelationsHandler:
             [e.event_id for e in related_events]
         )
 
-        events = await filter_events_for_client(
+        events = await filter_and_transform_events_for_client(
             self._storage_controllers,
             user_id,
             events,
@@ -599,7 +599,7 @@ class RelationsHandler:
             # Limit the returned threads to those the user has participated in.
             events = [event for event in events if participated[event.event_id]]
 
-        events = await filter_events_for_client(
+        events = await filter_and_transform_events_for_client(
             self._storage_controllers,
             user_id,
             events,

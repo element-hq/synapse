@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.144.0"
+version = "1.145.0rc2"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -415,20 +415,22 @@ line-ending = "auto"
 manifest-path = "rust/Cargo.toml"
 module-name = "synapse.synapse_rust"
 python-source = "."
-sdist-include = [
+include = [
     "AUTHORS.rst",
     "book.toml",
-    "changelog.d",
+    "changelog.d/**/*",
     "CHANGES.md",
     "CONTRIBUTING.md",
-    "demo",
-    "docs",
+    "demo/**/*",
+    "docs/**/*",
     "INSTALL.md",
+    "LICENSE-AGPL-3.0",
+    "LICENSE-COMMERCIAL",
     "mypy.ini",
-    "scripts-dev",
-    "synmark",
+    "scripts-dev/**/*",
+    "synmark/**/*",
     "sytest-blacklist",
-    "tests",
+    "tests/**/*",
     "UPGRADE.rst",
     "Cargo.toml",
     "Cargo.lock",
@@ -436,7 +438,7 @@ sdist-include = [
     "rust/build.rs",
     "rust/src/**",
 ]
-sdist-exclude = ["synapse/*.so"]
+exclude = ["synapse/*.so"]
 
 [build-system]
 # The upper bounds here are defensive, intended to prevent situations like
