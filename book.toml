@@ -4,7 +4,6 @@
 title = "Synapse"
 authors = ["The Matrix.org Foundation C.I.C."]
 language = "en"
-multilingual = false
 
 # The directory that documentation files are stored in
 src = "docs"
