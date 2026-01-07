@@ -74,6 +74,8 @@ jobs:
           #
           # We empty out the file, instead of deleting it, as doing so would
           # just cause htmltest to complain that links to it were invalid.
-          echo "" > book/print.html
+          # Ideally `htmltest` would have an option to ignore specific files
+          # instead.
+          echo '<!DOCTYPE HTML>' > book/print.html
 
           ./htmltest book --conf docs/.htmltest.yml
