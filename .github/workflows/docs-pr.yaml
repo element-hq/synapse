@@ -68,4 +68,8 @@ jobs:
         # Then run htmltest (without checking external links since that involves the network and is slow).
         run: |
           MDBOOK_OUTPUT__HTML__SITE_URL="./" mdbook build
-          ./htmltest book --skip-external
+
+          # Delete the print.html file as it can raise false positives during link checking.
+          rm -rf book/print.html
+
+          ./htmltest book --conf docs/.htmltest.yml
