@@ -22,11 +22,11 @@ from typing import TYPE_CHECKING, Collection, cast
 
 from signedjson.key import (
     decode_signing_key_base64,
+    encode_signing_key_base64,
     generate_signing_key,
     get_verify_key,
 )
 from signedjson.types import SigningKey
-from unpaddedbase64 import encode_base64
 
 from synapse.api.errors import SynapseError
 from synapse.storage._base import SQLBaseStore
@@ -36,7 +36,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
-from synapse.types import get_domain_from_id
+from synapse.types import UserID, get_domain_from_id
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -51,7 +51,7 @@ class AccountKeysStore(SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
 
-    async def get_or_create_account_key_user_id_for_account_name_user_id(
+    async def get_or_create_local_account_key_user_id(
         self, account_name_user_id: str
     ) -> tuple[str, SigningKey]:
         """
@@ -71,7 +71,7 @@ class AccountKeysStore(SQLBaseStore):
             raise SynapseError(
                 500,
                 (
-                    "get_or_create_account_key_user_id_for_account_name_user_id: this server cannot"
+                    "get_or_create_local_account_key_user_id: this server cannot"
                     f" create an account key for other servers: {account_name_user_id}"
                 ),
             )
@@ -81,40 +81,42 @@ class AccountKeysStore(SQLBaseStore):
             keyvalues={
                 "account_name_user_id": account_name_user_id,
             },
-            retcols=["account_key_user_id", "account_key"],
+            retcols=["account_key_user_id", "signing_key"],
             allow_none=True,
-            desc="get_or_create_account_key_user_id_for_account_name_user_id.get_key_txn",
+            desc="get_or_create_local_account_key_user_id.get_key_txn",
         )
         if row is not None:
             return row[0], decode_account_key(row[1])
 
         # create a new account key for this account inside a txn to ensure we lock correctly.
         def create_key_txn(txn: LoggingTransaction) -> tuple[str, str]:
-            key, public_key_str = generate_account_key()
-            account_key_user_id = (
-                f"@{public_key_str}:{get_domain_from_id(account_name_user_id)}"
+            signing_key = generate_signing_key("1")
+            account_key_user_id = UserID.from_verify_key(
+                get_domain_from_id(account_name_user_id),
+                get_verify_key(signing_key),
             )
 
             # Race to insert the key. The first one to make it will be returned here as we don't clobber
             sql = (
-                "INSERT INTO account_keys(account_name_user_id, account_key_user_id, account_key)"
-                " VALUES(?, ?, ?)"
+                "INSERT INTO account_keys(account_name_user_id, account_key_user_id, account_domain, signing_key)"
+                " VALUES(?, ?, ?, ?)"
                 " ON CONFLICT DO NOTHING"
             )
             txn.execute(
                 sql,
                 (
                     account_name_user_id,
-                    account_key_user_id,
-                    encode_base64(key.encode(), urlsafe=True),
+                    account_key_user_id.to_string(),
+                    account_key_user_id.domain,
+                    encode_signing_key_base64(signing_key),
                 ),
             )
-            sql = "SELECT account_key_user_id, account_key FROM account_keys WHERE account_name_user_id = ?"
+            sql = "SELECT account_key_user_id, signing_key FROM account_keys WHERE account_name_user_id = ?"
             txn.execute(sql, (account_name_user_id,))
             return cast(tuple[str, str], txn.fetchone())
 
         row = await self.db_pool.runInteraction(
-            "get_or_create_account_key_user_id_for_account_name_user_id.create_key_txn",
+            "get_or_create_local_account_key_user_id.create_key_txn",
             create_key_txn,
         )
         return row[0], decode_account_key(row[1])
@@ -129,11 +131,11 @@ class AccountKeysStore(SQLBaseStore):
 
         Args:
             account_key_user_ids: A list of user IDs in account key format e.g
-            ["@l8Hft5qXKn1vfHrg3p4+W8gELQVo8N13JkluMfmn2sQ:example.com"]
+            ["@l8Hft5qXKn1vfHrg3p4-W8gELQVo8N13JkluMfmn2sQ:example.com"]
 
         Returns:
             A map of account key user IDs to account name user IDs e.g.
-            {"@l8Hft5qXKn1vfHrg3p4+W8gELQVo8N13JkluMfmn2sQ:example.com":"@alice:example.com"}
+            {"@l8Hft5qXKn1vfHrg3p4-W8gELQVo8N13JkluMfmn2sQ:example.com":"@alice:example.com"}
         """
 
         clause, args = make_in_list_sql_clause(
@@ -150,11 +152,66 @@ class AccountKeysStore(SQLBaseStore):
         )
         return {row[0]: row[1] for row in rows}
 
+    async def store_verified_account_name_user_ids(
+        self, key_to_name: dict[str, str], timestamp: int
+    ) -> None:
+        """
+        Store the verified account names for the given account key user IDs.
 
-def generate_account_key() -> tuple[SigningKey, str]:
-    signing_key = generate_signing_key("1")
-    verify_key_str = encode_base64(get_verify_key(signing_key).encode(), urlsafe=True)
-    return signing_key, verify_key_str
+        Args:
+            key_to_name: A map from account key user ID to verified account name user ID.
+            timestamp: The current time, used for marking when this account was verified.
+        """
+        await self.db_pool.simple_upsert_many(
+            table="account_keys",
+            key_names=["account_key_user_id"],
+            key_values=[(k,) for k in key_to_name.keys()],
+            value_names=["account_name_user_id", "account_domain", "verified_at_ms"],
+            value_values=[
+                (n, get_domain_from_id(n), timestamp) for n in key_to_name.values()
+            ],
+            desc="store_verified_account_name_user_ids",
+        )
+
+    async def store_unverified_account_key_user_ids(
+        self,
+        user_ids: list[str],
+    ) -> None:
+        """
+        Store unverified account key user IDs. Does nothing if the account key user ID is already
+        verified.
+
+        Args:
+            user_ids: A list of account key user IDs.
+        """
+        await self.db_pool.simple_upsert_many(
+            table="account_keys",
+            key_names=["account_key_user_id"],
+            key_values=[(k,) for k in user_ids],
+            desc="store_unverified_account_key_user_ids",
+            value_names=["account_domain"],
+            value_values=[(get_domain_from_id(k),) for k in user_ids],
+        )
+
+    async def get_unverified_account_key_user_ids(
+        self,
+        domain: str,
+    ) -> list[str]:
+        """
+        Get a list of unverified user IDs for the given domain.
+
+        Args:
+            domain: The domain to query
+        Returns:
+            A list of unverified account key user IDs.
+        """
+        # simple_select_onecol does not support IS NULL
+        result = await self.db_pool.execute(
+            "get_unverified_account_key_user_ids",
+            "SELECT account_key_user_id FROM account_keys WHERE account_domain = ? AND account_name_user_id IS NULL",
+            domain,
+        )
+        return [r[0] for r in result]
 
 
 def decode_account_key(signing_key: str) -> SigningKey:
