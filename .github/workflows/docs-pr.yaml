@@ -69,7 +69,11 @@ jobs:
         run: |
           MDBOOK_OUTPUT__HTML__SITE_URL="./" mdbook build
 
-          # Delete the print.html file as it can raise false positives during link checking.
-          rm -rf book/print.html
+          # Delete the contents of the print.html file, as it can raise false
+          # positives during link checking.
+          #
+          # We empty out the file, instead of deleting it, as doing so would
+          # just cause htmltest to complain that links to it were invalid.
+          echo "" > book/print.html
 
           ./htmltest book --conf docs/.htmltest.yml
