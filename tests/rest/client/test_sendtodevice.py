@@ -208,7 +208,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
             data = json_cb()
             self.assertEqual(len(data["edus"]), 2)
         finally:
-            server_logger.disabled = server_logger_was_disabled
+            sql_logger.disabled = sql_logger_was_disabled
 
     def test_transaction_splitting(self) -> None:
         """Test that a bunch of to-device messages are split into multiple transactions if there are too many EDUs"""
@@ -217,9 +217,9 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # ref: https://github.com/twisted/twisted/issues/12482
         # To remove this, we would need to fix the above issue and
         # update, including in olddeps (so several years' wait).
-        server_logger = logging.getLogger("synapse.storage.SQL")
-        server_logger_was_disabled = server_logger.disabled
-        server_logger.disabled = True
+        sql_logger = logging.getLogger("synapse.storage.SQL")
+        sql_logger_was_disabled = sql_logger.disabled
+        sql_logger.disabled = True
         try:
             mock_send_transaction: AsyncMock = (
                 self.federation_transport_client.send_transaction
@@ -262,7 +262,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
             second_call = mock_send_transaction.call_args_list[1][0][1]()
             self.assertEqual(len(second_call["edus"]), 11)
         finally:
-            server_logger.disabled = server_logger_was_disabled
+            sql_logger.disabled = sql_logger_was_disabled
 
     @override_config({"rc_key_requests": {"per_second": 10, "burst_count": 2}})
     def test_local_room_key_request(self) -> None:
