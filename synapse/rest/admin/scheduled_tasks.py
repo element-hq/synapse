@@ -42,7 +42,9 @@ class ScheduledTasksRestServlet(RestServlet):
         action_name = parse_string(request, "action_name")
         resource_id = parse_string(request, "resource_id")
         status = parse_string(request, "status")
-        # fallback to avoid breaking existing usage ( API doc didn't match the code...)
+        # This parameter was historically called `job_status`, while the Admin API docs
+        # defined it as `status`. We now support both, as `status` is generally
+        # a nicer name. A v2 of this endpoint should keep only `status`.
         if status is None:
             status = parse_string(request, "job_status")
         max_timestamp = parse_integer(request, "max_timestamp")
