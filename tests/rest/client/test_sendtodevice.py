@@ -126,7 +126,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
         user1_tok = self.login("u1", "pass", "d1")
 
         # send the message
-        test_msg = {"foo": random_string(MAX_EDU_SIZE)}
+        test_msg = {"foo": "a" * MAX_EDU_SIZE}
         channel = self.make_request(
             "PUT",
             "/_matrix/client/r0/sendToDevice/m.test/12345",
