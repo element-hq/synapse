@@ -190,8 +190,9 @@ oidc_providers:
 3. Create an application for synapse in Authentik and link it to the provider.
 4. Note the slug of your application, Client ID and Client Secret.
 
-Note: RSA keys must be used for signing for Authentik, ECC keys do not work.
-Note: The provider must have a signing key set and must not use an encryption key.
+> [!NOTE]
+> RSA keys must be used for signing for Authentik; ECC keys do not work.
+> The provider must have a signing key set and must not use an encryption key.
 
 Synapse config:
 ```yaml

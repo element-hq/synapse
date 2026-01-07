@@ -96,8 +96,9 @@ The following configuration options, in the `registration` section, are related:
   it more difficult for them to refresh in time, which may force them to need to
   re-authenticate using login credentials).
 
-**Note:** All four options above only apply when tokens are created (by logging in or refreshing).
-Changes to these settings do not apply retroactively.
+> [!NOTE]
+> All four options above only apply when tokens are created (by logging in or refreshing).
+> Changes to these settings do not apply retroactively.
 
 
 ### Using refresh token expiry to log out inactive sessions
@@ -113,9 +114,10 @@ account.
 `refreshable_access_token_lifetime` and this section assumes that to be the case
 for simplicity.)
 
-Note: this will only affect sessions using refresh tokens. You may wish to
-set a short `nonrefreshable_access_token_lifetime` to prevent this being bypassed
-by clients that do not support refresh tokens.
+> [!NOTE]
+> This will only affect sessions using refresh tokens. You may wish to
+> set a short `nonrefreshable_access_token_lifetime` to prevent this being bypassed
+> by clients that do not support refresh tokens.
 
 
 #### Choosing values that guarantee permitting some inactivity

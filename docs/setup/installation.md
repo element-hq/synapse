@@ -21,9 +21,10 @@ best practices. ⚠️
 
 ## Installing Synapse
 
-Note: Synapse uses a number of platform dependencies such as Python and PostgreSQL,
-and aims to follow supported upstream versions. See the [deprecation
-policy](../deprecation_policy.md) for more details.
+> [!NOTE]
+> Synapse uses a number of platform dependencies such as Python and PostgreSQL,
+> and aims to follow supported upstream versions. See the [deprecation
+> policy](../deprecation_policy.md) for more details.
 
 ### Prebuilt packages
 
@@ -314,8 +315,9 @@ sudo dnf group install "Development Tools"
 
 ##### Red Hat Enterprise Linux / Rocky Linux / Oracle Linux
 
-*Note: The term "RHEL" below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux.
-The distributions are 1:1 binary compatible.*
+> [!NOTE]
+> The term "RHEL" below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux.
+> The distributions are 1:1 binary compatible.
 
 It's recommended to use the latest Python versions.
 

@@ -20,8 +20,9 @@ So for example, if Synapse were to calculate the active users on the 15th July a
 A user is **never** considered active if they are either:
  - Part of the trial day cohort (described below)
  - Owned by an application service.
-   - Note: This **only** covers users that are part of an application service `namespaces.users` registration. The namespace
-     must also be marked as `exclusive`.
+   > [!NOTE]
+   > This **only** covers users that are part of an application service `namespaces.users` registration. The namespace
+   > must also be marked as `exclusive`.
 
 Otherwise, any request to Synapse will mark the user as active. Please note that registration will not mark a user as active *unless* 
 they register with a 3pid that is included in the config field `mau_limits_reserved_threepids`.

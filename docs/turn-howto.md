@@ -156,8 +156,9 @@ Here are a few things to try:
       user=username:password
       ```
 
-      **Note**: these settings will not take effect unless `use-auth-secret`
-      and `static-auth-secret` are disabled.
+      > [!NOTE]
+      > These settings will not take effect unless `use-auth-secret`
+      > and `static-auth-secret` are disabled.
 
       Restart coturn after changing the configuration file.
 

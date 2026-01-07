@@ -92,9 +92,10 @@ This does not include the size of any associated media associated with the room.
 
 Returns an error on SQLite.
 
-*Note:* This uses the planner statistics from PostgreSQL to do the estimates,
-which means that the returned information can vary widely from reality. However,
-it should be enough to get a rough idea of where database disk space is going.
+> [!NOTE]
+> This uses the planner statistics from PostgreSQL to do the estimates,
+> which means that the returned information can vary widely from reality. However,
+> it should be enough to get a rough idea of where database disk space is going.
 
 
 The API is:
