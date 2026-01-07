@@ -1,0 +1,1 @@
+Fix bug due to passing of incorrect parameter to get_local_current_membership_for_user_in_room. Contributed by Lukas Tautz.
