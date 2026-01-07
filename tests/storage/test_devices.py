@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Collection, List, Tuple
+from typing import Collection
 
 from twisted.internet.testing import MemoryReactor
 
@@ -27,7 +27,7 @@ import synapse.api.errors
 from synapse.api.constants import EduTypes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -44,7 +44,7 @@ class DeviceStoreTestCase(HomeserverTestCase):
         config["federation_sender_instances"] = ["master"]
         return config
 
-    def add_device_change(self, user_id: str, device_ids: List[str], host: str) -> None:
+    def add_device_change(self, user_id: str, device_ids: list[str], host: str) -> None:
         """Add a device list change for the given device to
         `device_lists_outbound_pokes` table.
         """
@@ -306,7 +306,7 @@ class DeviceStoreTestCase(HomeserverTestCase):
     def _check_devices_in_updates(
         self,
         expected_device_ids: Collection[str],
-        device_updates: List[Tuple[str, JsonDict]],
+        device_updates: list[tuple[str, JsonDict]],
     ) -> None:
         """Check that an specific device ids exist in a list of device update EDUs"""
         self.assertEqual(len(device_updates), len(expected_device_ids))

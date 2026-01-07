@@ -20,9 +20,10 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import SynapseError
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_json_object_from_request
 from synapse.http.site import SynapseRequest
@@ -46,7 +47,13 @@ class UserDirectorySearchRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.user_directory_handler = hs.get_user_directory_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonMapping]:
+        self._per_user_limiter = Ratelimiter(
+            store=hs.get_datastores().main,
+            clock=hs.get_clock(),
+            cfg=hs.config.ratelimiting.rc_user_directory,
+        )
+
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonMapping]:
         """Searches for users in directory
 
         Returns:
@@ -68,6 +75,8 @@ class UserDirectorySearchRestServlet(RestServlet):
 
         if not self.hs.config.userdirectory.user_directory_search_enabled:
             return 200, {"limited": False, "results": []}
+
+        await self._per_user_limiter.ratelimit(requester)
 
         body = parse_json_object_from_request(request)
 

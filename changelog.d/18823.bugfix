@@ -1,1 +1,0 @@
-Fix bug where we did not send invite revocations over federation.

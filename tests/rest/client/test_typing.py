@@ -27,7 +27,7 @@ from synapse.api.constants import EduTypes
 from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

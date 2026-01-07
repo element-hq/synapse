@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -86,7 +86,7 @@ class ReplicationFederationSendEventsRestServlet(ReplicationEndpoint):
     async def _serialize_payload(  # type: ignore[override]
         store: "DataStore",
         room_id: str,
-        event_and_contexts: List[EventPersistencePair],
+        event_and_contexts: list[EventPersistencePair],
         backfilled: bool,
     ) -> JsonDict:
         """
@@ -122,7 +122,7 @@ class ReplicationFederationSendEventsRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         with Measure(
             self.clock, name="repl_fed_send_events_parse", server_name=self.server_name
         ):
@@ -194,7 +194,7 @@ class ReplicationFederationSendEduRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, edu_type: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         origin = content["origin"]
         edu_content = content["content"]
 
@@ -243,7 +243,7 @@ class ReplicationGetQueryRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, query_type: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         args = content["args"]
         args["origin"] = content["origin"]
 
@@ -285,7 +285,7 @@ class ReplicationCleanRoomRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self.store.clean_room_for_join(room_id)
 
         return 200, {}
@@ -320,7 +320,7 @@ class ReplicationStoreRoomOnOutlierMembershipRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         room_version = KNOWN_ROOM_VERSIONS[content["room_version"]]
         await self.store.maybe_store_room_on_outlier_membership(room_id, room_version)
         return 200, {}

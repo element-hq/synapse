@@ -17,6 +17,10 @@ from twisted.internet.defer import Deferred
 from synapse.types import ISynapseReactor
 
 class HttpClient:
+    """
+    The returned deferreds follow Synapse logcontext rules.
+    """
+
     def __init__(self, reactor: ISynapseReactor, user_agent: str) -> None: ...
     def get(self, url: str, response_limit: int) -> Deferred[bytes]: ...
     def post(

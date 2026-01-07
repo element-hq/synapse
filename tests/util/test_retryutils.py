@@ -35,6 +35,7 @@ class RetryLimiterTestCase(HomeserverTestCase):
             get_retry_limiter(
                 destination="test_dest",
                 our_server_name=self.hs.hostname,
+                hs=self.hs,
                 clock=self.clock,
                 store=store,
             )
@@ -57,6 +58,7 @@ class RetryLimiterTestCase(HomeserverTestCase):
             get_retry_limiter(
                 destination="test_dest",
                 our_server_name=self.hs.hostname,
+                hs=self.hs,
                 clock=self.clock,
                 store=store,
             )
@@ -89,6 +91,7 @@ class RetryLimiterTestCase(HomeserverTestCase):
             get_retry_limiter(
                 destination="test_dest",
                 our_server_name=self.hs.hostname,
+                hs=self.hs,
                 clock=self.clock,
                 store=store,
             ),
@@ -104,6 +107,7 @@ class RetryLimiterTestCase(HomeserverTestCase):
             get_retry_limiter(
                 destination="test_dest",
                 our_server_name=self.hs.hostname,
+                hs=self.hs,
                 clock=self.clock,
                 store=store,
             )
@@ -139,6 +143,7 @@ class RetryLimiterTestCase(HomeserverTestCase):
             get_retry_limiter(
                 destination="test_dest",
                 our_server_name=self.hs.hostname,
+                hs=self.hs,
                 clock=self.clock,
                 store=store,
             )
@@ -165,6 +170,7 @@ class RetryLimiterTestCase(HomeserverTestCase):
             get_retry_limiter(
                 destination="test_dest",
                 our_server_name=self.hs.hostname,
+                hs=self.hs,
                 clock=self.clock,
                 store=store,
                 notifier=notifier,
@@ -238,6 +244,7 @@ class RetryLimiterTestCase(HomeserverTestCase):
             get_retry_limiter(
                 destination="test_dest",
                 our_server_name=self.hs.hostname,
+                hs=self.hs,
                 clock=self.clock,
                 store=store,
             )
@@ -261,6 +268,7 @@ class RetryLimiterTestCase(HomeserverTestCase):
             get_retry_limiter(
                 destination="test_dest",
                 our_server_name=self.hs.hostname,
+                hs=self.hs,
                 clock=self.clock,
                 store=store,
             ),
@@ -273,6 +281,7 @@ class RetryLimiterTestCase(HomeserverTestCase):
             get_retry_limiter(
                 destination="test_dest",
                 our_server_name=self.hs.hostname,
+                hs=self.hs,
                 clock=self.clock,
                 store=store,
             )
@@ -297,6 +306,7 @@ class RetryLimiterTestCase(HomeserverTestCase):
             get_retry_limiter(
                 destination="test_dest",
                 our_server_name=self.hs.hostname,
+                hs=self.hs,
                 clock=self.clock,
                 store=store,
             ),

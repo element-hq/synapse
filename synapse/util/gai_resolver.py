@@ -17,13 +17,8 @@ from socket import (
 from typing import (
     TYPE_CHECKING,
     Callable,
-    List,
     NoReturn,
-    Optional,
     Sequence,
-    Tuple,
-    Type,
-    Union,
 )
 
 from zope.interface import implementer
@@ -91,13 +86,13 @@ _socktypeToType = {
 }
 
 
-_GETADDRINFO_RESULT = List[
-    Tuple[
+_GETADDRINFO_RESULT = list[
+    tuple[
         AddressFamily,
         SocketKind,
         int,
         str,
-        Union[Tuple[str, int], Tuple[str, int, int, int], Tuple[int, bytes]],
+        tuple[str, int] | tuple[str, int, int, int] | tuple[int, bytes],
     ]
 ]
 
@@ -112,7 +107,7 @@ class GAIResolver:
     def __init__(
         self,
         reactor: IReactorThreads,
-        getThreadPool: Optional[Callable[[], "ThreadPool"]] = None,
+        getThreadPool: Callable[[], "ThreadPool"] | None = None,
         getaddrinfo: Callable[[str, int, int, int], _GETADDRINFO_RESULT] = getaddrinfo,
     ):
         """
@@ -141,7 +136,7 @@ class GAIResolver:
         resolutionReceiver: IResolutionReceiver,
         hostName: str,
         portNumber: int = 0,
-        addressTypes: Optional[Sequence[Type[IAddress]]] = None,
+        addressTypes: Sequence[type[IAddress]] | None = None,
         transportSemantics: str = "TCP",
     ) -> IHostResolution:
         """

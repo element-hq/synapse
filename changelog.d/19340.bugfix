@@ -1,0 +1,1 @@
+Transform events with client metadata before serialising in /event response.

@@ -20,7 +20,6 @@
 #
 #
 
-from typing import Optional
 from unittest import mock
 
 from twisted.internet.defer import ensureDeferred
@@ -35,7 +34,7 @@ from synapse.rest.client import devices, login, register
 from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests import unittest
@@ -251,7 +250,7 @@ class DeviceTestCase(unittest.HomeserverTestCase):
         self.assertEqual(10, len(res))
 
         # wait for the task scheduler to do a second delete pass
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS / 1000)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         # remaining messages should now be deleted
         res = self.get_success(
@@ -312,8 +311,8 @@ class DeviceTestCase(unittest.HomeserverTestCase):
         user_id: str,
         device_id: str,
         display_name: str,
-        access_token: Optional[str] = None,
-        ip: Optional[str] = None,
+        access_token: str | None = None,
+        ip: str | None = None,
     ) -> None:
         device_id = self.get_success(
             self.handler.check_device_registered(
@@ -449,6 +448,33 @@ class DeviceTestCase(unittest.HomeserverTestCase):
                 {"device_id": device_3, "keys": device_key_3},
             ],
         )
+
+    def test_delete_device_removes_refresh_tokens(self) -> None:
+        """Deleting a device should also purge any refresh tokens for it."""
+        self._record_users()
+
+        self.get_success(
+            self.store.add_refresh_token_to_user(
+                user_id=user1,
+                token="refresh_token",
+                device_id="abc",
+                expiry_ts=None,
+                ultimate_session_expiry_ts=None,
+            )
+        )
+
+        self.get_success(self.handler.delete_devices(user1, ["abc"]))
+
+        remaining_refresh_token = self.get_success(
+            self.store.db_pool.simple_select_one(
+                table="refresh_tokens",
+                keyvalues={"user_id": user1, "device_id": "abc"},
+                retcols=("id",),
+                desc="get_refresh_token_for_device",
+                allow_none=True,
+            )
+        )
+        self.assertIsNone(remaining_refresh_token)
 
 
 class DehydrationTestCase(unittest.HomeserverTestCase):

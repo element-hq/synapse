@@ -12,7 +12,7 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-use std::{collections::HashMap, future::Future};
+use std::{collections::HashMap, future::Future, sync::OnceLock};
 
 use anyhow::Context;
 use futures::TryStreamExt;
@@ -134,10 +134,10 @@ fn get_runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRunt
 }
 
 /// A reference to the `twisted.internet.defer` module.
-static DEFER: OnceCell<PyObject> = OnceCell::new();
+static DEFER: OnceCell<Py<PyAny>> = OnceCell::new();
 
 /// Access to the `twisted.internet.defer` module.
-fn defer(py: Python<'_>) -> PyResult<&Bound<PyAny>> {
+fn defer(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
     Ok(DEFER
         .get_or_try_init(|| py.import("twisted.internet.defer").map(Into::into))?
         .bind(py))
@@ -165,7 +165,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 #[pyclass]
 struct HttpClient {
     client: reqwest::Client,
-    reactor: PyObject,
+    reactor: Py<PyAny>,
 }
 
 #[pymethods]
@@ -237,7 +237,7 @@ impl HttpClient {
                 return Err(HttpResponseException::new(status, buffer));
             }
 
-            let r = Python::with_gil(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
+            let r = Python::attach(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
 
             Ok(r)
         })
@@ -270,7 +270,7 @@ where
     handle.spawn(async move {
         let res = task.await;
 
-        Python::with_gil(move |py| {
+        Python::attach(move |py| {
             // Flatten the panic into standard python error
             let res = match res {
                 Ok(r) => r,
@@ -299,5 +299,22 @@ where
         });
     });
 
-    Ok(deferred)
+    // Make the deferred follow the Synapse logcontext rules
+    make_deferred_yieldable(py, &deferred)
+}
+
+static MAKE_DEFERRED_YIELDABLE: OnceLock<pyo3::Py<pyo3::PyAny>> = OnceLock::new();
+
+/// Given a deferred, make it follow the Synapse logcontext rules
+fn make_deferred_yieldable<'py>(
+    py: Python<'py>,
+    deferred: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let make_deferred_yieldable = MAKE_DEFERRED_YIELDABLE.get_or_init(|| {
+        let sys = PyModule::import(py, "synapse.logging.context").unwrap();
+        let func = sys.getattr("make_deferred_yieldable").unwrap().unbind();
+        func
+    });
+
+    make_deferred_yieldable.call1(py, (deferred,))?.extract(py)
 }

@@ -21,7 +21,6 @@
 import base64
 import logging
 import os
-from typing import List, Optional
 from unittest.mock import patch
 
 import treq
@@ -195,7 +194,7 @@ class ProxyParserTests(TestCase):
         expected_scheme: bytes,
         expected_hostname: bytes,
         expected_port: int,
-        expected_credentials: Optional[bytes],
+        expected_credentials: bytes | None,
     ) -> None:
         """
         Tests that a given proxy URL will be broken into the components.
@@ -251,8 +250,8 @@ class ProxyAgentTests(TestCase):
         client_factory: IProtocolFactory,
         server_factory: IProtocolFactory,
         ssl: bool = False,
-        expected_sni: Optional[bytes] = None,
-        tls_sanlist: Optional[List[bytes]] = None,
+        expected_sni: bytes | None = None,
+        tls_sanlist: list[bytes] | None = None,
     ) -> IProtocol:
         """Builds a test server, and completes the outgoing client connection
 
@@ -602,7 +601,7 @@ class ProxyAgentTests(TestCase):
         self,
         proxy_config: ProxyConfig,
         expect_proxy_ssl: bool = False,
-        expected_auth_credentials: Optional[bytes] = None,
+        expected_auth_credentials: bytes | None = None,
     ) -> None:
         """Send a http request via an agent and check that it is correctly received at
             the proxy. The proxy can use either http or https.
@@ -682,7 +681,7 @@ class ProxyAgentTests(TestCase):
         self,
         proxy_config: ProxyConfig,
         expect_proxy_ssl: bool = False,
-        expected_auth_credentials: Optional[bytes] = None,
+        expected_auth_credentials: bytes | None = None,
     ) -> None:
         """Send a https request via an agent and check that it is correctly received at
             the proxy and client. The proxy can use either http or https.

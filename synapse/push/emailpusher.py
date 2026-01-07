@@ -20,16 +20,16 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.error import AlreadyCalled, AlreadyCancelled
 from twisted.internet.interfaces import IDelayedCall
 
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.push import Pusher, PusherConfig, PusherConfigException, ThrottleParams
 from synapse.push.mailer import Mailer
 from synapse.push.push_types import EmailReason
 from synapse.storage.databases.main.event_push_actions import EmailPushAction
+from synapse.util.duration import Duration
 from synapse.util.threepids import validate_email
 
 if TYPE_CHECKING:
@@ -72,7 +72,7 @@ class EmailPusher(Pusher):
         self.store = self.hs.get_datastores().main
         self.email = pusher_config.pushkey
         self.timed_call: Optional[IDelayedCall] = None
-        self.throttle_params: Dict[str, ThrottleParams] = {}
+        self.throttle_params: dict[str, ThrottleParams] = {}
         self._inited = False
 
         self._is_processing = False
@@ -118,7 +118,7 @@ class EmailPusher(Pusher):
         if self._is_processing:
             return
 
-        run_as_background_process("emailpush.process", self.server_name, self._process)
+        self.hs.run_as_background_process("emailpush.process", self._process)
 
     def _pause_processing(self) -> None:
         """Used by tests to temporarily pause processing of events.
@@ -175,7 +175,7 @@ class EmailPusher(Pusher):
             )
         )
 
-        soonest_due_at: Optional[int] = None
+        soonest_due_at: int | None = None
 
         if not unprocessed:
             await self.save_last_stream_ordering_and_success(self.max_stream_ordering)
@@ -228,8 +228,10 @@ class EmailPusher(Pusher):
                     self.timed_call = None
 
         if soonest_due_at is not None:
-            self.timed_call = self.hs.get_reactor().callLater(
-                self.seconds_until(soonest_due_at), self.on_timer
+            delay = self.seconds_until(soonest_due_at)
+            self.timed_call = self.hs.get_clock().call_later(
+                Duration(seconds=delay),
+                self.on_timer,
             )
 
     async def save_last_stream_ordering_and_success(
@@ -323,7 +325,7 @@ class EmailPusher(Pusher):
         )
 
     async def send_notification(
-        self, push_actions: List[EmailPushAction], reason: EmailReason
+        self, push_actions: list[EmailPushAction], reason: EmailReason
     ) -> None:
         logger.info("Sending notif email for user %r", self.user_id)
 

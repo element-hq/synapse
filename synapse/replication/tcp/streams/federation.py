@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 import attr
 
@@ -58,7 +58,7 @@ class FederationStream(Stream):
                 federation_sender.get_current_token
             )
             update_function: Callable[
-                [str, int, int, int], Awaitable[Tuple[List[Tuple[int, Any]], int, bool]]
+                [str, int, int, int], Awaitable[tuple[list[tuple[int, Any]], int, bool]]
             ] = federation_sender.get_replication_rows
 
         elif hs.should_send_federation():
@@ -88,5 +88,5 @@ class FederationStream(Stream):
     @staticmethod
     async def _stub_update_function(
         instance_name: str, from_token: int, upto_token: int, limit: int
-    ) -> Tuple[list, int, bool]:
+    ) -> tuple[list, int, bool]:
         return [], upto_token, False

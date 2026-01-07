@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred
@@ -139,7 +138,7 @@ def _await_resolution(reactor: ThreadedMemoryReactorClock, d: Deferred) -> float
     return (reactor.seconds() - start_time) * 1000
 
 
-def build_rc_config(settings: Optional[dict] = None) -> FederationRatelimitSettings:
+def build_rc_config(settings: dict | None = None) -> FederationRatelimitSettings:
     config_dict = default_config("test")
     config_dict.update(settings or {})
     config = HomeServerConfig()

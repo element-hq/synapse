@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.138/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.144/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -2259,9 +2259,8 @@ properties:
       Setting this to a high value allows users to report content quickly, possibly in
       duplicate. This can result in higher database usage.
     default:
-      per_user:
-        per_second: 1.0
-        burst_count: 5.0
+      per_second: 1.0
+      burst_count: 5.0
     examples:
       - per_second: 2.0
         burst_count: 20.0
@@ -2270,12 +2269,21 @@ properties:
     description: >-
       Sets rate limits for how often users are able to create rooms.
     default:
-      per_user:
-        per_second: 0.016
-        burst_count: 10.0
+      per_second: 0.016
+      burst_count: 10.0
     examples:
       - per_second: 1.0
         burst_count: 5.0
+  rc_user_directory:
+    $ref: "#/$defs/rc"
+    description: >-
+      This option allows admins to ratelimit searches in the user directory.
+
+
+      _Added in Synapse 1.145.0._
+    default:
+      per_second: 0.016
+      burst_count: 200.0
   federation_rr_transactions_per_room_per_second:
     type: integer
     description: >-
@@ -2337,6 +2345,19 @@ properties:
     description: >-
       Enable the media store service in the Synapse master. Set to false if you
       are using a separate media store worker.
+    default: true
+    examples:
+      - false
+  enable_local_media_storage:
+    type: boolean
+    description: >-
+      Enable the local on-disk media storage provider. When disabled, media is
+      stored only in configured `media_storage_providers` and temporary files are
+      used for processing.
+      
+      **Warning:** If this option is set to `false` and no `media_storage_providers`
+      are configured, all media requests will return 404 errors as there will be
+      no storage backend available.
     default: true
     examples:
       - false
@@ -2415,8 +2436,15 @@ properties:
       A list of media upload limits defining how much data a given user can
       upload in a given time period.
 
+      These limits are applied in addition to the `max_upload_size` limit above
+      (which applies to individual uploads).
+
 
       An empty list means no limits are applied.
+
+
+      These settings can be overridden using the `get_media_upload_limits_for_user`
+      module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
     default: []
     items:
       time_period:
@@ -2879,6 +2907,35 @@ properties:
     default: true
     examples:
       - false
+  matrix_rtc:
+    type: object 
+    description: >-
+      Options related to MatrixRTC.
+    properties:
+      transports:
+        type: array
+        items:
+          type: object
+          required:
+            - type
+          properties:
+            type:
+              type: string
+              description: The type of transport to use to connect to the selective forwarding unit (SFU).
+              example: livekit
+            livekit_service_url:
+              type: string
+              description: >-
+                The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+              example: https://matrix-rtc.example.com/livekit/jwt
+        description:
+          A list of transport types and arguments to use for MatrixRTC connections.
+        default: []
+    default: {}
+    examples:
+      - transports:
+        - type: livekit
+          livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
   enable_registration:
     type: boolean
     description: >-
@@ -4661,8 +4718,9 @@ properties:
       pepper:
         type: ["string", "null"]
         description: >-
-          Set the value here to a secret random string for extra security. DO
-          NOT CHANGE THIS AFTER INITIAL SETUP!
+          A secret random string that will be appended to user's passwords
+          before they are hashed. This improves the security of short passwords.
+          DO NOT CHANGE THIS AFTER INITIAL SETUP!
         default: null
       policy:
         type: object

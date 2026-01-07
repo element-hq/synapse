@@ -1,14 +1,15 @@
 [
     {
-        "provider_name": "Twitter",
-        "provider_url": "http://www.twitter.com/",
+        "provider_name": "X",
+        "provider_url": "https://x.com/",
         "endpoints": [
             {
                 "schemes": [
-                    "https://twitter.com/*/moments/*",
-                    "https://*.twitter.com/*/moments/*"
+                    "https://x.com/*",
+                    "https://x.com/*/status/*",
+                    "https://*.x.com/*/status/*"
                 ],
-                "url": "https://publish.twitter.com/oembed"
+                "url": "https://publish.x.com/oembed"
             }
         ]
     },

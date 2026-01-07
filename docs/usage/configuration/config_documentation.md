@@ -2006,9 +2006,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_reports:
-  per_user:
-    per_second: 1.0
-    burst_count: 5.0
+  per_second: 1.0
+  burst_count: 5.0
 ```
 
 Example configuration:
@@ -2031,9 +2030,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_room_creation:
-  per_user:
-    per_second: 0.016
-    burst_count: 10.0
+  per_second: 0.016
+  burst_count: 10.0
 ```
 
 Example configuration:
@@ -2041,6 +2039,25 @@ Example configuration:
 rc_room_creation:
   per_second: 1.0
   burst_count: 5.0
+```
+---
+### `rc_user_directory`
+
+*(object)* This option allows admins to ratelimit searches in the user directory.
+
+_Added in Synapse 1.145.0._
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_user_directory:
+  per_second: 0.016
+  burst_count: 200.0
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
@@ -2092,6 +2109,16 @@ enable_authenticated_media: false
 Example configuration:
 ```yaml
 enable_media_repo: false
+```
+---
+### `enable_local_media_storage`
+
+*(boolean)* Enable the local on-disk media storage provider. When disabled, media is stored only in configured `media_storage_providers` and temporary files are used for processing.
+**Warning:** If this option is set to `false` and no `media_storage_providers` are configured, all media requests will return 404 errors as there will be no storage backend available. Defaults to `true`.
+
+Example configuration:
+```yaml
+enable_local_media_storage: false
 ```
 ---
 ### `media_store_path`
@@ -2168,8 +2195,11 @@ max_upload_size: 60M
 ### `media_upload_limits`
 
 *(array)* A list of media upload limits defining how much data a given user can upload in a given time period.
+These limits are applied in addition to the `max_upload_size` limit above (which applies to individual uploads).
 
 An empty list means no limits are applied.
+
+These settings can be overridden using the `get_media_upload_limits_for_user` module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
 
 Defaults to `[]`.
 
@@ -2570,6 +2600,28 @@ turn_user_lifetime: 2h
 Example configuration:
 ```yaml
 turn_allow_guests: false
+```
+---
+### `matrix_rtc`
+
+*(object)* Options related to MatrixRTC. Defaults to `{}`.
+
+This setting has the following sub-options:
+
+* `transports` (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to `[]`.
+
+  Options for each entry include:
+
+  * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
+
+  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+
+Example configuration:
+```yaml
+matrix_rtc:
+  transports:
+  - type: livekit
+    livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```
 ---
 ## Registration
@@ -3792,7 +3844,7 @@ This setting has the following sub-options:
 
 * `localdb_enabled` (boolean): Set to false to disable authentication against the local password database. This is ignored if `enabled` is false, and is only useful if you have other `password_providers`. Defaults to `true`.
 
-* `pepper` (string|null): Set the value here to a secret random string for extra security. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
+* `pepper` (string|null): A secret random string that will be appended to user's passwords before they are hashed. This improves the security of short passwords. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
 
 * `policy` (object): Define and enforce a password policy, such as minimum lengths for passwords, etc. This is an implementation of MSC2000.
 

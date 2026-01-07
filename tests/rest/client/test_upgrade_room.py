@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 from unittest.mock import patch
 
 from twisted.internet.testing import MemoryReactor
@@ -28,7 +27,7 @@ from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.rest import admin
 from synapse.rest.client import login, room, room_upgrade_rest_servlet
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeChannel
@@ -56,8 +55,8 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
 
     def _upgrade_room(
         self,
-        token: Optional[str] = None,
-        room_id: Optional[str] = None,
+        token: str | None = None,
+        room_id: str | None = None,
         expire_cache: bool = True,
     ) -> FakeChannel:
         if expire_cache:

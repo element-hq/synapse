@@ -15,7 +15,7 @@ from synapse.federation.federation_base import (
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import make_request
@@ -50,7 +50,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
 
         self.intially_unjoined_room_id = f"!example:{self.OTHER_SERVER_NAME}"
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 2}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 2}})
     def test_local_user_local_joins_contribute_to_limit_and_are_limited(self) -> None:
         # The rate limiter has accumulated one token from Alice's join after the create
         # event.
@@ -76,7 +76,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             by=0.5,
         )
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 2}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 2}})
     def test_local_user_profile_edits_dont_contribute_to_limit(self) -> None:
         # The rate limiter has accumulated one token from Alice's join after the create
         # event. Alice should still be able to change her displayname.
@@ -100,7 +100,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             )
         )
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 1}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 1}})
     def test_remote_joins_contribute_to_rate_limit(self) -> None:
         # Join once, to fill the rate limiter bucket.
         #
@@ -248,7 +248,7 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
         self.room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
         self.intially_unjoined_room_id = "!example:otherhs"
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 2}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.01, "burst_count": 2}})
     def test_local_users_joining_on_another_worker_contribute_to_rate_limit(
         self,
     ) -> None:
@@ -458,7 +458,9 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         self.assertEqual(initial_count, new_count)
 
 
-class TestInviteFiltering(FederatingHomeserverTestCase):
+class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
+    """Tests for MSC4155-style invite filtering."""
+
     servlets = [
         synapse.rest.admin.register_servlets,
         synapse.rest.client.login.register_servlets,
@@ -585,6 +587,148 @@ class TestInviteFiltering(FederatingHomeserverTestCase):
                 self.bob,
                 AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG,
                 {"blocked_servers": [remote_server]},
+            )
+        )
+
+        room_id = self.helper.create_room_as(
+            room_creator=self.alice, tok=self.alice_token
+        )
+        room_version = self.get_success(self.store.get_room_version(room_id))
+
+        invite_event = event_from_pdu_json(
+            {
+                "type": EventTypes.Member,
+                "content": {"membership": "invite"},
+                "room_id": room_id,
+                "sender": remote_user,
+                "state_key": self.bob,
+                "depth": 32,
+                "prev_events": [],
+                "auth_events": [],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            room_version,
+        )
+
+        f = self.get_failure(
+            self.fed_handler.on_invite_request(
+                remote_server,
+                invite_event,
+                invite_event.room_version,
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(f.code, 403)
+        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
+
+
+class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
+    """Tests for MSC4380-style invite filtering."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        synapse.rest.client.login.register_servlets,
+        synapse.rest.client.room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.handler = hs.get_room_member_handler()
+        self.fed_handler = hs.get_federation_handler()
+        self.store = hs.get_datastores().main
+
+        # Create two users.
+        self.alice = self.register_user("alice", "pass")
+        self.alice_token = self.login("alice", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_token = self.login("bob", "pass")
+
+    @override_config({"experimental_features": {"msc4380_enabled": True}})
+    def test_misc4380_block_invite_local(self) -> None:
+        """Test that MSC4380 will block a user from being invited to a room"""
+        room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.bob,
+                AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
+                {
+                    "default_action": "block",
+                },
+            )
+        )
+
+        f = self.get_failure(
+            self.handler.update_membership(
+                requester=create_requester(self.alice),
+                target=UserID.from_string(self.bob),
+                room_id=room_id,
+                action=Membership.INVITE,
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(f.code, 403)
+        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
+
+    @override_config({"experimental_features": {"msc4380_enabled": True}})
+    def test_misc4380_non_string_setting(self) -> None:
+        """Test that `default_action` being set to something non-stringy is the same as "accept"."""
+        room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.bob,
+                AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
+                {
+                    "default_action": 1,
+                },
+            )
+        )
+
+        self.get_success(
+            self.handler.update_membership(
+                requester=create_requester(self.alice),
+                target=UserID.from_string(self.bob),
+                room_id=room_id,
+                action=Membership.INVITE,
+            )
+        )
+
+    @override_config({"experimental_features": {"msc4380_enabled": False}})
+    def test_msc4380_disabled_allow_invite_local(self) -> None:
+        """Test that, when MSC4380 is not enabled, invites are accepted as normal"""
+        room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.bob,
+                AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
+                {
+                    "default_action": "block",
+                },
+            )
+        )
+
+        self.get_success(
+            self.handler.update_membership(
+                requester=create_requester(self.alice),
+                target=UserID.from_string(self.bob),
+                room_id=room_id,
+                action=Membership.INVITE,
+            ),
+        )
+
+    @override_config({"experimental_features": {"msc4380_enabled": True}})
+    def test_msc4380_block_invite_remote(self) -> None:
+        """Test that MSC4380 will block a user from being invited to a room by a remote user."""
+        # A remote user who sends the invite
+        remote_server = "otherserver"
+        remote_user = "@otheruser:" + remote_server
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.bob,
+                AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
+                {"default_action": "block"},
             )
         )
 
