@@ -1,1 +1,1 @@
-Support for stable MSC4312 m.oauth UIA stage for resetting cross-signing identity with the OAuth 2.0 API.
+Stabilise support for [MSC4312](https://github.com/matrix-org/matrix-spec-proposals/pull/4312)'s `m.oauth` User-Interactive Auth stage for resetting cross-signing identity with the OAuth 2.0 API. The old, unstable name (`org.matrix.cross_signing_reset`) is now deprecated and will be removed in a future release.
