@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a9644081.js";
+            window.path_to_searchindex_js = "searchindex-bb34af24.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -15227,11 +15227,12 @@ for a server admin: see <a href="usage/administration/admin_api">Admin API</a>.<
 <li>“scheduled” - Task is scheduled but not active</li>
 <li>“active” - Task is active and probably running, and if not will be run on next scheduler loop run</li>
 <li>“complete” - Task has completed successfully</li>
+<li>“cancelled” - Task has been cancelled</li>
 <li>“failed” - Task is over and either returned a failed status, or had an exception</li>
 </ul>
 </li>
 <li>
-<p><code>max_timestamp</code>: int - Is optional. Returns only the scheduled tasks with a timestamp inferior to the specified one.</p>
+<p><code>max_timestamp</code>: int - Is optional. Returns only the scheduled tasks with a timestamp (in milliseconds since the unix epoch) inferior to the specified one.</p>
 </li>
 </ul>
 <p><strong>Response</strong></p>
