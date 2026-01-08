@@ -71,7 +71,7 @@ from synapse.types.handlers.sliding_sync import (
 )
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -755,7 +755,7 @@ class SlidingSyncHandler:
             timeline_events.reverse()
 
             # Make sure we don't expose any events that the client shouldn't see
-            timeline_events = await filter_events_for_client(
+            timeline_events = await filter_and_transform_events_for_client(
                 self.storage_controllers,
                 user.to_string(),
                 timeline_events,

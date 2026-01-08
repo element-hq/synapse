@@ -119,6 +119,12 @@ stacking them up. You can monitor the currently running background updates with
 
 # Upgrading to v1.146.0
 
+## Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka
+
+Ubuntu 25.04 Plucky Puffin [is end-of-life as of 17 Jan
+2026](https://endoflife.date/ubuntu). This release drops support for Ubuntu
+25.04, and in its place adds support for Ubuntu 25.10 Questing Quokka.
+
 ## Removal of MSC2697 (Legacy) Dehydrated devices
 
 The endpoints for

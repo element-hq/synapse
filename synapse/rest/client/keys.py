@@ -560,9 +560,14 @@ class SigningKeyUploadServlet(RestServlet):
                         {
                             "session": "dummy",
                             "flows": [
+                                {"stages": ["m.oauth"]},
+                                # The unstable name from MSC4312 should be supported until enough clients have adopted the stable (`m.oauth`) name:
                                 {"stages": ["org.matrix.cross_signing_reset"]},
                             ],
                             "params": {
+                                "m.oauth": {
+                                    "url": url,
+                                },
                                 "org.matrix.cross_signing_reset": {
                                     "url": url,
                                 },
@@ -594,9 +599,14 @@ class SigningKeyUploadServlet(RestServlet):
                         {
                             "session": "dummy",
                             "flows": [
+                                {"stages": ["m.oauth"]},
+                                # The unstable name from MSC4312 should be supported until enough clients have adopted the stable (`m.oauth`) name:
                                 {"stages": ["org.matrix.cross_signing_reset"]},
                             ],
                             "params": {
+                                "m.oauth": {
+                                    "url": url,
+                                },
                                 "org.matrix.cross_signing_reset": {
                                     "url": url,
                                 },
