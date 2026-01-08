@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-ad6b5e04.js";
+            window.path_to_searchindex_js = "searchindex-a9644081.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -2512,7 +2512,7 @@ because current versions of Synapse emit both old and new names.</p>
 the names of Prometheus metrics.
 If you want to test your changes before legacy names are disabled by default,
 you may specify <code>enable_legacy_metrics: false</code> in your homeserver configuration.</p>
-<p>A list of affected metrics is available on the <a href="https://element-hq.github.io/synapse/v1.69/metrics-howto.html?highlight=metrics%20deprecated#renaming-of-metrics--deprecation-of-old-names-in-12">Metrics How-to page</a>.</p>
+<p>A list of affected metrics is available on the <a href="https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12">Metrics How-to page</a>.</p>
 <h2 id="deprecation-of-the-generate_short_term_login_token-module-api-method"><a class="header" href="#deprecation-of-the-generate_short_term_login_token-module-api-method">Deprecation of the <code>generate_short_term_login_token</code> module API method</a></h2>
 <p>The following method of the module API has been deprecated, and is scheduled to
 be remove in v1.71.0:</p>
@@ -3731,7 +3731,7 @@ for its use in the room directory!</p>
 </ul>
 <h1 id="upgrading-to-v120"><a class="header" href="#upgrading-to-v120">Upgrading to v1.2.0</a></h1>
 <p>Some counter metrics have been renamed, with the old names deprecated.
-See <a href="#renaming-of-metrics--deprecation-of-old-names-in-12">the metrics
+See <a href="https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12">the metrics
 documentation</a>
 for details.</p>
 <h1 id="upgrading-to-v110"><a class="header" href="#upgrading-to-v110">Upgrading to v1.1.0</a></h1>
@@ -17174,198 +17174,6 @@ on <code>http://127.0.0.1:9101</code>.</p>
 </code></pre>
 <p>Labels (<code>instance</code>, <code>job</code>, <code>index</code>) can be defined as anything.
 The labels are used to group graphs in grafana.</p>
-<h2 id="renaming-of-metrics--deprecation-of-old-names-in-12"><a class="header" href="#renaming-of-metrics--deprecation-of-old-names-in-12">Renaming of metrics &amp; deprecation of old names in 1.2</a></h2>
-<p>Synapse 1.2 updates the Prometheus metrics to match the naming
-convention of the upstream <code>prometheus_client</code>. The old names are
-considered deprecated and will be removed in a future version of
-Synapse.
-<strong>The old names will be disabled by default in Synapse v1.71.0 and removed
-altogether in Synapse v1.73.0.</strong></p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>New Name</th><th>Old Name</th></tr>
-</thead>
-<tbody>
-<tr><td>python_gc_objects_collected_total</td><td>python_gc_objects_collected</td></tr>
-<tr><td>python_gc_objects_uncollectable_total</td><td>python_gc_objects_uncollectable</td></tr>
-<tr><td>python_gc_collections_total</td><td>python_gc_collections</td></tr>
-<tr><td>process_cpu_seconds_total</td><td>process_cpu_seconds</td></tr>
-<tr><td>synapse_federation_client_sent_transactions_total</td><td>synapse_federation_client_sent_transactions</td></tr>
-<tr><td>synapse_federation_client_events_processed_total</td><td>synapse_federation_client_events_processed</td></tr>
-<tr><td>synapse_event_processing_loop_count_total</td><td>synapse_event_processing_loop_count</td></tr>
-<tr><td>synapse_event_processing_loop_room_count_total</td><td>synapse_event_processing_loop_room_count</td></tr>
-<tr><td>synapse_util_caches_cache_hits</td><td>synapse_util_caches_cache:hits</td></tr>
-<tr><td>synapse_util_caches_cache_size</td><td>synapse_util_caches_cache:size</td></tr>
-<tr><td>synapse_util_caches_cache_evicted_size</td><td>synapse_util_caches_cache:evicted_size</td></tr>
-<tr><td>synapse_util_caches_cache</td><td>synapse_util_caches_cache:total</td></tr>
-<tr><td>synapse_util_caches_response_cache_size</td><td>synapse_util_caches_response_cache:size</td></tr>
-<tr><td>synapse_util_caches_response_cache_hits</td><td>synapse_util_caches_response_cache:hits</td></tr>
-<tr><td>synapse_util_caches_response_cache_evicted_size</td><td>synapse_util_caches_response_cache:evicted_size</td></tr>
-<tr><td>synapse_util_metrics_block_count_total</td><td>synapse_util_metrics_block_count</td></tr>
-<tr><td>synapse_util_metrics_block_time_seconds_total</td><td>synapse_util_metrics_block_time_seconds</td></tr>
-<tr><td>synapse_util_metrics_block_ru_utime_seconds_total</td><td>synapse_util_metrics_block_ru_utime_seconds</td></tr>
-<tr><td>synapse_util_metrics_block_ru_stime_seconds_total</td><td>synapse_util_metrics_block_ru_stime_seconds</td></tr>
-<tr><td>synapse_util_metrics_block_db_txn_count_total</td><td>synapse_util_metrics_block_db_txn_count</td></tr>
-<tr><td>synapse_util_metrics_block_db_txn_duration_seconds_total</td><td>synapse_util_metrics_block_db_txn_duration_seconds</td></tr>
-<tr><td>synapse_util_metrics_block_db_sched_duration_seconds_total</td><td>synapse_util_metrics_block_db_sched_duration_seconds</td></tr>
-<tr><td>synapse_background_process_start_count_total</td><td>synapse_background_process_start_count</td></tr>
-<tr><td>synapse_background_process_ru_utime_seconds_total</td><td>synapse_background_process_ru_utime_seconds</td></tr>
-<tr><td>synapse_background_process_ru_stime_seconds_total</td><td>synapse_background_process_ru_stime_seconds</td></tr>
-<tr><td>synapse_background_process_db_txn_count_total</td><td>synapse_background_process_db_txn_count</td></tr>
-<tr><td>synapse_background_process_db_txn_duration_seconds_total</td><td>synapse_background_process_db_txn_duration_seconds</td></tr>
-<tr><td>synapse_background_process_db_sched_duration_seconds_total</td><td>synapse_background_process_db_sched_duration_seconds</td></tr>
-<tr><td>synapse_storage_events_persisted_events_total</td><td>synapse_storage_events_persisted_events</td></tr>
-<tr><td>synapse_storage_events_persisted_events_sep_total</td><td>synapse_storage_events_persisted_events_sep</td></tr>
-<tr><td>synapse_storage_events_state_delta_total</td><td>synapse_storage_events_state_delta</td></tr>
-<tr><td>synapse_storage_events_state_delta_single_event_total</td><td>synapse_storage_events_state_delta_single_event</td></tr>
-<tr><td>synapse_storage_events_state_delta_reuse_delta_total</td><td>synapse_storage_events_state_delta_reuse_delta</td></tr>
-<tr><td>synapse_federation_server_received_pdus_total</td><td>synapse_federation_server_received_pdus</td></tr>
-<tr><td>synapse_federation_server_received_edus_total</td><td>synapse_federation_server_received_edus</td></tr>
-<tr><td>synapse_handler_presence_notified_presence_total</td><td>synapse_handler_presence_notified_presence</td></tr>
-<tr><td>synapse_handler_presence_federation_presence_out_total</td><td>synapse_handler_presence_federation_presence_out</td></tr>
-<tr><td>synapse_handler_presence_presence_updates_total</td><td>synapse_handler_presence_presence_updates</td></tr>
-<tr><td>synapse_handler_presence_timers_fired_total</td><td>synapse_handler_presence_timers_fired</td></tr>
-<tr><td>synapse_handler_presence_federation_presence_total</td><td>synapse_handler_presence_federation_presence</td></tr>
-<tr><td>synapse_handler_presence_bump_active_time_total</td><td>synapse_handler_presence_bump_active_time</td></tr>
-<tr><td>synapse_federation_client_sent_edus_total</td><td>synapse_federation_client_sent_edus</td></tr>
-<tr><td>synapse_federation_client_sent_pdu_destinations_count_total</td><td>synapse_federation_client_sent_pdu_destinations:count</td></tr>
-<tr><td>synapse_federation_client_sent_pdu_destinations_total</td><td>synapse_federation_client_sent_pdu_destinations:total</td></tr>
-<tr><td>synapse_handlers_appservice_events_processed_total</td><td>synapse_handlers_appservice_events_processed</td></tr>
-<tr><td>synapse_notifier_notified_events_total</td><td>synapse_notifier_notified_events</td></tr>
-<tr><td>synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter_total</td><td>synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter</td></tr>
-<tr><td>synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter_total</td><td>synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter</td></tr>
-<tr><td>synapse_http_httppusher_http_pushes_processed_total</td><td>synapse_http_httppusher_http_pushes_processed</td></tr>
-<tr><td>synapse_http_httppusher_http_pushes_failed_total</td><td>synapse_http_httppusher_http_pushes_failed</td></tr>
-<tr><td>synapse_http_httppusher_badge_updates_processed_total</td><td>synapse_http_httppusher_badge_updates_processed</td></tr>
-<tr><td>synapse_http_httppusher_badge_updates_failed_total</td><td>synapse_http_httppusher_badge_updates_failed</td></tr>
-<tr><td>synapse_admin_mau_current</td><td>synapse_admin_mau:current</td></tr>
-<tr><td>synapse_admin_mau_max</td><td>synapse_admin_mau:max</td></tr>
-<tr><td>synapse_admin_mau_registered_reserved_users</td><td>synapse_admin_mau:registered_reserved_users</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="removal-of-deprecated-metrics--time-based-counters-becoming-histograms-in-0310"><a class="header" href="#removal-of-deprecated-metrics--time-based-counters-becoming-histograms-in-0310">Removal of deprecated metrics &amp; time based counters becoming histograms in 0.31.0</a></h2>
-<p>The duplicated metrics deprecated in Synapse 0.27.0 have been removed.</p>
-<p>All time duration-based metrics have been changed to be seconds. This
-affects:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>msec -&gt; sec metrics</th></tr>
-</thead>
-<tbody>
-<tr><td>python_gc_time</td></tr>
-<tr><td>python_twisted_reactor_tick_time</td></tr>
-<tr><td>synapse_storage_query_time</td></tr>
-<tr><td>synapse_storage_schedule_time</td></tr>
-<tr><td>synapse_storage_transaction_time</td></tr>
-</tbody>
-</table>
-</div>
-<p>Several metrics have been changed to be histograms, which sort entries
-into buckets and allow better analysis. The following metrics are now
-histograms:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Altered metrics</th></tr>
-</thead>
-<tbody>
-<tr><td>python_gc_time</td></tr>
-<tr><td>python_twisted_reactor_pending_calls</td></tr>
-<tr><td>python_twisted_reactor_tick_time</td></tr>
-<tr><td>synapse_http_server_response_time_seconds</td></tr>
-<tr><td>synapse_storage_query_time</td></tr>
-<tr><td>synapse_storage_schedule_time</td></tr>
-<tr><td>synapse_storage_transaction_time</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="block-and-response-metrics-renamed-for-0270"><a class="header" href="#block-and-response-metrics-renamed-for-0270">Block and response metrics renamed for 0.27.0</a></h2>
-<p>Synapse 0.27.0 begins the process of rationalising the duplicate
-<code>*:count</code> metrics reported for the resource tracking for code blocks and
-HTTP requests.</p>
-<p>At the same time, the corresponding <code>*:total</code> metrics are being renamed,
-as the <code>:total</code> suffix no longer makes sense in the absence of a
-corresponding <code>:count</code> metric.</p>
-<p>To enable a graceful migration path, this release just adds new names
-for the metrics being renamed. A future release will remove the old
-ones.</p>
-<p>The following table shows the new metrics, and the old metrics which
-they are replacing.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>New name</th><th>Old name</th></tr>
-</thead>
-<tbody>
-<tr><td>synapse_util_metrics_block_count</td><td>synapse_util_metrics_block_timer:count</td></tr>
-<tr><td>synapse_util_metrics_block_count</td><td>synapse_util_metrics_block_ru_utime:count</td></tr>
-<tr><td>synapse_util_metrics_block_count</td><td>synapse_util_metrics_block_ru_stime:count</td></tr>
-<tr><td>synapse_util_metrics_block_count</td><td>synapse_util_metrics_block_db_txn_count:count</td></tr>
-<tr><td>synapse_util_metrics_block_count</td><td>synapse_util_metrics_block_db_txn_duration:count</td></tr>
-<tr><td>synapse_util_metrics_block_time_seconds</td><td>synapse_util_metrics_block_timer:total</td></tr>
-<tr><td>synapse_util_metrics_block_ru_utime_seconds</td><td>synapse_util_metrics_block_ru_utime:total</td></tr>
-<tr><td>synapse_util_metrics_block_ru_stime_seconds</td><td>synapse_util_metrics_block_ru_stime:total</td></tr>
-<tr><td>synapse_util_metrics_block_db_txn_count</td><td>synapse_util_metrics_block_db_txn_count:total</td></tr>
-<tr><td>synapse_util_metrics_block_db_txn_duration_seconds</td><td>synapse_util_metrics_block_db_txn_duration:total</td></tr>
-<tr><td>synapse_http_server_response_count</td><td>synapse_http_server_requests</td></tr>
-<tr><td>synapse_http_server_response_count</td><td>synapse_http_server_response_time:count</td></tr>
-<tr><td>synapse_http_server_response_count</td><td>synapse_http_server_response_ru_utime:count</td></tr>
-<tr><td>synapse_http_server_response_count</td><td>synapse_http_server_response_ru_stime:count</td></tr>
-<tr><td>synapse_http_server_response_count</td><td>synapse_http_server_response_db_txn_count:count</td></tr>
-<tr><td>synapse_http_server_response_count</td><td>synapse_http_server_response_db_txn_duration:count</td></tr>
-<tr><td>synapse_http_server_response_time_seconds</td><td>synapse_http_server_response_time:total</td></tr>
-<tr><td>synapse_http_server_response_ru_utime_seconds</td><td>synapse_http_server_response_ru_utime:total</td></tr>
-<tr><td>synapse_http_server_response_ru_stime_seconds</td><td>synapse_http_server_response_ru_stime:total</td></tr>
-<tr><td>synapse_http_server_response_db_txn_count</td><td>synapse_http_server_response_db_txn_count:total</td></tr>
-<tr><td>synapse_http_server_response_db_txn_duration_seconds</td><td>synapse_http_server_response_db_txn_duration:total</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="standard-metric-names"><a class="header" href="#standard-metric-names">Standard Metric Names</a></h2>
-<p>As of synapse version 0.18.2, the format of the process-wide metrics has
-been changed to fit prometheus standard naming conventions. Additionally
-the units have been changed to seconds, from milliseconds.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>New name</th><th>Old name</th></tr>
-</thead>
-<tbody>
-<tr><td>process_cpu_user_seconds_total</td><td>process_resource_utime / 1000</td></tr>
-<tr><td>process_cpu_system_seconds_total</td><td>process_resource_stime / 1000</td></tr>
-<tr><td>process_open_fds (no 'type' label)</td><td>process_fds</td></tr>
-</tbody>
-</table>
-</div>
-<p>The python-specific counts of garbage collector performance have been
-renamed.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>New name</th><th>Old name</th></tr>
-</thead>
-<tbody>
-<tr><td>python_gc_time</td><td>reactor_gc_time</td></tr>
-<tr><td>python_gc_unreachable_total</td><td>reactor_gc_unreachable</td></tr>
-<tr><td>python_gc_counts</td><td>reactor_gc_counts</td></tr>
-</tbody>
-</table>
-</div>
-<p>The twisted-specific reactor metrics have been renamed.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>New name</th><th>Old name</th></tr>
-</thead>
-<tbody>
-<tr><td>python_twisted_reactor_pending_calls</td><td>reactor_pending_calls</td></tr>
-<tr><td>python_twisted_reactor_tick_time</td><td>reactor_tick_time</td></tr>
-</tbody>
-</table>
-</div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="reporting-homeserver-usage-statistics"><a class="header" href="#reporting-homeserver-usage-statistics">Reporting Homeserver Usage Statistics</a></h1>
 <p>When generating your Synapse configuration file, you are asked whether you
