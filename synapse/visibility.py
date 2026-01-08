@@ -75,7 +75,7 @@ _HISTORY_VIS_KEY: Final[tuple[str, str]] = (EventTypes.RoomHistoryVisibility, ""
 
 
 @trace
-async def filter_events_for_client(
+async def filter_and_transform_events_for_client(
     storage: StorageControllers,
     user_id: str,
     events: list[EventBase],

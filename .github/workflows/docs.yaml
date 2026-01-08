@@ -58,7 +58,7 @@ jobs:
       - name: Setup mdbook
         uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
         with:
-          mdbook-version: '0.4.17'
+          mdbook-version: '0.5.2'
 
       - name: Set version of docs
         run: echo 'window.SYNAPSE_VERSION = "${{ needs.pre.outputs.branch-version }}";' > ./docs/website_files/version.js
