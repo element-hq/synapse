@@ -1,3 +1,11 @@
+# Synapse 1.145.0rc3 (2026-01-07)
+
+No significant changes since 1.145.0rc2.
+
+This RC strips out unnecessary files from the wheels that were added when fixing the source distribution packaging in the previous RC.
+
+
+
 # Synapse 1.145.0rc2 (2026-01-07)
 
 No significant changes since 1.145.0rc1.
