@@ -585,31 +585,6 @@ class RoomDelayedEventRestServlet(RoomDelayedEventRestServletBase):
         ret = {"delay_id": delay_id}
         return 200, ret
 
-    async def on_POST(
-        self,
-        request: SynapseRequest,
-        room_id: str,
-        event_type: str,
-    ) -> tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request, allow_guest=True)
-        return await self._do(request, requester, room_id, event_type)
-
-    async def on_PUT(
-        self, request: SynapseRequest, room_id: str, event_type: str, txn_id: str
-    ) -> tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request, allow_guest=True)
-        set_tag("txn_id", txn_id)
-
-        return await self.txns.fetch_or_execute_request(
-            request,
-            requester,
-            self._do,
-            request,
-            requester,
-            room_id,
-            event_type,
-        )
-
 
 def _parse_request_delay(
     request: SynapseRequest,
