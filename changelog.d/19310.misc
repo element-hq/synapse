@@ -1,0 +1,1 @@
+Add an internal `cancel_task` API to the task scheduler.

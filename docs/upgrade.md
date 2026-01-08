@@ -117,6 +117,14 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.146.0
+
+## Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka
+
+Ubuntu 25.04 Plucky Puffin [is end-of-life as of 17 Jan
+2026](https://endoflife.date/ubuntu). This release drops support for Ubuntu
+25.04, and in its place adds support for Ubuntu 25.10 Questing Quokka.
+
 # Upgrading to v1.144.0
 
 ## Worker support for unstable MSC4140 `/restart` endpoint
@@ -828,7 +836,7 @@ the names of Prometheus metrics.
 If you want to test your changes before legacy names are disabled by default,
 you may specify `enable_legacy_metrics: false` in your homeserver configuration.
 
-A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html?highlight=metrics%20deprecated#renaming-of-metrics--deprecation-of-old-names-in-12).
+A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12).
 
 
 ## Deprecation of the `generate_short_term_login_token` module API method
@@ -2423,7 +2431,7 @@ back to v1.3.1, subject to the following:
 
 Some counter metrics have been renamed, with the old names deprecated.
 See [the metrics
-documentation](metrics-howto.md#renaming-of-metrics--deprecation-of-old-names-in-12)
+documentation](https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12)
 for details.
 
 # Upgrading to v1.1.0

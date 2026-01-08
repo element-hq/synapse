@@ -206,6 +206,53 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         # We expect only one new file to have been persisted.
         self.assertEqual(start_count + 1, self._count_remote_media())
 
+    @override_config(
+        {"enable_authenticated_media": False, "enable_local_media_storage": False}
+    )
+    def test_download_simple_file_race_no_local_storage(self) -> None:
+        """Test that fetching remote media works when local storage is disabled.
+
+        This test verifies that the system handles the case where local storage
+        is disabled. Without storage providers configured, the media cannot be
+        retrieved, but the important thing is that the race condition is still
+        handled correctly.
+        """
+        hs1 = self.make_worker_hs("synapse.app.generic_worker")
+        hs2 = self.make_worker_hs("synapse.app.generic_worker")
+
+        start_count = self._count_remote_media()
+
+        # Make two requests without responding to the outbound media requests.
+        channel1, request1 = self._get_media_req(hs1, "example.com:443", "ABC123")
+        channel2, request2 = self._get_media_req(hs2, "example.com:443", "ABC123")
+
+        # Respond to the first outbound media request and check that the client
+        # request is successful
+        request1.setResponseCode(200)
+        request1.responseHeaders.setRawHeaders(b"Content-Type", [b"text/plain"])
+        request1.write(b"Hello!")
+        request1.finish()
+
+        self.pump(0.1)
+
+        # With local storage disabled and no storage providers,
+        # we expect a 404 error
+        self.assertEqual(channel1.code, 404, channel1.result["body"])
+
+        # Now respond to the second with the same content.
+        request2.setResponseCode(200)
+        request2.responseHeaders.setRawHeaders(b"Content-Type", [b"text/plain"])
+        request2.write(b"Hello!")
+        request2.finish()
+
+        self.pump(0.1)
+
+        # Same for the second request
+        self.assertEqual(channel2.code, 404, channel2.result["body"])
+
+        # No files should be stored locally
+        self.assertEqual(start_count, self._count_remote_media())
+
     @override_config({"enable_authenticated_media": False})
     def test_download_image_race(self) -> None:
         """Test that fetching remote *images* from two different processes at
@@ -427,6 +474,53 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
         # We expect only one new file to have been persisted.
         self.assertEqual(start_count + 1, self._count_remote_media())
+
+    @override_config({"enable_local_media_storage": False})
+    def test_download_simple_file_race_no_local_storage(self) -> None:
+        """Test that fetching remote media works when local storage is disabled.
+
+        When enable_local_media_storage is False, files should only be stored in
+        the storage providers and not in the local filesystem.
+        """
+        hs1 = self.make_worker_hs("synapse.app.generic_worker")
+        hs2 = self.make_worker_hs("synapse.app.generic_worker")
+
+        start_count = self._count_remote_media()
+
+        # Make two requests without responding to the outbound media requests.
+        channel1, request1 = self._get_media_req(hs1, "example.com:443", "ABC123")
+        channel2, request2 = self._get_media_req(hs2, "example.com:443", "ABC123")
+
+        # Respond to the first outbound media request and check that the client
+        # request is successful
+        request1.setResponseCode(200)
+        request1.responseHeaders.setRawHeaders(
+            b"Content-Type",
+            ["multipart/mixed; boundary=6067d4698f8d40a0a794ea7d7379d53a"],
+        )
+        request1.write(self.file_data)
+        request1.finish()
+
+        self.pump(0.1)
+        # With local storage disabled and no storage providers,
+        # we expect a 404 error
+        self.assertEqual(channel1.code, 404, channel1.result["body"])
+
+        # Now respond to the second with the same content.
+        request2.setResponseCode(200)
+        request2.responseHeaders.setRawHeaders(
+            b"Content-Type",
+            ["multipart/mixed; boundary=6067d4698f8d40a0a794ea7d7379d53a"],
+        )
+        request2.write(self.file_data)
+        request2.finish()
+
+        self.pump(0.1)
+
+        self.assertEqual(channel2.code, 404, channel2.result["body"])
+
+        # With local storage disabled, no files should be stored locally
+        self.assertEqual(start_count, self._count_remote_media())
 
     def test_download_image_race(self) -> None:
         """Test that fetching remote *images* from two different processes at

@@ -1,3 +1,80 @@
+# Synapse 1.145.0rc3 (2026-01-07)
+
+No significant changes since 1.145.0rc2.
+
+This RC strips out unnecessary files from the wheels that were added when fixing the source distribution packaging in the previous RC.
+
+
+
+# Synapse 1.145.0rc2 (2026-01-07)
+
+No significant changes since 1.145.0rc1.
+
+This RC fixes the source distribution packaging for uploading to PyPI.
+
+
+
+# Synapse 1.145.0rc1 (2026-01-06)
+
+## End of Life of Ubuntu 25.04 Plucky Puffin
+
+Ubuntu 25.04 (Plucky Puffin) will be end of life on Jan 17, 2026. Synapse will stop building packages for Ubuntu 25.04 shortly thereafter.
+
+## Updates to Locked Dependencies No Longer Included in Changelog
+
+The "Updates to locked dependencies" section has been removed from the changelog due to lack of use and the maintenance burden. ([\#19254](https://github.com/element-hq/synapse/issues/19254))
+
+## Features
+
+- Add `memberships` endpoint to the admin API. This is useful for forensics and T&S purpose. ([\#19260](https://github.com/element-hq/synapse/issues/19260))
+- Server admins can bypass the quarantine media check when downloading media by setting the `admin_unsafely_bypass_quarantine` query parameter to `true` on Client-Server API media download requests. ([\#19275](https://github.com/element-hq/synapse/issues/19275))
+- Implemented pagination for the [MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666) mutual rooms endpoint. Contributed by @tulir @ Beeper. ([\#19279](https://github.com/element-hq/synapse/issues/19279))
+- Admin API: add worker support to `GET /_synapse/admin/v2/users/<user_id>`. ([\#19281](https://github.com/element-hq/synapse/issues/19281))
+- Improve proxy support for the `federation_client.py` dev script. Contributed by Denis Kasak (@dkasak). ([\#19300](https://github.com/element-hq/synapse/issues/19300))
+
+## Bugfixes
+
+- Fix sliding sync performance slow down for long lived connections. ([\#19206](https://github.com/element-hq/synapse/issues/19206))
+- Fix a bug where Mastodon posts (and possibly other embeds) have the wrong description for URL previews. ([\#19231](https://github.com/element-hq/synapse/issues/19231))
+- Fix bug where `Duration` was logged incorrectly. ([\#19267](https://github.com/element-hq/synapse/issues/19267))
+- Fix bug introduced in 1.143.0 that broke support for versions of `zope-interface` older than 6.2. ([\#19274](https://github.com/element-hq/synapse/issues/19274))
+- Transform events with client metadata before serialising in /event response. ([\#19340](https://github.com/element-hq/synapse/issues/19340))
+
+## Updates to the Docker image
+
+- Add a way to expose metrics from the Docker image (`SYNAPSE_ENABLE_METRICS`). ([\#19324](https://github.com/element-hq/synapse/issues/19324))
+
+## Improved Documentation
+
+- Document the importance of `public_baseurl` when configuring OpenID Connect authentication. ([\#19270](https://github.com/element-hq/synapse/issues/19270))
+
+## Deprecations and Removals
+
+- Ubuntu 25.04 (Plucky Puffin) will be end of life on Jan 17, 2026. Synapse will stop building packages for Ubuntu 25.04 shortly thereafter.
+- Remove the "Updates to locked dependencies" section from the changelog due to lack of use and the maintenance burden. ([\#19254](https://github.com/element-hq/synapse/issues/19254))
+
+## Internal Changes
+
+- Group together dependabot update PRs to reduce the review load. ([\#18402](https://github.com/element-hq/synapse/issues/18402))
+- Fix `HomeServer.shutdown()` failing if the homeserver hasn't been setup yet. ([\#19187](https://github.com/element-hq/synapse/issues/19187))
+- Respond with useful error codes with `Content-Length` header/s are invalid. ([\#19212](https://github.com/element-hq/synapse/issues/19212))
+- Fix `HomeServer.shutdown()` failing if the homeserver failed to `start`. ([\#19232](https://github.com/element-hq/synapse/issues/19232))
+- Switch the build backend from `poetry-core` to `maturin`. ([\#19234](https://github.com/element-hq/synapse/issues/19234))
+- Raise the limit for concurrently-open non-security @dependabot PRs from 5 to 10. ([\#19253](https://github.com/element-hq/synapse/issues/19253))
+- Require 14 days to pass before pulling in general dependency updates to help mitigate upstream supply chain attacks. ([\#19258](https://github.com/element-hq/synapse/issues/19258))
+- Drop the broken netlify documentation workflow until a new one is implemented. ([\#19262](https://github.com/element-hq/synapse/issues/19262))
+- Don't include debug logs in `Clock` unless explicitly enabled. ([\#19278](https://github.com/element-hq/synapse/issues/19278))
+- Use `uv` to test olddeps to ensure all transitive dependencies use minimum versions. ([\#19289](https://github.com/element-hq/synapse/issues/19289))
+- Add a config to be able to rate limit search in the user directory. ([\#19291](https://github.com/element-hq/synapse/issues/19291))
+- Log the original bind exception when encountering `Failed to listen on 0.0.0.0, continuing because listening on [::]`. ([\#19297](https://github.com/element-hq/synapse/issues/19297))
+- Unpin the version of Rust we use to build Synapse wheels (was 1.82.0) now that MacOS support has been dropped. ([\#19302](https://github.com/element-hq/synapse/issues/19302))
+- Make it more clear how `shared_extra_conf` is combined in our Docker configuration scripts. ([\#19323](https://github.com/element-hq/synapse/issues/19323))
+- Update CI to stream Complement progress and format logs in a separate step after all tests are done. ([\#19326](https://github.com/element-hq/synapse/issues/19326))
+- Format `.github/workflows/tests.yml`. ([\#19327](https://github.com/element-hq/synapse/issues/19327))
+
+
+
+
 # Synapse 1.144.0 (2025-12-09)
 
 ## Deprecation of MacOS Python wheels
