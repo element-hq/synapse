@@ -2409,11 +2409,11 @@ class RoomDelayedEventTestCase(RoomBase):
     def get_delayed_event_path_and_body(
         cls,
         room_id: str,
+        delay: int,
         event_type: str,
         state_key: str | None,
-        txn_id: str | None,
-        delay: int,
         content: JsonDict,
+        txn_id: str | None = "mid1",
     ) -> tuple[str, JsonDict]:
         path = (
             f"rooms/{room_id}/{'send' if state_key is None else 'state'}/{event_type}"
@@ -2433,10 +2433,9 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test sending a delayed event with invalid content."""
         path, body = self.get_delayed_event_path_and_body(
             self.room_id,
+            2000,
             "m.room.message",
             None,
-            "mid1",
-            2000,
             {},
         )
         channel = self.make_request(
@@ -2451,10 +2450,9 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test that sending a delayed event is unsupported with the default config."""
         path, body = self.get_delayed_event_path_and_body(
             self.room_id,
+            2000,
             "m.room.message",
             None,
-            "mid1",
-            2000,
             {"body": "test", "msgtype": "m.text"},
         )
         channel = self.make_request(
@@ -2474,10 +2472,9 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test that sending a delayed event fails if its delay is longer than allowed."""
         path, body = self.get_delayed_event_path_and_body(
             self.room_id,
+            2000,
             "m.room.message",
             None,
-            "mid1",
-            2000,
             {"body": "test", "msgtype": "m.text"},
         )
         channel = self.make_request(
@@ -2501,10 +2498,9 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test that sending a delayed event fails if its delay is invalid."""
         path, body = self.get_delayed_event_path_and_body(
             self.room_id,
+            invalid_delay,
             "m.room.message",
             None,
-            "mid1",
-            invalid_delay,
             {"body": "test", "msgtype": "m.text"},
         )
         channel = self.make_request(
@@ -2528,10 +2524,9 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test that errors for delayed events being unsupported have precedence over errors for invalid delays."""
         path, body = self.get_delayed_event_path_and_body(
             self.room_id,
+            invalid_delay,
             "m.room.message",
             None,
-            "mid1",
-            invalid_delay,
             {"body": "test", "msgtype": "m.text"},
         )
         channel = self.make_request(
@@ -2551,10 +2546,9 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test sending a valid delayed message event."""
         path, body = self.get_delayed_event_path_and_body(
             self.room_id,
+            2000,
             "m.room.message",
             None,
-            "mid1",
-            2000,
             {"body": "test", "msgtype": "m.text"},
         )
         channel = self.make_request(
@@ -2569,10 +2563,9 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test sending a valid delayed state event."""
         path, body = self.get_delayed_event_path_and_body(
             self.room_id,
+            2000,
             "m.room.topic",
             "",
-            None,
-            2000,
             {"topic": "This is a topic"},
         )
         channel = self.make_request(
@@ -2596,11 +2589,11 @@ class RoomDelayedEventTestCase(RoomBase):
 
         path, body = self.get_delayed_event_path_and_body(
             self.room_id,
+            2000,
             "m.room.message",
             None,
-            None,
-            2000,
             {"body": "test", "msgtype": "m.text"},
+            None,
         )
         # Test that new delayed events are correctly ratelimited.
         args = (
@@ -2632,11 +2625,11 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
     def get_delayed_event_path_and_body(
         cls,
         room_id: str,
+        delay: int,
         event_type: str,
         state_key: str | None,
-        txn_id: str | None,
-        delay: int,
         content: JsonDict,
+        txn_id: str | None = "mid1",
     ) -> tuple[str, JsonDict]:
         body = {
             "delay": delay,
@@ -2644,9 +2637,8 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         }
         path = f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}"
         if state_key is not None:
-            path += f"/{state_key}"
             body["state_key"] = state_key
-        elif txn_id is not None:
+        if txn_id is not None:
             path += f"/{txn_id}"
         return path, body
 
@@ -2656,10 +2648,9 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         content = {"body": "test", "msgtype": "m.text"}
         path, _ = self.get_delayed_event_path_and_body(
             self.room_id,
+            2000,
             "m.room.message",
             None,
-            "mid1",
-            2000,
             content,
         )
         channel = self.make_request(
@@ -2680,10 +2671,9 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         """Test that the dedicated endpoint fails with a body missing a required key."""
         path, body = self.get_delayed_event_path_and_body(
             self.room_id,
+            2000,
             "m.room.message",
             None,
-            "mid1",
-            2000,
             {"body": "test", "msgtype": "m.text"},
         )
         del body[missing_key]
@@ -2704,10 +2694,9 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         """Test that the dedicated endpoint fails with a body missing all required keys."""
         path, _ = self.get_delayed_event_path_and_body(
             self.room_id,
+            2000,
             "m.room.topic",
             "",
-            None,
-            2000,
             {"topic": "This is a topic"},
         )
         channel = self.make_request(
