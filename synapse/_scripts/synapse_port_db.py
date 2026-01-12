@@ -94,6 +94,7 @@ from synapse.storage.databases.state.bg_updates import StateBackgroundUpdateStor
 from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor
+from synapse.util.duration import Duration
 
 # Cast safety: Twisted does some naughty magic which replaces the
 # twisted.internet.reactor module with a Reactor instance at runtime.
@@ -232,6 +233,11 @@ IGNORED_BACKGROUND_UPDATES = {
     "mark_unreferenced_state_groups_for_deletion_bg_update",
 }
 
+
+STARTUP_BACKGROUND_UPDATE_GRACE_PERIOD = Duration(seconds=5)
+"""
+The ammount of time we will wait for background updates to complete before giving up.
+"""
 
 # Error returned by the run function. Used at the top-level part of the script to
 # handle errors and return codes.
@@ -762,6 +768,23 @@ class Porter:
                     " VACUUM;"
                 )
                 return
+
+            # Give a grace period of 5 seconds for any background tasks that get added
+            # on startup to resolve themselves (like the ones added by
+            # `_resolve_stale_data_in_sliding_sync_tables`)
+            background_updates_done_check_start_time_seconds = (
+                self.hs.get_clock().time()
+            )
+            while not await self.sqlite_store.db_pool.updates.has_completed_background_updates():
+                if (
+                    self.hs.get_clock().time()
+                    - background_updates_done_check_start_time_seconds
+                    > STARTUP_BACKGROUND_UPDATE_GRACE_PERIOD.as_secs()
+                ):
+                    break
+
+                # Sleep to give a chance for the reactor to do other work
+                await self.hs.get_clock().sleep(Duration(seconds=1))
 
             # Check if all background updates are done, abort if not.
             updates_complete = await self.sqlite_store.db_pool.updates.has_completed_background_updates()
