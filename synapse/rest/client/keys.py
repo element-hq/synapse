@@ -44,7 +44,7 @@ from synapse.http.servlet import (
     validate_json_object,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.opentracing import log_kv, set_tag
+from synapse.logging.opentracing import set_tag
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
 from synapse.types import JsonDict, StreamToken
 from synapse.types.rest import RequestBodyModel
