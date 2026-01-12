@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bb34af24.js";
+            window.path_to_searchindex_js = "searchindex-e4da8cce.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -335,6 +335,12 @@ stacking them up. You can monitor the currently running background updates with
 <p>Ubuntu 25.04 Plucky Puffin <a href="https://endoflife.date/ubuntu">is end-of-life as of 17 Jan
 2026</a>. This release drops support for Ubuntu
 25.04, and in its place adds support for Ubuntu 25.10 Questing Quokka.</p>
+<h2 id="removal-of-msc2697-legacy-dehydrated-devices"><a class="header" href="#removal-of-msc2697-legacy-dehydrated-devices">Removal of MSC2697 (Legacy) Dehydrated devices</a></h2>
+<p>The endpoints for
+<a href="https://github.com/matrix-org/matrix-spec-proposals/pull/2697">MSC2697</a> have now
+been removed, since the MSC is closed. Developers who rely on this feature should
+migrate to <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3814">MSC3814</a>
+which introduces support for a newer version of dehydrated devices.</p>
 <h1 id="upgrading-to-v11440"><a class="header" href="#upgrading-to-v11440">Upgrading to v1.144.0</a></h1>
 <h2 id="worker-support-for-unstable-msc4140-restart-endpoint"><a class="header" href="#worker-support-for-unstable-msc4140-restart-endpoint">Worker support for unstable MSC4140 <code>/restart</code> endpoint</a></h2>
 <p>The following unstable endpoint pattern may now be routed to worker processes:</p>
