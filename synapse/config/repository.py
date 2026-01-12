@@ -174,6 +174,11 @@ class ContentRepositoryConfig(Config):
             config.get("media_store_path", "media_store")
         )
 
+        # Whether to enable the local media storage provider. When disabled,
+        # media will only be stored in configured storage providers and temp
+        # files will be used for processing.
+        self.enable_local_media_storage = config.get("enable_local_media_storage", True)
+
         backup_media_store_path = config.get("backup_media_store_path")
 
         synchronous_backup_media_store = config.get(

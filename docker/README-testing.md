@@ -135,3 +135,5 @@ but it does not serve TLS by default.
 You can configure `SYNAPSE_TLS_CERT` and `SYNAPSE_TLS_KEY` to point to a
 TLS certificate and key (respectively), both in PEM (textual) format.
 In this case, Nginx will additionally serve using HTTPS on port 8448.
+
+
