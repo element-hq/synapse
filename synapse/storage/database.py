@@ -801,7 +801,7 @@ class DatabasePool:
 
         try:
             i = 0
-            N = 5
+            MAX_NUMBER_OF_RETRIES = 5
             while True:
                 cursor = conn.cursor(
                     txn_name=name,
@@ -829,33 +829,35 @@ class DatabasePool:
                         name,
                         e,
                         i,
-                        N,
+                        MAX_NUMBER_OF_RETRIES,
                     )
-                    if i < N:
+                    try:
+                        with opentracing.start_active_span("db.rollback"):
+                            conn.rollback()
+                    except self.engine.module.Error as e1:
+                        transaction_logger.warning("[TXN EROLL] {%s} %s", name, e1)
+                    # Keep retrying
+                    if i < MAX_NUMBER_OF_RETRIES:
                         i += 1
-                        try:
-                            with opentracing.start_active_span("db.rollback"):
-                                conn.rollback()
-                        except self.engine.module.Error as e1:
-                            transaction_logger.warning("[TXN EROLL] {%s} %s", name, e1)
                         continue
                     raise
                 except self.engine.module.DatabaseError as e:
                     if self.engine.is_deadlock(e):
                         transaction_logger.warning(
-                            "[TXN DEADLOCK] {%s} %d/%d", name, i, N
+                            "[TXN DEADLOCK] {%s} %d/%d", name, i, MAX_NUMBER_OF_RETRIES
                         )
-                        if i < N:
+                        try:
+                            with opentracing.start_active_span("db.rollback"):
+                                conn.rollback()
+                        except self.engine.module.Error as e1:
+                            transaction_logger.warning(
+                                "[TXN EROLL] {%s} %s",
+                                name,
+                                e1,
+                            )
+                        # Keep retrying
+                        if i < MAX_NUMBER_OF_RETRIES:
                             i += 1
-                            try:
-                                with opentracing.start_active_span("db.rollback"):
-                                    conn.rollback()
-                            except self.engine.module.Error as e1:
-                                transaction_logger.warning(
-                                    "[TXN EROLL] {%s} %s",
-                                    name,
-                                    e1,
-                                )
                             continue
                     raise
                 finally:
