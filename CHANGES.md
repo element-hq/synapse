@@ -1,3 +1,11 @@
+# Synapse 1.145.0rc4 (2026-01-08)
+
+No significant changes since 1.145.0rc3.
+
+This RC contains a fix specifically for openSUSE packaging and no other changes. 
+
+
+
 # Synapse 1.145.0rc3 (2026-01-07)
 
 No significant changes since 1.145.0rc2.
