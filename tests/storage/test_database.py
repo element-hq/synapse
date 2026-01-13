@@ -206,10 +206,9 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
                 call(987, 654, extra=321),
                 call(987, 654, extra=321),
                 call(987, 654, extra=321),
-                call(987, 654, extra=321),
             ]
         )
-        self.assertEqual(exception_callback.call_count, 6)  # no additional calls
+        self.assertEqual(exception_callback.call_count, 5)  # no additional calls
 
     def test_successful_retry(self) -> None:
         """Test callbacks for a failed transaction followed by a successful attempt."""
@@ -282,7 +281,6 @@ class CancellationTestCase(unittest.HomeserverTestCase):
                 call(987, 654, extra=321),
                 call(987, 654, extra=321),
                 call(987, 654, extra=321),
-                call(987, 654, extra=321),
             ]
         )
-        self.assertEqual(exception_callback.call_count, 6)  # no additional calls
+        self.assertEqual(exception_callback.call_count, 5)  # no additional calls

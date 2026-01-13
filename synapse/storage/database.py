@@ -828,7 +828,7 @@ class DatabasePool:
                         "[TXN OPERROR] {%s} %s %d/%d",
                         name,
                         e,
-                        i,
+                        i + 1,
                         MAX_NUMBER_OF_RETRIES,
                     )
                     try:
@@ -837,14 +837,17 @@ class DatabasePool:
                     except self.engine.module.Error as e1:
                         transaction_logger.warning("[TXN EROLL] {%s} %s", name, e1)
                     # Keep retrying
-                    if i < MAX_NUMBER_OF_RETRIES:
+                    if i < MAX_NUMBER_OF_RETRIES - 1:
                         i += 1
                         continue
                     raise
                 except self.engine.module.DatabaseError as e:
                     if self.engine.is_deadlock(e):
                         transaction_logger.warning(
-                            "[TXN DEADLOCK] {%s} %d/%d", name, i, MAX_NUMBER_OF_RETRIES
+                            "[TXN DEADLOCK] {%s} %d/%d",
+                            name,
+                            i + 1,
+                            MAX_NUMBER_OF_RETRIES,
                         )
                         try:
                             with opentracing.start_active_span("db.rollback"):
@@ -856,7 +859,7 @@ class DatabasePool:
                                 e1,
                             )
                         # Keep retrying
-                        if i < MAX_NUMBER_OF_RETRIES:
+                        if i < MAX_NUMBER_OF_RETRIES - 1:
                             i += 1
                             continue
                     raise
