@@ -222,6 +222,11 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
         txn_mocks.after_callback.assert_called_once_with(123, 456, extra=789)
         txn_mocks.exception_callback.assert_not_called()
 
+        # Should have commited right away
+        self.assertEqual(txn_mocks.commit.call_count, 1)
+        # (nothing was rolled back)
+        self.assertEqual(txn_mocks.rollback.call_count, 0)
+
     def test_exception_callback(self) -> None:
         """Test that the exception callback is called when a transaction fails."""
         _test_txn = Mock(side_effect=ZeroDivisionError)
