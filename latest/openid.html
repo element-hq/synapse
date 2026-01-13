@@ -201,6 +201,10 @@ maintainer.</p>
 setting in your configuration file.
 See the <a href="usage/configuration/config_documentation.html#oidc_providers">configuration manual</a> for some sample settings, as well as
 the text below for example configurations for specific providers.</p>
+<p>For setups using <a href="delegate.html"><code>.well-known</code> delegation</a>, make sure
+<a href="usage/configuration/config_documentation.html#public_baseurl"><code>public_baseurl</code></a> is set
+appropriately. If unset, Synapse defaults to <code>https://&lt;server_name&gt;/</code> which is used in
+the OIDC callback URL.</p>
 <h2 id="oidc-back-channel-logout"><a class="header" href="#oidc-back-channel-logout">OIDC Back-Channel Logout</a></h2>
 <p>Synapse supports receiving <a href="https://openid.net/specs/openid-connect-backchannel-1_0.html">OpenID Connect Back-Channel Logout</a> notifications.</p>
 <p>This lets the OpenID Connect Provider notify Synapse when a user logs out, so that Synapse can end that user session.

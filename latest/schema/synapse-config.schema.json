@@ -1,6 +1,6 @@
 {
   "$schema": "https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json",
-  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.144/synapse-config.schema.json",
+  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.145/synapse-config.schema.json",
   "type": "object",
   "properties": {
     "modules": {
@@ -1977,6 +1977,14 @@
           "burst_count": 5.0
         }
       ]
+    },
+    "rc_user_directory": {
+      "$ref": "#/$defs/rc",
+      "description": "This option allows admins to ratelimit searches in the user directory.\n\n_Added in Synapse 1.145.0._",
+      "default": {
+        "per_second": 0.016,
+        "burst_count": 200.0
+      }
     },
     "federation_rr_transactions_per_room_per_second": {
       "type": "integer",

@@ -1955,7 +1955,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.144.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.145.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -5865,6 +5865,24 @@ Setting this to a high value allows users to report content quickly, possibly in
   burst_count: 5.0
 </code></pre>
 <hr />
+<h3 id="rc_user_directory"><a class="header" href="#rc_user_directory"><code>rc_user_directory</code></a></h3>
+<p><em>(object)</em> This option allows admins to ratelimit searches in the user directory.</p>
+<p><em>Added in Synapse 1.145.0.</em></p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>per_second</code> (number): Maximum number of requests a client can send per second.</p>
+</li>
+<li>
+<p><code>burst_count</code> (number): Maximum number of requests a client can send before being throttled.</p>
+</li>
+</ul>
+<p>Default configuration:</p>
+<pre><code class="language-yaml">rc_user_directory:
+  per_second: 0.016
+  burst_count: 200.0
+</code></pre>
+<hr />
 <h3 id="federation_rr_transactions_per_room_per_second"><a class="header" href="#federation_rr_transactions_per_room_per_second"><code>federation_rr_transactions_per_room_per_second</code></a></h3>
 <p><em>(integer)</em> Sets outgoing federation transaction frequency for sending read-receipts, per-room.</p>
 <p>If we end up trying to send out more read-receipts, they will get buffered up into fewer transactions.</p>
@@ -8136,14 +8154,18 @@ a fresh config using Synapse by following the instructions in
 server_name: &quot;SERVERNAME&quot;
 pid_file: DATADIR/homeserver.pid
 listeners:
-  - port: 8008
+  - bind_addresses:
+    - ::1
+    - 127.0.0.1
+    port: 8008
+    resources:
+    - compress: false
+      names:
+      - client
+      - federation
     tls: false
     type: http
     x_forwarded: true
-    bind_addresses: ['::1', '127.0.0.1']
-    resources:
-      - names: [client, federation]
-        compress: false
 database:
   name: sqlite3
   args:
@@ -8651,6 +8673,10 @@ maintainer.</p>
 setting in your configuration file.
 See the <a href="usage/configuration/config_documentation.html#oidc_providers">configuration manual</a> for some sample settings, as well as
 the text below for example configurations for specific providers.</p>
+<p>For setups using <a href="delegate.html"><code>.well-known</code> delegation</a>, make sure
+<a href="usage/configuration/config_documentation.html#public_baseurl"><code>public_baseurl</code></a> is set
+appropriately. If unset, Synapse defaults to <code>https://&lt;server_name&gt;/</code> which is used in
+the OIDC callback URL.</p>
 <h2 id="oidc-back-channel-logout"><a class="header" href="#oidc-back-channel-logout">OIDC Back-Channel Logout</a></h2>
 <p>Synapse supports receiving <a href="https://openid.net/specs/openid-connect-backchannel-1_0.html">OpenID Connect Back-Channel Logout</a> notifications.</p>
 <p>This lets the OpenID Connect Provider notify Synapse when a user logs out, so that Synapse can end that user session.
@@ -12174,6 +12200,8 @@ information.</p>
 ^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$
 ^/_matrix/client/(r0|v3|unstable)/capabilities$
 ^/_matrix/client/(r0|v3|unstable)/notifications$
+
+# Admin API requests
 ^/_synapse/admin/v1/rooms/[^/]+$
 
 # Encryption requests
@@ -12217,6 +12245,9 @@ information.</p>
 
 # Presence requests
 ^/_matrix/client/(api/v1|r0|v3|unstable)/presence/
+
+# Admin API requests
+^/_synapse/admin/v2/users/[^/]+$
 </code></pre>
 <p>Pagination requests can also be handled, but all requests for a given
 room must be routed to the same instance. Additionally, care must be taken to
@@ -13387,6 +13418,16 @@ is quarantined, Synapse will:</p>
 <li>Quarantine any existing cached remote media.</li>
 <li>Quarantine any future remote media.</li>
 </ul>
+<h2 id="downloading-quarantined-media"><a class="header" href="#downloading-quarantined-media">Downloading quarantined media</a></h2>
+<p>Normally, when media is quarantined, it will return a 404 error when downloaded.
+Admins can bypass this by adding <code>?admin_unsafely_bypass_quarantine=true</code>
+to the <a href="https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1mediadownloadservernamemediaid">normal download URL</a>.</p>
+<p>Bypassing the quarantine check is not recommended. Media is typically quarantined
+to prevent harmful content from being served to users, which includes admins. Only
+set the bypass parameter if you intentionally want to access potentially harmful
+content.</p>
+<p>Non-admin users cannot bypass quarantine checks, even when specifying the above
+query parameter.</p>
 <h2 id="quarantining-media-by-id"><a class="header" href="#quarantining-media-by-id">Quarantining media by ID</a></h2>
 <p>This API quarantines a single piece of local or remote media.</p>
 <p>Request:</p>
@@ -15661,6 +15702,41 @@ The parameter <code>logout_devices</code> is optional and defaults to <code>true
     &quot;admin&quot;: true
 }
 </code></pre>
+<h2 id="list-room-memberships-of-a-user"><a class="header" href="#list-room-memberships-of-a-user">List room memberships of a user</a></h2>
+<p>Gets a list of room memberships for a specific <code>user_id</code>. This
+endpoint differs from
+<a href="admin_api/user_admin_api.html#list-joined-rooms-of-a-user"><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/joined_rooms</code></a>
+in that it returns rooms with memberships other than &quot;join&quot;.</p>
+<p>The API is:</p>
+<pre><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/memberships
+</code></pre>
+<p>A response body like the following is returned:</p>
+<pre><code class="language-json">    {
+        &quot;memberships&quot;: {
+            &quot;!DuGcnbhHGaSZQoNQR:matrix.org&quot;: &quot;join&quot;,
+            &quot;!ZtSaPCawyWtxfWiIy:matrix.org&quot;: &quot;leave&quot;,
+        }
+    }
+</code></pre>
+<p>which is a list of room membership states for the given user. This endpoint can
+be used with both local and remote users, with the caveat that the homeserver will
+only be aware of the memberships for rooms that one of its local users has joined.</p>
+<p>Remote user memberships may also be out of date if all local users have since left
+a room. The homeserver will thus no longer receive membership updates about it.</p>
+<p>The list includes rooms that the user has since left; other membership states (knock,
+invite, etc.) are also possible.</p>
+<p>Note that rooms will only disappear from this list if they are
+<a href="admin_api/./rooms.html#delete-room-api">purged</a> from the homeserver.</p>
+<p><strong>Parameters</strong></p>
+<p>The following parameters should be set in the URL:</p>
+<ul>
+<li><code>user_id</code> - fully qualified: for example, <code>@user:server.com</code>.</li>
+</ul>
+<p><strong>Response</strong></p>
+<p>The following fields are returned in the JSON response body:</p>
+<ul>
+<li><code>memberships</code> - A map of <code>room_id</code> (string) to <code>membership</code> state (string).</li>
+</ul>
 <h2 id="list-joined-rooms-of-a-user"><a class="header" href="#list-joined-rooms-of-a-user">List joined rooms of a user</a></h2>
 <p>Gets a list of all <code>room_id</code> that a specific <code>user_id</code> is joined to and is a member of (participating in).</p>
 <p>The API is:</p>
