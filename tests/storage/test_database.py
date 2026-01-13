@@ -231,15 +231,10 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
         txn_mocks.exception_callback.assert_called_once_with(987, 654, extra=321)
 
         # Nothing should have committed.
-        txn_mocks.commit.assert_not_called()
+        self.assertEqual(txn_mocks.commit.call_count, 0)
         # FIXME: Every transaction should have been rolled back, see
         # https://github.com/element-hq/synapse/issues/19202
-        # txn_mocks.rollback.assert_has_calls(
-        #     [
-        #         call(),
-        #     ]
-        # )
-        # self.assertEqual(txn_mocks.rollback.call_count, 1)  # no additional calls
+        # self.assertEqual(txn_mocks.rollback.call_count, 1)
 
     def test_failed_retry(self) -> None:
         """Test that the exception callback is called for every failed attempt."""
@@ -262,18 +257,9 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
         )  # no additional calls
 
         # Nothing should have committed.
-        txn_mocks.commit.assert_not_called()
+        self.assertEqual(txn_mocks.commit.call_count, 0)
         # Every transaction should have been rolled back.
-        txn_mocks.rollback.assert_has_calls(
-            [
-                call(),
-                call(),
-                call(),
-                call(),
-                call(),
-            ]
-        )
-        self.assertEqual(txn_mocks.rollback.call_count, 5)  # no additional calls
+        self.assertEqual(txn_mocks.rollback.call_count, 5)
 
     def test_successful_retry(self) -> None:
         """Test callbacks for a failed transaction followed by a successful attempt."""
@@ -296,14 +282,9 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
         txn_mocks.exception_callback.assert_not_called()
 
         # The last attempt should have committed.
-        txn_mocks.commit.assert_called_once()
+        self.assertEqual(txn_mocks.commit.call_count, 1)
         # The first attempt should have been rolled back.
-        txn_mocks.rollback.assert_has_calls(
-            [
-                call(),
-            ]
-        )
-        self.assertEqual(txn_mocks.rollback.call_count, 1)  # no additional calls
+        self.assertEqual(txn_mocks.rollback.call_count, 1)
 
 
 class CancellationTestCase(unittest.HomeserverTestCase):
