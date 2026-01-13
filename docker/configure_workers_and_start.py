@@ -378,9 +378,6 @@ Prometheus config.
 NGINX_HOST_PLACEHOLDER = "<HOST_PLACEHOLDER>"
 """Will be replaced with the whatever hostname:port used to access the nginx metrics endpoint."""
 
-NGINX_HOSTNAME_PLACEHOLDER = "<HOSTNAME_PLACEHOLDER>"
-"""Will be replaced with the whatever hostname used to access the nginx metrics endpoint."""
-
 NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY = """
 server {{
     listen 9469;
@@ -398,7 +395,6 @@ server {{
         # `host.docker.internal:9469`, etc. Or perhaps it's even some randomly assigned
         # port mapping.
         sub_filter '{host_placeholder}' '$http_host';
-        sub_filter '{hostname_placeholder}' '$host';
         # By default, `ngx_http_sub_module` only works on `text/html` responses. We want
         # to find/replace in `application/JSON`.
         sub_filter_types application/json;
@@ -701,6 +697,14 @@ class Worker:
     `event_persister:2` -> `event_persister`
     `stream_writers=account_data+presence+receipts+to_device+typing"` -> `stream_writers`
     """
+    worker_index: int
+    """
+    The index of the worker starting from 1 for each worker type requested.
+
+    ex.
+    `event_persister:2` -> `1` and `2`
+    `stream_writers=account_data+presence+receipts+to_device+typing"` -> `1`
+    """
     worker_types: set[str]
     """
     ex.
@@ -828,6 +832,7 @@ def parse_worker_types(
         worker_dict[worker_name] = Worker(
             worker_name=worker_name,
             worker_base_name=worker_base_name,
+            worker_index=worker_number,
             worker_types=worker_types_set,
         )
 
@@ -1086,7 +1091,7 @@ def generate_worker_files(
                 "labels": {
                     # The downstream user should also configure `honor_labels: true` in
                     # their Prometheus config to prevent Prometheus from overwriting the
-                    # `job`/`instance` labels.
+                    # `job` labels.
                     #
                     # > honor_labels controls how Prometheus handles conflicts between labels that are
                     # > already present in scraped data and labels that Prometheus would attach
@@ -1098,8 +1103,8 @@ def generate_worker_files(
                     # Reference:
                     # - https://prometheus.io/docs/concepts/jobs_instances/
                     # - https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config
-                    "instance": f"{NGINX_HOSTNAME_PLACEHOLDER}:{worker_name_to_metrics_port_map[worker.worker_name]}",
                     "job": worker.worker_base_name,
+                    "index": f"{worker.worker_index}",
                     # This allows us to change the `metrics_path` on a per-target basis.
                     # We want to grab the metrics from our nginx proxied location (setup
                     # below).
@@ -1118,9 +1123,8 @@ def generate_worker_files(
             {
                 "targets": [NGINX_HOST_PLACEHOLDER],
                 "labels": {
-                    # Main process always serves metrics on port 19090
-                    "instance": f"{NGINX_HOSTNAME_PLACEHOLDER}:19090",
                     "job": "main",
+                    "index": "1",
                     "__metrics_path__": "/metrics/worker/main",
                 },
             }
@@ -1163,7 +1167,6 @@ def generate_worker_files(
         nginx_prometheus_metrics_service_discovery = NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY.format(
             service_discovery_file_path=PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH,
             host_placeholder=NGINX_HOST_PLACEHOLDER,
-            hostname_placeholder=NGINX_HOSTNAME_PLACEHOLDER,
             metrics_proxy_locations=metrics_proxy_locations,
         )
 
