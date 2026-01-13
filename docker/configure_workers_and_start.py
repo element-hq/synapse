@@ -1123,7 +1123,11 @@ def generate_worker_files(
             {
                 "targets": [NGINX_HOST_PLACEHOLDER],
                 "labels": {
-                    "job": "main",
+                    # We use `"synapse"` as the job name for the main process because it
+                    # matches what we expect people to use from a monolith setup with
+                    # their static scrape config. It's `job` name used in our Grafana
+                    # dashboard for the main process.
+                    "job": "synapse",
                     "index": "1",
                     "__metrics_path__": "/metrics/worker/main",
                 },
