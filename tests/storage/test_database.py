@@ -208,6 +208,16 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
         except Exception:
             pass
 
+        # FIXME: Sanity check that every transaction is either committed or rolled back,
+        # see https://github.com/element-hq/synapse/issues/19202
+        # transaction_count = after_callback.call_count + exception_callback.call_count
+        # self.assertEqual(
+        #     transaction_count,
+        #     commit_mock.call_count + rollback_mock.call_count,
+        #     "We expect every transaction attempt to either commit or rollback. "
+        #     f"Saw {transaction_count} transactions, but only {commit_mock.call_count} commits and {rollback_mock.call_count} rollbacks",
+        # )
+
         return TransactionMocks(
             after_callback=after_callback,
             exception_callback=exception_callback,
