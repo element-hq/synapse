@@ -257,9 +257,8 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
                 call(987, 654, extra=321),
             ]
         )
-        self.assertEqual(
-            txn_mocks.exception_callback.call_count, 5
-        )  # no additional calls
+        # no additional calls
+        self.assertEqual(txn_mocks.exception_callback.call_count, 5)
 
         # Nothing should have committed.
         self.assertEqual(txn_mocks.commit.call_count, 0)
@@ -283,7 +282,8 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
                 call(123, 456, extra=789),
             ]
         )
-        self.assertEqual(txn_mocks.after_callback.call_count, 2)  # no additional calls
+        # no additional calls
+        self.assertEqual(txn_mocks.after_callback.call_count, 2)
         txn_mocks.exception_callback.assert_not_called()
 
         # The last attempt should have committed.
