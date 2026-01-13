@@ -20,8 +20,8 @@
 #
 
 from typing import Callable
-from unittest.mock import Mock, call
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
+
 import attr
 
 from twisted.internet import defer
@@ -189,11 +189,15 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
         orig_commit = LoggingDatabaseConnection.commit
         orig_rollback = LoggingDatabaseConnection.rollback
 
-        def _commit(self, *a, **kw):
+        # type-ignore becauase we're just transparently passing through args/kwargs and
+        # returning whatever result that the original function does
+        def _commit(self, *a, **kw):  # type: ignore[no-untyped-def]
             commit_mock()
             return orig_commit(self, *a, **kw)
 
-        def _rollback(self, *a, **kw):
+        # type-ignore becauase we're just transparently passing through args/kwargs and
+        # returning whatever result that the original function does
+        def _rollback(self, *a, **kw):  # type: ignore[no-untyped-def]
             rollback_mock()
             return orig_rollback(self, *a, **kw)
 
