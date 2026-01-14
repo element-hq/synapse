@@ -19,6 +19,9 @@
 #
 #
 
+# This import is required for Generic usage of `InFlightGauge` to work prior to Python 3.14.
+from __future__ import annotations
+
 import logging
 from functools import wraps
 from types import TracebackType

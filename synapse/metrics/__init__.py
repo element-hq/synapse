@@ -27,6 +27,7 @@ import platform
 import threading
 from importlib import metadata
 from typing import (
+    TYPE_CHECKING,
     Callable,
     Generic,
     Iterable,
@@ -262,22 +263,12 @@ shutdown.
 MetricsEntry = TypeVar("MetricsEntry")
 
 
-T = TypeVar("T")
+class _InFlightGaugeRuntime(Collector):
+    """
+    Runtime class for InFlightGauge. Contains all actual logic.
+    Does not inherit from Generic to avoid MRO conflicts.
 
-
-class _InFlightGaugeTyping(Generic[T]):
-    """Typing-only base. No runtime behaviour."""
-
-    # This class has no state and no runtime behaviour by itself.
-    # Explicitly set slots to empty here to enforce no attributes can be created.
-    # This also has the effect of playing well with inheritance by not creating a
-    # `__dict__` that would be inherited by subclasses even if they are using slots
-    # themselves.
-    __slots__ = ()
-
-
-class InFlightGauge(_InFlightGaugeTyping[MetricsEntry], Collector):
-    """Tracks number of things (e.g. requests, Measure blocks, etc) in flight
+    Tracks number of things (e.g. requests, Measure blocks, etc) in flight
     at any given time.
 
     Each InFlightGauge will create a metric called `<name>_total` that counts
@@ -410,6 +401,19 @@ class InFlightGauge(_InFlightGaugeTyping[MetricsEntry], Collector):
             for key, metrics in metrics_by_key.items():
                 gauge.add_metric(labels=key, value=getattr(metrics, name))
             yield gauge
+
+
+if TYPE_CHECKING:
+
+    class InFlightGauge(_InFlightGaugeRuntime, Generic[MetricsEntry]):
+        """
+        Typing-only generic wrapper.
+        Provides InFlightGauge[T] support to type checkers.
+        """
+
+        ...
+else:
+    InFlightGauge = _InFlightGaugeRuntime
 
 
 class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):

@@ -18,6 +18,10 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+
+# This import is required for Generic usage of `InFlightGauge` to work prior to Python 3.14.
+from __future__ import annotations
+
 from typing import NoReturn, Protocol
 
 from prometheus_client.core import Sample
