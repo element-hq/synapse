@@ -28,6 +28,7 @@ import threading
 from importlib import metadata
 from typing import (
     TYPE_CHECKING,
+    Any,
     Callable,
     Generic,
     Iterable,
@@ -304,7 +305,8 @@ class _InFlightGaugeRuntime(Collector):
         )
 
         # Counts number of in flight blocks for a given set of label values
-        self._registrations = {}
+        # Type annotations are not
+        self._registrations: dict[tuple[str, ...], set[Callable[[Any], None]]] = {}
 
         # Protects access to _registrations
         self._lock = threading.Lock()
@@ -408,9 +410,6 @@ if TYPE_CHECKING:
         Typing-only generic wrapper.
         Provides InFlightGauge[T] support to type checkers.
         """
-
-        _metrics_class: type[MetricsEntry]
-        _registrations: dict[tuple[str, ...], set[Callable[[MetricsEntry], None]]]
 else:
     InFlightGauge = _InFlightGaugeRuntime
 
