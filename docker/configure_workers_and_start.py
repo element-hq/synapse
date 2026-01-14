@@ -385,8 +385,8 @@ server {{
         alias {service_discovery_file_path};
         default_type application/json;
 
-        # Find/replace the host placeholder with the actual host used to access this
-        # endpoint.
+        # Find/replace the host placeholder in the response body with the actual
+        # host used to access this endpoint.
         #
         # We want to reflect back whatever host the client used to access this file.
         # For example, if they accessed it via `localhost:9469`, then they
