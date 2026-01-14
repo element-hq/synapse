@@ -1,3 +1,26 @@
+# Synapse 1.145.0 (2026-01-13)
+
+No significant changes since 1.145.0rc4.
+
+## End of Life of Ubuntu 25.04 Plucky Puffin
+
+Ubuntu 25.04 (Plucky Puffin) will be end of life on Jan 17, 2026. Synapse will stop building packages for Ubuntu 25.04 shortly thereafter.
+
+## Updates to Locked Dependencies No Longer Included in Changelog
+
+The "Updates to locked dependencies" section has been removed from the changelog due to lack of use and the maintenance burden. ([\#19254](https://github.com/element-hq/synapse/issues/19254))
+
+
+
+
+# Synapse 1.145.0rc4 (2026-01-08)
+
+No significant changes since 1.145.0rc3.
+
+This RC contains a fix specifically for openSUSE packaging and no other changes. 
+
+
+
 # Synapse 1.145.0rc3 (2026-01-07)
 
 No significant changes since 1.145.0rc2.
@@ -16,17 +39,9 @@ This RC fixes the source distribution packaging for uploading to PyPI.
 
 # Synapse 1.145.0rc1 (2026-01-06)
 
-## End of Life of Ubuntu 25.04 Plucky Puffin
-
-Ubuntu 25.04 (Plucky Puffin) will be end of life on Jan 17, 2026. Synapse will stop building packages for Ubuntu 25.04 shortly thereafter.
-
-## Updates to Locked Dependencies No Longer Included in Changelog
-
-The "Updates to locked dependencies" section has been removed from the changelog due to lack of use and the maintenance burden. ([\#19254](https://github.com/element-hq/synapse/issues/19254))
-
 ## Features
 
-- Add `memberships` endpoint to the admin API. This is useful for forensics and T&S purpose. ([\#19260](https://github.com/element-hq/synapse/issues/19260))
+- Add `memberships` endpoint to the admin API. This is useful for forensics and T&S purposes. ([\#19260](https://github.com/element-hq/synapse/issues/19260))
 - Server admins can bypass the quarantine media check when downloading media by setting the `admin_unsafely_bypass_quarantine` query parameter to `true` on Client-Server API media download requests. ([\#19275](https://github.com/element-hq/synapse/issues/19275))
 - Implemented pagination for the [MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666) mutual rooms endpoint. Contributed by @tulir @ Beeper. ([\#19279](https://github.com/element-hq/synapse/issues/19279))
 - Admin API: add worker support to `GET /_synapse/admin/v2/users/<user_id>`. ([\#19281](https://github.com/element-hq/synapse/issues/19281))
