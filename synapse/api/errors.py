@@ -26,7 +26,7 @@ import math
 import typing
 from enum import Enum
 from http import HTTPStatus
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from twisted.web import http
 
