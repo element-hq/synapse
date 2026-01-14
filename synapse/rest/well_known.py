@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.resource import Resource
 from twisted.web.server import Request
@@ -42,7 +42,7 @@ class WellKnownBuilder:
         self._config = hs.config
         self._auth = hs.get_auth()
 
-    async def get_well_known(self) -> Optional[JsonDict]:
+    async def get_well_known(self) -> JsonDict | None:
         if not self._config.server.serve_client_wellknown:
             return None
 
@@ -97,7 +97,7 @@ class ClientWellKnownResource(DirectServeJsonResource):
         super().__init__(clock=hs.get_clock())
         self._well_known_builder = WellKnownBuilder(hs)
 
-    async def _async_render_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         r = await self._well_known_builder.get_well_known()
         if not r:
             raise NotFoundError(".well-known not available")

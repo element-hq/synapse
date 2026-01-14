@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.http.server import DirectServeJsonResource
 from synapse.http.site import SynapseRequest
@@ -73,5 +73,5 @@ class JwksResource(DirectServeJsonResource):
             "keys": keys,
         }
 
-    async def _async_render_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def _async_render_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         return 200, self.res

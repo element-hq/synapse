@@ -15,11 +15,11 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
-from pydantic import ValidationError
+from pydantic import Field, StrictStr, ValidationError, model_validator
+from typing_extensions import Self
 
-from synapse._pydantic_compat import Field, StrictStr, validator
 from synapse.types import JsonDict
 from synapse.util.pydantic_models import ParseModel
 
@@ -29,17 +29,16 @@ from ._base import Config, ConfigError
 class TransportConfigModel(ParseModel):
     type: StrictStr
 
-    livekit_service_url: Optional[StrictStr] = Field(default=None)
+    livekit_service_url: StrictStr | None = Field(default=None)
     """An optional livekit service URL. Only required if type is "livekit"."""
 
-    @validator("livekit_service_url", always=True)
-    def validate_livekit_service_url(cls, v: Any, values: dict) -> Any:
-        if values.get("type") == "livekit" and not v:
+    @model_validator(mode="after")
+    def validate_livekit_service_url(self) -> Self:
+        if self.type == "livekit" and not self.livekit_service_url:
             raise ValueError(
                 "You must set a `livekit_service_url` when using the 'livekit' transport."
             )
-
-        return v
+        return self
 
 
 class MatrixRtcConfigModel(ParseModel):

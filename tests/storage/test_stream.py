@@ -20,7 +20,6 @@
 #
 
 import logging
-from typing import List, Tuple
 from unittest.mock import AsyncMock, patch
 
 from immutabledict import immutabledict
@@ -150,7 +149,7 @@ class PaginationTestCase(HomeserverTestCase):
         )
         self.event_id_none = res["event_id"]
 
-    def _filter_messages(self, filter: JsonDict) -> List[str]:
+    def _filter_messages(self, filter: JsonDict) -> list[str]:
         """Make a request to /messages with a filter, returns the chunk of events."""
 
         events, next_key, _ = self.get_success(
@@ -324,7 +323,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
 
     def _send_event_on_instance(
         self, instance_name: str, room_id: str, access_token: str
-    ) -> Tuple[JsonDict, PersistedEventPosition]:
+    ) -> tuple[JsonDict, PersistedEventPosition]:
         """
         Send an event in a room and mimic that it was persisted by a specific
         instance/worker.

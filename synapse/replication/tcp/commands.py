@@ -26,7 +26,7 @@ allowed to be sent by which side.
 
 import abc
 import logging
-from typing import List, Optional, Tuple, Type, TypeVar
+from typing import TypeVar
 
 from synapse.replication.tcp.streams._base import StreamRow
 from synapse.util.json import json_decoder, json_encoder
@@ -49,7 +49,7 @@ class Command(metaclass=abc.ABCMeta):
 
     @classmethod
     @abc.abstractmethod
-    def from_line(cls: Type[T], line: str) -> T:
+    def from_line(cls: type[T], line: str) -> T:
         """Deserialises a line from the wire into this command. `line` does not
         include the command.
         """
@@ -88,7 +88,7 @@ class _SimpleCommand(Command):
         self.data = data
 
     @classmethod
-    def from_line(cls: Type[SC], line: str) -> SC:
+    def from_line(cls: type[SC], line: str) -> SC:
         return cls(line)
 
     def to_line(self) -> str:
@@ -137,7 +137,7 @@ class RdataCommand(Command):
     NAME = "RDATA"
 
     def __init__(
-        self, stream_name: str, instance_name: str, token: Optional[int], row: StreamRow
+        self, stream_name: str, instance_name: str, token: int | None, row: StreamRow
     ):
         self.stream_name = stream_name
         self.instance_name = instance_name
@@ -145,7 +145,7 @@ class RdataCommand(Command):
         self.row = row
 
     @classmethod
-    def from_line(cls: Type["RdataCommand"], line: str) -> "RdataCommand":
+    def from_line(cls: type["RdataCommand"], line: str) -> "RdataCommand":
         stream_name, instance_name, token, row_json = line.split(" ", 3)
         return cls(
             stream_name,
@@ -204,7 +204,7 @@ class PositionCommand(Command):
         self.new_token = new_token
 
     @classmethod
-    def from_line(cls: Type["PositionCommand"], line: str) -> "PositionCommand":
+    def from_line(cls: type["PositionCommand"], line: str) -> "PositionCommand":
         stream_name, instance_name, prev_token, new_token = line.split(" ", 3)
         return cls(stream_name, instance_name, int(prev_token), int(new_token))
 
@@ -249,7 +249,7 @@ class ReplicateCommand(Command):
         REPLICATE
     """
 
-    __slots__: List[str] = []
+    __slots__: list[str] = []
 
     NAME = "REPLICATE"
 
@@ -257,7 +257,7 @@ class ReplicateCommand(Command):
         pass
 
     @classmethod
-    def from_line(cls: Type[T], line: str) -> T:
+    def from_line(cls: type[T], line: str) -> T:
         return cls()
 
     def to_line(self) -> str:
@@ -288,7 +288,7 @@ class UserSyncCommand(Command):
         self,
         instance_id: str,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         is_syncing: bool,
         last_sync_ms: int,
     ):
@@ -299,8 +299,8 @@ class UserSyncCommand(Command):
         self.last_sync_ms = last_sync_ms
 
     @classmethod
-    def from_line(cls: Type["UserSyncCommand"], line: str) -> "UserSyncCommand":
-        device_id: Optional[str]
+    def from_line(cls: type["UserSyncCommand"], line: str) -> "UserSyncCommand":
+        device_id: str | None
         instance_id, user_id, device_id, state, last_sync_ms = line.split(" ", 4)
 
         if device_id == "None":
@@ -343,7 +343,7 @@ class ClearUserSyncsCommand(Command):
 
     @classmethod
     def from_line(
-        cls: Type["ClearUserSyncsCommand"], line: str
+        cls: type["ClearUserSyncsCommand"], line: str
     ) -> "ClearUserSyncsCommand":
         return cls(line)
 
@@ -373,7 +373,7 @@ class FederationAckCommand(Command):
 
     @classmethod
     def from_line(
-        cls: Type["FederationAckCommand"], line: str
+        cls: type["FederationAckCommand"], line: str
     ) -> "FederationAckCommand":
         instance_name, token = line.split(" ")
         return cls(instance_name, int(token))
@@ -407,7 +407,7 @@ class UserIpCommand(Command):
         access_token: str,
         ip: str,
         user_agent: str,
-        device_id: Optional[str],
+        device_id: str | None,
         last_seen: int,
     ):
         self.user_id = user_id
@@ -418,7 +418,7 @@ class UserIpCommand(Command):
         self.last_seen = last_seen
 
     @classmethod
-    def from_line(cls: Type["UserIpCommand"], line: str) -> "UserIpCommand":
+    def from_line(cls: type["UserIpCommand"], line: str) -> "UserIpCommand":
         user_id, jsn = line.split(" ", 1)
 
         access_token, ip, user_agent, device_id, last_seen = json_decoder.decode(jsn)
@@ -485,7 +485,7 @@ class LockReleasedCommand(Command):
         self.lock_key = lock_key
 
     @classmethod
-    def from_line(cls: Type["LockReleasedCommand"], line: str) -> "LockReleasedCommand":
+    def from_line(cls: type["LockReleasedCommand"], line: str) -> "LockReleasedCommand":
         instance_name, lock_name, lock_key = json_decoder.decode(line)
 
         return cls(instance_name, lock_name, lock_key)
@@ -505,7 +505,7 @@ class NewActiveTaskCommand(_SimpleCommand):
     NAME = "NEW_ACTIVE_TASK"
 
 
-_COMMANDS: Tuple[Type[Command], ...] = (
+_COMMANDS: tuple[type[Command], ...] = (
     ServerCommand,
     RdataCommand,
     PositionCommand,

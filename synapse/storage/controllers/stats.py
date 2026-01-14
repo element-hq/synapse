@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Collection, Counter, List, Tuple
+from typing import TYPE_CHECKING, Collection, Counter
 
 from synapse.api.errors import SynapseError
 from synapse.storage.database import LoggingTransaction
@@ -39,7 +39,7 @@ class StatsController:
     def __init__(self, hs: "HomeServer", stores: Databases):
         self.stores = stores
 
-    async def get_room_db_size_estimate(self) -> List[Tuple[str, int]]:
+    async def get_room_db_size_estimate(self) -> list[tuple[str, int]]:
         """Get an estimate of the largest rooms and how much database space they
         use, in bytes.
 

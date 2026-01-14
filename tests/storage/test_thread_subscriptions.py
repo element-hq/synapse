@@ -12,7 +12,6 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-from typing import Optional, Union
 
 from twisted.internet.testing import MemoryReactor
 
@@ -102,10 +101,10 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         self,
         thread_root_id: str,
         *,
-        automatic_event_orderings: Optional[EventOrderings],
-        room_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-    ) -> Optional[Union[int, AutomaticSubscriptionConflicted]]:
+        automatic_event_orderings: EventOrderings | None,
+        room_id: str | None = None,
+        user_id: str | None = None,
+    ) -> int | AutomaticSubscriptionConflicted | None:
         if user_id is None:
             user_id = self.user_id
 
@@ -124,9 +123,9 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
     def _unsubscribe(
         self,
         thread_root_id: str,
-        room_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-    ) -> Optional[int]:
+        room_id: str | None = None,
+        user_id: str | None = None,
+    ) -> int | None:
         if user_id is None:
             user_id = self.user_id
 

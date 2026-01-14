@@ -19,7 +19,7 @@
 #
 #
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from twisted.internet.testing import MemoryReactor
 
@@ -161,8 +161,8 @@ class KnockingStrippedStateEventHelperMixin(HomeserverTestCase):
 
     def check_knock_room_state_against_room_state(
         self,
-        knock_room_state: List[Dict],
-        expected_room_state: Dict,
+        knock_room_state: list[dict],
+        expected_room_state: dict,
     ) -> None:
         """Test a list of stripped room state events received over federation against a
         dict of expected state events.
@@ -232,7 +232,7 @@ class FederationKnockingTestCase(
         # Have this homeserver skip event auth checks. This is necessary due to
         # event auth checks ensuring that events were signed by the sender's homeserver.
         async def _check_event_auth(
-            origin: Optional[str], event: EventBase, context: EventContext
+            origin: str | None, event: EventBase, context: EventContext
         ) -> None:
             pass
 

@@ -30,17 +30,10 @@ from typing import (
     Any,
     Callable,
     Collection,
-    Dict,
     Generic,
     Iterable,
-    List,
     Literal,
-    Optional,
-    Set,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
     cast,
     overload,
 )
@@ -57,6 +50,7 @@ from synapse.util.caches.treecache import (
     iterate_tree_cache_items,
 )
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.linked_list import ListNode
 
 if TYPE_CHECKING:
@@ -122,14 +116,14 @@ def _expire_old_entries(
     hs: "HomeServer",
     clock: Clock,
     expiry_seconds: float,
-    autotune_config: Optional[dict],
+    autotune_config: dict | None,
 ) -> "defer.Deferred[None]":
     """Walks the global cache list to find cache entries that haven't been
     accessed in the given number of seconds, or if a given memory threshold has been breached.
     """
 
     async def _internal_expire_old_entries(
-        clock: Clock, expiry_seconds: float, autotune_config: Optional[dict]
+        clock: Clock, expiry_seconds: float, autotune_config: dict | None
     ) -> None:
         if autotune_config:
             max_cache_memory_usage = autotune_config["max_cache_memory_usage"]
@@ -209,9 +203,9 @@ def _expire_old_entries(
             if (i + 1) % 10000 == 0:
                 logger.debug("Waiting during drop")
                 if node.last_access_ts_secs > now - expiry_seconds:
-                    await clock.sleep(0.5)
+                    await clock.sleep(Duration(milliseconds=500))
                 else:
-                    await clock.sleep(0)
+                    await clock.sleep(Duration(seconds=0))
                 logger.debug("Waking during drop")
 
             node = next_node
@@ -255,7 +249,7 @@ def setup_expire_lru_cache_entries(hs: "HomeServer") -> None:
     clock = hs.get_clock()
     clock.looping_call(
         _expire_old_entries,
-        30 * 1000,
+        Duration(seconds=30),
         server_name,
         hs,
         clock,
@@ -286,7 +280,7 @@ class _Node(Generic[KT, VT]):
         prune_unread_entries: bool = True,
     ):
         self._list_node = ListNode.insert_after(self, root)
-        self._global_list_node: Optional[_TimedListNode] = None
+        self._global_list_node: _TimedListNode | None = None
         if USE_GLOBAL_LIST and prune_unread_entries:
             self._global_list_node = _TimedListNode.insert_after(self, GLOBAL_ROOT)
             self._global_list_node.update_last_access(clock)
@@ -308,7 +302,7 @@ class _Node(Generic[KT, VT]):
         # footprint down. Storing `None` is free as its a singleton, while empty
         # lists are 56 bytes (and empty sets are 216 bytes, if we did the naive
         # thing and used sets).
-        self.callbacks: Optional[List[Callable[[], None]]] = None
+        self.callbacks: list[Callable[[], None]] | None = None
 
         self.add_callbacks(callbacks)
 
@@ -404,12 +398,12 @@ class LruCache(Generic[KT, VT]):
         clock: Clock,
         server_name: str,
         cache_name: str,
-        cache_type: Type[Union[dict, TreeCache]] = dict,
-        size_callback: Optional[Callable[[VT], int]] = None,
-        metrics_collection_callback: Optional[Callable[[], None]] = None,
+        cache_type: type[dict | TreeCache] = dict,
+        size_callback: Callable[[VT], int] | None = None,
+        metrics_collection_callback: Callable[[], None] | None = None,
         apply_cache_factor_from_config: bool = True,
         prune_unread_entries: bool = True,
-        extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
+        extra_index_cb: Callable[[KT, VT], KT] | None = None,
     ): ...
 
     @overload
@@ -420,12 +414,12 @@ class LruCache(Generic[KT, VT]):
         clock: Clock,
         server_name: str,
         cache_name: Literal[None] = None,
-        cache_type: Type[Union[dict, TreeCache]] = dict,
-        size_callback: Optional[Callable[[VT], int]] = None,
-        metrics_collection_callback: Optional[Callable[[], None]] = None,
+        cache_type: type[dict | TreeCache] = dict,
+        size_callback: Callable[[VT], int] | None = None,
+        metrics_collection_callback: Callable[[], None] | None = None,
         apply_cache_factor_from_config: bool = True,
         prune_unread_entries: bool = True,
-        extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
+        extra_index_cb: Callable[[KT, VT], KT] | None = None,
     ): ...
 
     def __init__(
@@ -434,13 +428,13 @@ class LruCache(Generic[KT, VT]):
         max_size: int,
         clock: Clock,
         server_name: str,
-        cache_name: Optional[str] = None,
-        cache_type: Type[Union[dict, TreeCache]] = dict,
-        size_callback: Optional[Callable[[VT], int]] = None,
-        metrics_collection_callback: Optional[Callable[[], None]] = None,
+        cache_name: str | None = None,
+        cache_type: type[dict | TreeCache] = dict,
+        size_callback: Callable[[VT], int] | None = None,
+        metrics_collection_callback: Callable[[], None] | None = None,
         apply_cache_factor_from_config: bool = True,
         prune_unread_entries: bool = True,
-        extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
+        extra_index_cb: Callable[[KT, VT], KT] | None = None,
     ):
         """
         Args:
@@ -489,7 +483,7 @@ class LruCache(Generic[KT, VT]):
 
                 Note: The new key does not have to be unique.
         """
-        cache: Union[Dict[KT, _Node[KT, VT]], TreeCache] = cache_type()
+        cache: dict[KT, _Node[KT, VT]] | TreeCache = cache_type()
         self.cache = cache  # Used for introspection.
         self.apply_cache_factor_from_config = apply_cache_factor_from_config
 
@@ -505,10 +499,10 @@ class LruCache(Generic[KT, VT]):
 
         # register_cache might call our "set_cache_factor" callback; there's nothing to
         # do yet when we get resized.
-        self._on_resize: Optional[Callable[[], None]] = None
+        self._on_resize: Callable[[], None] | None = None
 
         if cache_name is not None and server_name is not None:
-            metrics: Optional[CacheMetric] = register_cache(
+            metrics: CacheMetric | None = register_cache(
                 cache_type="lru_cache",
                 cache_name=cache_name,
                 cache=self,
@@ -529,7 +523,7 @@ class LruCache(Generic[KT, VT]):
 
         lock = threading.Lock()
 
-        extra_index: Dict[KT, Set[KT]] = {}
+        extra_index: dict[KT, set[KT]] = {}
 
         def evict() -> None:
             while cache_len() > self.max_size:
@@ -630,7 +624,7 @@ class LruCache(Generic[KT, VT]):
             callbacks: Collection[Callable[[], None]] = ...,
             update_metrics: bool = ...,
             update_last_access: bool = ...,
-        ) -> Optional[VT]: ...
+        ) -> VT | None: ...
 
         @overload
         def cache_get(
@@ -639,16 +633,16 @@ class LruCache(Generic[KT, VT]):
             callbacks: Collection[Callable[[], None]] = ...,
             update_metrics: bool = ...,
             update_last_access: bool = ...,
-        ) -> Union[T, VT]: ...
+        ) -> T | VT: ...
 
         @synchronized
         def cache_get(
             key: KT,
-            default: Optional[T] = None,
+            default: T | None = None,
             callbacks: Collection[Callable[[], None]] = (),
             update_metrics: bool = True,
             update_last_access: bool = True,
-        ) -> Union[None, T, VT]:
+        ) -> None | T | VT:
             """Look up a key in the cache
 
             Args:
@@ -682,21 +676,21 @@ class LruCache(Generic[KT, VT]):
             key: tuple,
             default: Literal[None] = None,
             update_metrics: bool = True,
-        ) -> Union[None, Iterable[Tuple[KT, VT]]]: ...
+        ) -> None | Iterable[tuple[KT, VT]]: ...
 
         @overload
         def cache_get_multi(
             key: tuple,
             default: T,
             update_metrics: bool = True,
-        ) -> Union[T, Iterable[Tuple[KT, VT]]]: ...
+        ) -> T | Iterable[tuple[KT, VT]]: ...
 
         @synchronized
         def cache_get_multi(
             key: tuple,
-            default: Optional[T] = None,
+            default: T | None = None,
             update_metrics: bool = True,
-        ) -> Union[None, T, Iterable[Tuple[KT, VT]]]:
+        ) -> None | T | Iterable[tuple[KT, VT]]:
             """Returns a generator yielding all entries under the given key.
 
             Can only be used if backed by a tree cache.
@@ -774,13 +768,13 @@ class LruCache(Generic[KT, VT]):
                 return value
 
         @overload
-        def cache_pop(key: KT, default: Literal[None] = None) -> Optional[VT]: ...
+        def cache_pop(key: KT, default: Literal[None] = None) -> VT | None: ...
 
         @overload
-        def cache_pop(key: KT, default: T) -> Union[T, VT]: ...
+        def cache_pop(key: KT, default: T) -> T | VT: ...
 
         @synchronized
-        def cache_pop(key: KT, default: Optional[T] = None) -> Union[None, T, VT]:
+        def cache_pop(key: KT, default: T | None = None) -> None | T | VT:
             node = cache.get(key, None)
             if node:
                 evicted_len = delete_node(node)
@@ -930,22 +924,22 @@ class AsyncLruCache(Generic[KT, VT]):
         self._lru_cache: LruCache[KT, VT] = LruCache(*args, **kwargs)
 
     async def get(
-        self, key: KT, default: Optional[T] = None, update_metrics: bool = True
-    ) -> Optional[VT]:
+        self, key: KT, default: T | None = None, update_metrics: bool = True
+    ) -> VT | None:
         return self._lru_cache.get(key, update_metrics=update_metrics)
 
     async def get_external(
         self,
         key: KT,
-        default: Optional[T] = None,
+        default: T | None = None,
         update_metrics: bool = True,
-    ) -> Optional[VT]:
+    ) -> VT | None:
         # This method should fetch from any configured external cache, in this case noop.
         return None
 
     def get_local(
-        self, key: KT, default: Optional[T] = None, update_metrics: bool = True
-    ) -> Optional[VT]:
+        self, key: KT, default: T | None = None, update_metrics: bool = True
+    ) -> VT | None:
         return self._lru_cache.get(key, update_metrics=update_metrics)
 
     async def set(self, key: KT, value: VT) -> None:

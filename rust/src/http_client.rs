@@ -134,7 +134,7 @@ fn get_runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRunt
 }
 
 /// A reference to the `twisted.internet.defer` module.
-static DEFER: OnceCell<PyObject> = OnceCell::new();
+static DEFER: OnceCell<Py<PyAny>> = OnceCell::new();
 
 /// Access to the `twisted.internet.defer` module.
 fn defer(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
@@ -165,7 +165,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 #[pyclass]
 struct HttpClient {
     client: reqwest::Client,
-    reactor: PyObject,
+    reactor: Py<PyAny>,
 }
 
 #[pymethods]
@@ -237,7 +237,7 @@ impl HttpClient {
                 return Err(HttpResponseException::new(status, buffer));
             }
 
-            let r = Python::with_gil(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
+            let r = Python::attach(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
 
             Ok(r)
         })
@@ -270,7 +270,7 @@ where
     handle.spawn(async move {
         let res = task.await;
 
-        Python::with_gil(move |py| {
+        Python::attach(move |py| {
             // Flatten the panic into standard python error
             let res = match res {
                 Ok(r) => r,

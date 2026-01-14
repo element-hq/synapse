@@ -21,7 +21,7 @@
 import logging
 import random
 import urllib.parse
-from typing import TYPE_CHECKING, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
 from prometheus_client import Counter
 
@@ -40,6 +40,7 @@ from . import push_tools
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+from synapse.util.duration import Duration
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ http_badges_failed_counter = Counter(
 )
 
 
-def tweaks_for_actions(actions: List[Union[str, Dict]]) -> JsonMapping:
+def tweaks_for_actions(actions: list[str | dict]) -> JsonMapping:
     """
     Converts a list of actions into a `tweaks` dict (which can then be passed to
         the push gateway).
@@ -163,7 +164,7 @@ class HttpPusher(Pusher):
         self.data_minus_url = {}
         self.data_minus_url.update(self.data)
         del self.data_minus_url["url"]
-        self.badge_count_last_call: Optional[int] = None
+        self.badge_count_last_call: int | None = None
 
     def on_started(self, should_check_for_notifs: bool) -> None:
         """Called when this pusher has been started.
@@ -336,7 +337,7 @@ class HttpPusher(Pusher):
                 else:
                     logger.info("Push failed: delaying for %ds", self.backoff_delay)
                     self.timed_call = self.hs.get_clock().call_later(
-                        self.backoff_delay,
+                        Duration(seconds=self.backoff_delay),
                         self.on_timer,
                     )
                     self.backoff_delay = min(
@@ -371,7 +372,7 @@ class HttpPusher(Pusher):
             delay_ms = random.randint(1, self.push_jitter_delay_ms)
             diff_ms = event.origin_server_ts + delay_ms - self.clock.time_msec()
             if diff_ms > 0:
-                await self.clock.sleep(diff_ms / 1000)
+                await self.clock.sleep(Duration(milliseconds=diff_ms))
 
         rejected = await self.dispatch_push_event(event, tweaks, badge)
         if rejected is False:
@@ -394,9 +395,9 @@ class HttpPusher(Pusher):
     async def dispatch_push(
         self,
         content: JsonDict,
-        tweaks: Optional[JsonMapping] = None,
-        default_payload: Optional[JsonMapping] = None,
-    ) -> Union[bool, List[str]]:
+        tweaks: JsonMapping | None = None,
+        default_payload: JsonMapping | None = None,
+    ) -> bool | list[str]:
         """Send a notification to the registered push gateway, with `content` being
         the content of the `notification` top property specified in the spec.
         Note that the `devices` property will be added with device-specific
@@ -453,7 +454,7 @@ class HttpPusher(Pusher):
         event: EventBase,
         tweaks: JsonMapping,
         badge: int,
-    ) -> Union[bool, List[str]]:
+    ) -> bool | list[str]:
         """Send a notification to the registered push gateway by building it
         from an event.
 

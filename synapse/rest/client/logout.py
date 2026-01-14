@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet
@@ -43,7 +43,7 @@ class LogoutRestServlet(RestServlet):
         self._auth_handler = hs.get_auth_handler()
         self._device_handler = hs.get_device_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(
             request, allow_expired=True, allow_locked=True
         )
@@ -70,7 +70,7 @@ class LogoutAllRestServlet(RestServlet):
         self._auth_handler = hs.get_auth_handler()
         self._device_handler = hs.get_device_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(
             request, allow_expired=True, allow_locked=True
         )

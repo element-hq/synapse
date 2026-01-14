@@ -23,12 +23,9 @@ import collections.abc
 import logging
 import typing
 from typing import (
-    Dict,
     Iterator,
     Mapping,
-    Optional,
     Sequence,
-    Set,
     TypeVar,
 )
 
@@ -44,15 +41,6 @@ if typing.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class Duration:
-    """Helper class that holds constants for common time durations in
-    milliseconds."""
-
-    MINUTE_MS = 60 * 1000
-    HOUR_MS = 60 * MINUTE_MS
-    DAY_MS = 24 * HOUR_MS
-
-
 def unwrapFirstError(failure: Failure) -> Failure:
     # Deprecated: you probably just want to catch defer.FirstError and reraise
     # the subFailure's value, which will do a better job of preserving stacktraces.
@@ -63,7 +51,7 @@ def unwrapFirstError(failure: Failure) -> Failure:
 
 def log_failure(
     failure: Failure, msg: str, consumeErrors: bool = True
-) -> Optional[Failure]:
+) -> Failure | None:
     """Creates a function suitable for passing to `Deferred.addErrback` that
     logs any failures that occur.
 
@@ -119,8 +107,8 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
     """
 
     _underlying_map: Mapping[K, V]
-    _mutable_map: Dict[K, V] = attr.ib(factory=dict)
-    _deletions: Set[K] = attr.ib(factory=set)
+    _mutable_map: dict[K, V] = attr.ib(factory=dict)
+    _deletions: set[K] = attr.ib(factory=set)
 
     def __getitem__(self, key: K) -> V:
         if key in self._deletions:

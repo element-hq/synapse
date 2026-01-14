@@ -19,7 +19,6 @@
 #
 #
 
-from typing import Type
 from unittest import skipUnless
 
 from immutabledict import immutabledict
@@ -152,7 +151,7 @@ class MapUsernameTestCase(unittest.TestCase):
 class MultiWriterTokenTestCase(unittest.HomeserverTestCase):
     """Tests for the different types of multi writer tokens."""
 
-    token_type: Type[AbstractMultiWriterStreamToken]
+    token_type: type[AbstractMultiWriterStreamToken]
 
     def test_basic_token(self) -> None:
         """Test that a simple stream token can be serialized and unserialized"""

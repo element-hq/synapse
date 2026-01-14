@@ -23,7 +23,7 @@ import logging
 import re
 import urllib.parse
 from inspect import signature
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar
 
 from prometheus_client import Counter, Gauge
 
@@ -42,6 +42,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.cancellation import is_function_cancellable
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -112,7 +113,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
     """
 
     NAME: str = abc.abstractproperty()  # type: ignore
-    PATH_ARGS: Tuple[str, ...] = abc.abstractproperty()  # type: ignore
+    PATH_ARGS: tuple[str, ...] = abc.abstractproperty()  # type: ignore
     METHOD = "POST"
     CACHE = True
     RETRY_ON_TIMEOUT = True
@@ -187,7 +188,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     async def _handle_request(
         self, request: Request, content: JsonDict, **kwargs: Any
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """Handle incoming request.
 
         This is called with the request object and PATH_ARGS.
@@ -292,7 +293,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                     "/".join(url_args),
                 )
 
-                headers: Dict[bytes, List[bytes]] = {}
+                headers: dict[bytes, list[bytes]] = {}
                 # Add an authorization header, if configured.
                 if replication_secret:
                     headers[b"Authorization"] = [b"Bearer " + replication_secret]
@@ -317,7 +318,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
                             # If we timed out we probably don't need to worry about backing
                             # off too much, but lets just wait a little anyway.
-                            await clock.sleep(1)
+                            await clock.sleep(Duration(seconds=1))
                         except (ConnectError, DNSLookupError) as e:
                             if not cls.RETRY_ON_CONNECT_ERROR:
                                 raise
@@ -332,7 +333,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                                 e,
                             )
 
-                            await clock.sleep(delay)
+                            await clock.sleep(Duration(seconds=delay))
                             attempts += 1
                 except HttpResponseException as e:
                     # We convert to SynapseError as we know that it was a SynapseError
@@ -403,7 +404,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
     async def _check_auth_and_handle(
         self, request: SynapseRequest, **kwargs: Any
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """Called on new incoming requests when caching is enabled. Checks
         if there is a cached response for the request and returns that,
         otherwise calls `_handle_request` and caches its response.

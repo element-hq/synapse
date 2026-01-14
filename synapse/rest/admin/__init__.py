@@ -35,7 +35,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.handlers.pagination import PURGE_HISTORY_ACTION_NAME
@@ -74,6 +74,7 @@ from synapse.rest.admin.registration_tokens import (
     RegistrationTokenRestServlet,
 )
 from synapse.rest.admin.rooms import (
+    AdminRoomHierarchy,
     BlockRoomRestServlet,
     DeleteRoomStatusByDeleteIdRestServlet,
     DeleteRoomStatusByRoomIdRestServlet,
@@ -113,10 +114,12 @@ from synapse.rest.admin.users import (
     UserByThreePid,
     UserInvitesCount,
     UserJoinedRoomCount,
-    UserMembershipRestServlet,
+    UserJoinedRoomsRestServlet,
+    UserMembershipsRestServlet,
     UserRegisterServlet,
     UserReplaceMasterCrossSigningKeyRestServlet,
     UserRestServletV2,
+    UserRestServletV2Get,
     UsersRestServletV2,
     UsersRestServletV3,
     UserTokenRestServlet,
@@ -137,7 +140,7 @@ class VersionServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.res = {"server_version": SYNAPSE_VERSION}
 
-    def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         return HTTPStatus.OK, self.res
 
 
@@ -152,8 +155,8 @@ class PurgeHistoryRestServlet(RestServlet):
         self.auth = hs.get_auth()
 
     async def on_POST(
-        self, request: SynapseRequest, room_id: str, event_id: Optional[str]
-    ) -> Tuple[int, JsonDict]:
+        self, request: SynapseRequest, room_id: str, event_id: str | None
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         body = parse_json_object_from_request(request, allow_empty_body=True)
@@ -172,7 +175,7 @@ class PurgeHistoryRestServlet(RestServlet):
             if event.room_id != room_id:
                 raise SynapseError(HTTPStatus.BAD_REQUEST, "Event is for wrong room.")
 
-            # RoomStreamToken expects [int] not Optional[int]
+            # RoomStreamToken expects [int] not [int | None]
             assert event.internal_metadata.stream_ordering is not None
             room_token = RoomStreamToken(
                 topological=event.depth, stream=event.internal_metadata.stream_ordering
@@ -237,7 +240,7 @@ class PurgeHistoryStatusRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, purge_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         purge_task = await self.pagination_handler.get_delete_task(purge_id)
@@ -279,6 +282,8 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
         # matrix_authentication_service integration uses the dedicated MAS API.
         if hs.config.experimental.msc3861.enabled:
             register_servlets_for_msc3861_delegation(hs, http_server)
+        else:
+            UserRestServletV2Get(hs).register(http_server)
 
         return
 
@@ -296,7 +301,8 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     VersionServlet(hs).register(http_server)
     if not auth_delegated:
         UserAdminServlet(hs).register(http_server)
-    UserMembershipRestServlet(hs).register(http_server)
+    UserJoinedRoomsRestServlet(hs).register(http_server)
+    UserMembershipsRestServlet(hs).register(http_server)
     if not auth_delegated:
         UserTokenRestServlet(hs).register(http_server)
     UserRestServletV2(hs).register(http_server)
@@ -342,6 +348,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ExperimentalFeaturesRestServlet(hs).register(http_server)
     SuspendAccountRestServlet(hs).register(http_server)
     ScheduledTasksRestServlet(hs).register(http_server)
+    AdminRoomHierarchy(hs).register(http_server)
     EventRestServlet(hs).register(http_server)
 
 

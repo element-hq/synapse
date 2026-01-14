@@ -25,13 +25,8 @@ from threading import Lock
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Set,
-    Tuple,
     cast,
 )
 
@@ -76,6 +71,7 @@ from synapse.util import stringutils
 from synapse.util.async_helpers import Linearizer
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.cancellation import cancellable
+from synapse.util.duration import Duration
 from synapse.util.metrics import measure_func
 from synapse.util.retryutils import (
     NotRetryingDestination,
@@ -90,10 +86,10 @@ logger = logging.getLogger(__name__)
 
 DELETE_DEVICE_MSGS_TASK_NAME = "delete_device_messages"
 MAX_DEVICE_DISPLAY_NAME_LEN = 100
-DELETE_STALE_DEVICES_INTERVAL_MS = 24 * 60 * 60 * 1000
+DELETE_STALE_DEVICES_INTERVAL = Duration(days=1)
 
 
-def _check_device_name_length(name: Optional[str]) -> None:
+def _check_device_name_length(name: str | None) -> None:
     """
     Checks whether a device name is longer than the maximum allowed length.
 
@@ -191,7 +187,7 @@ class DeviceHandler:
         ):
             self.clock.looping_call(
                 self.hs.run_as_background_process,
-                DELETE_STALE_DEVICES_INTERVAL_MS,
+                DELETE_STALE_DEVICES_INTERVAL,
                 desc="delete_stale_devices",
                 func=self._delete_stale_devices,
             )
@@ -212,10 +208,10 @@ class DeviceHandler:
     async def check_device_registered(
         self,
         user_id: str,
-        device_id: Optional[str],
-        initial_device_display_name: Optional[str] = None,
-        auth_provider_id: Optional[str] = None,
-        auth_provider_session_id: Optional[str] = None,
+        device_id: str | None,
+        initial_device_display_name: str | None = None,
+        auth_provider_id: str | None = None,
+        auth_provider_session_id: str | None = None,
     ) -> str:
         """
         If the given device has not been registered, register it with the
@@ -273,7 +269,7 @@ class DeviceHandler:
 
     @trace
     async def delete_all_devices_for_user(
-        self, user_id: str, except_device_id: Optional[str] = None
+        self, user_id: str, except_device_id: str | None = None
     ) -> None:
         """Delete all of the user's devices
 
@@ -348,7 +344,7 @@ class DeviceHandler:
         await self.notify_device_update(user_id, device_ids)
 
     async def upsert_device(
-        self, user_id: str, device_id: str, display_name: Optional[str] = None
+        self, user_id: str, device_id: str, display_name: str | None = None
     ) -> bool:
         """Create or update a device
 
@@ -407,7 +403,7 @@ class DeviceHandler:
                 raise
 
     @trace
-    async def get_devices_by_user(self, user_id: str) -> List[JsonDict]:
+    async def get_devices_by_user(self, user_id: str) -> list[JsonDict]:
         """
         Retrieve the given user's devices
 
@@ -429,9 +425,7 @@ class DeviceHandler:
         log_kv(device_map)
         return devices
 
-    async def get_dehydrated_device(
-        self, user_id: str
-    ) -> Optional[Tuple[str, JsonDict]]:
+    async def get_dehydrated_device(self, user_id: str) -> tuple[str, JsonDict] | None:
         """Retrieve the information for a dehydrated device.
 
         Args:
@@ -445,10 +439,10 @@ class DeviceHandler:
     async def store_dehydrated_device(
         self,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         device_data: JsonDict,
-        initial_device_display_name: Optional[str] = None,
-        keys_for_device: Optional[JsonDict] = None,
+        initial_device_display_name: str | None = None,
+        keys_for_device: JsonDict | None = None,
     ) -> str:
         """Store a dehydrated device for a user, optionally storing the keys associated with
         it as well.  If the user had a previous dehydrated device, it is removed.
@@ -567,8 +561,8 @@ class DeviceHandler:
         user_id: str,
         room_ids: StrCollection,
         from_token: StreamToken,
-        now_token: Optional[StreamToken] = None,
-    ) -> Set[str]:
+        now_token: StreamToken | None = None,
+    ) -> set[str]:
         """Get the set of users whose devices have changed who share a room with
         the given user.
         """
@@ -644,8 +638,8 @@ class DeviceHandler:
         # Check for newly joined or left rooms. We need to make sure that we add
         # to newly joined in the case membership goes from join -> leave -> join
         # again.
-        newly_joined_rooms: Set[str] = set()
-        newly_left_rooms: Set[str] = set()
+        newly_joined_rooms: set[str] = set()
+        newly_left_rooms: set[str] = set()
         for change in membership_changes:
             # We check for changes in "joinedness", i.e. if the membership has
             # changed to or from JOIN.
@@ -661,10 +655,10 @@ class DeviceHandler:
         # the user is currently in.
 
         # List of membership changes per room
-        room_to_deltas: Dict[str, List[StateDelta]] = {}
+        room_to_deltas: dict[str, list[StateDelta]] = {}
         # The set of event IDs of membership events (so we can fetch their
         # associated membership).
-        memberships_to_fetch: Set[str] = set()
+        memberships_to_fetch: set[str] = set()
 
         # TODO: Only pull out membership events?
         state_changes = await self.store.get_current_state_deltas_for_rooms(
@@ -681,7 +675,7 @@ class DeviceHandler:
                 memberships_to_fetch.add(delta.prev_event_id)
 
         # Fetch all the memberships for the membership events
-        event_id_to_memberships: Mapping[str, Optional[EventIdMembership]] = {}
+        event_id_to_memberships: Mapping[str, EventIdMembership | None] = {}
         if memberships_to_fetch:
             event_id_to_memberships = await self.store.get_membership_from_event_ids(
                 memberships_to_fetch
@@ -695,8 +689,8 @@ class DeviceHandler:
 
         # We now want to find any user that have newly joined/invited/knocked,
         # or newly left, similarly to above.
-        newly_joined_or_invited_or_knocked_users: Set[str] = set()
-        newly_left_users: Set[str] = set()
+        newly_joined_or_invited_or_knocked_users: set[str] = set()
+        newly_left_users: set[str] = set()
         for _, deltas in room_to_deltas.items():
             for delta in deltas:
                 # Get the prev/new memberships for the delta
@@ -838,7 +832,7 @@ class DeviceHandler:
         # Check if the application services have any results.
         if self._query_appservices_for_keys:
             # Query the appservice for all devices for this user.
-            query: Dict[str, Optional[List[str]]] = {user_id: None}
+            query: dict[str, list[str] | None] = {user_id: None}
 
             # Query the appservices for any keys.
             appservice_results = await self._appservice_handler.query_keys(query)
@@ -898,7 +892,7 @@ class DeviceHandler:
     async def notify_user_signature_update(
         self,
         from_user_id: str,
-        user_ids: List[str],
+        user_ids: list[str],
     ) -> None:
         """Notify a device writer that a user have made new signatures of other users.
 
@@ -922,12 +916,12 @@ class DeviceHandler:
         )
 
     DEVICE_MSGS_DELETE_BATCH_LIMIT = 1000
-    DEVICE_MSGS_DELETE_SLEEP_MS = 100
+    DEVICE_MSGS_DELETE_SLEEP = Duration(milliseconds=100)
 
     async def _delete_device_messages(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         """Scheduler task to delete device messages in batch of `DEVICE_MSGS_DELETE_BATCH_LIMIT`."""
         assert task.params is not None
         user_id = task.params["user_id"]
@@ -948,9 +942,7 @@ class DeviceHandler:
             if from_stream_id is None:
                 return TaskStatus.COMPLETE, None, None
 
-            await self.clock.sleep(
-                DeviceWriterHandler.DEVICE_MSGS_DELETE_SLEEP_MS / 1000.0
-            )
+            await self.clock.sleep(DeviceWriterHandler.DEVICE_MSGS_DELETE_SLEEP)
 
 
 class DeviceWriterHandler(DeviceHandler):
@@ -1051,7 +1043,7 @@ class DeviceWriterHandler(DeviceHandler):
             await self.handle_new_device_update()
 
     async def notify_user_signature_update(
-        self, from_user_id: str, user_ids: List[str]
+        self, from_user_id: str, user_ids: list[str]
     ) -> None:
         """Notify a user that they have made new signatures of other users.
 
@@ -1112,7 +1104,7 @@ class DeviceWriterHandler(DeviceHandler):
         # hosts we've already poked about for this update. This is so that we
         # don't poke the same remote server about the same update repeatedly.
         current_stream_id = None
-        hosts_already_sent_to: Set[str] = set()
+        hosts_already_sent_to: set[str] = set()
 
         try:
             stream_id, room_id = await self.store.get_device_change_last_converted_pos()
@@ -1311,7 +1303,7 @@ class DeviceWriterHandler(DeviceHandler):
 
 
 def _update_device_from_client_ips(
-    device: JsonDict, client_ips: Mapping[Tuple[str, str], DeviceLastConnectionInfo]
+    device: JsonDict, client_ips: Mapping[tuple[str, str], DeviceLastConnectionInfo]
 ) -> None:
     ip = client_ips.get((device["user_id"], device["device_id"]))
     device.update(
@@ -1338,8 +1330,8 @@ class DeviceListWorkerUpdater:
 
     async def multi_user_device_resync(
         self,
-        user_ids: List[str],
-    ) -> Dict[str, Optional[JsonMapping]]:
+        user_ids: list[str],
+    ) -> dict[str, JsonMapping | None]:
         """
         Like `user_device_resync` but operates on multiple users **from the same origin**
         at once.
@@ -1363,9 +1355,9 @@ class DeviceListWorkerUpdater:
     async def process_cross_signing_key_update(
         self,
         user_id: str,
-        master_key: Optional[JsonDict],
-        self_signing_key: Optional[JsonDict],
-    ) -> List[str]:
+        master_key: JsonDict | None,
+        self_signing_key: JsonDict | None,
+    ) -> list[str]:
         """Process the given new master and self-signing key for the given remote user.
 
         Args:
@@ -1455,14 +1447,14 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         )
 
         # user_id -> list of updates waiting to be handled.
-        self._pending_updates: Dict[
-            str, List[Tuple[str, str, Iterable[str], JsonDict]]
+        self._pending_updates: dict[
+            str, list[tuple[str, str, Iterable[str], JsonDict]]
         ] = {}
 
         # Recently seen stream ids. We don't bother keeping these in the DB,
         # but they're useful to have them about to reduce the number of spurious
         # resyncs.
-        self._seen_updates: ExpiringCache[str, Set[str]] = ExpiringCache(
+        self._seen_updates: ExpiringCache[str, set[str]] = ExpiringCache(
             cache_name="device_update_edu",
             server_name=self.server_name,
             hs=self.hs,
@@ -1476,7 +1468,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self._resync_retry_lock = Lock()
         self.clock.looping_call(
             self.hs.run_as_background_process,
-            30 * 1000,
+            Duration(seconds=30),
             func=self._maybe_retry_device_resync,
             desc="_maybe_retry_device_resync",
         )
@@ -1619,12 +1611,12 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                 )
 
     async def _need_to_do_resync(
-        self, user_id: str, updates: Iterable[Tuple[str, str, Iterable[str], JsonDict]]
+        self, user_id: str, updates: Iterable[tuple[str, str, Iterable[str], JsonDict]]
     ) -> bool:
         """Given a list of updates for a user figure out if we need to do a full
         resync, or whether we have enough data that we can just apply the delta.
         """
-        seen_updates: Set[str] = self._seen_updates.get(user_id, set())
+        seen_updates: set[str] = self._seen_updates.get(user_id, set())
 
         extremity = await self.store.get_device_list_last_stream_id_for_remote(user_id)
 
@@ -1702,8 +1694,8 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
             self._resync_retry_lock.release()
 
     async def multi_user_device_resync(
-        self, user_ids: List[str], mark_failed_as_stale: bool = True
-    ) -> Dict[str, Optional[JsonMapping]]:
+        self, user_ids: list[str], mark_failed_as_stale: bool = True
+    ) -> dict[str, JsonMapping | None]:
         """
         Like `user_device_resync` but operates on multiple users **from the same origin**
         at once.
@@ -1739,7 +1731,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
 
     async def _user_device_resync_returning_failed(
         self, user_id: str
-    ) -> Tuple[Optional[JsonMapping], bool]:
+    ) -> tuple[JsonMapping | None, bool]:
         """Fetches all devices for a user and updates the device cache with them.
 
         Args:

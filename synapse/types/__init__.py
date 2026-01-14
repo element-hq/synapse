@@ -29,17 +29,12 @@ from typing import (
     AbstractSet,
     Any,
     ClassVar,
-    Dict,
-    List,
     Literal,
     Mapping,
     Match,
     MutableMapping,
     NoReturn,
     Optional,
-    Set,
-    Tuple,
-    Type,
     TypedDict,
     TypeVar,
     Union,
@@ -84,16 +79,16 @@ logger = logging.getLogger(__name__)
 # Define a state map type from type/state_key to T (usually an event ID or
 # event)
 T = TypeVar("T")
-StateKey = Tuple[str, str]
+StateKey = tuple[str, str]
 StateMap = Mapping[StateKey, T]
 MutableStateMap = MutableMapping[StateKey, T]
 
 # JSON types. These could be made stronger, but will do for now.
 # A "simple" (canonical) JSON value.
-SimpleJsonValue = Optional[Union[str, int, bool]]
-JsonValue = Union[List[SimpleJsonValue], Tuple[SimpleJsonValue, ...], SimpleJsonValue]
+SimpleJsonValue = str | int | bool | None
+JsonValue = list[SimpleJsonValue] | tuple[SimpleJsonValue, ...] | SimpleJsonValue
 # A JSON-serialisable dict.
-JsonDict = Dict[str, Any]
+JsonDict = dict[str, Any]
 # A JSON-serialisable mapping; roughly speaking an immutable JSONDict.
 # Useful when you have a TypedDict which isn't going to be mutated and you don't want
 # to cast to JsonDict everywhere.
@@ -106,12 +101,12 @@ JsonSerializable = object
 #
 # StrCollection is an unordered collection of strings. If ordering is important,
 # StrSequence can be used instead.
-StrCollection = Union[Tuple[str, ...], List[str], AbstractSet[str]]
+StrCollection = tuple[str, ...] | list[str] | AbstractSet[str]
 # Sequence[str] that does not include str itself; str being a Sequence[str]
 # is very misleading and results in bugs.
 #
 # Unlike StrCollection, StrSequence is an ordered collection of strings.
-StrSequence = Union[Tuple[str, ...], List[str]]
+StrSequence = tuple[str, ...] | list[str]
 
 
 # Note that this seems to require inheriting *directly* from Interface in order
@@ -163,15 +158,15 @@ class Requester:
     """
 
     user: "UserID"
-    access_token_id: Optional[int]
+    access_token_id: int | None
     is_guest: bool
-    scope: Set[str]
+    scope: set[str]
     shadow_banned: bool
-    device_id: Optional[str]
+    device_id: str | None
     app_service: Optional["ApplicationService"]
     authenticated_entity: str
 
-    def serialize(self) -> Dict[str, Any]:
+    def serialize(self) -> dict[str, Any]:
         """Converts self to a type that can be serialized as JSON, and then
         deserialized by `deserialize`
 
@@ -191,7 +186,7 @@ class Requester:
 
     @staticmethod
     def deserialize(
-        store: "ApplicationServiceWorkerStore", input: Dict[str, Any]
+        store: "ApplicationServiceWorkerStore", input: dict[str, Any]
     ) -> "Requester":
         """Converts a dict that was produced by `serialize` back into a
         Requester.
@@ -221,13 +216,13 @@ class Requester:
 
 def create_requester(
     user_id: Union[str, "UserID"],
-    access_token_id: Optional[int] = None,
+    access_token_id: int | None = None,
     is_guest: bool = False,
     scope: StrCollection = (),
     shadow_banned: bool = False,
-    device_id: Optional[str] = None,
+    device_id: str | None = None,
     app_service: Optional["ApplicationService"] = None,
-    authenticated_entity: Optional[str] = None,
+    authenticated_entity: str | None = None,
 ) -> Requester:
     """
     Create a new ``Requester`` object
@@ -305,11 +300,11 @@ class DomainSpecificString(metaclass=abc.ABCMeta):
     def __copy__(self: DS) -> DS:
         return self
 
-    def __deepcopy__(self: DS, memo: Dict[str, object]) -> DS:
+    def __deepcopy__(self: DS, memo: dict[str, object]) -> DS:
         return self
 
     @classmethod
-    def from_string(cls: Type[DS], s: str) -> DS:
+    def from_string(cls: type[DS], s: str) -> DS:
         """Parse the string given by 's' into a structure object."""
         if len(s) < 1 or s[0:1] != cls.SIGIL:
             raise SynapseError(
@@ -337,7 +332,7 @@ class DomainSpecificString(metaclass=abc.ABCMeta):
         return "%s%s:%s" % (self.SIGIL, self.localpart, self.domain)
 
     @classmethod
-    def is_valid(cls: Type[DS], s: str) -> bool:
+    def is_valid(cls: type[DS], s: str) -> bool:
         """Parses the input string and attempts to ensure it is valid."""
         # TODO: this does not reject an empty localpart or an overly-long string.
         # See https://spec.matrix.org/v1.2/appendices/#identifier-grammar
@@ -390,10 +385,10 @@ class RoomID:
 
     SIGIL = "!"
     id: str
-    room_id_with_domain: Optional[RoomIdWithDomain]
+    room_id_with_domain: RoomIdWithDomain | None
 
     @classmethod
-    def is_valid(cls: Type["RoomID"], s: str) -> bool:
+    def is_valid(cls: type["RoomID"], s: str) -> bool:
         if ":" in s:
             return RoomIdWithDomain.is_valid(s)
         try:
@@ -402,7 +397,7 @@ class RoomID:
         except Exception:
             return False
 
-    def get_domain(self) -> Optional[str]:
+    def get_domain(self) -> str | None:
         if not self.room_id_with_domain:
             return None
         return self.room_id_with_domain.domain
@@ -415,7 +410,7 @@ class RoomID:
     __repr__ = to_string
 
     @classmethod
-    def from_string(cls: Type["RoomID"], s: str) -> "RoomID":
+    def from_string(cls: type["RoomID"], s: str) -> "RoomID":
         # sigil check
         if len(s) < 1 or s[0] != cls.SIGIL:
             raise SynapseError(
@@ -424,7 +419,7 @@ class RoomID:
                 Codes.INVALID_PARAM,
             )
 
-        room_id_with_domain: Optional[RoomIdWithDomain] = None
+        room_id_with_domain: RoomIdWithDomain | None = None
         if ":" in s:
             room_id_with_domain = RoomIdWithDomain.from_string(s)
         else:
@@ -492,7 +487,7 @@ NON_MXID_CHARACTER_PATTERN = re.compile(
 
 
 def map_username_to_mxid_localpart(
-    username: Union[str, bytes], case_sensitive: bool = False
+    username: str | bytes, case_sensitive: bool = False
 ) -> str:
     """Map a username onto a string suitable for a MXID
 
@@ -749,7 +744,7 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
     attributes, must be hashable.
     """
 
-    topological: Optional[int] = attr.ib(
+    topological: int | None = attr.ib(
         validator=attr.validators.optional(attr.validators.instance_of(int)),
         kw_only=True,
         default=None,
@@ -829,7 +824,7 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
         return super().copy_and_advance(other)
 
-    def as_historical_tuple(self) -> Tuple[int, int]:
+    def as_historical_tuple(self) -> tuple[int, int]:
         """Returns a tuple of `(topological, stream)` for historical tokens.
 
         Raises if not an historical token (i.e. doesn't have a topological part).
@@ -959,7 +954,7 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
     def is_stream_position_in_range(
         low: Optional["AbstractMultiWriterStreamToken"],
         high: Optional["AbstractMultiWriterStreamToken"],
-        instance_name: Optional[str],
+        instance_name: str | None,
         pos: int,
     ) -> bool:
         """Checks if a given persisted position is between the two given tokens.
@@ -1229,11 +1224,11 @@ class StreamToken:
     @overload
     def get_field(
         self, key: StreamKeyType
-    ) -> Union[int, RoomStreamToken, MultiWriterStreamToken]: ...
+    ) -> int | RoomStreamToken | MultiWriterStreamToken: ...
 
     def get_field(
         self, key: StreamKeyType
-    ) -> Union[int, RoomStreamToken, MultiWriterStreamToken]:
+    ) -> int | RoomStreamToken | MultiWriterStreamToken:
         """Returns the stream ID for the given key."""
         return getattr(self, key.value)
 
@@ -1399,8 +1394,8 @@ class PersistedEventPosition(PersistedPosition):
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class ThirdPartyInstanceID:
-    appservice_id: Optional[str]
-    network_id: Optional[str]
+    appservice_id: str | None
+    network_id: str | None
 
     # Deny iteration because it will bite you if you try to create a singleton
     # set by:
@@ -1412,7 +1407,7 @@ class ThirdPartyInstanceID:
     def __copy__(self) -> "ThirdPartyInstanceID":
         return self
 
-    def __deepcopy__(self, memo: Dict[str, object]) -> "ThirdPartyInstanceID":
+    def __deepcopy__(self, memo: dict[str, object]) -> "ThirdPartyInstanceID":
         return self
 
     @classmethod
@@ -1436,8 +1431,8 @@ class ReadReceipt:
     room_id: str
     receipt_type: str
     user_id: str
-    event_ids: List[str]
-    thread_id: Optional[str]
+    event_ids: list[str]
+    thread_id: str | None
     data: JsonDict
 
 
@@ -1459,8 +1454,8 @@ class DeviceListUpdates:
     # The latter happening only once, thus always giving you the same sets
     # across multiple DeviceListUpdates instances.
     # Also see: don't define mutable default arguments.
-    changed: Set[str] = attr.ib(factory=set)
-    left: Set[str] = attr.ib(factory=set)
+    changed: set[str] = attr.ib(factory=set)
+    left: set[str] = attr.ib(factory=set)
 
     def __bool__(self) -> bool:
         return bool(self.changed or self.left)
@@ -1468,7 +1463,7 @@ class DeviceListUpdates:
 
 def get_verify_key_from_cross_signing_key(
     key_info: Mapping[str, Any],
-) -> Tuple[str, VerifyKey]:
+) -> tuple[str, VerifyKey]:
     """Get the key ID and signedjson verify key from a cross-signing key dict
 
     Args:
@@ -1512,11 +1507,11 @@ class UserInfo:
     """
 
     user_id: UserID
-    appservice_id: Optional[int]
-    consent_server_notice_sent: Optional[str]
-    consent_version: Optional[str]
-    consent_ts: Optional[int]
-    user_type: Optional[str]
+    appservice_id: int | None
+    consent_server_notice_sent: str | None
+    consent_version: str | None
+    consent_ts: int | None
+    user_type: str | None
     creation_ts: int
     is_admin: bool
     is_deactivated: bool
@@ -1529,14 +1524,14 @@ class UserInfo:
 
 class UserProfile(TypedDict):
     user_id: str
-    display_name: Optional[str]
-    avatar_url: Optional[str]
+    display_name: str | None
+    avatar_url: str | None
 
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)
 class RetentionPolicy:
-    min_lifetime: Optional[int] = None
-    max_lifetime: Optional[int] = None
+    min_lifetime: int | None = None
+    max_lifetime: int | None = None
 
 
 class TaskStatus(str, Enum):
@@ -1568,13 +1563,13 @@ class ScheduledTask:
     # In milliseconds since epoch in system time timezone, usually UTC.
     timestamp: int
     # Optionally bind a task to some resource id for easy retrieval
-    resource_id: Optional[str]
+    resource_id: str | None
     # Optional parameters that will be passed to the function ran by the task
-    params: Optional[JsonMapping]
+    params: JsonMapping | None
     # Optional result that can be updated by the running task
-    result: Optional[JsonMapping]
+    result: JsonMapping | None
     # Optional error that should be assigned a value when the status is FAILED
-    error: Optional[str]
+    error: str | None
 
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)

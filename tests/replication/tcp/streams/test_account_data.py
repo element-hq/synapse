@@ -46,28 +46,39 @@ class AccountDataStreamTestCase(BaseStreamTestCase):
 
         # check we're testing what we think we are: no rows should yet have been
         # received
-        self.assertEqual([], self.test_handler.received_rdata_rows)
+        received_account_data_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == AccountDataStream.NAME
+        ]
+        self.assertEqual([], received_account_data_rows)
 
         # now reconnect to pull the updates
         self.reconnect()
         self.replicate()
 
-        # we should have received all the expected rows in the right order
-        received_rows = self.test_handler.received_rdata_rows
+        # We should have received all the expected rows in the right order
+        #
+        # Filter the updates to only include account data changes
+        received_account_data_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == AccountDataStream.NAME
+        ]
 
         for t in updates:
-            (stream_name, token, row) = received_rows.pop(0)
+            (stream_name, token, row) = received_account_data_rows.pop(0)
             self.assertEqual(stream_name, AccountDataStream.NAME)
             self.assertIsInstance(row, AccountDataStream.AccountDataStreamRow)
             self.assertEqual(row.data_type, t)
             self.assertEqual(row.room_id, "test_room")
 
-        (stream_name, token, row) = received_rows.pop(0)
+        (stream_name, token, row) = received_account_data_rows.pop(0)
         self.assertIsInstance(row, AccountDataStream.AccountDataStreamRow)
         self.assertEqual(row.data_type, "m.global")
         self.assertIsNone(row.room_id)
 
-        self.assertEqual([], received_rows)
+        self.assertEqual([], received_account_data_rows)
 
     def test_update_function_global_account_data_limit(self) -> None:
         """Test replication with many global account data updates"""
@@ -85,32 +96,38 @@ class AccountDataStreamTestCase(BaseStreamTestCase):
             store.add_account_data_to_room("test_user", "test_room", "m.per_room", {})
         )
 
-        # tell the notifier to catch up to avoid duplicate rows.
-        # workaround for https://github.com/matrix-org/synapse/issues/7360
-        # FIXME remove this when the above is fixed
-        self.replicate()
-
         # check we're testing what we think we are: no rows should yet have been
         # received
-        self.assertEqual([], self.test_handler.received_rdata_rows)
+        received_account_data_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == AccountDataStream.NAME
+        ]
+        self.assertEqual([], received_account_data_rows)
 
         # now reconnect to pull the updates
         self.reconnect()
         self.replicate()
 
         # we should have received all the expected rows in the right order
-        received_rows = self.test_handler.received_rdata_rows
+        #
+        # Filter the updates to only include typing changes
+        received_account_data_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == AccountDataStream.NAME
+        ]
 
         for t in updates:
-            (stream_name, token, row) = received_rows.pop(0)
+            (stream_name, token, row) = received_account_data_rows.pop(0)
             self.assertEqual(stream_name, AccountDataStream.NAME)
             self.assertIsInstance(row, AccountDataStream.AccountDataStreamRow)
             self.assertEqual(row.data_type, t)
             self.assertIsNone(row.room_id)
 
-        (stream_name, token, row) = received_rows.pop(0)
+        (stream_name, token, row) = received_account_data_rows.pop(0)
         self.assertIsInstance(row, AccountDataStream.AccountDataStreamRow)
         self.assertEqual(row.data_type, "m.per_room")
         self.assertEqual(row.room_id, "test_room")
 
-        self.assertEqual([], received_rows)
+        self.assertEqual([], received_account_data_rows)

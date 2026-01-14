@@ -20,7 +20,7 @@
 #
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 import attr
 
@@ -67,7 +67,7 @@ class QueryMediaById(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, server_name: str, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
@@ -134,7 +134,7 @@ class QuarantineMediaInRoom(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
@@ -161,7 +161,7 @@ class QuarantineMediaByUser(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
@@ -190,7 +190,7 @@ class QuarantineMediaByID(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, server_name: str, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
@@ -219,7 +219,7 @@ class UnquarantineMediaByID(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, server_name: str, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         logger.info("Remove from quarantine media by ID: %s/%s", server_name, media_id)
@@ -241,7 +241,7 @@ class ProtectMediaByID(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         logger.info("Protecting local media by ID: %s", media_id)
@@ -263,7 +263,7 @@ class UnprotectMediaByID(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         logger.info("Unprotecting local media by ID: %s", media_id)
@@ -285,12 +285,44 @@ class ListMediaInRoom(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         local_mxcs, remote_mxcs = await self.store.get_media_mxcs_in_room(room_id)
 
         return HTTPStatus.OK, {"local": local_mxcs, "remote": remote_mxcs}
+
+
+class ListQuarantinedMedia(RestServlet):
+    """Lists all quarantined media on the server."""
+
+    PATTERNS = admin_patterns("/media/quarantined$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        self.auth = hs.get_auth()
+
+    async def on_GET(
+        self,
+        request: SynapseRequest,
+    ) -> tuple[int, JsonDict]:
+        await assert_requester_is_admin(self.auth, request)
+
+        start = parse_integer(request, "from", default=0)
+        limit = parse_integer(request, "limit", default=100)
+        local_or_remote = parse_string(request, "kind", required=True)
+
+        if local_or_remote not in ["local", "remote"]:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Query parameter `kind` must be either 'local' or 'remote'.",
+            )
+
+        mxcs = await self.store.get_quarantined_media_mxcs(
+            start, limit, local_or_remote == "local"
+        )
+
+        return HTTPStatus.OK, {"media": mxcs}
 
 
 class PurgeMediaCacheRestServlet(RestServlet):
@@ -300,7 +332,7 @@ class PurgeMediaCacheRestServlet(RestServlet):
         self.media_repository = hs.get_media_repository()
         self.auth = hs.get_auth()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         before_ts = parse_integer(request, "before_ts", required=True)
@@ -338,7 +370,7 @@ class DeleteMediaByID(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, server_name: str, media_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         if not self._is_mine_server_name(server_name):
@@ -374,8 +406,8 @@ class DeleteMediaByDateSize(RestServlet):
         self.media_repository = hs.get_media_repository()
 
     async def on_POST(
-        self, request: SynapseRequest, server_name: Optional[str] = None
-    ) -> Tuple[int, JsonDict]:
+        self, request: SynapseRequest, server_name: str | None = None
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         before_ts = parse_integer(request, "before_ts", required=True)
@@ -433,7 +465,7 @@ class UserMediaRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None
 
@@ -477,7 +509,7 @@ class UserMediaRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None
 
@@ -532,6 +564,7 @@ def register_servlets_for_media_repo(hs: "HomeServer", http_server: HttpServer) 
     ProtectMediaByID(hs).register(http_server)
     UnprotectMediaByID(hs).register(http_server)
     ListMediaInRoom(hs).register(http_server)
+    ListQuarantinedMedia(hs).register(http_server)
     # XXX DeleteMediaByDateSize must be registered before DeleteMediaByID as
     #     their URL routes overlap.
     DeleteMediaByDateSize(hs).register(http_server)

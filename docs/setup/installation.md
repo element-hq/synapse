@@ -16,7 +16,14 @@ that your email address is probably `user@example.com` rather than
 `user@email.example.com`) - but doing so may require more advanced setup: see
 [Setting up Federation](../federate.md).
 
+⚠️ Before setting up Synapse please consult the [security page](security.md) for
+best practices. ⚠️
+
 ## Installing Synapse
+
+Note: Synapse uses a number of platform dependencies such as Python and PostgreSQL,
+and aims to follow supported upstream versions. See the [deprecation
+policy](../deprecation_policy.md) for more details.
 
 ### Prebuilt packages
 
@@ -87,17 +94,13 @@ file when you upgrade the Debian package to a later version.
 Andrej Shadura maintains a
 [`matrix-synapse`](https://packages.debian.org/sid/matrix-synapse) package in
 the Debian repositories.
-For `bookworm` and `sid`, it can be installed simply with:
+For `forky` (14) and `sid` (rolling release), it can be installed simply with:
 
 ```sh
 sudo apt install matrix-synapse
 ```
 
-Synapse is also available in `bullseye-backports`.  Please
-see the [Debian documentation](https://backports.debian.org/Instructions/)
-for information on how to use backports.
-
-`matrix-synapse` is no longer maintained for `buster` and older.
+The downstream Debian `matrix-synapse` package is not available for `trixie` (13) and older. Consider using the Matrix.org packages (above).
 
 ##### Downstream Ubuntu packages
 
@@ -208,7 +211,7 @@ When following this route please make sure that the [Platform-specific prerequis
 System requirements:
 
 - POSIX-compliant system (tested on Linux & OS X)
-- Python 3.9 or later, up to Python 3.13.
+- Python 3.10 or later, up to Python 3.13.
 - At least 1GB of free RAM if you want to join large public rooms like #matrix:matrix.org
 
 If building on an uncommon architecture for which pre-built wheels are
@@ -311,11 +314,16 @@ sudo dnf group install "Development Tools"
 
 ##### Red Hat Enterprise Linux / Rocky Linux / Oracle Linux
 
-*Note: The term "RHEL" below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux. The distributions are 1:1 binary compatible.*
+*Note: The term "RHEL" below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux.
+The distributions are 1:1 binary compatible.*
 
 It's recommended to use the latest Python versions.
 
-RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ships with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.
+RHEL 8 & 9 in particular ship with Python 3.6 & 3.9 respectively by default
+which are EOL and therefore no longer supported by Synapse.
+However, newer Python versions provide significant performance improvements
+and they're available in official distributions' repositories.
+Therefore it's recommended to use them.
 
 Python 3.11 and 3.12 are available for both RHEL 8 and 9.
 

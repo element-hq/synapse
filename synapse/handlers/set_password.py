@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.types import Requester
@@ -42,7 +42,7 @@ class SetPasswordHandler:
         user_id: str,
         password_hash: str,
         logout_devices: bool,
-        requester: Optional[Requester] = None,
+        requester: Requester | None = None,
     ) -> None:
         if not self._auth_handler.can_change_password():
             raise SynapseError(403, "Password change disabled", errcode=Codes.FORBIDDEN)

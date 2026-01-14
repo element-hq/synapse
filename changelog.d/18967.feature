@@ -1,1 +1,0 @@
-Add experimental implementation for the latest draft of [MSC4143](https://github.com/matrix-org/matrix-spec-proposals/pull/4143).

@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Iterable
 
 from synapse.http.server import HttpServer, JsonResource
 from synapse.rest import admin
@@ -78,7 +78,7 @@ if TYPE_CHECKING:
 
 RegisterServletsFunc = Callable[["HomeServer", HttpServer], None]
 
-CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
+CLIENT_SERVLET_FUNCTIONS: tuple[RegisterServletsFunc, ...] = (
     versions.register_servlets,
     initial_sync.register_servlets,
     room.register_deprecated_servlets,
@@ -128,7 +128,7 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     thread_subscriptions.register_servlets,
 )
 
-SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {
+SERVLET_GROUPS: dict[str, Iterable[RegisterServletsFunc]] = {
     "client": CLIENT_SERVLET_FUNCTIONS,
 }
 
@@ -143,7 +143,7 @@ class ClientRestResource(JsonResource):
        * etc
     """
 
-    def __init__(self, hs: "HomeServer", servlet_groups: Optional[List[str]] = None):
+    def __init__(self, hs: "HomeServer", servlet_groups: list[str] | None = None):
         JsonResource.__init__(self, hs, canonical_json=False)
         if hs.config.media.can_load_media_repo:
             # This import is here to prevent a circular import failure
@@ -156,7 +156,7 @@ class ClientRestResource(JsonResource):
     def register_servlets(
         client_resource: HttpServer,
         hs: "HomeServer",
-        servlet_groups: Optional[Iterable[str]] = None,
+        servlet_groups: Iterable[str] | None = None,
     ) -> None:
         # Some servlets are only registered on the main process (and not worker
         # processes).

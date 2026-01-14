@@ -5,6 +5,7 @@
 
 # Setup
   - [Installation](setup/installation.md)
+  - [Security](setup/security.md)
   - [Using Postgres](postgres.md)
   - [Configuring a Reverse Proxy](reverse_proxy.md)
   - [Configuring a Forward/Outbound Proxy](setup/forward_proxy.md)
@@ -116,6 +117,8 @@
       - [The Auth Chain Difference Algorithm](auth_chain_difference_algorithm.md)
     - [Media Repository](media_repository.md)
     - [Room and User Statistics](room_and_user_statistics.md)
+    - [Releasing]()
+      - [Release Notes Review Checklist](development/internal_documentation/release_notes_review_checklist.md)
   - [Scripts]()
 
 # Other

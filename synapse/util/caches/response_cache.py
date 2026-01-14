@@ -24,10 +24,8 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Generic,
     Iterable,
-    Optional,
     TypeVar,
 )
 
@@ -44,6 +42,7 @@ from synapse.logging.opentracing import (
 from synapse.util.async_helpers import AbstractObservableDeferred, ObservableDeferred
 from synapse.util.caches import EvictionReason, register_cache
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +88,7 @@ class ResponseCacheEntry:
     easier to cache Failure results.
     """
 
-    opentracing_span_context: "Optional[opentracing.SpanContext]"
+    opentracing_span_context: "opentracing.SpanContext | None"
     """The opentracing span which generated/is generating the result"""
 
 
@@ -119,10 +118,10 @@ class ResponseCache(Generic[KV]):
             timeout_ms
             enable_logging
         """
-        self._result_cache: Dict[KV, ResponseCacheEntry] = {}
+        self._result_cache: dict[KV, ResponseCacheEntry] = {}
 
         self.clock = clock
-        self.timeout_sec = timeout_ms / 1000.0
+        self.timeout = Duration(milliseconds=timeout_ms)
 
         self._name = name
         self._metrics = register_cache(
@@ -151,7 +150,7 @@ class ResponseCache(Generic[KV]):
         """
         return self._result_cache.keys()
 
-    def _get(self, key: KV) -> Optional[ResponseCacheEntry]:
+    def _get(self, key: KV) -> ResponseCacheEntry | None:
         """Look up the given key.
 
         Args:
@@ -172,7 +171,7 @@ class ResponseCache(Generic[KV]):
         self,
         context: ResponseCacheContext[KV],
         deferred: "defer.Deferred[RV]",
-        opentracing_span_context: "Optional[opentracing.SpanContext]",
+        opentracing_span_context: "opentracing.SpanContext | None",
     ) -> ResponseCacheEntry:
         """Set the entry for the given key to the given deferred.
 
@@ -197,9 +196,9 @@ class ResponseCache(Generic[KV]):
             # if this cache has a non-zero timeout, and the callback has not cleared
             # the should_cache bit, we leave it in the cache for now and schedule
             # its removal later.
-            if self.timeout_sec and context.should_cache:
+            if self.timeout and context.should_cache:
                 self.clock.call_later(
-                    self.timeout_sec,
+                    self.timeout,
                     self._entry_timeout,
                     key,
                     # We don't need to track these calls since they don't hold any strong
@@ -290,7 +289,7 @@ class ResponseCache(Generic[KV]):
             if cache_context:
                 kwargs["cache_context"] = context
 
-            span_context: Optional[opentracing.SpanContext] = None
+            span_context: opentracing.SpanContext | None = None
 
             async def cb() -> RV:
                 # NB it is important that we do not `await` before setting span_context!

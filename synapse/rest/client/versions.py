@@ -23,7 +23,7 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import RoomCreationPreset
 from synapse.http.server import HttpServer
@@ -62,7 +62,7 @@ class VersionsRestServlet(RestServlet):
             in self.config.room.encryption_enabled_by_default_for_room_presets
         )
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         msc3881_enabled = self.config.experimental.msc3881_enabled
         msc3575_enabled = self.config.experimental.msc3575_enabled
 
@@ -124,7 +124,7 @@ class VersionsRestServlet(RestServlet):
                     # Implements additional endpoints as described in MSC2432
                     "org.matrix.msc2432": True,
                     # Implements additional endpoints as described in MSC2666
-                    "uk.half-shot.msc2666.query_mutual_rooms": True,
+                    "uk.half-shot.msc2666.query_mutual_rooms": self.config.experimental.msc2666_enabled,
                     # Whether new rooms will be set to encrypted or not (based on presets).
                     "io.element.e2ee_forced.public": self.e2ee_forced_public,
                     "io.element.e2ee_forced.private": self.e2ee_forced_private,
@@ -182,6 +182,8 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4306": self.config.experimental.msc4306_enabled,
                     # MSC4169: Backwards-compatible redaction sending using `/send`
                     "com.beeper.msc4169": self.config.experimental.msc4169_enabled,
+                    # MSC4380: Invite blocking
+                    "org.matrix.msc4380": self.config.experimental.msc4380_enabled,
                 },
             },
         )

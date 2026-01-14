@@ -12,7 +12,6 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 import logging
-from typing import List, Optional
 
 from parameterized import parameterized_class
 
@@ -66,7 +65,7 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         self,
         actual_items: StrSequence,
         expected_items: StrSequence,
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> None:
         """
         Like `self.assertListEqual(...)` but with an actually understandable diff message.
@@ -75,14 +74,14 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         if actual_items == expected_items:
             return
 
-        expected_lines: List[str] = []
+        expected_lines: list[str] = []
         for expected_item in expected_items:
             is_expected_in_actual = expected_item in actual_items
             expected_lines.append(
                 "{}  {}".format(" " if is_expected_in_actual else "?", expected_item)
             )
 
-        actual_lines: List[str] = []
+        actual_lines: list[str] = []
         for actual_item in actual_items:
             is_actual_in_expected = actual_item in expected_items
             actual_lines.append(
@@ -101,9 +100,9 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         self,
         *,
         room_id: str,
-        actual_event_ids: List[str],
-        expected_event_ids: List[str],
-        message: Optional[str] = None,
+        actual_event_ids: list[str],
+        expected_event_ids: list[str],
+        message: str | None = None,
     ) -> None:
         """
         Like `self.assertListEqual(...)` for event IDs in a room but will give a nicer

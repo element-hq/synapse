@@ -17,7 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -265,7 +265,7 @@ class RetentionNoDefaultPolicyTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
 
         retention_config = {

@@ -35,15 +35,10 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Deque,
-    Dict,
     Iterable,
-    List,
     MutableMapping,
     Optional,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     cast,
@@ -86,6 +81,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource
 from twisted.web.server import Request, Site
 
+from synapse.api.constants import MAX_REQUEST_SIZE
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
@@ -124,11 +120,11 @@ R = TypeVar("R")
 P = ParamSpec("P")
 
 # the type of thing that can be passed into `make_request` in the headers list
-CustomHeaderType = Tuple[Union[str, bytes], Union[str, bytes]]
+CustomHeaderType = tuple[str | bytes, str | bytes]
 
 # A pre-prepared SQLite DB that is used as a template when creating new SQLite
 # DB each test run. This dramatically speeds up test set up when using SQLite.
-PREPPED_SQLITE_DB_CONN: Optional[LoggingDatabaseConnection] = None
+PREPPED_SQLITE_DB_CONN: LoggingDatabaseConnection | None = None
 
 
 class TimedOutException(Exception):
@@ -152,8 +148,8 @@ class FakeChannel:
     result: dict = attr.Factory(dict)
     _ip: str = "127.0.0.1"
     _producer: Optional[Union[IPullProducer, IPushProducer]] = None
-    resource_usage: Optional[ContextResourceUsage] = None
-    _request: Optional[Request] = None
+    resource_usage: ContextResourceUsage | None = None
+    _request: Request | None = None
 
     @property
     def request(self) -> Request:
@@ -172,7 +168,7 @@ class FakeChannel:
         return body
 
     @property
-    def json_list(self) -> List[JsonDict]:
+    def json_list(self) -> list[JsonDict]:
         body = json.loads(self.text_body)
         assert isinstance(body, list)
         return body
@@ -211,7 +207,7 @@ class FakeChannel:
         version: bytes,
         code: bytes,
         reason: bytes,
-        headers: Union[Headers, List[Tuple[bytes, bytes]]],
+        headers: Headers | list[tuple[bytes, bytes]],
     ) -> None:
         self.result["version"] = version
         self.result["code"] = code
@@ -246,7 +242,6 @@ class FakeChannel:
 
     def loseConnection(self) -> None:
         self.unregisterProducer()
-        self.transport.loseConnection()
 
     # Type ignore: mypy doesn't like the fact that producer isn't an IProducer.
     def registerProducer(self, producer: IProducer, streaming: bool) -> None:
@@ -362,18 +357,18 @@ class FakeSite:
 
 def make_request(
     reactor: MemoryReactorClock,
-    site: Union[Site, FakeSite],
-    method: Union[bytes, str],
-    path: Union[bytes, str],
-    content: Union[bytes, str, JsonDict] = b"",
-    access_token: Optional[str] = None,
-    request: Type[Request] = SynapseRequest,
+    site: Site | FakeSite,
+    method: bytes | str,
+    path: bytes | str,
+    content: bytes | str | JsonDict = b"",
+    access_token: str | None = None,
+    request: type[Request] = SynapseRequest,
     shorthand: bool = True,
-    federation_auth_origin: Optional[bytes] = None,
-    content_type: Optional[bytes] = None,
+    federation_auth_origin: bytes | None = None,
+    content_type: bytes | None = None,
     content_is_form: bool = False,
     await_result: bool = True,
-    custom_headers: Optional[Iterable[CustomHeaderType]] = None,
+    custom_headers: Iterable[CustomHeaderType] | None = None,
     client_ip: str = "127.0.0.1",
 ) -> FakeChannel:
     """
@@ -433,18 +428,29 @@ def make_request(
 
     channel = FakeChannel(site, reactor, ip=client_ip)
 
-    req = request(channel, site, our_server_name="test_server")
+    req = request(
+        channel,
+        site,
+        our_server_name="test_server",
+        max_request_body_size=MAX_REQUEST_SIZE,
+    )
     channel.request = req
 
     req.content = BytesIO(content)
     # Twisted expects to be at the end of the content when parsing the request.
     req.content.seek(0, SEEK_END)
 
-    # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
-    # bodies if the Content-Length header is missing
-    req.requestHeaders.addRawHeader(
-        b"Content-Length", str(len(content)).encode("ascii")
-    )
+    # If `Content-Length` was passed in as a custom header, don't automatically add it
+    # here.
+    if custom_headers is None or not any(
+        (k if isinstance(k, bytes) else k.encode("ascii")) == b"Content-Length"
+        for k, _ in custom_headers
+    ):
+        # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
+        # bodies if the Content-Length header is missing
+        req.requestHeaders.addRawHeader(
+            b"Content-Length", str(len(content)).encode("ascii")
+        )
 
     if access_token:
         req.requestHeaders.addRawHeader(
@@ -492,17 +498,17 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
     def __init__(self) -> None:
         self.threadpool = ThreadPool(self)
 
-        self._tcp_callbacks: Dict[Tuple[str, int], Callable] = {}
-        self._udp: List[udp.Port] = []
-        self.lookups: Dict[str, str] = {}
-        self._thread_callbacks: Deque[Callable[..., R]] = deque()
+        self._tcp_callbacks: dict[tuple[str, int], Callable] = {}
+        self._udp: list[udp.Port] = []
+        self.lookups: dict[str, str] = {}
+        self._thread_callbacks: deque[Callable[..., R]] = deque()
 
         lookups = self.lookups
 
         @implementer(IResolverSimple)
         class FakeResolver:
             def getHostByName(
-                self, name: str, timeout: Optional[Sequence[int]] = None
+                self, name: str, timeout: Sequence[int] | None = None
             ) -> "Deferred[str]":
                 if name not in lookups:
                     return fail(DNSLookupError("OH NO: unknown %s" % (name,)))
@@ -622,7 +628,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         port: int,
         factory: ClientFactory,
         timeout: float = 30,
-        bindAddress: Optional[Tuple[str, int]] = None,
+        bindAddress: tuple[str, int] | None = None,
     ) -> IConnector:
         """Fake L{IReactorTCP.connectTCP}."""
 
@@ -793,7 +799,7 @@ class ThreadPool:
 
     def callInThreadWithCallback(
         self,
-        onResult: Callable[[bool, Union[Failure, R]], None],
+        onResult: Callable[[bool, Failure | R], None],
         function: Callable[P, R],
         *args: P.args,
         **kwargs: P.kwargs,
@@ -814,7 +820,7 @@ class ThreadPool:
         return d
 
 
-def get_clock() -> Tuple[ThreadedMemoryReactorClock, Clock]:
+def get_clock() -> tuple[ThreadedMemoryReactorClock, Clock]:
     # Ignore the linter error since this is an expected usage of creating a `Clock` for
     # testing purposes.
     reactor = ThreadedMemoryReactorClock()
@@ -851,12 +857,12 @@ class FakeTransport:
     will get called back for connectionLost() notifications etc.
     """
 
-    _peer_address: Union[IPv4Address, IPv6Address] = attr.Factory(
+    _peer_address: IPv4Address | IPv6Address = attr.Factory(
         lambda: address.IPv4Address("TCP", "127.0.0.1", 5678)
     )
     """The value to be returned by getPeer"""
 
-    _host_address: Union[IPv4Address, IPv6Address] = attr.Factory(
+    _host_address: IPv4Address | IPv6Address = attr.Factory(
         lambda: address.IPv4Address("TCP", "127.0.0.1", 1234)
     )
     """The value to be returned by getHost"""
@@ -868,10 +874,10 @@ class FakeTransport:
     producer: Optional[IPushProducer] = None
     autoflush: bool = True
 
-    def getPeer(self) -> Union[IPv4Address, IPv6Address]:
+    def getPeer(self) -> IPv4Address | IPv6Address:
         return self._peer_address
 
-    def getHost(self) -> Union[IPv4Address, IPv6Address]:
+    def getHost(self) -> IPv4Address | IPv6Address:
         return self._host_address
 
     def loseConnection(self) -> None:
@@ -960,7 +966,7 @@ class FakeTransport:
         for x in seq:
             self.write(x)
 
-    def flush(self, maxbytes: Optional[int] = None) -> None:
+    def flush(self, maxbytes: int | None = None) -> None:
         if not self.buffer:
             # nothing to do. Don't write empty buffers: it upsets the
             # TLSMemoryBIOProtocol
@@ -1041,7 +1047,7 @@ class FakeTransport:
 
 def connect_client(
     reactor: ThreadedMemoryReactorClock, client_id: int
-) -> Tuple[IProtocol, AccumulatingProtocol]:
+) -> tuple[IProtocol, AccumulatingProtocol]:
     """
     Connect a client to a fake TCP transport.
 
@@ -1066,10 +1072,10 @@ def setup_test_homeserver(
     *,
     cleanup_func: Callable[[Callable[[], Optional["Deferred[None]"]]], None],
     server_name: str = "test",
-    config: Optional[HomeServerConfig] = None,
+    config: HomeServerConfig | None = None,
     reactor: Optional[ISynapseReactor] = None,
-    homeserver_to_use: Type[HomeServer] = TestHomeServer,
-    db_txn_limit: Optional[int] = None,
+    homeserver_to_use: type[HomeServer] = TestHomeServer,
+    db_txn_limit: int | None = None,
     **extra_homeserver_attributes: Any,
 ) -> HomeServer:
     """
@@ -1079,10 +1085,10 @@ def setup_test_homeserver(
     If no datastore is supplied, one is created and given to the homeserver.
 
     Args:
-        cleanup_func : The function used to register a cleanup routine for
-                       after the test. If the function returns a Deferred, the
-                       test case will wait until the Deferred has fired before
-                       proceeding to the next cleanup function.
+        cleanup_func: The function used to register a cleanup routine for
+            after the test. If the function returns a Deferred, the
+            test case will wait until the Deferred has fired before
+            proceeding to the next cleanup function.
         server_name: Homeserver name
         config: Homeserver config
         reactor: Twisted reactor
@@ -1195,67 +1201,8 @@ def setup_test_homeserver(
         cur.close()
         db_conn.close()
 
-    hs = homeserver_to_use(
-        server_name,
-        config=config,
-        reactor=reactor,
-    )
-
-    # Capture the `hs` as a `weakref` here to ensure there is no scenario where uncalled
-    # cleanup functions result in holding the `hs` in memory.
-    cleanup_hs_ref = weakref.ref(hs)
-
-    def shutdown_hs_on_cleanup() -> "Deferred[None]":
-        cleanup_hs = cleanup_hs_ref()
-        deferred: "Deferred[None]" = defer.succeed(None)
-        if cleanup_hs is not None:
-            deferred = defer.ensureDeferred(cleanup_hs.shutdown())
-        return deferred
-
-    # Register the cleanup hook for the homeserver.
-    # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
-    # strange behaviours.
-    cleanup_func(shutdown_hs_on_cleanup)
-
-    # Install @cache_in_self attributes
-    for key, val in extra_homeserver_attributes.items():
-        setattr(hs, "_" + key, val)
-
-    # Mock TLS
-    hs.tls_server_context_factory = Mock()
-
-    # Patch `make_pool` before initialising the database, to make database transactions
-    # synchronous for testing.
-    with patch("synapse.storage.database.make_pool", side_effect=make_fake_db_pool):
-        hs.setup()
-
-    # Register background tasks required by this server. This must be done
-    # somewhat manually due to the background tasks not being registered
-    # unless handlers are instantiated.
-    #
-    # Since, we don't have to worry about `daemonize` (forking the process) in tests, we
-    # can just start the background tasks straight away after `hs.setup`. (compare this
-    # with where we call `hs.start_background_tasks()` outside of the test environment).
-    if hs.config.worker.run_background_tasks:
-        hs.start_background_tasks()
-
-    # Since we've changed the databases to run DB transactions on the same
-    # thread, we need to stop the event fetcher hogging that one thread.
-    hs.get_datastores().main.USE_DEDICATED_DB_THREADS_FOR_EVENT_FETCHING = False
-
-    if USE_POSTGRES_FOR_TESTS:
-        # Capture the `database_pool` as a `weakref` here to ensure there is no scenario where uncalled
-        # cleanup functions result in holding the `hs` in memory.
-        database_pool = weakref.ref(hs.get_datastores().databases[0])
-
-        # We need to do cleanup on PostgreSQL
         def cleanup() -> None:
             import psycopg2
-
-            # Close all the db pools
-            db_pool = database_pool()
-            if db_pool is not None:
-                db_pool._db_pool.close()
 
             dropped = False
 
@@ -1301,6 +1248,96 @@ def setup_test_homeserver(
             # Register the cleanup hook
             cleanup_func(cleanup)
 
+    hs = homeserver_to_use(
+        server_name,
+        config=config,
+        reactor=reactor,
+    )
+
+    # Capture the `hs` as a `weakref` here to ensure there is no scenario where uncalled
+    # cleanup functions result in holding the `hs` in memory.
+    cleanup_hs_ref = weakref.ref(hs)
+
+    def shutdown_hs_on_cleanup() -> "Deferred[None]":
+        cleanup_hs = cleanup_hs_ref()
+        deferred: "Deferred[None]" = defer.succeed(None)
+        if cleanup_hs is not None:
+            deferred = defer.ensureDeferred(cleanup_hs.shutdown())
+        return deferred
+
+    # Register the cleanup hook for the homeserver.
+    # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
+    # strange behaviours.
+    cleanup_func(shutdown_hs_on_cleanup)
+
+    # Install @cache_in_self attributes
+    for key, val in extra_homeserver_attributes.items():
+        setattr(hs, "_" + key, val)
+
+    # Mock TLS
+    hs.tls_server_context_factory = Mock()
+
+    # Patch `make_pool` before initialising the database, to make database transactions
+    # synchronous for testing.
+    with patch("synapse.storage.database.make_pool", side_effect=make_fake_db_pool):
+        hs.setup()
+
+    # Ideally, setup/start would be separated but since this is historically used
+    # throughout tests, we keep the existing behavior for now. We probably just need to
+    # rename this function.
+    start_test_homeserver(hs=hs, cleanup_func=cleanup_func, reactor=reactor)
+
+    return hs
+
+
+def start_test_homeserver(
+    *,
+    hs: HomeServer,
+    cleanup_func: Callable[[Callable[[], Optional["Deferred[None]"]]], None],
+    reactor: ISynapseReactor,
+) -> None:
+    """
+    Start a homeserver for testing.
+
+    Args:
+        hs: The homeserver to start.
+        cleanup_func: The function used to register a cleanup routine for
+            after the test. If the function returns a Deferred, the
+            test case will wait until the Deferred has fired before
+            proceeding to the next cleanup function.
+        reactor: Twisted reactor
+    """
+
+    # Register background tasks required by this server. This must be done
+    # somewhat manually due to the background tasks not being registered
+    # unless handlers are instantiated.
+    #
+    # Since, we don't have to worry about `daemonize` (forking the process) in tests, we
+    # can just start the background tasks straight away after `hs.setup`. (compare this
+    # with where we call `hs.start_background_tasks()` outside of the test environment).
+    if hs.config.worker.run_background_tasks:
+        hs.start_background_tasks()
+
+    # Since we've changed the databases to run DB transactions on the same
+    # thread, we need to stop the event fetcher hogging that one thread.
+    hs.get_datastores().main.USE_DEDICATED_DB_THREADS_FOR_EVENT_FETCHING = False
+
+    if USE_POSTGRES_FOR_TESTS:
+        # Capture the `database_pool` as a `weakref` here to ensure there is no scenario where uncalled
+        # cleanup functions result in holding the `hs` in memory.
+        database_pool = weakref.ref(hs.get_datastores().databases[0])
+
+        # We need to do cleanup on PostgreSQL
+        def cleanup() -> None:
+            # Close all the db pools
+            db_pool = database_pool()
+            if db_pool is not None:
+                db_pool._db_pool.close()
+
+        if not LEAVE_DB:
+            # Register the cleanup hook
+            cleanup_func(cleanup)
+
     # bcrypt is far too slow to be doing in unit tests
     # Need to let the HS build an auth handler and then mess with it
     # because AuthHandler's constructor requires the HS, so we can't make one
@@ -1335,5 +1372,3 @@ def setup_test_homeserver(
     load_legacy_third_party_event_rules(hs)
     load_legacy_presence_router(hs)
     load_legacy_password_auth_providers(hs)
-
-    return hs

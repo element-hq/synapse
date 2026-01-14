@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -69,7 +69,7 @@ class ReplicationNotifyAccountDeactivatedServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         by_admin = content["by_admin"]
         await self.deactivate_account_handler.notify_account_deactivated(
             user_id, by_admin=by_admin

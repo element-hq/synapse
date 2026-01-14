@@ -23,7 +23,7 @@ class PeriodicallyFlushingMemoryHandler(MemoryHandler):
         self,
         capacity: int,
         flushLevel: int = logging.ERROR,
-        target: Optional[Handler] = None,
+        target: Handler | None = None,
         flushOnClose: bool = True,
         period: float = 5.0,
         reactor: Optional[IReactorCore] = None,

@@ -42,7 +42,6 @@ from synapse.types import Requester, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.unittest import override_config
 from tests.utils import mock_getRawHeaders
 
 
@@ -237,7 +236,6 @@ class AuthTestCase(unittest.HomeserverTestCase):
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         self.get_failure(self.auth.get_user_by_req(request), AuthError)
 
-    @override_config({"experimental_features": {"msc3202_device_masquerading": True}})
     def test_get_user_by_req_appservice_valid_token_valid_device_id(self) -> None:
         """
         Tests that when an application service passes the device_id URL parameter
@@ -264,7 +262,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
         request.getClientAddress.return_value.host = "127.0.0.1"
         request.args[b"access_token"] = [self.test_token]
         request.args[b"user_id"] = [masquerading_user_id]
-        request.args[b"org.matrix.msc3202.device_id"] = [masquerading_device_id]
+        request.args[b"device_id"] = [masquerading_device_id]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         requester = self.get_success(self.auth.get_user_by_req(request))
         self.assertEqual(
@@ -272,7 +270,6 @@ class AuthTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(requester.device_id, masquerading_device_id.decode("utf8"))
 
-    @override_config({"experimental_features": {"msc3202_device_masquerading": True}})
     def test_get_user_by_req_appservice_valid_token_invalid_device_id(self) -> None:
         """
         Tests that when an application service passes the device_id URL parameter
@@ -299,7 +296,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
         request.getClientAddress.return_value.host = "127.0.0.1"
         request.args[b"access_token"] = [self.test_token]
         request.args[b"user_id"] = [masquerading_user_id]
-        request.args[b"org.matrix.msc3202.device_id"] = [masquerading_device_id]
+        request.args[b"device_id"] = [masquerading_device_id]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
 
         failure = self.get_failure(self.auth.get_user_by_req(request), AuthError)

@@ -1,5 +1,5 @@
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import NotFoundError
 from synapse.events.utils import (
@@ -43,7 +43,7 @@ class EventRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self._auth.get_user_by_req(request)
         await assert_user_is_admin(self._auth, requester)
 

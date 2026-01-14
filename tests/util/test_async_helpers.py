@@ -19,7 +19,7 @@
 #
 import logging
 import traceback
-from typing import Any, Coroutine, List, NoReturn, Optional, Tuple, TypeVar
+from typing import Any, Coroutine, NoReturn, TypeVar
 
 from parameterized import parameterized_class
 
@@ -45,7 +45,7 @@ from synapse.util.async_helpers import (
 )
 
 from tests.server import get_clock
-from tests.unittest import TestCase
+from tests.unittest import TestCase, logcontext_clean
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ class ObservableDeferredTest(TestCase):
         observer1.addBoth(check_called_first)
 
         # store the results
-        results: List[Optional[int]] = [None, None]
+        results: list[int | None] = [None, None]
 
         def check_val(res: int, idx: int) -> int:
             results[idx] = res
@@ -102,7 +102,7 @@ class ObservableDeferredTest(TestCase):
         observer1.addBoth(check_called_first)
 
         # store the results
-        results: List[Optional[Failure]] = [None, None]
+        results: list[Failure | None] = [None, None]
 
         def check_failure(res: Failure, idx: int) -> None:
             results[idx] = res
@@ -198,7 +198,12 @@ class TimeoutDeferredTest(TestCase):
 
         self.failureResultOf(timing_out_d, defer.TimeoutError)
 
-    async def test_logcontext_is_preserved_on_cancellation(self) -> None:
+    @logcontext_clean
+    async def test_logcontext_is_preserved_on_timeout_cancellation(self) -> None:
+        """
+        Test that the logcontext is preserved when we timeout and the deferred is
+        cancelled.
+        """
         # Sanity check that we start in the sentinel context
         self.assertEqual(current_context(), SENTINEL_CONTEXT)
 
@@ -268,6 +273,65 @@ class TimeoutDeferredTest(TestCase):
             self.assertIs(current_context(), context_one)
 
         # Back to the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+    @logcontext_clean
+    async def test_logcontext_is_not_lost_when_awaiting_on_timeout_cancellation(
+        self,
+    ) -> None:
+        """
+        Test that the logcontext isn't lost when we `await make_deferred_yieldable(...)`
+        the deferred to complete/timeout and it times out.
+        """
+
+        # Sanity check that we start in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # Create a deferred which we will never complete
+        incomplete_d: Deferred = Deferred()
+
+        async def competing_task() -> None:
+            with LoggingContext(
+                name="competing", server_name="test_server"
+            ) as context_competing:
+                timing_out_d = timeout_deferred(
+                    deferred=incomplete_d,
+                    timeout=1.0,
+                    clock=self.clock,
+                )
+                self.assertNoResult(timing_out_d)
+                # We should still be in the logcontext we started in
+                self.assertIs(current_context(), context_competing)
+
+                # Mimic the normal use case to wait for the work to complete or timeout.
+                #
+                # In this specific test, we expect the deferred to timeout and raise an
+                # exception at this point.
+                await make_deferred_yieldable(timing_out_d)
+
+                self.fail(
+                    "We should not make it to this point as the `timing_out_d` should have been cancelled"
+                )
+
+        d = defer.ensureDeferred(competing_task())
+
+        # Still in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # Pump until we trigger the timeout
+        self.reactor.pump(
+            # We only need to pump `1.0` (seconds) as we set
+            # `timeout_deferred(timeout=1.0)` above
+            (1.0,)
+        )
+
+        # Still in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # We expect a failure due to the timeout
+        self.failureResultOf(d, defer.TimeoutError)
+
+        # Back to the sentinel context at the end of the day
         self.assertEqual(current_context(), SENTINEL_CONTEXT)
 
 
@@ -644,7 +708,7 @@ class AwakenableSleeperTests(TestCase):
 class GatherCoroutineTests(TestCase):
     """Tests for `gather_optional_coroutines`"""
 
-    def make_coroutine(self) -> Tuple[Coroutine[Any, Any, T], "defer.Deferred[T]"]:
+    def make_coroutine(self) -> tuple[Coroutine[Any, Any, T], "defer.Deferred[T]"]:
         """Returns a coroutine and a deferred that it is waiting on to resolve"""
 
         d: "defer.Deferred[T]" = defer.Deferred()

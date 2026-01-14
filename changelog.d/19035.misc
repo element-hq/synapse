@@ -1,1 +1,0 @@
-Allow any command of the `release.py` to accept a `--gh-token` argument.

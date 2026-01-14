@@ -1,1 +1,0 @@
-Remove duplicate call to `hs.start_background_tasks()` introduced from a bad merge.

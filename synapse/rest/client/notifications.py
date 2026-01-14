@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import ReceiptTypes
 from synapse.events.utils import (
@@ -53,7 +53,7 @@ class NotificationsServlet(RestServlet):
         self.clock = hs.get_clock()
         self._event_serializer = hs.get_event_client_serializer()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
 

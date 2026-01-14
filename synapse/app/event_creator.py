@@ -18,16 +18,11 @@
 #
 #
 
-import sys
-
-from synapse.app.generic_worker import load_config, start
-from synapse.util.logcontext import LoggingContext
+from synapse.app.generic_worker import main as worker_main
 
 
 def main() -> None:
-    homeserver_config = load_config(sys.argv[1:])
-    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
-        start(homeserver_config)
+    worker_main()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING
 
 import attr
 from typing_extensions import TypeAlias
@@ -50,7 +50,7 @@ class ThreadSubscriptionsRestServlet(RestServlet):
         self.handler = hs.get_thread_subscriptions_handler()
 
     class PutBody(RequestBodyModel):
-        automatic: Optional[AnyEventId]
+        automatic: AnyEventId | None = None
         """
         If supplied, the event ID of an event giving rise to this automatic subscription.
 
@@ -59,7 +59,7 @@ class ThreadSubscriptionsRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str, thread_root_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         RoomID.from_string(room_id)
         if not thread_root_id.startswith("$"):
             raise SynapseError(
@@ -80,7 +80,7 @@ class ThreadSubscriptionsRestServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, room_id: str, thread_root_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         RoomID.from_string(room_id)
         if not thread_root_id.startswith("$"):
             raise SynapseError(
@@ -101,7 +101,7 @@ class ThreadSubscriptionsRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, room_id: str, thread_root_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         RoomID.from_string(room_id)
         if not thread_root_id.startswith("$"):
             raise SynapseError(
@@ -134,7 +134,7 @@ class ThreadSubscriptionsPaginationRestServlet(RestServlet):
         self.is_mine = hs.is_mine
         self.store = hs.get_datastores().main
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         limit = min(
@@ -204,8 +204,8 @@ class ThreadSubscriptionsPaginationRestServlet(RestServlet):
             )
         )
 
-        subscribed_threads: Dict[str, Dict[str, JsonDict]] = {}
-        unsubscribed_threads: Dict[str, Dict[str, JsonDict]] = {}
+        subscribed_threads: dict[str, dict[str, JsonDict]] = {}
+        unsubscribed_threads: dict[str, dict[str, JsonDict]] = {}
         for stream_id, room_id, thread_root_id, subscribed, automatic in subscriptions:
             if subscribed:
                 subscribed_threads.setdefault(room_id, {})[thread_root_id] = (

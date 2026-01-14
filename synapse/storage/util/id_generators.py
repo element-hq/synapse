@@ -28,17 +28,10 @@ from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
     ContextManager,
-    Dict,
     Generic,
     Iterable,
-    List,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
     cast,
 )
 
@@ -182,7 +175,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
     Uses a Postgres sequence to coordinate ID assignment, but positions of other
     writers will only get updated when `advance` is called (by replication).
 
-    Note: Only works with Postgres.
+    On SQLite, falls back to a single-writer implementation, which is fine because
+    Synapse only supports monolith mode when SQLite is the database driver.
 
     Warning: Streams using this generator start at ID 2, because ID 1 is always assumed
         to have been 'seen as persisted'.
@@ -223,9 +217,9 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         stream_name: str,
         server_name: str,
         instance_name: str,
-        tables: List[Tuple[str, str, str]],
+        tables: list[tuple[str, str, str]],
         sequence_name: str,
-        writers: List[str],
+        writers: list[str],
         positive: bool = True,
     ) -> None:
         self._db = db
@@ -243,7 +237,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # Note: If we are a negative stream then we still store all the IDs as
         # positive to make life easier for us, and simply negate the IDs when we
         # return them.
-        self._current_positions: Dict[str, int] = {}
+        self._current_positions: dict[str, int] = {}
 
         # Set of local IDs that we're still processing. The current position
         # should be less than the minimum of this set (if not empty).
@@ -260,7 +254,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
         # Set of local IDs that we've processed that are larger than the current
         # position, due to there being smaller unpersisted IDs.
-        self._finished_ids: Set[int] = set()
+        self._finished_ids: set[int] = set()
 
         # We track the max position where we know everything before has been
         # persisted. This is done by a) looking at the min across all instances
@@ -281,7 +275,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         self._persisted_upto_position = (
             min(self._current_positions.values()) if self._current_positions else 1
         )
-        self._known_persisted_positions: List[int] = []
+        self._known_persisted_positions: list[int] = []
 
         # The maximum stream ID that we have seen been allocated across any writer.
         # Since this defaults to 1, this means that ID 1 is assumed to have already
@@ -348,7 +342,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
     def _load_current_ids(
         self,
         db_conn: LoggingDatabaseConnection,
-        tables: List[Tuple[str, str, str]],
+        tables: list[tuple[str, str, str]],
         sequence_name: str,
     ) -> None:
         cur = db_conn.cursor(txn_name="_load_current_ids")
@@ -439,7 +433,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
             self._persisted_upto_position = min_stream_id
 
-            rows: List[Tuple[str, int]] = []
+            rows: list[tuple[str, int]] = []
             for table, instance_column, id_column in tables:
                 sql = """
                     SELECT %(instance)s, %(id)s FROM %(table)s
@@ -453,13 +447,13 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 cur.execute(sql, (min_stream_id * self._return_factor,))
 
                 # Cast safety: this corresponds to the types returned by the query above.
-                rows.extend(cast(Iterable[Tuple[str, int]], cur))
+                rows.extend(cast(Iterable[tuple[str, int]], cur))
 
             # Sort by stream_id (ascending, lowest -> highest) so that we handle
             # rows in order for each instance because we don't want to overwrite
             # the current_position of an instance to a lower stream ID than
             # we're actually at.
-            def sort_by_stream_id_key_func(row: Tuple[str, int]) -> int:
+            def sort_by_stream_id_key_func(row: tuple[str, int]) -> int:
                 (instance, stream_id) = row
                 # If `stream_id` is ever `None`, we will see a `TypeError: '<'
                 # not supported between instances of 'NoneType' and 'X'` error.
@@ -492,7 +486,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         stream_ids = self._load_next_mult_id_txn(txn, 1)
         return stream_ids[0]
 
-    def _load_next_mult_id_txn(self, txn: Cursor, n: int) -> List[int]:
+    def _load_next_mult_id_txn(self, txn: Cursor, n: int) -> list[int]:
         # We need to track that we've requested some more stream IDs, and what
         # the current max allocated stream ID is. This is to prevent a race
         # where we've been allocated stream IDs but they have not yet been added
@@ -529,7 +523,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             AsyncContextManager[int], _MultiWriterCtxManager(self, self._notifier)
         )
 
-    def get_next_mult(self, n: int) -> AsyncContextManager[List[int]]:
+    def get_next_mult(self, n: int) -> AsyncContextManager[list[int]]:
         # If we have a list of instances that are allowed to write to this
         # stream, make sure we're in it.
         if self._writers and self._instance_name not in self._writers:
@@ -537,12 +531,22 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
         # Cast safety: see get_next.
         return cast(
-            AsyncContextManager[List[int]],
+            AsyncContextManager[list[int]],
             _MultiWriterCtxManager(self, self._notifier, n),
         )
 
     def get_next_txn(self, txn: LoggingTransaction) -> int:
         """
+        Generate an ID for immediate use within a database transaction.
+
+        The ID will automatically be marked as finished at the end of the
+        database transaction, therefore the stream rows MUST be persisted
+        within the active transaction (MUST NOT be persisted in a later
+        transaction).
+
+        The replication notifier will automatically be notified when the
+        transaction ends successfully.
+
         Usage:
 
             stream_id = stream_id_gen.get_next_txn(txn)
@@ -578,8 +582,18 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
         return self._return_factor * next_id
 
-    def get_next_mult_txn(self, txn: LoggingTransaction, n: int) -> List[int]:
+    def get_next_mult_txn(self, txn: LoggingTransaction, n: int) -> list[int]:
         """
+        Generate multiple IDs for immediate use within a database transaction.
+
+        The IDs will automatically be marked as finished at the end of the
+        database transaction, therefore the stream rows MUST be persisted
+        within the active transaction (MUST NOT be persisted in a later
+        transaction).
+
+        The replication notifier will automatically be notified when the
+        transaction ends successfully.
+
         Usage:
 
             stream_id = stream_id_gen.get_next_txn(txn)
@@ -615,7 +629,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
         return [self._return_factor * next_id for next_id in next_ids]
 
-    def _mark_ids_as_finished(self, next_ids: List[int]) -> None:
+    def _mark_ids_as_finished(self, next_ids: list[int]) -> None:
         """These IDs have finished being processed so we should advance the
         current position if possible.
         """
@@ -624,7 +638,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             self._unfinished_ids.difference_update(next_ids)
             self._finished_ids.update(next_ids)
 
-            new_cur: Optional[int] = None
+            new_cur: int | None = None
 
             if self._unfinished_ids or self._in_flight_fetches:
                 # If there are unfinished IDs then the new position will be the
@@ -707,7 +721,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 self._instance_name, self._persisted_upto_position
             )
 
-    def get_positions(self) -> Dict[str, int]:
+    def get_positions(self) -> dict[str, int]:
         """Get a copy of the current positon map.
 
         Note that this won't necessarily include all configured writers if some
@@ -849,10 +863,10 @@ class _AsyncCtxManagerWrapper(Generic[T]):
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
         return self.inner.__exit__(exc_type, exc, tb)
 
 
@@ -862,10 +876,10 @@ class _MultiWriterCtxManager:
 
     id_gen: MultiWriterIdGenerator
     notifier: "ReplicationNotifier"
-    multiple_ids: Optional[int] = None
-    stream_ids: List[int] = attr.Factory(list)
+    multiple_ids: int | None = None
+    stream_ids: list[int] = attr.Factory(list)
 
-    async def __aenter__(self) -> Union[int, List[int]]:
+    async def __aenter__(self) -> int | list[int]:
         # It's safe to run this in autocommit mode as fetching values from a
         # sequence ignores transaction semantics anyway.
         self.stream_ids = await self.id_gen._db.runInteraction(
@@ -882,9 +896,9 @@ class _MultiWriterCtxManager:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
     ) -> bool:
         self.id_gen._mark_ids_as_finished(self.stream_ids)
 

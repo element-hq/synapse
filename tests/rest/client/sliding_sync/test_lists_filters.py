@@ -690,7 +690,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         user1_tok = self.login(user1_id, "pass")
 
         # Create a remote invite room without any `unsigned.invite_room_state`
-        _remote_invite_room_id = self._create_remote_invite_room_for_user(
+        _remote_invite_room_id, _ = self._create_remote_invite_room_for_user(
             user1_id, None
         )
 
@@ -760,7 +760,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
 
         # Create a remote invite room with some `unsigned.invite_room_state`
         # indicating that the room is encrypted.
-        remote_invite_room_id = self._create_remote_invite_room_for_user(
+        remote_invite_room_id, _ = self._create_remote_invite_room_for_user(
             user1_id,
             [
                 StrippedStateEvent(
@@ -849,7 +849,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
 
         # Create a remote invite room with some `unsigned.invite_room_state`
         # but don't set any room encryption event.
-        remote_invite_room_id = self._create_remote_invite_room_for_user(
+        remote_invite_room_id, _ = self._create_remote_invite_room_for_user(
             user1_id,
             [
                 StrippedStateEvent(
@@ -1484,7 +1484,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         user1_tok = self.login(user1_id, "pass")
 
         # Create a remote invite room without any `unsigned.invite_room_state`
-        _remote_invite_room_id = self._create_remote_invite_room_for_user(
+        _remote_invite_room_id, _ = self._create_remote_invite_room_for_user(
             user1_id, None
         )
 
@@ -1554,7 +1554,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
 
         # Create a remote invite room with some `unsigned.invite_room_state` indicating
         # that it is a space room
-        remote_invite_room_id = self._create_remote_invite_room_for_user(
+        remote_invite_room_id, _ = self._create_remote_invite_room_for_user(
             user1_id,
             [
                 StrippedStateEvent(
@@ -1637,7 +1637,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
 
         # Create a remote invite room with some `unsigned.invite_room_state`
         # but the create event does not specify a room type (normal room)
-        remote_invite_room_id = self._create_remote_invite_room_for_user(
+        remote_invite_room_id, _ = self._create_remote_invite_room_for_user(
             user1_id,
             [
                 StrippedStateEvent(

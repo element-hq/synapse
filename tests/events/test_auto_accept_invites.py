@@ -19,9 +19,8 @@
 #
 #
 import asyncio
-from asyncio import Future
 from http import HTTPStatus
-from typing import Any, Awaitable, Dict, List, Optional, Tuple, TypeVar, cast
+from typing import Any, TypeVar, cast
 from unittest.mock import Mock
 
 import attr
@@ -526,8 +525,8 @@ def generate_request_key() -> SyncRequestKey:
 def sync_join(
     testcase: HomeserverTestCase,
     user_id: str,
-    since_token: Optional[StreamToken] = None,
-) -> Tuple[List[JoinedSyncResult], StreamToken]:
+    since_token: StreamToken | None = None,
+) -> tuple[list[JoinedSyncResult], StreamToken]:
     """Perform a sync request for the given user and return the user join updates
     they've received, as well as the next_batch token.
 
@@ -765,9 +764,9 @@ class MockEvent:
 
     sender: str
     type: str
-    content: Dict[str, Any]
+    content: dict[str, Any]
     room_id: str = "!someroom"
-    state_key: Optional[str] = None
+    state_key: str | None = None
 
     def is_state(self) -> bool:
         """Checks if the event is a state event by checking if it has a state key."""
@@ -787,29 +786,21 @@ TV = TypeVar("TV")
 
 
 async def make_awaitable(value: T) -> T:
+    """
+    Makes a fresh awaitable, suitable for mocking an `async` function.
+    """
     return value
 
 
-def make_multiple_awaitable(result: TV) -> Awaitable[TV]:
-    """
-    Makes an awaitable, suitable for mocking an `async` function.
-    This uses Futures as they can be awaited multiple times so can be returned
-    to multiple callers.
-    """
-    future: Future[TV] = Future()
-    future.set_result(result)
-    return future
-
-
 def create_module(
-    config_override: Optional[Dict[str, Any]] = None, worker_name: Optional[str] = None
+    config_override: dict[str, Any] | None = None, worker_name: str | None = None
 ) -> InviteAutoAccepter:
     # Create a mock based on the ModuleApi spec, but override some mocked functions
     # because some capabilities are needed for running the tests.
     module_api = Mock(spec=ModuleApi)
     module_api.is_mine.side_effect = lambda a: a.split(":")[1] == "test"
     module_api.worker_name = worker_name
-    module_api.sleep.return_value = make_multiple_awaitable(None)
+    module_api.sleep.return_value = lambda *_args, **_kwargs: make_awaitable(None)
     module_api.get_userinfo_by_id.return_value = UserInfo(
         user_id=UserID.from_string("@user:test"),
         is_admin=False,
