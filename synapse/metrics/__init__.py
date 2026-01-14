@@ -305,7 +305,12 @@ class _InFlightGaugeRuntime(Collector):
         )
 
         # Counts number of in flight blocks for a given set of label values
-        # Type annotations are not
+        # `Callable` should be of type `Callable[[MetricsEntry], None]`, but
+        # `MetricsEntry` has no meaning in this context without the higher level
+        # `InFlightGauge` typing information.
+        # Instead, the typing is enforced by having `_registrations` be private and all
+        # accessor functions have proper `Callable[[MetricsEntry], None]` type
+        # annotations.
         self._registrations: dict[tuple[str, ...], set[Callable[[Any], None]]] = {}
 
         # Protects access to _registrations
