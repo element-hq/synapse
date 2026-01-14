@@ -262,7 +262,21 @@ shutdown.
 MetricsEntry = TypeVar("MetricsEntry")
 
 
-class InFlightGauge(Collector, Generic[MetricsEntry]):
+T = TypeVar("T")
+
+
+class _InFlightGaugeTyping(Generic[T]):
+    """Typing-only base. No runtime behaviour."""
+
+    # This class has no state and no runtime behaviour by itself.
+    # Explicitly set slots to empty here to enforce no attributes can be created.
+    # This also has the effect of playing well with inheritance by not creating a
+    # `__dict__` that would be inherited by subclasses even if they are using slots
+    # themselves.
+    __slots__ = ()
+
+
+class InFlightGauge(_InFlightGaugeTyping[MetricsEntry], Collector):
     """Tracks number of things (e.g. requests, Measure blocks, etc) in flight
     at any given time.
 
