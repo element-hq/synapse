@@ -1,0 +1,1 @@
+Tweak docstrings and signatures of `auth_types_for_event` and `get_catchup_room_event_ids`.
