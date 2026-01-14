@@ -7,6 +7,8 @@ on:
   merge_group:
   workflow_dispatch:
 
+# Pointless comment to give an excuse to make a commit and test
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
