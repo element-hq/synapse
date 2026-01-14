@@ -691,12 +691,14 @@ class Worker:
     `event_persister:2` -> `event_persister1` and `event_persister2`
     `stream_writers=account_data+presence+receipts+to_device+typing"` -> `stream_writers`
     """
+
     worker_base_name: str
     """
     ex.
     `event_persister:2` -> `event_persister`
     `stream_writers=account_data+presence+receipts+to_device+typing"` -> `stream_writers`
     """
+
     worker_index: int
     """
     The index of the worker starting from 1 for each worker type requested.
@@ -705,6 +707,7 @@ class Worker:
     `event_persister:2` -> `1` and `2`
     `stream_writers=account_data+presence+receipts+to_device+typing"` -> `1`
     """
+
     worker_types: set[str]
     """
     ex.
