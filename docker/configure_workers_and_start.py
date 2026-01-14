@@ -351,6 +351,16 @@ NGINX_LOCATION_REGEX_CONFIG_BLOCK = """
         proxy_set_header Host $host;
     }}
 """
+
+# Having both **regex** (`NGINX_LOCATION_REGEX_CONFIG_BLOCK`) match vs **exact**
+# (`NGINX_LOCATION_EXACT_CONFIG_BLOCK`) match is necessary because we can't use a URI
+# path in `proxy_pass http://localhost:19090/_synapse/metrics` with the regex version.
+#
+# Example of what happens if you try to use `proxy_pass http://localhost:19090/_synapse/metrics`
+# with `NGINX_LOCATION_REGEX_CONFIG_BLOCK`:
+# ```
+# nginx | 2025/12/31 22:58:34 [emerg] 21#21: "proxy_pass" cannot have URI part in location given by regular expression, or inside named location, or inside "if" statement, or inside "limit_except" block in /etc/nginx/conf.d/matrix-synapse.conf:732
+# ```
 NGINX_LOCATION_EXACT_CONFIG_BLOCK = """
     location = {endpoint} {{
         proxy_pass {upstream};
@@ -359,6 +369,7 @@ NGINX_LOCATION_EXACT_CONFIG_BLOCK = """
         proxy_set_header Host $host;
     }}
 """
+
 
 NGINX_UPSTREAM_CONFIG_BLOCK = """
 upstream {upstream_worker_base_name} {{
