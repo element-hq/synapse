@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a59e7b0d.js";
+            window.path_to_searchindex_js = "searchindex-da313e20.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -306,26 +306,22 @@ on <code>http://127.0.0.1:9101</code>.</p>
     static_configs:
       - targets: ["my.server.here:port"]
         labels:
-          instance: "my.server"
           job: "master"
           index: 1
       - targets: ["my.workerserver.here:port"]
         labels:
-          instance: "my.server"
           job: "generic_worker"
           index: 1
       - targets: ["my.workerserver.here:port"]
         labels:
-          instance: "my.server"
           job: "generic_worker"
           index: 2
       - targets: ["my.workerserver.here:port"]
         labels:
-          instance: "my.server"
           job: "media_repository"
           index: 1
 </code></pre>
-<p>Labels (<code>instance</code>, <code>job</code>, <code>index</code>) can be defined as anything.
+<p>Labels (<code>job</code>, <code>index</code>) can be defined as anything.
 The labels are used to group graphs in grafana.</p>
 
                     </main>
