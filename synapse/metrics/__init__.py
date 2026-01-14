@@ -660,8 +660,8 @@ build_info.labels(
 ).set(1)
 
 
-synapse_server_name_to_instance_mapping = Gauge(
-    "synapse_server_name_to_instance_mapping",
+synapse_server_name_info = Gauge(
+    "synapse_server_name_info",
     "Maps Synapse `server_name`s to the `instance`s they're hosted on",
     # `instance` will automatically be set by Prometheus
     labelnames=[SERVER_NAME_LABEL],
@@ -669,8 +669,11 @@ synapse_server_name_to_instance_mapping = Gauge(
 """
 Maps Synapse `server_name`s to the `instance`s they're hosted on.
 
-The `instance` will automatically be set by Prometheus and is the `<host>:<port>` part
-of the target's URL that was scraped.
+This is an info-style metric where the value is always 1, and labels carry metadata:
+
+ - `server_name`: The Synapse `server_name`
+ - `instance`: Automatically be set by Prometheus and is the `<host>:<port>` part
+    of the target's URL that was scraped.
 
 This is useful as it allows us to correlate process-level metrics (like `process_*`,
 `python_*`, etc) with homeservers.

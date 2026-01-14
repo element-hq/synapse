@@ -150,7 +150,7 @@ from synapse.metrics import (
     SERVER_NAME_LABEL,
     all_later_gauges_to_clean_up_on_shutdown,
     register_threadpool,
-    synapse_server_name_to_instance_mapping,
+    synapse_server_name_info,
 )
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
@@ -364,9 +364,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._background_processes: set[defer.Deferred[Any | None]] = set()
 
         # For every server we spawn in the process, track it in the metrics
-        synapse_server_name_to_instance_mapping.labels(
-            **{SERVER_NAME_LABEL: self.hostname}
-        ).set(1)
+        synapse_server_name_info.labels(**{SERVER_NAME_LABEL: self.hostname}).set(1)
 
     def run_as_background_process(
         self,
