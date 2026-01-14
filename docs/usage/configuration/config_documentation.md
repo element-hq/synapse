@@ -2184,8 +2184,6 @@ Options for each entry include:
 
 * `msc4335_soft_limit` (boolean): Experimental MSC4335 value to say if the limit can be increased. Optional.
 
-* `msc4335_increase_uri` (string): Experimental MSC4335 URI to where the user can increase the upload limit. Required if msc4335_soft_limit is true.
-
 Example configuration:
 ```yaml
 media_upload_limits:
@@ -2195,7 +2193,6 @@ media_upload_limits:
   max_size: 500M
   msc4335_info_uri: https://example.com/quota
   msc4335_soft_limit: true
-  msc4335_increase_uri: https://example.com/increase-quota
 ```
 ---
 ### `max_image_pixels`

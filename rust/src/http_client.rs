@@ -137,7 +137,7 @@ fn get_runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRunt
 static DEFER: OnceCell<PyObject> = OnceCell::new();
 
 /// Access to the `twisted.internet.defer` module.
-fn defer(py: Python<'_>) -> PyResult<&Bound<PyAny>> {
+fn defer(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
     Ok(DEFER
         .get_or_try_init(|| py.import("twisted.internet.defer").map(Into::into))?
         .bind(py))

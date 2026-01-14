@@ -396,7 +396,6 @@ class MediaRepository:
                         "Media upload limit exceeded",
                         limit.msc4335_info_uri,
                         limit.msc4335_soft_limit,
-                        limit.msc4335_increase_uri,
                     )
                 # Otherwise we use the current behaviour albeit not spec compliant
                 # See: https://github.com/element-hq/synapse/issues/18749

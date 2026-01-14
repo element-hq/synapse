@@ -2978,7 +2978,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         config_dict = default_config("test")
 
         # msc4335_info_uri and msc4335_soft_limit are required
-        # msc4335_increase_uri is required if msc4335_soft_limit is true
 
         with self.assertRaises(ConfigError):
             HomeServerConfig().parse_config_dict(
@@ -2988,23 +2987,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                             "time_period": "1d",
                             "max_size": "1K",
                             "msc4335_info_uri": "https://example.com",
-                        }
-                    ],
-                    **config_dict,
-                },
-                "",
-                "",
-            )
-
-        with self.assertRaises(ConfigError):
-            HomeServerConfig().parse_config_dict(
-                {
-                    "media_upload_limits": [
-                        {
-                            "time_period": "1d",
-                            "max_size": "1K",
-                            "msc4335_info_uri": "https://example.com",
-                            "msc4335_soft_limit": True,
                         }
                     ],
                     **config_dict,
@@ -3045,22 +3027,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                 "",
             )
 
-        with self.assertRaises(ConfigError):
-            HomeServerConfig().parse_config_dict(
-                {
-                    "media_upload_limits": [
-                        {
-                            "time_period": "1d",
-                            "max_size": "1K",
-                            "msc4335_increase_uri": "https://example.com/increase",
-                        }
-                    ],
-                    **config_dict,
-                },
-                "",
-                "",
-            )
-
     @override_config(
         {
             "experimental_features": {"msc4335_enabled": True},
@@ -3087,7 +3053,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body["org.matrix.msc4335.info_uri"], "https://example.com"
         )
-        self.assertEquals(hasattr(channel.json_body, "org.matrix.msc4335.increase_uri"), False)
 
     @override_config(
         {
@@ -3098,7 +3063,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                     "max_size": "1K",
                     "msc4335_info_uri": "https://example.com",
                     "msc4335_soft_limit": True,
-                    "msc4335_increase_uri": "https://example.com/increase",
                 }
             ],
         }
@@ -3117,10 +3081,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
             channel.json_body["org.matrix.msc4335.info_uri"], "https://example.com"
         )
         self.assertEqual(channel.json_body["org.matrix.msc4335.soft_limit"], True)
-        self.assertEqual(
-            channel.json_body["org.matrix.msc4335.increase_uri"],
-            "https://example.com/increase",
-        )
 
     @override_config(
         {

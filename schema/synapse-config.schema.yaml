@@ -2446,10 +2446,6 @@ properties:
           type: boolean
           description: >-
             Experimental MSC4335 value to say if the limit can be increased. Optional.
-        msc4335_increase_uri:
-          type: string
-          description: >-
-            Experimental MSC4335 URI to where the user can increase the upload limit. Required if msc4335_soft_limit is true.
     examples:
       - - time_period: 1h
           max_size: 100M
@@ -2457,7 +2453,6 @@ properties:
           max_size: 500M
           msc4335_info_uri: https://example.com/quota
           msc4335_soft_limit: true
-          msc4335_increase_uri: https://example.com/increase-quota
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.

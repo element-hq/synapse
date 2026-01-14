@@ -526,20 +526,13 @@ class MSC4335UserLimitExceededError(SynapseError):
         msg: str,
         info_uri: str,
         soft_limit: bool = False,
-        increase_uri: Optional[str] = None,
     ):
-        if soft_limit and increase_uri is None:
-            raise ValueError("increase_uri must be provided if soft_limit is True")
-
         additional_fields: dict[str, Union[str, bool]] = {
             "org.matrix.msc4335.info_uri": info_uri,
         }
 
         if soft_limit:
             additional_fields["org.matrix.msc4335.soft_limit"] = soft_limit
-
-        if soft_limit and increase_uri is not None:
-            additional_fields["org.matrix.msc4335.increase_uri"] = increase_uri
 
         super().__init__(
             code,
