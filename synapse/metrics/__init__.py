@@ -297,16 +297,14 @@ class _InFlightGaugeRuntime(Collector):
 
         # Create a class which have the sub_metrics values as attributes, which
         # default to 0 on initialization. Used to pass to registered callbacks.
-        self._metrics_class: type[MetricsEntry] = attr.make_class(
+        self._metrics_class = attr.make_class(
             "_MetricsEntry",
             attrs={x: attr.ib(default=0) for x in sub_metrics},
             slots=True,
         )
 
         # Counts number of in flight blocks for a given set of label values
-        self._registrations: dict[
-            tuple[str, ...], set[Callable[[MetricsEntry], None]]
-        ] = {}
+        self._registrations = {}
 
         # Protects access to _registrations
         self._lock = threading.Lock()
@@ -411,7 +409,8 @@ if TYPE_CHECKING:
         Provides InFlightGauge[T] support to type checkers.
         """
 
-        ...
+        _metrics_class: type[MetricsEntry]
+        _registrations: dict[tuple[str, ...], set[Callable[[MetricsEntry], None]]]
 else:
     InFlightGauge = _InFlightGaugeRuntime
 
