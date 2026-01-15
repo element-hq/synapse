@@ -278,17 +278,24 @@ class DelayedEventsTestCase(HomeserverTestCase):
         channel = self._update_delayed_event(delay_ids.pop(0), "cancel", action_in_path)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
-    @parameterized.expand((True, False))
-    def test_send_delayed_state_event(self, action_in_path: bool) -> None:
+    @parameterized.expand(
+        (
+            (content_property_value, action_in_path)
+            for content_property_value in ("test", "tест")
+            for action_in_path in (True, False)
+        )
+    )
+    def test_send_delayed_state_event(
+        self, content_value: str, action_in_path: bool
+    ) -> None:
         state_key = "to_send_on_request"
 
-        setter_key = "setter"
-        setter_expected = "on_send"
+        content_property_name = "key"
         channel = self.make_request(
             "PUT",
             _get_path_for_delayed_state(self.room_id, _EVENT_TYPE, state_key, 100000),
             {
-                setter_key: setter_expected,
+                content_property_name: content_value,
             },
             self.user1_access_token,
         )
@@ -300,7 +307,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         events = self._get_delayed_events()
         self.assertEqual(1, len(events), events)
         content = self._get_delayed_event_content(events[0])
-        self.assertEqual(setter_expected, content.get(setter_key), content)
+        self.assertEqual(content_value, content.get(content_property_name), content)
         self.helper.get_state(
             self.room_id,
             _EVENT_TYPE,
@@ -318,7 +325,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             self.user1_access_token,
             state_key=state_key,
         )
-        self.assertEqual(setter_expected, content.get(setter_key), content)
+        self.assertEqual(content_value, content.get(content_property_name), content)
 
     @parameterized.expand((True, False))
     @unittest.override_config({"rc_message": {"per_second": 2.5, "burst_count": 3}})
