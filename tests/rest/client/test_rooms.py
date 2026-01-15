@@ -2403,6 +2403,27 @@ class RoomDelayedEventTestCase(RoomBase):
     """Tests delayed events."""
 
     user_id = "@sid1:red"
+    invalid_delay_error_type = Codes.INVALID_PARAM
+
+    @classmethod
+    def get_delayed_event_path_and_body(
+        cls,
+        room_id: str,
+        delay: int,
+        event_type: str,
+        state_key: str | None,
+        content: JsonDict,
+        txn_id: str | None = "mid1",
+    ) -> tuple[str, JsonDict]:
+        path = (
+            f"rooms/{room_id}/{'send' if state_key is None else 'state'}/{event_type}"
+        )
+        if state_key is not None:
+            path += f"/{state_key}"
+        elif txn_id is not None:
+            path += f"/{txn_id}"
+        path += f"?org.matrix.msc4140.delay={delay}"
+        return path, content
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.room_id = self.helper.create_room_as(self.user_id)
@@ -2410,26 +2431,34 @@ class RoomDelayedEventTestCase(RoomBase):
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_send_delayed_invalid_event(self) -> None:
         """Test sending a delayed event with invalid content."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            2000,
+            "m.room.message",
+            None,
+            {},
+        )
         channel = self.make_request(
             "PUT",
-            (
-                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
-                % self.room_id
-            ).encode("ascii"),
-            {},
+            path.encode("ascii"),
+            body,
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertNotIn("org.matrix.msc4140.errcode", channel.json_body)
 
     def test_delayed_event_unsupported_by_default(self) -> None:
         """Test that sending a delayed event is unsupported with the default config."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            2000,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+        )
         channel = self.make_request(
             "PUT",
-            (
-                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
-                % self.room_id
-            ).encode("ascii"),
-            {"body": "test", "msgtype": "m.text"},
+            path.encode("ascii"),
+            body,
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
@@ -2441,13 +2470,17 @@ class RoomDelayedEventTestCase(RoomBase):
     @unittest.override_config({"max_event_delay_duration": "1000"})
     def test_delayed_event_exceeds_max_delay(self) -> None:
         """Test that sending a delayed event fails if its delay is longer than allowed."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            2000,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+        )
         channel = self.make_request(
             "PUT",
-            (
-                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
-                % self.room_id
-            ).encode("ascii"),
-            {"body": "test", "msgtype": "m.text"},
+            path.encode("ascii"),
+            body,
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
@@ -2456,45 +2489,89 @@ class RoomDelayedEventTestCase(RoomBase):
             channel.json_body,
         )
 
+    @parameterized.expand((-2000, 0))
     @unittest.override_config({"max_event_delay_duration": "24h"})
-    def test_delayed_event_with_negative_delay(self) -> None:
-        """Test that sending a delayed event fails if its delay is negative."""
+    def test_delayed_event_with_invalid_delay(
+        self,
+        invalid_delay: int,
+    ) -> None:
+        """Test that sending a delayed event fails if its delay is invalid."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            invalid_delay,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+        )
         channel = self.make_request(
             "PUT",
-            (
-                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=-2000"
-                % self.room_id
-            ).encode("ascii"),
-            {"body": "test", "msgtype": "m.text"},
+            path.encode("ascii"),
+            body,
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            Codes.INVALID_PARAM, channel.json_body["errcode"], channel.json_body
+            self.invalid_delay_error_type,
+            channel.json_body["errcode"],
+            channel.json_body,
+        )
+
+    @parameterized.expand((-2000, 0))
+    @unittest.override_config({"max_event_delay_duration": None})
+    def test_delayed_event_unsupported_with_invalid_delay(
+        self,
+        invalid_delay: int,
+    ) -> None:
+        """Test that errors for delayed events being unsupported have precedence over errors for invalid delays."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            invalid_delay,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+        )
+        channel = self.make_request(
+            "PUT",
+            path.encode("ascii"),
+            body,
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            "M_MAX_DELAY_UNSUPPORTED",
+            channel.json_body.get("org.matrix.msc4140.errcode"),
+            channel.json_body,
         )
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_send_delayed_message_event(self) -> None:
         """Test sending a valid delayed message event."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            2000,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+        )
         channel = self.make_request(
             "PUT",
-            (
-                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
-                % self.room_id
-            ).encode("ascii"),
-            {"body": "test", "msgtype": "m.text"},
+            path.encode("ascii"),
+            body,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_send_delayed_state_event(self) -> None:
         """Test sending a valid delayed state event."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            2000,
+            "m.room.topic",
+            "",
+            {"topic": "This is a topic"},
+        )
         channel = self.make_request(
             "PUT",
-            (
-                "rooms/%s/state/m.room.topic/?org.matrix.msc4140.delay=2000"
-                % self.room_id
-            ).encode("ascii"),
-            {"topic": "This is a topic"},
+            path.encode("ascii"),
+            body,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
@@ -2510,14 +2587,19 @@ class RoomDelayedEventTestCase(RoomBase):
         exempt from ratelimiting.
         """
 
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            2000,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+            None,
+        )
         # Test that new delayed events are correctly ratelimited.
         args = (
             "POST",
-            (
-                "rooms/%s/send/m.room.message?org.matrix.msc4140.delay=2000"
-                % self.room_id
-            ).encode("ascii"),
-            {"body": "test", "msgtype": "m.text"},
+            path.encode("ascii"),
+            body,
         )
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
@@ -2532,6 +2614,102 @@ class RoomDelayedEventTestCase(RoomBase):
         # Test that the new delayed events aren't ratelimited anymore.
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+
+class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
+    """Tests the dedicated request endpoint for scheduling delayed events."""
+
+    invalid_delay_error_type = Codes.BAD_JSON
+
+    @classmethod
+    def get_delayed_event_path_and_body(
+        cls,
+        room_id: str,
+        delay: int,
+        event_type: str,
+        state_key: str | None,
+        content: JsonDict,
+        txn_id: str | None = "mid1",
+    ) -> tuple[str, JsonDict]:
+        body = {
+            "delay": delay,
+            "content": content,
+        }
+        path = f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}"
+        if state_key is not None:
+            body["state_key"] = state_key
+        if txn_id is not None:
+            path += f"/{txn_id}"
+        return path, body
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_delayed_event_with_content_at_top(self) -> None:
+        """Test that the dedicated endpoint fails with event content keys at the top level of the body."""
+        content = {"body": "test", "msgtype": "m.text"}
+        path, _ = self.get_delayed_event_path_and_body(
+            self.room_id,
+            2000,
+            "m.room.message",
+            None,
+            content,
+        )
+        channel = self.make_request(
+            "PUT",
+            path.encode("ascii"),
+            content,
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.BAD_JSON,
+            channel.json_body["errcode"],
+            channel.json_body,
+        )
+
+    @parameterized.expand(("delay", "content"))
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_delayed_event_with_missing_key(self, missing_key: str) -> None:
+        """Test that the dedicated endpoint fails with a body missing a required key."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            2000,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+        )
+        del body[missing_key]
+        channel = self.make_request(
+            "PUT",
+            path.encode("ascii"),
+            body,
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.MISSING_PARAM,
+            channel.json_body["errcode"],
+            channel.json_body,
+        )
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_delayed_event_with_no_keys(self) -> None:
+        """Test that the dedicated endpoint fails with a body missing all required keys."""
+        path, _ = self.get_delayed_event_path_and_body(
+            self.room_id,
+            2000,
+            "m.room.topic",
+            "",
+            {"topic": "This is a topic"},
+        )
+        channel = self.make_request(
+            "PUT",
+            path.encode("ascii"),
+            {},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.BAD_JSON,
+            channel.json_body["errcode"],
+            channel.json_body,
+        )
 
 
 class RoomSearchTestCase(unittest.HomeserverTestCase):

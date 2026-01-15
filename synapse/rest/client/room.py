@@ -23,13 +23,15 @@
 
 import logging
 import re
+from abc import ABC, abstractmethod
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Awaitable
+from typing import TYPE_CHECKING, Any, Awaitable, NoReturn
 from urllib import parse as urlparse
 
 import attr
 from prometheus_client.core import Histogram
+from pydantic.types import PositiveInt, StrictStr
 
 from twisted.web.server import Request
 
@@ -57,6 +59,7 @@ from synapse.http.servlet import (
     ResolveRoomIdMixin,
     RestServlet,
     assert_params_in_dict,
+    parse_and_validate_json_object_from_request,
     parse_boolean,
     parse_enum,
     parse_integer,
@@ -75,6 +78,7 @@ from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main import DataStore
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
+from synapse.types.rest import RequestBodyModel
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
@@ -487,6 +491,101 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         )
 
 
+class RoomDelayedEventRestServletBase(ABC, TransactionRestServlet):
+    CATEGORY = "Delayed event management requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+        self.event_creation_handler = hs.get_event_creation_handler()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
+        self.auth = hs.get_auth()
+
+    def register(self, http_server: HttpServer) -> None:
+        # /rooms/$roomid/delayed_event/$event_type[/$txn_id]
+        PATTERNS = "/rooms/(?P<room_id>[^/]*)/delayed_event/(?P<event_type>[^/]*)"
+        register_txn_path(self, PATTERNS, http_server, "org.matrix.msc4140")
+
+    @abstractmethod
+    async def _do(
+        self,
+        request: SynapseRequest,
+        requester: Requester,
+        room_id: str,
+        event_type: str,
+    ) -> tuple[int, JsonDict]: ...
+
+    async def on_POST(
+        self,
+        request: SynapseRequest,
+        room_id: str,
+        event_type: str,
+    ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        return await self._do(request, requester, room_id, event_type)
+
+    async def on_PUT(
+        self, request: SynapseRequest, room_id: str, event_type: str, txn_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        set_tag("txn_id", txn_id)
+
+        return await self.txns.fetch_or_execute_request(
+            request,
+            requester,
+            self._do,
+            request,
+            requester,
+            room_id,
+            event_type,
+        )
+
+
+class RoomDelayedEventRestServletUnsupported(RoomDelayedEventRestServletBase):
+    async def _do(self, *_: Any) -> NoReturn:
+        _raise_delayed_events_unsupported()
+
+
+class RoomDelayedEventRestServlet(RoomDelayedEventRestServletBase):
+    def __init__(self, hs: "HomeServer", max_event_delay_ms: int):
+        super().__init__(hs)
+        self._max_event_delay_ms = max_event_delay_ms
+
+    class DelayedEventBodyModel(RequestBodyModel):
+        delay: PositiveInt
+        content: JsonDict
+        state_key: StrictStr | None = None
+
+    async def _do(
+        self,
+        request: SynapseRequest,
+        requester: Requester,
+        room_id: str,
+        event_type: str,
+    ) -> tuple[int, JsonDict]:
+        request_body = parse_and_validate_json_object_from_request(
+            request, self.DelayedEventBodyModel
+        )
+        _check_delay_within_max(request_body.delay, self._max_event_delay_ms)
+
+        origin_server_ts = None
+        if requester.app_service:
+            origin_server_ts = parse_integer(request, "ts")
+
+        delay_id = await self.delayed_events_handler.add(
+            requester,
+            room_id=room_id,
+            event_type=event_type,
+            state_key=request_body.state_key,
+            origin_server_ts=origin_server_ts,
+            content=request_body.content,
+            delay=request_body.delay,
+        )
+
+        set_tag("delay_id", delay_id)
+        ret = {"delay_id": delay_id}
+        return 200, ret
+
+
 def _parse_request_delay(
     request: SynapseRequest,
     max_delay: int | None,
@@ -505,18 +604,35 @@ def _parse_request_delay(
         SynapseError: if the delay parameter is present and forbidden,
             or if it exceeds the maximum allowed value.
     """
-    delay = parse_integer(request, "org.matrix.msc4140.delay")
+    param_name = "org.matrix.msc4140.delay"
+    # Allow negatives here to validate the delay only after max_delay is checked
+    delay = parse_integer(request, param_name, negative=True)
     if delay is None:
         return None
     if max_delay is None:
+        _raise_delayed_events_unsupported()
+    if delay <= 0:
         raise SynapseError(
             HTTPStatus.BAD_REQUEST,
-            "Delayed events are not supported on this server",
-            Codes.UNKNOWN,
-            {
-                "org.matrix.msc4140.errcode": "M_MAX_DELAY_UNSUPPORTED",
-            },
+            f"Query parameter {param_name} must be an integer greater than zero.",
+            Codes.INVALID_PARAM,
         )
+    _check_delay_within_max(delay, max_delay)
+    return delay
+
+
+def _raise_delayed_events_unsupported() -> NoReturn:
+    raise SynapseError(
+        HTTPStatus.BAD_REQUEST,
+        "Delayed events are not supported on this server",
+        Codes.UNKNOWN,
+        {
+            "org.matrix.msc4140.errcode": "M_MAX_DELAY_UNSUPPORTED",
+        },
+    )
+
+
+def _check_delay_within_max(delay: int, max_delay: int) -> None:
     if delay > max_delay:
         raise SynapseError(
             HTTPStatus.BAD_REQUEST,
@@ -527,7 +643,6 @@ def _parse_request_delay(
                 "org.matrix.msc4140.max_delay": max_delay,
             },
         )
-    return delay
 
 
 # TODO: Needs unit testing for room ID + alias joins
@@ -1563,6 +1678,7 @@ def register_txn_path(
     servlet: RestServlet,
     regex_string: str,
     http_server: HttpServer,
+    unstable_path_segment: str = "",
 ) -> None:
     """Registers a transaction-based path.
 
@@ -1579,15 +1695,25 @@ def register_txn_path(
     on_PUT = getattr(servlet, "on_PUT", None)
     if on_POST is None or on_PUT is None:
         raise RuntimeError("on_POST and on_PUT must exist when using register_txn_path")
+    if unstable_path_segment:
+        get_client_patterns = lambda path_regex: client_patterns(
+            f"/{re.escape(unstable_path_segment)}{path_regex}",
+            releases=(),
+        )
+    else:
+        get_client_patterns = lambda path_regex: client_patterns(
+            path_regex,
+            v1=True,
+        )
     http_server.register_paths(
         "POST",
-        client_patterns(regex_string + "$", v1=True),
+        get_client_patterns(regex_string + "$"),
         on_POST,
         servlet.__class__.__name__,
     )
     http_server.register_paths(
         "PUT",
-        client_patterns(regex_string + "/(?P<txn_id>[^/]*)$", v1=True),
+        get_client_patterns(regex_string + "/(?P<txn_id>[^/]*)$"),
         on_PUT,
         servlet.__class__.__name__,
     )
@@ -1753,6 +1879,13 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SearchRestServlet(hs).register(http_server)
     RoomCreateRestServlet(hs).register(http_server)
     TimestampLookupRestServlet(hs).register(http_server)
+
+    max_event_delay_ms = hs.config.server.max_event_delay_ms
+    (
+        RoomDelayedEventRestServlet(hs, max_event_delay_ms)
+        if max_event_delay_ms
+        else RoomDelayedEventRestServletUnsupported(hs)
+    ).register(http_server)
 
     # Some servlets only get registered for the main process.
     if hs.config.worker.worker_app is None:
