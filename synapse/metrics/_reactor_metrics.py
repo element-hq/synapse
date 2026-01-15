@@ -185,7 +185,5 @@ def install_reactor_metrics(target_reactor: Any) -> None:
 # `synapse/app/complement_fork_starter.py` that uses the `ProxiedReactor`. In this case,
 # it will handle installing the real reactor when the time is right and will call
 # `install_reactor_metrics(...)` itself.
-logger.warning("asdf1: %r %s", reactor, isinstance(reactor, ProxiedReactor))
 if not isinstance(reactor, ProxiedReactor):
     install_reactor_metrics(reactor)
-logger.warning("asdf2: %r", reactor)
