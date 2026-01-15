@@ -67,8 +67,20 @@ class ProxiedReactor:
         """
         self.___reactor_target = new_reactor
 
+        # Import here to avoid circular imports.
+        from synapse.metrics._reactor_metrics import install_reactor_metrics
+
+        # Install reactor metrics now we've got a real reactor.
+        install_reactor_metrics(new_reactor)
+
     def __getattr__(self, attr_name: str) -> Any:
         return getattr(self.___reactor_target, attr_name)
+
+    def get_underyling_reactor(self) -> Any:
+        """
+        Get the underlying real reactor.
+        """
+        return self.___reactor_target
 
 
 def _worker_entrypoint(
