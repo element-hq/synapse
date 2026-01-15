@@ -894,6 +894,21 @@ class DatabasePool:
                     # [1]: https://github.com/python/cpython/blob/v3.8.0/Modules/_sqlite/connection.c#L465
                     # [2]: https://github.com/python/cpython/blob/v3.8.0/Modules/_sqlite/cursor.c#L236
                     cursor.close()
+            else:
+                # To appease the linter, we mark this as unreachable. Unreachable
+                # because we expect the code above to always return from the loop or
+                # raise an exception. `mypy` just doesn't understand our logic above.
+                #
+                # The Python docs
+                # (https://typing.python.org/en/latest/guides/unreachable.html#marking-code-as-unreachable)
+                # suggest `assert False` but that also gets linted to suggest raising an
+                # `AssertionError`. I'm not sure this has the same "unreachable"
+                # semantics, but it works anyway to solve the linter complaint because
+                # we're raising an exception.
+                raise AssertionError(
+                    "We expect this to be unreachable because the code above should either return or raise. "
+                    "This is a logic error in Synapse itself."
+                )
         except Exception as e:
             transaction_logger.debug("[TXN FAIL] {%s} %s", name, e)
             raise
