@@ -53,7 +53,7 @@
           "uid": "${DS_PROMETHEUS}"
         },
         "enable": true,
-        "expr": "changes(process_start_time_seconds{instance=\"$instance\",job=~\"synapse\"}[$bucket_size]) * on (instance, job) group_left(version) synapse_build_info{instance=\"$instance\",job=\"synapse\"}",
+        "expr": "(\n  changes(process_start_time_seconds{job=\"synapse\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\n  synapse_server_name_info{server_name=\"$server_name\"}\n) * on (instance, job, index) group_left(version) synapse_build_info{job=\"synapse\"}",
         "iconColor": "purple",
         "name": "deploys",
         "titleFormat": "Deployed {{version}}"
@@ -195,7 +195,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',instance=\"$instance\",code=~\"2..\"}[$bucket_size])) by (le)",
+          "expr": "sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',server_name=\"$server_name\",code=~\"2..\"}[$bucket_size])) by (le)",
           "format": "heatmap",
           "interval": "",
           "intervalFactor": 1,
@@ -330,7 +330,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",server_name=\"$server_name\",code=~\"2..\"}[$bucket_size])) by (le))",
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "99%",
@@ -340,7 +340,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.9, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size])) by (le))",
+          "expr": "histogram_quantile(0.9, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",server_name=\"$server_name\",code=~\"2..\"}[$bucket_size])) by (le))",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -351,7 +351,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.75, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size])) by (le))",
+          "expr": "histogram_quantile(0.75, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",server_name=\"$server_name\",code=~\"2..\"}[$bucket_size])) by (le))",
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "75%",
@@ -361,7 +361,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size])) by (le))",
+          "expr": "histogram_quantile(0.5, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",server_name=\"$server_name\",code=~\"2..\"}[$bucket_size])) by (le))",
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "50%",
@@ -371,7 +371,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.25, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size])) by (le))",
+          "expr": "histogram_quantile(0.25, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",server_name=\"$server_name\",code=~\"2..\"}[$bucket_size])) by (le))",
           "legendFormat": "25%",
           "refId": "F"
         },
@@ -379,7 +379,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.05, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size])) by (le))",
+          "expr": "histogram_quantile(0.05, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',index=~\"$index\",server_name=\"$server_name\",code=~\"2..\"}[$bucket_size])) by (le))",
           "legendFormat": "5%",
           "refId": "G"
         },
@@ -387,7 +387,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(rate(synapse_http_server_response_time_seconds_sum{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size])) / sum(rate(synapse_http_server_response_time_seconds_count{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size]))",
+          "expr": "sum(rate(synapse_http_server_response_time_seconds_sum{servlet='RoomSendEventRestServlet',index=~\"$index\",server_name=\"$server_name\",code=~\"2..\"}[$bucket_size])) / sum(rate(synapse_http_server_response_time_seconds_count{servlet='RoomSendEventRestServlet',index=~\"$index\",server_name=\"$server_name\",code=~\"2..\"}[$bucket_size]))",
           "legendFormat": "Average",
           "refId": "H",
           "editorMode": "code",
@@ -397,7 +397,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(rate(synapse_http_server_response_time_seconds_count{servlet='RoomSendEventRestServlet',index=~\"$index\",instance=\"$instance\",code=~\"2..\"}[$bucket_size]))",
+          "expr": "sum(rate(synapse_http_server_response_time_seconds_count{servlet='RoomSendEventRestServlet',index=~\"$index\",server_name=\"$server_name\",code=~\"2..\"}[$bucket_size]))",
           "hide": false,
           "instant": false,
           "legendFormat": "Local events being persisted",
@@ -408,7 +408,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(rate(synapse_storage_events_persisted_events_total{instance=\"$instance\"}[$bucket_size]))",
+          "expr": "sum(rate(synapse_storage_events_persisted_events_total{server_name=\"$server_name\"}[$bucket_size]))",
           "hide": false,
           "instant": false,
           "legendFormat": "All events being persisted",
@@ -541,7 +541,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "rate(process_cpu_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+          "expr": "rate(process_cpu_seconds_total{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -651,7 +651,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "process_resident_memory_bytes{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+          "expr": "process_resident_memory_bytes{job=~\"$job\",index=~\"$index\"} * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 2,
@@ -664,7 +664,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(process_resident_memory_bytes{instance=\"$instance\",job=~\"$job\",index=~\"$index\"})",
+          "expr": "sum(process_resident_memory_bytes{job=~\"$job\",index=~\"$index\"}) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
           "hide": true,
           "interval": "",
           "legendFormat": "total",
@@ -785,7 +785,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "synapse_build_info{instance=\"$instance\", job=\"synapse\"} - 1",
+          "expr": "(\n  synapse_build_info{job=\"synapse\"} * on (instance, job, index) group_left(server_name)\n  synapse_server_name_info{server_name=\"$server_name\"}\n) - 1",
           "legendFormat": "version {{version}}",
           "range": true,
           "refId": "deployed_synapse_versions"
@@ -857,7 +857,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "process_open_fds{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+          "expr": "process_open_fds{job=~\"$job\",index=~\"$index\"} * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
           "format": "time_series",
           "hide": false,
           "interval": "",
@@ -870,7 +870,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "process_max_fds{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+          "expr": "process_max_fds{job=~\"$job\",index=~\"$index\"} * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
           "format": "time_series",
           "hide": true,
           "interval": "",
@@ -1000,7 +1000,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(process_cpu_system_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(process_cpu_system_seconds_total{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} system ",
@@ -1013,7 +1013,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(process_cpu_user_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(process_cpu_user_seconds_total{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -1176,7 +1176,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.999, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.999, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",job=~\"$job\"}[$bucket_size])) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "{{job}}-{{index}} 99.9%",
@@ -1188,7 +1188,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.99, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",job=~\"$job\"}[$bucket_size])) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -1202,7 +1202,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.95, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.95, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",job=~\"$job\"}[$bucket_size])) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -1214,7 +1214,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.90, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.90, rate(python_twisted_reactor_tick_time_bucket{index=~\"$index\",job=~\"$job\"}[$bucket_size])) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} 90%",
@@ -1225,7 +1225,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(python_twisted_reactor_tick_time_sum{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size]) / rate(python_twisted_reactor_tick_time_count{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size])",
+              "expr": "(\n\trate(python_twisted_reactor_tick_time_sum{index=~\"$index\",job=~\"$job\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\n\tsynapse_server_name_info{server_name=\"$server_name\"}\n) / (\n\trate(python_twisted_reactor_tick_time_count{index=~\"$index\",job=~\"$job\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\n\tsynapse_server_name_info{server_name=\"$server_name\"}\n)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} mean",
@@ -1293,7 +1293,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "process_resident_memory_bytes{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "process_resident_memory_bytes{job=~\"$job\",index=~\"$index\"} * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -1306,7 +1306,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(process_resident_memory_bytes{instance=\"$instance\",job=~\"$job\",index=~\"$index\"})",
+              "expr": "sum by (server_name) (\n  process_resident_memory_bytes{job=~\"$job\",index=~\"$index\"} * on (instance, job, index) group_left(server_name)\n  synapse_server_name_info{server_name=\"$server_name\"}\n)",
               "interval": "",
               "legendFormat": "total",
               "refId": "B"
@@ -1405,7 +1405,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "scrape_duration_seconds{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "scrape_duration_seconds{job=~\"$job\",index=~\"$index\"} * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -1514,7 +1514,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "min_over_time(up{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "min_over_time(up{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{job}}-{{index}}",
@@ -1527,7 +1527,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "synapse_build_info{instance=\"$instance\", job=\"synapse\"} - 1",
+              "expr": "(\n  synapse_build_info{job=\"synapse\"} * on (instance, job, index) group_left(server_name)\n  synapse_server_name_info{server_name=\"$server_name\"}\n) - 1",
               "hide": false,
               "legendFormat": "version {{version}}",
               "range": true,
@@ -1618,7 +1618,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_http_server_response_ru_utime_seconds{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])+rate(synapse_http_server_response_ru_stime_seconds{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_http_server_response_ru_utime_seconds{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])+rate(synapse_http_server_response_ru_stime_seconds{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -1630,7 +1630,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_background_process_ru_utime_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])+rate(synapse_background_process_ru_stime_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_background_process_ru_utime_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])+rate(synapse_background_process_ru_stime_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -1737,7 +1737,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_http_client_requests_total{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_http_client_requests_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "legendFormat": "{{job}}-{{index}} {{method}}",
               "range": true,
               "refId": "A"
@@ -1747,7 +1747,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_http_matrixfederationclient_requests_total{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_http_matrixfederationclient_requests_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "legendFormat": "{{job}}-{{index}} {{method}} (federation)",
               "range": true,
               "refId": "B"
@@ -1867,7 +1867,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "synapse_threadpool_working_threads{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_threadpool_working_threads{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "interval": "",
               "legendFormat": "{{job}}-{{index}} {{name}}",
               "refId": "A"
@@ -1993,7 +1993,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',instance=\"$instance\"}[$bucket_size])) by (le)",
+              "expr": "sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',server_name=\"$server_name\"}[$bucket_size])) by (le)",
               "format": "heatmap",
               "intervalFactor": 1,
               "legendFormat": "{{le}}",
@@ -2075,7 +2075,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_storage_events_persisted_events_total{instance=\"$instance\"}[$bucket_size])) without (job,index)",
+              "expr": "sum(rate(synapse_storage_events_persisted_events_total{server_name=\"$server_name\"}[$bucket_size])) without (job,index)",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -2166,7 +2166,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_events_persisted_events_sep_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_storage_events_persisted_events_sep_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{origin_type}}",
@@ -2254,7 +2254,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum by(type) (rate(synapse_storage_events_persisted_events_sep_total{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum by(type) (rate(synapse_storage_events_persisted_events_sep_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "instant": false,
               "intervalFactor": 2,
@@ -2348,7 +2348,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(synapse_storage_events_persisted_events_sep_total{job=~\"$job\",index=~\"$index\", type=\"m.room.member\",instance=\"$instance\", origin_type=\"local\"}[$bucket_size])) by (origin_type, origin_entity)",
+              "expr": "sum(rate(synapse_storage_events_persisted_events_sep_total{job=~\"$job\",index=~\"$index\", type=\"m.room.member\",server_name=\"$server_name\", origin_type=\"local\"}[$bucket_size])) by (origin_type, origin_entity)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{origin_entity}} ({{origin_type}})",
@@ -2455,7 +2455,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',instance=\"$instance\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method))",
+              "expr": "histogram_quantile(0.99, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',server_name=\"$server_name\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -2467,7 +2467,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',instance=\"$instance\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method))",
+              "expr": "histogram_quantile(0.95, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',server_name=\"$server_name\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -2479,7 +2479,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.90, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',instance=\"$instance\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method))",
+              "expr": "histogram_quantile(0.90, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',server_name=\"$server_name\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} 90%",
@@ -2490,7 +2490,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.50, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',instance=\"$instance\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method))",
+              "expr": "histogram_quantile(0.50, sum(rate(synapse_http_server_response_time_seconds_bucket{servlet='RoomSendEventRestServlet',server_name=\"$server_name\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} 50%",
@@ -2502,7 +2502,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(synapse_http_server_response_time_seconds_sum{servlet='RoomSendEventRestServlet',instance=\"$instance\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method) / sum(rate(synapse_http_server_response_time_seconds_count{servlet='RoomSendEventRestServlet',instance=\"$instance\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method)",
+              "expr": "sum(rate(synapse_http_server_response_time_seconds_sum{servlet='RoomSendEventRestServlet',server_name=\"$server_name\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method) / sum(rate(synapse_http_server_response_time_seconds_count{servlet='RoomSendEventRestServlet',server_name=\"$server_name\",code=~\"2..\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (method)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} mean",
@@ -2626,7 +2626,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": false,
-              "expr": "sum(rate(synapse_state_res_db_for_biggest_room_seconds_total{instance=\"$instance\"}[1m]))",
+              "expr": "sum(rate(synapse_state_res_db_for_biggest_room_seconds_total{server_name=\"$server_name\"}[1m]))",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -2640,7 +2640,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": false,
-              "expr": "sum(rate(synapse_state_res_cpu_for_biggest_room_seconds_total{instance=\"$instance\"}[1m]))",
+              "expr": "sum(rate(synapse_state_res_cpu_for_biggest_room_seconds_total{server_name=\"$server_name\"}[1m]))",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -2741,7 +2741,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_http_server_requests_received_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_http_server_requests_received_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -2859,7 +2859,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_http_server_requests_received_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\",method!=\"OPTIONS\"}[$bucket_size]) and topk(10,synapse_http_server_requests_received_total{instance=\"$instance\",job=~\"$job\",method!=\"OPTIONS\"})",
+              "expr": "rate(synapse_http_server_requests_received_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\",method!=\"OPTIONS\"}[$bucket_size]) and topk(10,synapse_http_server_requests_received_total{server_name=\"$server_name\",job=~\"$job\",method!=\"OPTIONS\"})",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{method}} {{servlet}} {{job}}-{{index}}",
@@ -2962,7 +2962,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_http_server_in_flight_requests_ru_utime_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])+rate(synapse_http_server_in_flight_requests_ru_stime_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_http_server_in_flight_requests_ru_utime_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])+rate(synapse_http_server_in_flight_requests_ru_stime_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -3084,7 +3084,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "(rate(synapse_http_server_in_flight_requests_ru_utime_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])+rate(synapse_http_server_in_flight_requests_ru_stime_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) / rate(synapse_http_server_requests_received_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "(rate(synapse_http_server_in_flight_requests_ru_utime_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])+rate(synapse_http_server_in_flight_requests_ru_stime_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) / rate(synapse_http_server_requests_received_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -3205,7 +3205,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_http_server_in_flight_requests_db_txn_duration_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_http_server_in_flight_requests_db_txn_duration_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -3307,7 +3307,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "(sum(rate(synapse_http_server_response_time_seconds_sum{instance=\"$instance\",job=~\"$job\",index=~\"$index\",tag!=\"incremental_sync\"}[$bucket_size])) without (code))/(sum(rate(synapse_http_server_response_time_seconds_count{instance=\"$instance\",job=~\"$job\",index=~\"$index\",tag!=\"incremental_sync\"}[$bucket_size])) without (code))",
+              "expr": "(sum(rate(synapse_http_server_response_time_seconds_sum{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\",tag!=\"incremental_sync\"}[$bucket_size])) without (code))/(sum(rate(synapse_http_server_response_time_seconds_count{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\",tag!=\"incremental_sync\"}[$bucket_size])) without (code))",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -3408,7 +3408,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "topk(10,synapse_http_server_in_flight_requests_count{instance=\"$instance\",job=~\"$job\",index=~\"$index\"})",
+              "expr": "topk(10,synapse_http_server_in_flight_requests_count{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"})",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -3419,7 +3419,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(avg_over_time(synapse_http_server_in_flight_requests_count{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(avg_over_time(synapse_http_server_in_flight_requests_count{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
               "interval": "",
               "legendFormat": "Total",
               "refId": "B"
@@ -3537,7 +3537,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_background_process_ru_utime_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])+rate(synapse_background_process_ru_stime_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_background_process_ru_utime_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])+rate(synapse_background_process_ru_stime_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -3630,7 +3630,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_background_process_db_txn_duration_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) +  rate(synapse_background_process_db_sched_duration_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_background_process_db_txn_duration_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) +  rate(synapse_background_process_db_sched_duration_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 1,
@@ -3721,7 +3721,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_background_process_in_flight_count{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}",
+              "expr": "synapse_background_process_in_flight_count{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}",
               "legendFormat": "{{job}}-{{index}} {{name}}",
               "refId": "A"
             }
@@ -3838,7 +3838,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_federation_client_sent_transactions_total{instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_federation_client_sent_transactions_total{server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "successful txn rate",
@@ -3848,7 +3848,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_util_metrics_block_count_total{block_name=\"_send_new_transaction\",instance=\"$instance\"}[$bucket_size]) - ignoring (block_name) rate(synapse_federation_client_sent_transactions_total{instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_metrics_block_count_total{block_name=\"_send_new_transaction\",server_name=\"$server_name\"}[$bucket_size]) - ignoring (block_name) rate(synapse_federation_client_sent_transactions_total{server_name=\"$server_name\"}[$bucket_size]))",
               "legendFormat": "failed txn rate",
               "refId": "B"
             }
@@ -3938,7 +3938,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_federation_server_received_pdus_total{instance=~\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_federation_server_received_pdus_total{server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "pdus",
@@ -3948,7 +3948,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_federation_server_received_edus_total{instance=~\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_federation_server_received_edus_total{server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "edus",
@@ -4042,7 +4042,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(synapse_federation_client_sent_pdu_destinations_count_total{instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_federation_client_sent_pdu_destinations_count_total{server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -4054,7 +4054,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_federation_client_sent_edus_total{instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_federation_client_sent_edus_total{server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "edus",
@@ -4148,7 +4148,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_federation_client_sent_edus_by_type_total{instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_federation_client_sent_edus_by_type_total{server_name=\"$server_name\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -4490,7 +4490,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "synapse_federation_transaction_queue_pending_pdus{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_federation_transaction_queue_pending_pdus{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "interval": "",
               "legendFormat": "pending PDUs {{job}}-{{index}}",
               "range": true,
@@ -4501,7 +4501,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_federation_transaction_queue_pending_edus{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_federation_transaction_queue_pending_edus{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "interval": "",
               "legendFormat": "pending EDUs {{job}}-{{index}}",
               "refId": "B"
@@ -4598,7 +4598,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_federation_send_queue_presence_changed_size{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_federation_send_queue_presence_changed_size{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -4609,7 +4609,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_federation_send_queue_presence_map_size{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_federation_send_queue_presence_map_size{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -4621,7 +4621,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_federation_send_queue_presence_destinations_size{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_federation_send_queue_presence_destinations_size{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -4633,7 +4633,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_federation_send_queue_keyed_edu_size{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_federation_send_queue_keyed_edu_size{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -4645,7 +4645,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_federation_send_queue_edus_size{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_federation_send_queue_edus_size{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -4657,7 +4657,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_federation_send_queue_pos_time_size{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_federation_send_queue_pos_time_size{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -4790,7 +4790,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_event_processing_lag_by_event_bucket{instance=\"$instance\",name=\"federation_sender\"}[$bucket_size])) by (le)",
+              "expr": "sum(rate(synapse_event_processing_lag_by_event_bucket{server_name=\"$server_name\",name=\"federation_sender\"}[$bucket_size])) by (le)",
               "format": "heatmap",
               "instant": false,
               "interval": "",
@@ -4914,7 +4914,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.99, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.99, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -4925,7 +4925,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.9, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.9, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -4936,7 +4936,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.75, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.75, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -4947,7 +4947,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.5, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.5, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -4958,7 +4958,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.25, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.25, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "interval": "",
               "legendFormat": "25%",
               "refId": "F"
@@ -4967,7 +4967,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.05, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.05, sum(rate(synapse_event_processing_lag_by_event_bucket{name='federation_sender',index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "interval": "",
               "legendFormat": "5%",
               "refId": "G"
@@ -4976,7 +4976,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_event_processing_lag_by_event_sum{name='federation_sender',index=~\"$index\",instance=\"$instance\"}[$bucket_size])) / sum(rate(synapse_event_processing_lag_by_event_count{name='federation_sender',index=~\"$index\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_event_processing_lag_by_event_sum{name='federation_sender',index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) / sum(rate(synapse_event_processing_lag_by_event_count{name='federation_sender',index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
               "interval": "",
               "legendFormat": "Average",
               "refId": "H"
@@ -5126,7 +5126,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_federation_server_pdu_process_time_bucket{instance=\"$instance\"}[$bucket_size])) by (le)",
+              "expr": "sum(rate(synapse_federation_server_pdu_process_time_bucket{server_name=\"$server_name\"}[$bucket_size])) by (le)",
               "format": "heatmap",
               "instant": false,
               "interval": "",
@@ -5213,7 +5213,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "synapse_federation_server_oldest_inbound_pdu_in_staging{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}",
+              "expr": "synapse_federation_server_oldest_inbound_pdu_in_staging{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -5317,7 +5317,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "synapse_federation_server_number_inbound_pdu_in_staging{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}",
+              "expr": "synapse_federation_server_number_inbound_pdu_in_staging{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -5410,7 +5410,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_federation_soft_failed_events_total{instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_federation_soft_failed_events_total{server_name=\"$server_name\"}[$bucket_size]))",
               "interval": "",
               "legendFormat": "soft-failed events",
               "refId": "A"
@@ -5552,7 +5552,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(increase(synapse_rate_limit_reject_total{instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(increase(synapse_rate_limit_reject_total{server_name=\"$server_name\"}[$bucket_size]))",
               "refId": "A"
             }
           ],
@@ -5640,7 +5640,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(increase(synapse_rate_limit_sleep_total{instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(increase(synapse_rate_limit_sleep_total{server_name=\"$server_name\"}[$bucket_size]))",
               "refId": "A"
             }
           ],
@@ -5730,7 +5730,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(increase(synapse_rate_limit_reject_affected_hosts{instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(increase(synapse_rate_limit_reject_affected_hosts{server_name=\"$server_name\"}[$bucket_size]))",
               "refId": "A"
             }
           ],
@@ -5820,7 +5820,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(increase(synapse_rate_limit_sleep_affected_hosts{instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(increase(synapse_rate_limit_sleep_affected_hosts{server_name=\"$server_name\"}[$bucket_size]))",
               "refId": "A"
             }
           ],
@@ -5942,7 +5942,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.9995, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.9995, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 1,
@@ -5955,7 +5955,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.99, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.99, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "99%",
@@ -5966,7 +5966,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.9, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.9, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -5977,7 +5977,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.75, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.75, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "75%",
@@ -5987,7 +5987,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.5, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.5, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "50%",
@@ -5997,7 +5997,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.25, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.25, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "legendFormat": "25%",
               "refId": "F"
             },
@@ -6005,7 +6005,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.05, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",instance=\"$instance\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.05, sum(rate(synapse_rate_limit_queue_wait_time_seconds_bucket{index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) by (le))",
               "legendFormat": "5%",
               "refId": "G"
             },
@@ -6013,7 +6013,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_rate_limit_queue_wait_time_seconds_sum{index=~\"$index\",instance=\"$instance\"}[$bucket_size])) / sum(rate(synapse_rate_limit_queue_wait_time_seconds_count{index=~\"$index\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_rate_limit_queue_wait_time_seconds_sum{index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])) / sum(rate(synapse_rate_limit_queue_wait_time_seconds_count{index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
               "legendFormat": "Average",
               "refId": "H"
             }
@@ -6171,7 +6171,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_rate_limit_sleep_total{instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_rate_limit_sleep_total{server_name=\"$server_name\"}[$bucket_size]))",
               "refId": "A"
             },
             {
@@ -6293,7 +6293,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_http_httppusher_http_pushes_processed_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) and on (instance, job, index) (synapse_http_httppusher_http_pushes_failed_total + synapse_http_httppusher_http_pushes_processed_total) > 0",
+              "expr": "rate(synapse_http_httppusher_http_pushes_processed_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) and on (instance, job, index) (synapse_http_httppusher_http_pushes_failed_total + synapse_http_httppusher_http_pushes_processed_total) > 0",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -6307,7 +6307,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_http_httppusher_http_pushes_failed_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) and on (instance, job, index) (synapse_http_httppusher_http_pushes_failed_total + synapse_http_httppusher_http_pushes_processed_total) > 0",
+              "expr": "rate(synapse_http_httppusher_http_pushes_failed_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) and on (instance, job, index) (synapse_http_httppusher_http_pushes_failed_total + synapse_http_httppusher_http_pushes_processed_total) > 0",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "failed {{job}}-{{index}}",
@@ -6374,7 +6374,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "topk(10,synapse_pushers{job=~\"$job\",index=~\"$index\", instance=\"$instance\"})",
+              "expr": "topk(10,synapse_pushers{job=~\"$job\",index=~\"$index\", server_name=\"$server_name\"})",
               "legendFormat": "{{kind}} {{app_id}}",
               "refId": "A"
             }
@@ -6495,7 +6495,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter_total{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -6596,7 +6596,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter_total{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -6702,7 +6702,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache_hits{job=\"$job\",index=~\"$index\",name=\"push_rules_delta_state_cache_metric\",instance=\"$instance\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"push_rules_delta_state_cache_metric\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache_hits{job=\"$job\",index=~\"$index\",name=\"push_rules_delta_state_cache_metric\",server_name=\"$server_name\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"push_rules_delta_state_cache_metric\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -6717,7 +6717,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"push_rules_delta_state_cache_metric\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"push_rules_delta_state_cache_metric\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -6825,7 +6825,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache_hits{job=\"$job\",index=~\"$index\",name=\"room_push_rule_cache\",instance=\"$instance\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"room_push_rule_cache\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache_hits{job=\"$job\",index=~\"$index\",name=\"room_push_rule_cache\",server_name=\"$server_name\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"room_push_rule_cache\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -6840,7 +6840,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"room_push_rule_cache\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"room_push_rule_cache\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -6946,7 +6946,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache_hits{job=\"$job\",index=~\"$index\",name=\"_get_rules_for_room\",instance=\"$instance\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"_get_rules_for_room\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache_hits{job=\"$job\",index=~\"$index\",name=\"_get_rules_for_room\",server_name=\"$server_name\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"_get_rules_for_room\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -6961,7 +6961,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"_get_rules_for_room\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"_get_rules_for_room\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -7112,7 +7112,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_schedule_time_sum{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/rate(synapse_storage_schedule_time_count[$bucket_size])",
+              "expr": "rate(synapse_storage_schedule_time_sum{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/rate(synapse_storage_schedule_time_count[$bucket_size])",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{job}}-{{index}}",
@@ -7180,7 +7180,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.99, rate(synapse_storage_schedule_time_bucket{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.99, rate(synapse_storage_schedule_time_bucket{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 1,
@@ -7192,7 +7192,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.95, rate(synapse_storage_schedule_time_bucket{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.95, rate(synapse_storage_schedule_time_bucket{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}} {{index}} 95%",
@@ -7202,7 +7202,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.90, rate(synapse_storage_schedule_time_bucket{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.90, rate(synapse_storage_schedule_time_bucket{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}} {{index}} 90%",
@@ -7212,7 +7212,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_schedule_time_sum{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/rate(synapse_storage_schedule_time_count{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_storage_schedule_time_sum{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/rate(synapse_storage_schedule_time_count{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -7312,7 +7312,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "topk(10, rate(synapse_storage_transaction_time_count_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "topk(10, rate(synapse_storage_transaction_time_count_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -7412,7 +7412,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_transaction_time_sum_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_storage_transaction_time_sum_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "instant": false,
               "interval": "",
@@ -7512,7 +7512,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_transaction_time_sum_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/rate(synapse_storage_transaction_time_count_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_storage_transaction_time_sum_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/rate(synapse_storage_transaction_time_count_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "instant": false,
               "interval": "",
@@ -7606,7 +7606,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.99, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",instance=\"$instance\",job=\"$job\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.99, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=\"$job\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "99%",
@@ -7616,7 +7616,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.9, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",instance=\"$instance\",job=\"$job\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.9, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=\"$job\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "90%",
@@ -7626,7 +7626,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.75, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",instance=\"$instance\",job=\"$job\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.75, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=\"$job\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "75%",
@@ -7636,7 +7636,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.5, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",instance=\"$instance\",job=\"$job\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.5, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=\"$job\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "50%",
@@ -7763,7 +7763,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_util_metrics_block_ru_utime_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\",block_name!=\"wrapped_request_handler\"}[$bucket_size]) + rate(synapse_util_metrics_block_ru_stime_seconds_total[$bucket_size])",
+              "expr": "rate(synapse_util_metrics_block_ru_utime_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\",block_name!=\"wrapped_request_handler\"}[$bucket_size]) + rate(synapse_util_metrics_block_ru_stime_seconds_total[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -7861,7 +7861,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "(rate(synapse_util_metrics_block_ru_utime_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) + rate(synapse_util_metrics_block_ru_stime_seconds_total[$bucket_size])) / rate(synapse_util_metrics_block_count_total[$bucket_size])",
+              "expr": "(rate(synapse_util_metrics_block_ru_utime_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) + rate(synapse_util_metrics_block_ru_stime_seconds_total[$bucket_size])) / rate(synapse_util_metrics_block_count_total[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -7962,7 +7962,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "rate(synapse_util_metrics_block_db_txn_duration_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_util_metrics_block_db_txn_duration_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -8064,7 +8064,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_util_metrics_block_db_txn_duration_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) / rate(synapse_util_metrics_block_db_txn_count_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_util_metrics_block_db_txn_duration_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) / rate(synapse_util_metrics_block_db_txn_count_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -8161,7 +8161,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_util_metrics_block_db_txn_duration_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) / rate(synapse_util_metrics_block_db_txn_count_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_util_metrics_block_db_txn_duration_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) / rate(synapse_util_metrics_block_db_txn_count_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -8258,7 +8258,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_util_metrics_block_time_seconds_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) / rate(synapse_util_metrics_block_count_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_util_metrics_block_time_seconds_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]) / rate(synapse_util_metrics_block_count_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -8347,7 +8347,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_util_metrics_block_count_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_util_metrics_block_count_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "{{job}}-{{index}} {{block_name}}",
               "refId": "A"
@@ -8471,7 +8471,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_util_caches_cache_hits{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])/rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_util_caches_cache_hits{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])/rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}} {{job}}-{{index}}",
@@ -8572,7 +8572,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_util_caches_cache_size{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_util_caches_cache_size{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -8672,7 +8672,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -8772,7 +8772,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "topk(10, rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size]) - rate(synapse_util_caches_cache_hits{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size]))",
+              "expr": "topk(10, rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]) - rate(synapse_util_caches_cache_hits{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -8868,7 +8868,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_util_caches_cache_evicted_size{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_util_caches_cache_evicted_size{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -8988,7 +8988,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_util_caches_response_cache_size{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_util_caches_response_cache_size{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "interval": "",
               "legendFormat": "{{name}} {{job}}-{{index}}",
               "refId": "A"
@@ -9078,7 +9078,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_util_caches_response_cache_hits{instance=\"$instance\", job=~\"$job\", index=~\"$index\"}[$bucket_size])/rate(synapse_util_caches_response_cache{instance=\"$instance\", job=~\"$job\", index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_util_caches_response_cache_hits{server_name=\"$server_name\", job=~\"$job\", index=~\"$index\"}[$bucket_size])/rate(synapse_util_caches_response_cache{server_name=\"$server_name\", job=~\"$job\", index=~\"$index\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "{{name}} {{job}}-{{index}}",
               "refId": "A"
@@ -9207,7 +9207,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(python_gc_time_sum{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[10m])",
+              "expr": "rate(python_gc_time_sum{job=~\"$job\",index=~\"$index\"}[10m]) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "instant": false,
               "intervalFactor": 1,
@@ -9306,7 +9306,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(python_gc_time_sum{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/rate(python_gc_time_count[$bucket_size])",
+              "expr": "(\n  rate(python_gc_time_sum{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\n  synapse_server_name_info{server_name=\"$server_name\"}\n) / (\n  rate(python_gc_time_count{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\n  synapse_server_name_info{server_name=\"$server_name\"}\n)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{job}} {{index}} gen {{gen}} ",
@@ -9408,7 +9408,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "python_gc_counts{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}",
+              "expr": "python_gc_counts{job=~\"$job\",index=~\"$index\"} * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} gen {{gen}}",
@@ -9502,7 +9502,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(python_gc_unreachable_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/rate(python_gc_time_count{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "(\n  rate(python_gc_unreachable_total{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\n  synapse_server_name_info{server_name=\"$server_name\"}\n) / (\n  rate(python_gc_time_count{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\n  synapse_server_name_info{server_name=\"$server_name\"}\n)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} gen {{gen}}",
@@ -9594,7 +9594,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(python_gc_time_count{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(python_gc_time_count{job=~\"$job\",index=~\"$index\"}[$bucket_size]) * on (instance, job, index) group_left(server_name)\nsynapse_server_name_info{server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} gen {{gen}}",
@@ -9781,7 +9781,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum (rate(synapse_replication_tcp_protocol_outbound_commands_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (name, conn_id)",
+              "expr": "sum (rate(synapse_replication_tcp_protocol_outbound_commands_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (name, conn_id)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{job}}-{{index}} {{command}}",
@@ -9907,7 +9907,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "rate(synapse_replication_tcp_resource_stream_updates_total{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_replication_tcp_resource_stream_updates_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -10006,7 +10006,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum (rate(synapse_replication_tcp_protocol_inbound_commands_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (name, conn_id)",
+              "expr": "sum (rate(synapse_replication_tcp_protocol_inbound_commands_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])) without (name, conn_id)",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -10106,7 +10106,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "rate(synapse_replication_tcp_protocol_inbound_rdata_count_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_replication_tcp_protocol_inbound_rdata_count_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -10174,7 +10174,7 @@
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_replication_tcp_command_queue{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "synapse_replication_tcp_command_queue{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "interval": "",
               "legendFormat": "{{stream_name}} {{job}}-{{index}}",
               "refId": "A"
@@ -10268,7 +10268,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_replication_tcp_protocol_close_reason_total{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_replication_tcp_protocol_close_reason_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} {{reason_type}}",
@@ -10362,7 +10362,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_replication_tcp_resource_connections_per_stream{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}",
+              "expr": "synapse_replication_tcp_resource_connections_per_stream{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}} {{stream_name}}",
@@ -10372,7 +10372,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_replication_tcp_resource_total_connections{job=~\"$job\",index=~\"$index\",instance=\"$instance\"}",
+              "expr": "synapse_replication_tcp_resource_total_connections{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{job}}-{{index}}",
@@ -10492,7 +10492,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "max(synapse_event_persisted_position{instance=\"$instance\"}) - on() group_right() synapse_event_processing_positions{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "max(synapse_event_persisted_position{server_name=\"$server_name\"}) - on () group_right() synapse_event_processing_positions{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -10587,7 +10587,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "time()*1000-synapse_event_processing_last_ts{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}",
+              "expr": "time()*1000-synapse_event_processing_last_ts{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -10683,7 +10683,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "deriv(synapse_event_processing_last_ts{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/1000 - 1",
+              "expr": "deriv(synapse_event_processing_last_ts{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])/1000 - 1",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -10842,7 +10842,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_forward_extremities_bucket{instance=\"$instance\"} and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0)",
+              "expr": "synapse_forward_extremities_bucket{server_name=\"$server_name\"} and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0)",
               "format": "heatmap",
               "intervalFactor": 1,
               "legendFormat": "{{le}}",
@@ -10922,7 +10922,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_forward_extremities_bucket{instance=\"$instance\"} > 0",
+              "expr": "synapse_forward_extremities_bucket{server_name=\"$server_name\"} > 0",
               "format": "heatmap",
               "interval": "",
               "intervalFactor": 1,
@@ -11053,7 +11053,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_events_forward_extremities_persisted_bucket{instance=\"$instance\"}[$bucket_size]) and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0)",
+              "expr": "rate(synapse_storage_events_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0)",
               "format": "heatmap",
               "intervalFactor": 1,
               "legendFormat": "{{le}}",
@@ -11132,7 +11132,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.5, rate(synapse_storage_events_forward_extremities_persisted_bucket{instance=\"$instance\"}[$bucket_size]) and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0))",
+              "expr": "histogram_quantile(0.5, rate(synapse_storage_events_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "50%",
@@ -11142,7 +11142,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.75, rate(synapse_storage_events_forward_extremities_persisted_bucket{instance=\"$instance\"}[$bucket_size]) and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0))",
+              "expr": "histogram_quantile(0.75, rate(synapse_storage_events_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "75%",
@@ -11152,7 +11152,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.90, rate(synapse_storage_events_forward_extremities_persisted_bucket{instance=\"$instance\"}[$bucket_size]) and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0))",
+              "expr": "histogram_quantile(0.90, rate(synapse_storage_events_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "90%",
@@ -11162,7 +11162,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.99, rate(synapse_storage_events_forward_extremities_persisted_bucket{instance=\"$instance\"}[$bucket_size]) and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0))",
+              "expr": "histogram_quantile(0.99, rate(synapse_storage_events_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "99%",
@@ -11293,7 +11293,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_storage_events_stale_forward_extremities_persisted_bucket{instance=\"$instance\"}[$bucket_size]) and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0)",
+              "expr": "rate(synapse_storage_events_stale_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0)",
               "format": "heatmap",
               "intervalFactor": 1,
               "legendFormat": "{{le}}",
@@ -11372,7 +11372,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.5, rate(synapse_storage_events_stale_forward_extremities_persisted_bucket{instance=\"$instance\"}[$bucket_size]) and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0))",
+              "expr": "histogram_quantile(0.5, rate(synapse_storage_events_stale_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "50%",
@@ -11382,7 +11382,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.75, rate(synapse_storage_events_stale_forward_extremities_persisted_bucket{instance=\"$instance\"}[$bucket_size]) and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0))",
+              "expr": "histogram_quantile(0.75, rate(synapse_storage_events_stale_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "75%",
@@ -11392,7 +11392,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.90, rate(synapse_storage_events_stale_forward_extremities_persisted_bucket{instance=\"$instance\"}[$bucket_size]) and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0))",
+              "expr": "histogram_quantile(0.90, rate(synapse_storage_events_stale_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "90%",
@@ -11402,7 +11402,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.99, rate(synapse_storage_events_stale_forward_extremities_persisted_bucket{instance=\"$instance\"}[$bucket_size]) and on (index, instance, job) (synapse_storage_events_persisted_events_total > 0))",
+              "expr": "histogram_quantile(0.99, rate(synapse_storage_events_stale_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "99%",
@@ -11533,7 +11533,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_state_number_state_groups_in_resolution_bucket{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_state_number_state_groups_in_resolution_bucket{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size])",
               "format": "heatmap",
               "interval": "",
               "intervalFactor": 1,
@@ -11616,7 +11616,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.5, rate(synapse_state_number_state_groups_in_resolution_bucket{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.5, rate(synapse_state_number_state_groups_in_resolution_bucket{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -11628,7 +11628,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.75, rate(synapse_state_number_state_groups_in_resolution_bucket{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.75, rate(synapse_state_number_state_groups_in_resolution_bucket{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -11639,7 +11639,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.90, rate(synapse_state_number_state_groups_in_resolution_bucket{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.90, rate(synapse_state_number_state_groups_in_resolution_bucket{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -11650,7 +11650,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.99, rate(synapse_state_number_state_groups_in_resolution_bucket{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "histogram_quantile(0.99, rate(synapse_state_number_state_groups_in_resolution_bucket{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -11738,7 +11738,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_storage_events_state_resolutions_during_persistence_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_storage_events_state_resolutions_during_persistence_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "interval": "",
               "legendFormat": "State res ",
               "refId": "A"
@@ -11747,7 +11747,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_storage_events_potential_times_prune_extremities_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_storage_events_potential_times_prune_extremities_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "interval": "",
               "legendFormat": "Potential to prune",
               "refId": "B"
@@ -11756,7 +11756,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_storage_events_times_pruned_extremities_total{instance=\"$instance\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_storage_events_times_pruned_extremities_total{server_name=\"$server_name\",job=~\"$job\",index=~\"$index\"}[$bucket_size]))",
               "interval": "",
               "legendFormat": "Pruned",
               "refId": "C"
@@ -11883,7 +11883,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "max(synapse_admin_mau_max{instance=\"$instance\"})",
+              "expr": "max(synapse_admin_mau_max{server_name=\"$server_name\"})",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -11897,7 +11897,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "max(synapse_admin_mau_current{instance=\"$instance\"})",
+              "expr": "max(synapse_admin_mau_current{server_name=\"$server_name\"})",
               "hide": false,
               "legendFormat": "Current",
               "range": true,
@@ -11984,7 +11984,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "synapse_admin_mau_current_mau_by_service{instance=\"$instance\"}",
+              "expr": "synapse_admin_mau_current_mau_by_service{server_name=\"$server_name\"}",
               "interval": "",
               "legendFormat": "{{ app_service }}",
               "refId": "A"
@@ -12103,7 +12103,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_notifier_users_woken_by_stream_total{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_notifier_users_woken_by_stream_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -12202,7 +12202,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_handler_presence_get_updates_total{job=~\"$job\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_get_updates_total{job=~\"$job\",server_name=\"$server_name\"}[$bucket_size])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -12321,7 +12321,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_appservice_api_sent_events_total{instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_appservice_api_sent_events_total{server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "{{service}}",
               "range": true,
@@ -12409,7 +12409,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_appservice_api_sent_transactions_total{instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_appservice_api_sent_transactions_total{server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "{{exported_service }} {{ service }}",
               "range": true,
@@ -12522,7 +12522,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_handler_presence_notified_presence_total{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_notified_presence_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "Notified",
               "refId": "A"
@@ -12531,7 +12531,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_handler_presence_federation_presence_out_total{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_federation_presence_out_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "Remote ping",
               "refId": "B"
@@ -12540,7 +12540,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_handler_presence_presence_updates_total{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_presence_updates_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "Total updates",
               "refId": "C"
@@ -12549,7 +12549,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_handler_presence_federation_presence_total{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_federation_presence_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "Remote updates",
               "refId": "D"
@@ -12558,7 +12558,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_handler_presence_bump_active_time_total{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_bump_active_time_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "Bump active time",
               "refId": "E"
@@ -12643,7 +12643,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_handler_presence_state_transition_total{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_state_transition_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "{{from}} -> {{to}}",
               "range": true,
@@ -12731,7 +12731,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_handler_presence_notify_reason_total{job=\"$job\",index=~\"$index\",instance=\"$instance\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_notify_reason_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "{{reason}}",
               "range": true,
@@ -12880,7 +12880,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_external_cache_set{job=~\"$job\", instance=\"$instance\", index=~\"$index\"}[$bucket_size])",
+              "expr": "rate(synapse_external_cache_set{job=~\"$job\", server_name=\"$server_name\", index=~\"$index\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "{{ cache_name }} {{job}}-{{ index }}",
               "range": true,
@@ -12940,7 +12940,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "sum without (hit) (rate(synapse_external_cache_get{job=~\"$job\", instance=\"$instance\", index=~\"$index\"}[$bucket_size]))",
+              "expr": "sum without (hit) (rate(synapse_external_cache_get{job=~\"$job\", server_name=\"$server_name\", index=~\"$index\"}[$bucket_size]))",
               "interval": "",
               "legendFormat": "{{ cache_name }} {{job}}-{{ index }}",
               "range": true,
@@ -13073,7 +13073,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(rate(synapse_external_cache_response_time_seconds_bucket{index=~\"$index\",instance=\"$instance\",job=~\"$job\"}[$bucket_size])) by (le)",
+              "expr": "sum(rate(synapse_external_cache_response_time_seconds_bucket{index=~\"$index\",server_name=\"$server_name\",job=~\"$job\"}[$bucket_size])) by (le)",
               "format": "heatmap",
               "instant": false,
               "interval": "",
@@ -13180,7 +13180,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_external_cache_get{job=~\"$job\", instance=\"$instance\", index=~\"$index\", hit=\"False\"}[$bucket_size])",
+              "expr": "rate(synapse_external_cache_get{job=~\"$job\", server_name=\"$server_name\", index=~\"$index\", hit=\"False\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "{{ cache_name }} {{job}}-{{ index }}",
               "range": true,
@@ -13299,10 +13299,10 @@
         "hide": 0,
         "includeAll": false,
         "multi": false,
-        "name": "instance",
+        "name": "server_name",
         "options": [],
         "query": {
-          "query": "label_values(synapse_util_metrics_block_ru_utime_seconds_total, instance)",
+          "query": "label_values(synapse_util_metrics_block_ru_utime_seconds_total, server_name)",
           "refId": "Prometheus-instance-Variable-Query"
         },
         "refresh": 2,
