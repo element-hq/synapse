@@ -158,12 +158,17 @@ try:
         else:
             # E.g. this does not support the (Windows-only) ProactorEventLoop.
             logger.warning(
-                "Skipping configuring ReactorLastSeenMetric: unexpected asyncio loop selector: %r via %r",
+                "Skipping configuring reactor metrics: unexpected asyncio loop selector: %r via %r",
                 selector,
                 asyncio_loop,
             )
+    else:
+        logger.warning(
+            "Skipping configuring reactor metrics: unexpected reactor type: %r",
+            reactor,
+        )
 except Exception as e:
-    logger.warning("Configuring ReactorLastSeenMetric failed: %r", e)
+    logger.warning("Configuring reactor metrics failed: %r", e)
 
 
 if wrapper:
