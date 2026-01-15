@@ -800,9 +800,8 @@ class DatabasePool:
         transaction_logger.debug("[TXN START] {%s}", name)
 
         try:
-            i = 0
-            MAX_NUMBER_OF_RETRIES = 5
-            while True:
+            MAX_NUMBER_OF_ATTEMPTS = 5
+            for attempt_number in range(1, MAX_NUMBER_OF_ATTEMPTS + 1):
                 cursor = conn.cursor(
                     txn_name=name,
                     after_callbacks=after_callbacks,
@@ -828,17 +827,16 @@ class DatabasePool:
                         "[TXN OPERROR] {%s} %s %d/%d",
                         name,
                         e,
-                        i + 1,
-                        MAX_NUMBER_OF_RETRIES,
+                        attempt_number,
+                        MAX_NUMBER_OF_ATTEMPTS,
                     )
                     try:
                         with opentracing.start_active_span("db.rollback"):
                             conn.rollback()
                     except self.engine.module.Error as e1:
                         transaction_logger.warning("[TXN EROLL] {%s} %s", name, e1)
-                    # Keep retrying
-                    if i < MAX_NUMBER_OF_RETRIES - 1:
-                        i += 1
+                    # Keep retrying if we haven't reached max attempts
+                    if attempt_number < MAX_NUMBER_OF_ATTEMPTS:
                         continue
                     raise
                 except self.engine.module.DatabaseError as e:
@@ -846,8 +844,8 @@ class DatabasePool:
                         transaction_logger.warning(
                             "[TXN DEADLOCK] {%s} %d/%d",
                             name,
-                            i + 1,
-                            MAX_NUMBER_OF_RETRIES,
+                            attempt_number,
+                            MAX_NUMBER_OF_ATTEMPTS,
                         )
                         try:
                             with opentracing.start_active_span("db.rollback"):
@@ -858,9 +856,8 @@ class DatabasePool:
                                 name,
                                 e1,
                             )
-                        # Keep retrying
-                        if i < MAX_NUMBER_OF_RETRIES - 1:
-                            i += 1
+                        # Keep retrying if we haven't reached max attempts
+                        if attempt_number < MAX_NUMBER_OF_ATTEMPTS:
                             continue
                     raise
                 finally:
