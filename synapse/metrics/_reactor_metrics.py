@@ -181,9 +181,9 @@ def install_reactor_metrics(target_reactor: Any) -> None:
 
 # Install reactor metrics for the global reactor.
 #
-# Avoid noisy warning logs in the case that we're using the
-# `synapse/app/complement_fork_starter.py` that uses the `ProxiedReactor`. In this case,
-# it will handle installing the real reactor when the time is right and will call
-# `install_reactor_metrics(...)` itself.
+# Skip installation if using `ProxiedReactor` (used by `complement_fork_starter.py`).
+# The `ProxiedReactor` will handle calling `install_reactor_metrics(...)` itself when
+# ready. Skipping allows us to avoid seeing confusing `Skipping configuring reactor
+# metrics: unexpected reactor type: ProxiedReactor` warnings.
 if not isinstance(reactor, ProxiedReactor):
     install_reactor_metrics(reactor)
