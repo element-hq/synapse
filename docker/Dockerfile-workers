@@ -71,6 +71,15 @@ FROM $FROM
 
     # Expose nginx listener port
     EXPOSE 8080/tcp
+    # Metrics for workers are on ports starting from 19091 but since these are dynamic
+    # we don't expose them by default (metrics must be enabled with
+    # SYNAPSE_ENABLE_METRICS=1)
+    #
+    # Instead, we expose a single port used for Prometheus HTTP service discovery
+    # (`http://<synapse_container>:9469/metrics/service_discovery`) and proxy all of the
+    # workers' metrics endpoints through that
+    # (`http://<synapse_container>:9469/metrics/worker/<worker_name>`).
+    EXPOSE 9469/tcp
 
     # A script to read environment variables and create the necessary
     # files to run the desired worker configuration. Will start supervisord.
