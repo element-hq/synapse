@@ -374,15 +374,14 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
             desc="set_last_successful_stream_ordering",
         )
 
-    async def get_catch_up_room_event_ids(
+    async def get_catch_up_room_event_id(
         self,
         destination: str,
         last_successful_stream_ordering: int,
-    ) -> list[str]:
+    ) -> str | None:
         """
-        Returns at most 50 event IDs and their corresponding stream_orderings
-        that correspond to the oldest events that have not yet been sent to
-        the destination.
+        Returns the event ID of the oldest event that has not yet been sent to
+        the destination yet is the newest one we created in that room.
 
         Args:
             destination: the destination in question
@@ -390,35 +389,37 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
                 most-recently successfully-transmitted event to the destination
 
         Returns:
-            list of event_ids
+            event_ids
         """
         return await self.db_pool.runInteraction(
-            "get_catch_up_room_event_ids",
-            self._get_catch_up_room_event_ids_txn,
+            "get_catch_up_room_event_id",
+            self._get_catch_up_room_event_id_txn,
             destination,
             last_successful_stream_ordering,
         )
 
     @staticmethod
-    def _get_catch_up_room_event_ids_txn(
+    def _get_catch_up_room_event_id_txn(
         txn: LoggingTransaction,
         destination: str,
         last_successful_stream_ordering: int,
-    ) -> list[str]:
+    ) -> str | None:
         q = """
                 SELECT event_id FROM destination_rooms
                  JOIN events USING (stream_ordering)
                 WHERE destination = ?
                   AND stream_ordering > ?
                 ORDER BY stream_ordering
-                LIMIT 50
+                LIMIT 1
             """
         txn.execute(
             q,
             (destination, last_successful_stream_ordering),
         )
-        event_ids = [row[0] for row in txn]
-        return event_ids
+        row = txn.fetchone()
+        if not row:
+            return None
+        return row[0]
 
     async def get_catch_up_outstanding_destinations(
         self, after_destination: str | None

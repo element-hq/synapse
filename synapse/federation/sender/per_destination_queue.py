@@ -22,6 +22,7 @@
 import datetime
 import logging
 from collections import OrderedDict
+from dataclasses import dataclass
 from types import TracebackType
 from typing import TYPE_CHECKING, Hashable, Iterable
 
@@ -76,6 +77,12 @@ CATCHUP_RETRY_INTERVAL = 60 * 60 * 1000
 # Limit how many presence states we add to each presence EDU, to ensure that
 # they are bounded in size.
 MAX_PRESENCE_STATES_PER_EDU = 50
+
+
+@dataclass(frozen=True)
+class _CatchUpTransaction:
+    pdus_to_send: list[EventBase]
+    new_last_successful_stream_ordering: int
 
 
 class PerDestinationQueue:
@@ -469,6 +476,135 @@ class PerDestinationQueue:
             self.active_transmission_loop = None
             self.transmission_loop_running = False
 
+    async def _build_catch_up_transaction(
+        self, last_successful_stream_ordering: int
+    ) -> _CatchUpTransaction | None:
+        """
+        Build a catch-up transaction that is valid to be immediately sent to
+        this destination managed by this queue, provided we are in catch-up
+        mode for this destination.
+
+        Args:
+            last_successful_stream_ordering: the stream_ordering of the
+                most-recently successfully-transmitted event to the destination
+
+        Preconditions:
+        - We are in catch-up mode
+
+        Note:
+            We build transactions with events from only one room, as it's likely
+            that the remote will have to do additional processing, which may
+            take some time. It's better to give it small amounts of work
+            rather than risk the request timing out and repeatedly being
+            retried, and not making any progress.
+        """
+
+        # This gives the latest PDU *originating from us* to be sent in a catch-uppable room
+        # Specifically, that room is the one whose latest PDU *originating from us* is the
+        # earliest out of all the rooms.
+        event_id = await self._store.get_catch_up_room_event_id(
+            self._destination, last_successful_stream_ordering
+        )
+
+        if not event_id:
+            return None
+
+        # fetch the relevant event from the event store
+        # - redacted behaviour of REDACT is fine, since we only send metadata
+        #   of redacted events to the destination.
+        # - don't need to worry about rejected events as we do not actively
+        #   forward received events over federation.
+        catchup_pdu = await self._store.get_event(event_id)
+        if not catchup_pdu:
+            raise AssertionError(
+                f"No event retrieved when we asked for {event_id}. "
+                "This should not happen."
+            )
+
+        # The PDU from the DB will be the newest PDU in the room from
+        # *this server* that we tried---but were unable---to send to the remote.
+        # servers may have sent lots of events since then, and we want
+        # to try and tell the remote only about the *latest* events in
+        # the room. This is so that it doesn't get inundated by events
+        # from various parts of the DAG, which all need to be processed.
+        #
+        # Note: this does mean that in large rooms a server coming back
+        # online will get sent the same events from all the different
+        # servers, but the remote will correctly deduplicate them and
+        # handle it only once.
+
+        # Step 1, fetch the current extremities
+        extrems = await self._store.get_prev_events_for_room(catchup_pdu.room_id)
+
+        if catchup_pdu.event_id in extrems:
+            # If the event is in the extremities, then great! We can just
+            # use that without having to do further checks.
+            room_catchup_pdus = [catchup_pdu]
+        elif await self._store.is_partial_state_room(catchup_pdu.room_id):
+            # We can't be sure which events the destination should
+            # see using only partial state. Avoid doing so, and just retry
+            # sending our the newest PDU the remote is missing from us.
+            room_catchup_pdus = [catchup_pdu]
+        else:
+            # If not, fetch the extremities and figure out which we can
+            # send.
+            extrem_events = await self._store.get_events_as_list(extrems)
+
+            new_pdus = []
+            for p in extrem_events:
+                # We pulled this from the DB, so it'll be non-null
+                assert p.internal_metadata.stream_ordering
+
+                # Filter out events that happened before the remote went
+                # offline
+                if (
+                    p.internal_metadata.stream_ordering
+                    < last_successful_stream_ordering
+                ):
+                    continue
+
+                new_pdus.append(p)
+
+            # Filter out events where the server is not in the room,
+            # e.g. it may have left/been kicked. *Ideally* we'd pull
+            # out the kick and send that, but it's a rare edge case
+            # so we don't bother for now (the server that sent the
+            # kick should send it out if its online).
+            new_pdus = await filter_events_for_server(
+                self._storage_controllers,
+                self._destination,
+                self.server_name,
+                new_pdus,
+                redact=False,
+                filter_out_erased_senders=True,
+                filter_out_remote_partial_state_events=True,
+            )
+
+            # If we've filtered out all the extremities, fall back to
+            # sending the original event. This should ensure that the
+            # server gets at least some of missed events (especially if
+            # the other sending servers are up).
+            if new_pdus:
+                room_catchup_pdus = new_pdus
+            else:
+                room_catchup_pdus = [catchup_pdu]
+
+        logger.info(
+            "Catching up room to %s: %r", self._destination, catchup_pdu.room_id
+        )
+
+        # We pulled this from the DB, so it'll be non-null
+        assert catchup_pdu.internal_metadata.stream_ordering
+
+        return _CatchUpTransaction(
+            pdus_to_send=room_catchup_pdus,
+            # Note that we mark the last successful stream ordering as that
+            # from the *original* PDU, rather than the PDU(s) we actually
+            # send. This is because we use it to mark our position in the
+            # queue of missed PDUs to process.
+            new_last_successful_stream_ordering=catchup_pdu.internal_metadata.stream_ordering,
+        )
+
     async def _catch_up_transmission_loop(self) -> None:
         first_catch_up_check = self._last_successful_stream_ordering is None
 
@@ -495,11 +631,11 @@ class PerDestinationQueue:
 
         # get at most 50 catchup room/PDUs
         while self._transmission_loop_enabled:
-            event_ids = await self._store.get_catch_up_room_event_ids(
-                self._destination, last_successful_stream_ordering
+            catch_up_transaction = await self._build_catch_up_transaction(
+                last_successful_stream_ordering
             )
 
-            if not event_ids:
+            if not catch_up_transaction:
                 # No more events to catch up on, but we can't ignore the chance
                 # of a race condition, so we check that no new events have been
                 # skipped due to us being in catch-up mode
@@ -528,125 +664,22 @@ class PerDestinationQueue:
                 # clear those out now.
                 self._start_catching_up()
 
-            # fetch the relevant events from the event store
-            # - redacted behaviour of REDACT is fine, since we only send metadata
-            #   of redacted events to the destination.
-            # - don't need to worry about rejected events as we do not actively
-            #   forward received events over federation.
-            catchup_pdus = await self._store.get_events_as_list(event_ids)
-            if not catchup_pdus:
-                raise AssertionError(
-                    "No events retrieved when we asked for %r. "
-                    "This should not happen." % event_ids
-                )
-
-            logger.info(
-                "Catching up destination %s with %d PDUs",
-                self._destination,
-                len(catchup_pdus),
+            await self._transaction_manager.send_new_transaction(
+                self._destination, catch_up_transaction.pdus_to_send, []
             )
 
-            # We send transactions with events from one room only, as its likely
-            # that the remote will have to do additional processing, which may
-            # take some time. It's better to give it small amounts of work
-            # rather than risk the request timing out and repeatedly being
-            # retried, and not making any progress.
-            #
-            # Note: `catchup_pdus` will have exactly one PDU per room.
-            for pdu in catchup_pdus:
-                # The PDU from the DB will be the newest PDU in the room from
-                # *this server* that we tried---but were unable---to send to the remote.
-                # servers may have sent lots of events since then, and we want
-                # to try and tell the remote only about the *latest* events in
-                # the room. This is so that it doesn't get inundated by events
-                # from various parts of the DAG, which all need to be processed.
-                #
-                # Note: this does mean that in large rooms a server coming back
-                # online will get sent the same events from all the different
-                # servers, but the remote will correctly deduplicate them and
-                # handle it only once.
+            sent_transactions_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
 
-                # Step 1, fetch the current extremities
-                extrems = await self._store.get_prev_events_for_room(pdu.room_id)
-
-                if pdu.event_id in extrems:
-                    # If the event is in the extremities, then great! We can just
-                    # use that without having to do further checks.
-                    room_catchup_pdus = [pdu]
-                elif await self._store.is_partial_state_room(pdu.room_id):
-                    # We can't be sure which events the destination should
-                    # see using only partial state. Avoid doing so, and just retry
-                    # sending our the newest PDU the remote is missing from us.
-                    room_catchup_pdus = [pdu]
-                else:
-                    # If not, fetch the extremities and figure out which we can
-                    # send.
-                    extrem_events = await self._store.get_events_as_list(extrems)
-
-                    new_pdus = []
-                    for p in extrem_events:
-                        # We pulled this from the DB, so it'll be non-null
-                        assert p.internal_metadata.stream_ordering
-
-                        # Filter out events that happened before the remote went
-                        # offline
-                        if (
-                            p.internal_metadata.stream_ordering
-                            < last_successful_stream_ordering
-                        ):
-                            continue
-
-                        new_pdus.append(p)
-
-                    # Filter out events where the server is not in the room,
-                    # e.g. it may have left/been kicked. *Ideally* we'd pull
-                    # out the kick and send that, but it's a rare edge case
-                    # so we don't bother for now (the server that sent the
-                    # kick should send it out if its online).
-                    new_pdus = await filter_events_for_server(
-                        self._storage_controllers,
-                        self._destination,
-                        self.server_name,
-                        new_pdus,
-                        redact=False,
-                        filter_out_erased_senders=True,
-                        filter_out_remote_partial_state_events=True,
-                    )
-
-                    # If we've filtered out all the extremities, fall back to
-                    # sending the original event. This should ensure that the
-                    # server gets at least some of missed events (especially if
-                    # the other sending servers are up).
-                    if new_pdus:
-                        room_catchup_pdus = new_pdus
-                    else:
-                        room_catchup_pdus = [pdu]
-
-                logger.info(
-                    "Catching up rooms to %s: %r", self._destination, pdu.room_id
-                )
-
-                await self._transaction_manager.send_new_transaction(
-                    self._destination, room_catchup_pdus, []
-                )
-
-                sent_transactions_counter.labels(
-                    **{SERVER_NAME_LABEL: self.server_name}
-                ).inc()
-
-                # We pulled this from the DB, so it'll be non-null
-                assert pdu.internal_metadata.stream_ordering
-
-                # Note that we mark the last successful stream ordering as that
-                # from the *original* PDU, rather than the PDU(s) we actually
-                # send. This is because we use it to mark our position in the
-                # queue of missed PDUs to process.
-                last_successful_stream_ordering = pdu.internal_metadata.stream_ordering
-
-                self._last_successful_stream_ordering = last_successful_stream_ordering
-                await self._store.set_destination_last_successful_stream_ordering(
-                    self._destination, last_successful_stream_ordering
-                )
+            # Persist our position to the database
+            last_successful_stream_ordering = (
+                catch_up_transaction.new_last_successful_stream_ordering
+            )
+            self._last_successful_stream_ordering = last_successful_stream_ordering
+            await self._store.set_destination_last_successful_stream_ordering(
+                self._destination, last_successful_stream_ordering
+            )
 
     def _get_receipt_edus(self, limit: int) -> Iterable[Edu]:
         if not self._pending_receipt_edus:
