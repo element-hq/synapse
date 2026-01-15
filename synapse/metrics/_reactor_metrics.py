@@ -162,6 +162,11 @@ try:
                 selector,
                 asyncio_loop,
             )
+    else:
+        logger.warning(
+            "Skipping configuring ReactorLastSeenMetric: unexpected reactor type: %r",
+            reactor,
+        )
 except Exception as e:
     logger.warning("Configuring ReactorLastSeenMetric failed: %r", e)
 
