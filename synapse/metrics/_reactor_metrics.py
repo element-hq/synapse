@@ -30,7 +30,7 @@ from prometheus_client.core import REGISTRY, GaugeMetricFamily
 from twisted.internet import reactor, selectreactor
 from twisted.internet.asyncioreactor import AsyncioSelectorReactor
 
-from synapse.app.complement_fork_starter import ProxiedReactor
+from synapse.app.complement_fork_proxied_reactor import ProxiedReactor
 from synapse.metrics._types import Collector
 
 try:
