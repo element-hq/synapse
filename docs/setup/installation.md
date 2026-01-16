@@ -307,7 +307,7 @@ Installing prerequisites on CentOS or Fedora Linux:
 
 ```sh
 sudo dnf install libtiff-devel libjpeg-devel libzip-devel freetype-devel \
-                 libwebp-devel libxml2-devel libxslt-devel libpq-devel \
+                 libwebp-devel libxslt-devel libpq-devel \
                  python3-virtualenv libffi-devel openssl-devel python3-devel
 sudo dnf group install "Development Tools"
 ```
