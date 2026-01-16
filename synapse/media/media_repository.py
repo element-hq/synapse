@@ -390,13 +390,13 @@ class MediaRepository:
                 if (
                     msc4335_enabled
                     and limit.msc4335_info_uri
-                    and limit.msc4335_soft_limit is not None
+                    and limit.msc4335_can_upgrade is not None
                 ):
                     raise MSC4335UserLimitExceededError(
                         403,
                         "Media upload limit exceeded",
                         limit.msc4335_info_uri,
-                        limit.msc4335_soft_limit,
+                        limit.msc4335_can_upgrade,
                     )
                 # Otherwise we use the current behaviour albeit not spec compliant
                 # See: https://github.com/element-hq/synapse/issues/18749

@@ -2974,7 +2974,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
     def test_msc4335_requires_config(self) -> None:
         config_dict = default_config("test")
 
-        # msc4335_info_uri and msc4335_soft_limit are required
+        # msc4335_info_uri and msc4335_can_upgrade are required
 
         with self.assertRaises(ConfigError):
             HomeServerConfig().parse_config_dict(
@@ -2999,7 +2999,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                         {
                             "time_period": "1d",
                             "max_size": "1K",
-                            "msc4335_soft_limit": False,
+                            "msc4335_can_upgrade": False,
                         }
                     ],
                     **config_dict,
@@ -3015,7 +3015,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                         {
                             "time_period": "1d",
                             "max_size": "1K",
-                            "msc4335_soft_limit": True,
+                            "msc4335_can_upgrade": True,
                         }
                     ],
                     **config_dict,
@@ -3032,13 +3032,13 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                     "time_period": "1d",
                     "max_size": "1K",
                     "msc4335_info_uri": "https://example.com",
-                    "msc4335_soft_limit": False,
+                    "msc4335_can_upgrade": False,
                 }
             ],
         }
     )
     def test_msc4335_returns_hard_user_limit_exceeded(self) -> None:
-        """Test that the MSC4335 error is returned with soft_limit False when experimental feature is enabled."""
+        """Test that the MSC4335 error is returned with can_upgrade False when experimental feature is enabled."""
         channel = self.upload_media(500)
         self.assertEqual(channel.code, 200)
 
@@ -3059,13 +3059,13 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                     "time_period": "1d",
                     "max_size": "1K",
                     "msc4335_info_uri": "https://example.com",
-                    "msc4335_soft_limit": True,
+                    "msc4335_can_upgrade": True,
                 }
             ],
         }
     )
     def test_msc4335_returns_soft_user_limit_exceeded(self) -> None:
-        """Test that the MSC4335 error is returned with soft_limit True when experimental feature is enabled."""
+        """Test that the MSC4335 error is returned with can_upgrade True when experimental feature is enabled."""
         channel = self.upload_media(500)
         self.assertEqual(channel.code, 200)
 
@@ -3077,7 +3077,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body["org.matrix.msc4335.info_uri"], "https://example.com"
         )
-        self.assertEqual(channel.json_body["org.matrix.msc4335.soft_limit"], True)
+        self.assertEqual(channel.json_body["org.matrix.msc4335.can_upgrade"], True)
 
     @override_config(
         {
@@ -3294,7 +3294,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
                     "time_period": "1d",
                     "max_size": "1K",
                     "msc4335_info_uri": "https://example.com",
-                    "msc4335_soft_limit": False,
+                    "msc4335_can_upgrade": False,
                 },
             ]
         }

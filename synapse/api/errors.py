@@ -525,14 +525,14 @@ class MSC4335UserLimitExceededError(SynapseError):
         code: int,
         msg: str,
         info_uri: str,
-        soft_limit: bool = False,
+        can_upgrade: bool = False,
     ):
         additional_fields: dict[str, Union[str, bool]] = {
             "org.matrix.msc4335.info_uri": info_uri,
         }
 
-        if soft_limit:
-            additional_fields["org.matrix.msc4335.soft_limit"] = soft_limit
+        if can_upgrade:
+            additional_fields["org.matrix.msc4335.can_upgrade"] = can_upgrade
 
         super().__init__(
             code,

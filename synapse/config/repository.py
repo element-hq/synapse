@@ -137,7 +137,7 @@ class MediaUploadLimit:
     msc4335_info_uri: Optional[str] = None
     """Used for experimental MSC4335 error code feature"""
 
-    msc4335_soft_limit: Optional[bool] = None
+    msc4335_can_upgrade: Optional[bool] = None
     """Used for experimental MSC4335 error code feature"""
 
 
@@ -309,14 +309,14 @@ class ContentRepositoryConfig(Config):
             time_period_ms = self.parse_duration(limit_config["time_period"])
             max_bytes = self.parse_size(limit_config["max_size"])
             msc4335_info_uri = limit_config.get("msc4335_info_uri", None)
-            msc4335_soft_limit = limit_config.get("msc4335_soft_limit", None)
+            msc4335_can_upgrade = limit_config.get("msc4335_can_upgrade", None)
 
-            if (msc4335_info_uri is not None or msc4335_soft_limit is not None) and (
-                not (msc4335_info_uri and msc4335_soft_limit is not None)
+            if (msc4335_info_uri is not None or msc4335_can_upgrade is not None) and (
+                not (msc4335_info_uri and msc4335_can_upgrade is not None)
             ):
                 raise ConfigError(
-                    "If any of msc4335_info_uri or msc4335_soft_limit are set, then both msc4335_info_uri and "
-                    "msc4335_soft_limit must be set."
+                    "If any of msc4335_info_uri or msc4335_can_upgrade are set, then both msc4335_info_uri and "
+                    "msc4335_can_upgrade must be set."
                 )
 
             self.media_upload_limits.append(
@@ -324,7 +324,7 @@ class ContentRepositoryConfig(Config):
                     max_bytes,
                     time_period_ms,
                     msc4335_info_uri,
-                    msc4335_soft_limit,
+                    msc4335_can_upgrade,
                 )
             )
 
