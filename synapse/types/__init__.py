@@ -1546,6 +1546,8 @@ class TaskStatus(str, Enum):
     COMPLETE = "complete"
     # Task is over and either returned a failed status, or had an exception
     FAILED = "failed"
+    # Task has been cancelled
+    CANCELLED = "cancelled"
 
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)

@@ -800,9 +800,8 @@ class DatabasePool:
         transaction_logger.debug("[TXN START] {%s}", name)
 
         try:
-            i = 0
-            N = 5
-            while True:
+            MAX_NUMBER_OF_ATTEMPTS = 5
+            for attempt_number in range(1, MAX_NUMBER_OF_ATTEMPTS + 1):
                 cursor = conn.cursor(
                     txn_name=name,
                     after_callbacks=after_callbacks,
@@ -828,34 +827,37 @@ class DatabasePool:
                         "[TXN OPERROR] {%s} %s %d/%d",
                         name,
                         e,
-                        i,
-                        N,
+                        attempt_number,
+                        MAX_NUMBER_OF_ATTEMPTS,
                     )
-                    if i < N:
-                        i += 1
-                        try:
-                            with opentracing.start_active_span("db.rollback"):
-                                conn.rollback()
-                        except self.engine.module.Error as e1:
-                            transaction_logger.warning("[TXN EROLL] {%s} %s", name, e1)
+                    try:
+                        with opentracing.start_active_span("db.rollback"):
+                            conn.rollback()
+                    except self.engine.module.Error as e1:
+                        transaction_logger.warning("[TXN EROLL] {%s} %s", name, e1)
+                    # Keep retrying if we haven't reached max attempts
+                    if attempt_number < MAX_NUMBER_OF_ATTEMPTS:
                         continue
                     raise
                 except self.engine.module.DatabaseError as e:
                     if self.engine.is_deadlock(e):
                         transaction_logger.warning(
-                            "[TXN DEADLOCK] {%s} %d/%d", name, i, N
+                            "[TXN DEADLOCK] {%s} %d/%d",
+                            name,
+                            attempt_number,
+                            MAX_NUMBER_OF_ATTEMPTS,
                         )
-                        if i < N:
-                            i += 1
-                            try:
-                                with opentracing.start_active_span("db.rollback"):
-                                    conn.rollback()
-                            except self.engine.module.Error as e1:
-                                transaction_logger.warning(
-                                    "[TXN EROLL] {%s} %s",
-                                    name,
-                                    e1,
-                                )
+                        try:
+                            with opentracing.start_active_span("db.rollback"):
+                                conn.rollback()
+                        except self.engine.module.Error as e1:
+                            transaction_logger.warning(
+                                "[TXN EROLL] {%s} %s",
+                                name,
+                                e1,
+                            )
+                        # Keep retrying if we haven't reached max attempts
+                        if attempt_number < MAX_NUMBER_OF_ATTEMPTS:
                             continue
                     raise
                 finally:
@@ -892,6 +894,21 @@ class DatabasePool:
                     # [1]: https://github.com/python/cpython/blob/v3.8.0/Modules/_sqlite/connection.c#L465
                     # [2]: https://github.com/python/cpython/blob/v3.8.0/Modules/_sqlite/cursor.c#L236
                     cursor.close()
+            else:
+                # To appease the linter, we mark this as unreachable. Unreachable
+                # because we expect the code above to always return from the loop or
+                # raise an exception. `mypy` just doesn't understand our logic above.
+                #
+                # The Python docs
+                # (https://typing.python.org/en/latest/guides/unreachable.html#marking-code-as-unreachable)
+                # suggest `assert False` but that also gets linted to suggest raising an
+                # `AssertionError`. I'm not sure this has the same "unreachable"
+                # semantics, but it works anyway to solve the linter complaint because
+                # we're raising an exception.
+                raise AssertionError(
+                    "We expect this to be unreachable because the code above should either return or raise. "
+                    "This is a logic error in Synapse itself."
+                )
         except Exception as e:
             transaction_logger.debug("[TXN FAIL] {%s} %s", name, e)
             raise

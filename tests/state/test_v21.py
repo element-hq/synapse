@@ -447,7 +447,7 @@ class StateResV21TestCase(unittest.HomeserverTestCase):
                 )
             )
             # no matter how many events are persisted, the overall diff should always be the same.
-            self.assertEquals(got_auth_diff, got_auth_diff2)
+            self.assertEqual(got_auth_diff, got_auth_diff2)
 
         # now we will drip feed in `events` one-by-one, persisting them then resolving with the
         # rest. This ensures we correctly handle mixed persisted/unpersisted events. We will finish

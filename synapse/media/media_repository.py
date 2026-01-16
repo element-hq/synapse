@@ -64,7 +64,10 @@ from synapse.media.media_storage import (
     SHA256TransparentIOReader,
     SHA256TransparentIOWriter,
 )
-from synapse.media.storage_provider import StorageProviderWrapper
+from synapse.media.storage_provider import (
+    FileStorageProviderBackend,
+    StorageProviderWrapper,
+)
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
@@ -142,9 +145,22 @@ class MediaRepository:
             )
             storage_providers.append(provider)
 
+        # If local media storage is enabled, create the local provider
+        local_provider: FileStorageProviderBackend | None = None
+        if hs.config.media.enable_local_media_storage and self.primary_base_path:
+            local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
+
         self.media_storage: MediaStorage = MediaStorage(
-            self.hs, self.primary_base_path, self.filepaths, storage_providers
+            self.hs, self.filepaths, storage_providers, local_provider
         )
+
+        # Log a warning if there are no storage backends configured
+        if not hs.config.media.enable_local_media_storage and not storage_providers:
+            logger.warning(
+                "Local media storage is disabled and no media_storage_providers are "
+                "configured. All media requests will return 404 errors as there is "
+                "no storage backend available."
+            )
 
         self.clock.looping_call(
             self._start_update_recently_accessed, UPDATE_RECENTLY_ACCESSED_TS
@@ -439,7 +455,11 @@ class MediaRepository:
         return await self.store.get_cached_remote_media(origin, media_id)
 
     async def get_local_media_info(
-        self, request: SynapseRequest, media_id: str, max_timeout_ms: int
+        self,
+        request: SynapseRequest,
+        media_id: str,
+        max_timeout_ms: int,
+        bypass_quarantine: bool = False,
     ) -> LocalMedia | None:
         """Gets the info dictionary for given local media ID. If the media has
         not been uploaded yet, this function will wait up to ``max_timeout_ms``
@@ -451,6 +471,7 @@ class MediaRepository:
                 the file_id for local content.)
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            bypass_quarantine: whether to bypass quarantine checks
 
         Returns:
             Either the info dictionary for the given local media ID or
@@ -466,7 +487,7 @@ class MediaRepository:
                 respond_404(request)
                 return None
 
-            if media_info.quarantined_by:
+            if media_info.quarantined_by and not bypass_quarantine:
                 logger.info("Media %s is quarantined", media_id)
                 respond_404(request)
                 return None
@@ -500,6 +521,7 @@ class MediaRepository:
         max_timeout_ms: int,
         allow_authenticated: bool = True,
         federation: bool = False,
+        bypass_quarantine: bool = False,
     ) -> None:
         """Responds to requests for local media, if exists, or returns 404.
 
@@ -513,11 +535,14 @@ class MediaRepository:
                 media to be uploaded.
             allow_authenticated: whether media marked as authenticated may be served to this request
             federation: whether the local media being fetched is for a federation request
+            bypass_quarantine: whether to bypass quarantine checks
 
         Returns:
             Resolves once a response has successfully been written to request
         """
-        media_info = await self.get_local_media_info(request, media_id, max_timeout_ms)
+        media_info = await self.get_local_media_info(
+            request, media_id, max_timeout_ms, bypass_quarantine=bypass_quarantine
+        )
         if not media_info:
             return
 
@@ -561,6 +586,7 @@ class MediaRepository:
         ip_address: str,
         use_federation_endpoint: bool,
         allow_authenticated: bool = True,
+        bypass_quarantine: bool = False,
     ) -> None:
         """Respond to requests for remote media.
 
@@ -577,6 +603,7 @@ class MediaRepository:
                 federation `/download` endpoint
             allow_authenticated: whether media marked as authenticated may be served to this
                 request
+            bypass_quarantine: whether to bypass quarantine checks
 
         Returns:
             Resolves once a response has successfully been written to request
@@ -609,6 +636,7 @@ class MediaRepository:
                 ip_address,
                 use_federation_endpoint,
                 allow_authenticated,
+                bypass_quarantine=bypass_quarantine,
             )
 
         # Check if the media is cached on the client, if so return 304. We need
@@ -697,6 +725,7 @@ class MediaRepository:
         ip_address: str,
         use_federation_endpoint: bool,
         allow_authenticated: bool,
+        bypass_quarantine: bool = False,
     ) -> tuple[Responder | None, RemoteMedia]:
         """Looks for media in local cache, if not there then attempt to
         download from remote server.
@@ -712,6 +741,7 @@ class MediaRepository:
             ip_address: the IP address of the requester
             use_federation_endpoint: whether to request the remote media over the new federation
             /download endpoint
+            bypass_quarantine: whether to bypass quarantine checks
 
         Returns:
             A tuple of responder and the media info of the file.
@@ -732,7 +762,7 @@ class MediaRepository:
             file_id = media_info.filesystem_id
             file_info = FileInfo(server_name, file_id)
 
-            if media_info.quarantined_by:
+            if media_info.quarantined_by and not bypass_quarantine:
                 logger.info("Media is quarantined")
                 raise NotFoundError()
 
@@ -768,10 +798,18 @@ class MediaRepository:
         except SynapseError:
             raise
         except Exception as e:
-            # An exception may be because we downloaded media in another
-            # process, so let's check if we magically have the media.
-            media_info = await self.store.get_cached_remote_media(server_name, media_id)
-            if not media_info:
+            # If this is a constraint violation, it means another worker
+            # downloaded the media first. We should fetch the existing media info.
+            if isinstance(e, self.store.database_engine.module.IntegrityError):
+                # The file has already been cleaned up in _download_remote_file
+                # Just fetch the existing media info
+                media_info = await self.store.get_cached_remote_media(
+                    server_name, media_id
+                )
+                if not media_info:
+                    # This shouldn't happen, but let's raise an error if it does
+                    raise SynapseError(500, "Failed to fetch remote media")
+            else:
                 raise e
 
         file_id = media_info.filesystem_id
@@ -791,6 +829,39 @@ class MediaRepository:
 
         responder = await self.media_storage.fetch_media(file_info)
         return responder, media_info
+
+    async def _store_remote_media_with_cleanup(
+        self,
+        server_name: str,
+        media_id: str,
+        media_type: str,
+        time_now_ms: int,
+        upload_name: str | None,
+        media_length: int,
+        filesystem_id: str,
+        sha256: str,
+        fname: str,
+    ) -> None:
+        """Store remote media in database and clean up file on constraint violation."""
+        try:
+            await self.store.store_cached_remote_media(
+                origin=server_name,
+                media_id=media_id,
+                media_type=media_type,
+                time_now_ms=time_now_ms,
+                upload_name=upload_name,
+                media_length=media_length,
+                filesystem_id=filesystem_id,
+                sha256=sha256,
+            )
+        except self.store.database_engine.module.IntegrityError:
+            # Another worker downloaded the media first. Clean up our file.
+            try:
+                os.remove(fname)
+            except Exception:
+                pass
+            # Re-raise so the caller can handle it
+            raise
 
     async def _download_remote_file(
         self,
@@ -876,26 +947,21 @@ class MediaRepository:
             upload_name = get_filename_from_headers(headers)
             time_now_ms = self.clock.time_msec()
 
-            # Multiple remote media download requests can race (when using
-            # multiple media repos), so this may throw a violation constraint
-            # exception. If it does we'll delete the newly downloaded file from
-            # disk (as we're in the ctx manager).
-            #
-            # However: we've already called `finish()` so we may have also
-            # written to the storage providers. This is preferable to the
-            # alternative where we call `finish()` *after* this, where we could
-            # end up having an entry in the DB but fail to write the files to
-            # the storage providers.
-            await self.store.store_cached_remote_media(
-                origin=server_name,
-                media_id=media_id,
-                media_type=media_type,
-                time_now_ms=time_now_ms,
-                upload_name=upload_name,
-                media_length=length,
-                filesystem_id=file_id,
-                sha256=sha256writer.hexdigest(),
-            )
+        # Multiple remote media download requests can race (when using
+        # multiple media repos), so this may throw a violation constraint
+        # exception. If it does we'll delete the newly downloaded file from
+        # disk.
+        await self._store_remote_media_with_cleanup(
+            server_name=server_name,
+            media_id=media_id,
+            media_type=media_type,
+            time_now_ms=time_now_ms,
+            upload_name=upload_name,
+            media_length=length,
+            filesystem_id=file_id,
+            sha256=sha256writer.hexdigest(),
+            fname=fname,
+        )
 
         logger.info("Stored remote media in file %r", fname)
 
@@ -914,7 +980,6 @@ class MediaRepository:
             filesystem_id=file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
-            quarantined_ts=None,
             authenticated=authenticated,
             sha256=sha256writer.hexdigest(),
         )
@@ -1010,26 +1075,21 @@ class MediaRepository:
             upload_name = get_filename_from_headers(headers)
             time_now_ms = self.clock.time_msec()
 
-            # Multiple remote media download requests can race (when using
-            # multiple media repos), so this may throw a violation constraint
-            # exception. If it does we'll delete the newly downloaded file from
-            # disk (as we're in the ctx manager).
-            #
-            # However: we've already called `finish()` so we may have also
-            # written to the storage providers. This is preferable to the
-            # alternative where we call `finish()` *after* this, where we could
-            # end up having an entry in the DB but fail to write the files to
-            # the storage providers.
-            await self.store.store_cached_remote_media(
-                origin=server_name,
-                media_id=media_id,
-                media_type=media_type,
-                time_now_ms=time_now_ms,
-                upload_name=upload_name,
-                media_length=length,
-                filesystem_id=file_id,
-                sha256=sha256writer.hexdigest(),
-            )
+        # Multiple remote media download requests can race (when using
+        # multiple media repos), so this may throw a violation constraint
+        # exception. If it does we'll delete the newly downloaded file from
+        # disk.
+        await self._store_remote_media_with_cleanup(
+            server_name=server_name,
+            media_id=media_id,
+            media_type=media_type,
+            time_now_ms=time_now_ms,
+            upload_name=upload_name,
+            media_length=length,
+            filesystem_id=file_id,
+            sha256=sha256writer.hexdigest(),
+            fname=fname,
+        )
 
         logger.debug("Stored remote media in file %r", fname)
 
@@ -1048,7 +1108,6 @@ class MediaRepository:
             filesystem_id=file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
-            quarantined_ts=None,
             authenticated=authenticated,
             sha256=sha256writer.hexdigest(),
         )
@@ -1103,32 +1162,31 @@ class MediaRepository:
         t_type: str,
         url_cache: bool,
     ) -> tuple[str, FileInfo] | None:
-        input_path = await self.media_storage.ensure_media_is_in_local_cache(
+        async with self.media_storage.ensure_media_is_in_local_cache(
             FileInfo(None, media_id, url_cache=url_cache)
-        )
+        ) as input_path:
+            try:
+                thumbnailer = Thumbnailer(input_path)
+            except ThumbnailError as e:
+                logger.warning(
+                    "Unable to generate a thumbnail for local media %s using a method of %s and type of %s: %s",
+                    media_id,
+                    t_method,
+                    t_type,
+                    e,
+                )
+                return None
 
-        try:
-            thumbnailer = Thumbnailer(input_path)
-        except ThumbnailError as e:
-            logger.warning(
-                "Unable to generate a thumbnail for local media %s using a method of %s and type of %s: %s",
-                media_id,
-                t_method,
-                t_type,
-                e,
-            )
-            return None
-
-        with thumbnailer:
-            t_byte_source = await defer_to_thread(
-                self.hs.get_reactor(),
-                self._generate_thumbnail,
-                thumbnailer,
-                t_width,
-                t_height,
-                t_method,
-                t_type,
-            )
+            with thumbnailer:
+                t_byte_source = await defer_to_thread(
+                    self.hs.get_reactor(),
+                    self._generate_thumbnail,
+                    thumbnailer,
+                    t_width,
+                    t_height,
+                    t_method,
+                    t_type,
+                )
 
         if t_byte_source:
             try:
@@ -1179,33 +1237,32 @@ class MediaRepository:
         t_method: str,
         t_type: str,
     ) -> str | None:
-        input_path = await self.media_storage.ensure_media_is_in_local_cache(
+        async with self.media_storage.ensure_media_is_in_local_cache(
             FileInfo(server_name, file_id)
-        )
+        ) as input_path:
+            try:
+                thumbnailer = Thumbnailer(input_path)
+            except ThumbnailError as e:
+                logger.warning(
+                    "Unable to generate a thumbnail for remote media %s from %s using a method of %s and type of %s: %s",
+                    media_id,
+                    server_name,
+                    t_method,
+                    t_type,
+                    e,
+                )
+                return None
 
-        try:
-            thumbnailer = Thumbnailer(input_path)
-        except ThumbnailError as e:
-            logger.warning(
-                "Unable to generate a thumbnail for remote media %s from %s using a method of %s and type of %s: %s",
-                media_id,
-                server_name,
-                t_method,
-                t_type,
-                e,
-            )
-            return None
-
-        with thumbnailer:
-            t_byte_source = await defer_to_thread(
-                self.hs.get_reactor(),
-                self._generate_thumbnail,
-                thumbnailer,
-                t_width,
-                t_height,
-                t_method,
-                t_type,
-            )
+            with thumbnailer:
+                t_byte_source = await defer_to_thread(
+                    self.hs.get_reactor(),
+                    self._generate_thumbnail,
+                    thumbnailer,
+                    t_width,
+                    t_height,
+                    t_method,
+                    t_type,
+                )
 
         if t_byte_source:
             try:
@@ -1275,151 +1332,157 @@ class MediaRepository:
         if not requirements:
             return None
 
-        input_path = await self.media_storage.ensure_media_is_in_local_cache(
+        async with self.media_storage.ensure_media_is_in_local_cache(
             FileInfo(server_name, file_id, url_cache=url_cache)
-        )
-
-        try:
-            thumbnailer = Thumbnailer(input_path)
-        except ThumbnailError as e:
-            logger.warning(
-                "Unable to generate thumbnails for remote media %s from %s of type %s: %s",
-                media_id,
-                server_name,
-                media_type,
-                e,
-            )
-            return None
-
-        with thumbnailer:
-            m_width = thumbnailer.width
-            m_height = thumbnailer.height
-
-            if m_width * m_height >= self.max_image_pixels:
-                logger.info(
-                    "Image too large to thumbnail %r x %r > %r",
-                    m_width,
-                    m_height,
-                    self.max_image_pixels,
+        ) as input_path:
+            try:
+                thumbnailer = Thumbnailer(input_path)
+            except ThumbnailError as e:
+                logger.warning(
+                    "Unable to generate thumbnails for remote media %s from %s of type %s: %s",
+                    media_id,
+                    server_name,
+                    media_type,
+                    e,
                 )
                 return None
 
-            if thumbnailer.transpose_method is not None:
-                m_width, m_height = await defer_to_thread(
-                    self.hs.get_reactor(), thumbnailer.transpose
-                )
+            with thumbnailer:
+                m_width = thumbnailer.width
+                m_height = thumbnailer.height
 
-            # We deduplicate the thumbnail sizes by ignoring the cropped versions if
-            # they have the same dimensions of a scaled one.
-            thumbnails: dict[tuple[int, int, str], str] = {}
-            for requirement in requirements:
-                if requirement.method == "crop":
-                    thumbnails.setdefault(
-                        (requirement.width, requirement.height, requirement.media_type),
-                        requirement.method,
+                if m_width * m_height >= self.max_image_pixels:
+                    logger.info(
+                        "Image too large to thumbnail %r x %r > %r",
+                        m_width,
+                        m_height,
+                        self.max_image_pixels,
                     )
-                elif requirement.method == "scale":
-                    t_width, t_height = thumbnailer.aspect(
-                        requirement.width, requirement.height
-                    )
-                    t_width = min(m_width, t_width)
-                    t_height = min(m_height, t_height)
-                    thumbnails[(t_width, t_height, requirement.media_type)] = (
-                        requirement.method
+                    return None
+
+                if thumbnailer.transpose_method is not None:
+                    m_width, m_height = await defer_to_thread(
+                        self.hs.get_reactor(), thumbnailer.transpose
                     )
 
-            # Now we generate the thumbnails for each dimension, store it
-            for (t_width, t_height, t_type), t_method in thumbnails.items():
-                # Generate the thumbnail
-                if t_method == "crop":
-                    t_byte_source = await defer_to_thread(
-                        self.hs.get_reactor(),
-                        thumbnailer.crop,
-                        t_width,
-                        t_height,
-                        t_type,
+                # We deduplicate the thumbnail sizes by ignoring the cropped versions if
+                # they have the same dimensions of a scaled one.
+                thumbnails: dict[tuple[int, int, str], str] = {}
+                for requirement in requirements:
+                    if requirement.method == "crop":
+                        thumbnails.setdefault(
+                            (
+                                requirement.width,
+                                requirement.height,
+                                requirement.media_type,
+                            ),
+                            requirement.method,
+                        )
+                    elif requirement.method == "scale":
+                        t_width, t_height = thumbnailer.aspect(
+                            requirement.width, requirement.height
+                        )
+                        t_width = min(m_width, t_width)
+                        t_height = min(m_height, t_height)
+                        thumbnails[(t_width, t_height, requirement.media_type)] = (
+                            requirement.method
+                        )
+
+                # Now we generate the thumbnails for each dimension, store it
+                for (t_width, t_height, t_type), t_method in thumbnails.items():
+                    # Generate the thumbnail
+                    if t_method == "crop":
+                        t_byte_source = await defer_to_thread(
+                            self.hs.get_reactor(),
+                            thumbnailer.crop,
+                            t_width,
+                            t_height,
+                            t_type,
+                        )
+                    elif t_method == "scale":
+                        t_byte_source = await defer_to_thread(
+                            self.hs.get_reactor(),
+                            thumbnailer.scale,
+                            t_width,
+                            t_height,
+                            t_type,
+                        )
+                    else:
+                        logger.error("Unrecognized method: %r", t_method)
+                        continue
+
+                    if not t_byte_source:
+                        continue
+
+                    file_info = FileInfo(
+                        server_name=server_name,
+                        file_id=file_id,
+                        url_cache=url_cache,
+                        thumbnail=ThumbnailInfo(
+                            width=t_width,
+                            height=t_height,
+                            method=t_method,
+                            type=t_type,
+                            length=t_byte_source.tell(),
+                        ),
                     )
-                elif t_method == "scale":
-                    t_byte_source = await defer_to_thread(
-                        self.hs.get_reactor(),
-                        thumbnailer.scale,
-                        t_width,
-                        t_height,
-                        t_type,
-                    )
-                else:
-                    logger.error("Unrecognized method: %r", t_method)
-                    continue
 
-                if not t_byte_source:
-                    continue
-
-                file_info = FileInfo(
-                    server_name=server_name,
-                    file_id=file_id,
-                    url_cache=url_cache,
-                    thumbnail=ThumbnailInfo(
-                        width=t_width,
-                        height=t_height,
-                        method=t_method,
-                        type=t_type,
-                        length=t_byte_source.tell(),
-                    ),
-                )
-
-                async with self.media_storage.store_into_file(file_info) as (f, fname):
-                    try:
-                        await self.media_storage.write_to_file(t_byte_source, f)
-                    finally:
-                        t_byte_source.close()
-
-                    # We flush and close the file to ensure that the bytes have
-                    # been written before getting the size.
-                    f.flush()
-                    f.close()
-
-                    t_len = os.path.getsize(fname)
-
-                    # Write to database
-                    if server_name:
-                        # Multiple remote media download requests can race (when
-                        # using multiple media repos), so this may throw a violation
-                        # constraint exception. If it does we'll delete the newly
-                        # generated thumbnail from disk (as we're in the ctx
-                        # manager).
-                        #
-                        # However: we've already called `finish()` so we may have
-                        # also written to the storage providers. This is preferable
-                        # to the alternative where we call `finish()` *after* this,
-                        # where we could end up having an entry in the DB but fail
-                        # to write the files to the storage providers.
+                    async with self.media_storage.store_into_file(file_info) as (
+                        f,
+                        fname,
+                    ):
                         try:
-                            await self.store.store_remote_media_thumbnail(
-                                server_name,
-                                media_id,
-                                file_id,
-                                t_width,
-                                t_height,
-                                t_type,
-                                t_method,
-                                t_len,
-                            )
-                        except Exception as e:
-                            thumbnail_exists = (
-                                await self.store.get_remote_media_thumbnail(
+                            await self.media_storage.write_to_file(t_byte_source, f)
+                        finally:
+                            t_byte_source.close()
+
+                        # We flush and close the file to ensure that the bytes have
+                        # been written before getting the size.
+                        f.flush()
+                        f.close()
+
+                        t_len = os.path.getsize(fname)
+
+                        # Write to database
+                        if server_name:
+                            # Multiple remote media download requests can race (when
+                            # using multiple media repos), so this may throw a violation
+                            # constraint exception. If it does we'll delete the newly
+                            # generated thumbnail from disk (as we're in the ctx
+                            # manager).
+                            #
+                            # However: we've already called `finish()` so we may have
+                            # also written to the storage providers. This is preferable
+                            # to the alternative where we call `finish()` *after* this,
+                            # where we could end up having an entry in the DB but fail
+                            # to write the files to the storage providers.
+                            try:
+                                await self.store.store_remote_media_thumbnail(
                                     server_name,
                                     media_id,
+                                    file_id,
                                     t_width,
                                     t_height,
                                     t_type,
+                                    t_method,
+                                    t_len,
                                 )
+                            except Exception as e:
+                                thumbnail_exists = (
+                                    await self.store.get_remote_media_thumbnail(
+                                        server_name,
+                                        media_id,
+                                        t_width,
+                                        t_height,
+                                        t_type,
+                                    )
+                                )
+                                if not thumbnail_exists:
+                                    raise e
+                        else:
+                            await self.store.store_local_thumbnail(
+                                media_id, t_width, t_height, t_type, t_method, t_len
                             )
-                            if not thumbnail_exists:
-                                raise e
-                    else:
-                        await self.store.store_local_thumbnail(
-                            media_id, t_width, t_height, t_type, t_method, t_len
-                        )
 
         return {"width": m_width, "height": m_height}
 

@@ -73,33 +73,6 @@ Response:
 }
 ```
 
-## Listing all quarantined media
-
-This API returns a list of all quarantined media on the server. It is paginated, and can be scoped to either local or
-remote media. Note that the pagination values are also scoped to the request parameters - changing them but keeping the
-same pagination values will result in unexpected results.
-
-Request:
-```http
-GET /_synapse/admin/v1/media/quarantined?from=0&limit=100&kind=local
-```
-
-`from` and `limit` are optional parameters, and default to `0` and `100` respectively. They are the row index and number
-of rows to return - they are not timestamps.
-
-`kind` *MUST* either be `local` or `remote`.
-
-The API returns a JSON body containing MXC URIs for the quarantined media, like the following:
-
-```json
-{
-  "media": [
-    "mxc://localhost/xwvutsrqponmlkjihgfedcba",
-    "mxc://localhost/abcdefghijklmnopqrstuvwx"
-  ]
-}
-```
-
 # Quarantine media
 
 Quarantining media means that it is marked as inaccessible by users. It applies
@@ -114,6 +87,20 @@ is quarantined, Synapse will:
  - Quarantine any future media.
  - Quarantine any existing cached remote media.
  - Quarantine any future remote media.
+
+## Downloading quarantined media
+
+Normally, when media is quarantined, it will return a 404 error when downloaded.
+Admins can bypass this by adding `?admin_unsafely_bypass_quarantine=true`
+to the [normal download URL](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1mediadownloadservernamemediaid).
+
+Bypassing the quarantine check is not recommended. Media is typically quarantined
+to prevent harmful content from being served to users, which includes admins. Only
+set the bypass parameter if you intentionally want to access potentially harmful
+content.
+
+Non-admin users cannot bypass quarantine checks, even when specifying the above
+query parameter.
 
 ## Quarantining media by ID
 

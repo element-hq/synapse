@@ -1,0 +1,1 @@
+Replace deprecated usage of PyGitHub's `GitRelease.title` with `.name` in release script.

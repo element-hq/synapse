@@ -31,7 +31,7 @@ DISTS = (
     "debian:sid",  # (rolling distro, no EOL)
     "ubuntu:jammy",  # 22.04 LTS (EOL 2027-04) (our EOL forced by Python 3.10 is 2026-10-04)
     "ubuntu:noble",  # 24.04 LTS (EOL 2029-06)
-    "ubuntu:plucky",  # 25.04 (EOL 2026-01)
+    "ubuntu:questing",  # 25.10 (EOL 2026-07)
     "debian:trixie",  # (EOL not specified yet)
 )
 
@@ -94,6 +94,7 @@ class Builder:
         build_args = (
             (
                 "docker",
+                "buildx",
                 "build",
                 "--tag",
                 "dh-venv-builder:" + tag,
