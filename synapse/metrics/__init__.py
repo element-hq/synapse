@@ -267,7 +267,7 @@ MetricsEntry = TypeVar("MetricsEntry")
 class _InFlightGaugeRuntime(Collector):
     """
     Runtime class for InFlightGauge. Contains all actual logic.
-    Does not inherit from Generic to avoid MRO conflicts.
+    Does not inherit from Generic to avoid method resolution order (MRO) conflicts.
 
     Tracks number of things (e.g. requests, Measure blocks, etc) in flight
     at any given time.
