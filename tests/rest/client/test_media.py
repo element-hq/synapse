@@ -77,9 +77,9 @@ from tests.test_utils import SMALL_PNG
 from tests.unittest import override_config
 
 try:
-    import beauitfulsoup4
+    import bs4
 except ImportError:
-    beauitfulsoup4 = None  # type: ignore[assignment]
+    bs4 = None  # type: ignore[assignment]
 
 
 class MediaDomainBlockingTests(unittest.HomeserverTestCase):
@@ -188,7 +188,7 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
 
 
 class URLPreviewTests(unittest.HomeserverTestCase):
-    if not beauitfulsoup4:
+    if not bs4:
         skip = "url preview feature requires beauitfulsoup4"
 
     servlets = [media.register_servlets]

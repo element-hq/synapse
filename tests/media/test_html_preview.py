@@ -28,14 +28,14 @@ from synapse.media.preview_html import (
 from tests import unittest
 
 try:
-    import beauitfulsoup4
+    import bs4
 except ImportError:
-    beauitfulsoup4 = None  # type: ignore[assignment]
+    bs4 = None  # type: ignore[assignment]
 
 
 class SummarizeTestCase(unittest.TestCase):
-    if not beauitfulsoup4:
-        skip = "url preview feature requires beauitfulsoup4"
+    if not bs4:
+        skip = "url preview feature requires beautifulsoup4"
 
     def test_long_summarize(self) -> None:
         example_paras = [
@@ -152,8 +152,8 @@ class SummarizeTestCase(unittest.TestCase):
 
 
 class OpenGraphFromHtmlTestCase(unittest.TestCase):
-    if not beauitfulsoup4:
-        skip = "url preview feature requires beauitfulsoup4"
+    if not bs4:
+        skip = "url preview feature requires beautifulsoup4"
 
     def test_simple(self) -> None:
         html = b"""
