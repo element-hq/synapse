@@ -74,6 +74,23 @@ sent_edus_by_type = Counter(
 # If the retry interval is larger than this then we enter "catchup" mode
 CATCHUP_RETRY_INTERVAL = 60 * 60 * 1000
 
+# Maximum number of sticky events to put into one catch-up transaction
+# A limit of 10 is equal with the limit on the number of forward extremities,
+# so keeps it somewhat balanced.
+CATCHUP_MAX_STICKY_EVENTS = 10
+
+# Maximum number of rooms' worth of sticky events to send in a
+# catch-up transaction.
+# Normally (for non-sticky events) we would only send one room's worth of
+# events in a catch-up transaction, but that transaction would guarantee
+# that we made progress on that room.
+# For sticky events, since we must send them in `stream_ordering` order,
+# it is easy to see how it will be painful to have to only send sticky
+# events from one room, since they could be interleaved across multiple rooms
+# and when we send a sticky event, we still may have more events to send
+# for that room afterwards (unlike sending normal events during catch-up).
+CATCHUP_MAX_STICKY_EVENT_ROOMS = 5
+
 # Limit how many presence states we add to each presence EDU, to ensure that
 # they are bounded in size.
 MAX_PRESENCE_STATES_PER_EDU = 50
@@ -112,6 +129,7 @@ class PerDestinationQueue:
         self._instance_name = hs.get_instance_name()
         self._federation_shard_config = hs.config.worker.federation_shard_config
         self._state = hs.get_state_handler()
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
         self._should_send_on_this_instance = True
         if not self._federation_shard_config.should_handle(
@@ -489,7 +507,7 @@ class PerDestinationQueue:
                 most-recently successfully-transmitted event to the destination
 
         Preconditions:
-        - We are in catch-up mode
+            - We are in catch-up mode
 
         Note:
             We build transactions with events from only one room, as it's likely
@@ -497,6 +515,10 @@ class PerDestinationQueue:
             take some time. It's better to give it small amounts of work
             rather than risk the request timing out and repeatedly being
             retried, and not making any progress.
+
+            As an exception to this, when we are sending sticky events,
+            we may combine them across multiple rooms so that we can make
+            progress at a reasonable rate.
         """
 
         # This gives the latest PDU *originating from us* to be sent in a catch-uppable room
@@ -520,6 +542,87 @@ class PerDestinationQueue:
                 f"No event retrieved when we asked for {event_id}. "
                 "This should not happen."
             )
+        # event is from DB so should have this
+        assert catchup_pdu.internal_metadata.stream_ordering is not None
+
+        sticky_events: list[EventBase] = []
+        if self._msc4354_enabled:
+            # When sticky events are enabled, we need to check the gap
+            # `last_successful_stream_ordering < ... <= catchup_pdu.stream_ordering`
+            # for any sticky events that are due to go out to this destination.
+            #
+            # We must send them now, because once we advance
+            # `last_successful_stream_ordering`, we won't have any
+            # persistent way to remember that we didn't send the
+            # sticky events out.
+            # As a reminder: sticky events are supposed to be *reliably*
+            # delivered (as much as possible) until their expiry, so it's
+            # not acceptable for us to skip over them during catch-up.
+            #
+            # If we have too many sticky events to send, we will wind up
+            # NOT sending `catchup_pdu` out to the destination at all,
+            # but we also won't advance our `last_successful_stream_ordering`
+            # pointer past `catchup_pdu` either.
+
+            sticky_event_ids = (
+                await self._store.get_sticky_event_ids_sent_by_self_for_destination(
+                    self._destination,
+                    from_exc=last_successful_stream_ordering,
+                    to_inc=catchup_pdu.internal_metadata.stream_ordering,
+                    # + 1 so we can detect if we hit a limit
+                    limit=CATCHUP_MAX_STICKY_EVENTS + 1,
+                )
+            )
+
+            # Did we hit a limit on how many sticky events we can pull out?
+            # If so, then it's not actually safe to advance to `catchup_pdu`
+            # and so we won't send it out in a moment.
+            sticky_event_limit_hit = len(sticky_event_ids) > CATCHUP_MAX_STICKY_EVENTS
+            if sticky_event_limit_hit:
+                # this was just our dummy marker
+                sticky_event_ids.pop()
+
+            sticky_events = await self._store.get_events_as_list(sticky_event_ids)
+
+            if limit_rooms_in_event_sequence(
+                events_mut=sticky_events, room_limit=CATCHUP_MAX_STICKY_EVENT_ROOMS
+            ):
+                # We removed some events in order to avoid sending events to too many rooms
+                sticky_event_limit_hit = True
+
+            # Hold on to the last sticky event as we may need its stream_ordering
+            last_unfiltered_sticky_event = sticky_events[-1] if sticky_events else None
+
+            # This filter COULD pessimistically mean that we wind up sending 0 sticky events.
+            # In that case we should just advance and persist our position
+            # and go for another go-around.
+            sticky_events = await filter_events_for_server(
+                self._storage_controllers,
+                self._destination,
+                self.server_name,
+                sticky_events,
+                redact=False,
+                filter_out_erased_senders=True,
+                filter_out_remote_partial_state_events=True,
+            )
+
+            if sticky_event_limit_hit:
+                # can't this this without having too many sticky events
+                # so there must be at least one
+                assert last_unfiltered_sticky_event is not None
+                # pulled from DB
+                assert (
+                    last_unfiltered_sticky_event.internal_metadata.stream_ordering
+                    is not None
+                )
+
+                # We can't send the `catchup_pdu` because doing so
+                # would advance our `last_successful_stream_ordering`
+                # in a way that causes us to skip over some sticky events.
+                return _CatchUpTransaction(
+                    pdus_to_send=sticky_events,
+                    new_last_successful_stream_ordering=last_unfiltered_sticky_event.internal_metadata.stream_ordering,
+                )
 
         # The PDU from the DB will be the newest PDU in the room from
         # *this server* that we tried---but were unable---to send to the remote.
@@ -593,11 +696,8 @@ class PerDestinationQueue:
             "Catching up room to %s: %r", self._destination, catchup_pdu.room_id
         )
 
-        # We pulled this from the DB, so it'll be non-null
-        assert catchup_pdu.internal_metadata.stream_ordering
-
         return _CatchUpTransaction(
-            pdus_to_send=room_catchup_pdus,
+            pdus_to_send=sticky_events + room_catchup_pdus,
             # Note that we mark the last successful stream ordering as that
             # from the *original* PDU, rather than the PDU(s) we actually
             # send. This is because we use it to mark our position in the
@@ -917,3 +1017,26 @@ class _TransactionQueueManager:
             await self.queue._store.set_destination_last_successful_stream_ordering(
                 self.queue._destination, self._last_stream_ordering
             )
+
+
+def limit_rooms_in_event_sequence(events_mut: list[EventBase], room_limit: int) -> bool:
+    """
+    Given a list containing an ordered sequence of events,
+    mutates it to remove events in order to satisfy the limit on the number of rooms.
+
+    Does NOT leave a gap, instead all events from the first one violating the limit,
+    until the end of the list, will be removed.#
+
+    Returns:
+        True if and only if the limit was hit and the list was modified.
+    """
+
+    seen_rooms = set()
+
+    for idx, event in enumerate(events_mut):
+        seen_rooms.add(event.room_id)
+        if len(seen_rooms) > room_limit:
+            del events_mut[idx:]
+            return True
+
+    return False

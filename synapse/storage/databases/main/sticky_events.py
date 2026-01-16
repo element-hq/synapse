@@ -219,6 +219,63 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             (now,),
         )
 
+    async def get_sticky_event_ids_sent_by_self_for_destination(
+        self, destination: str, *, from_exc: int, to_inc: int, limit: int
+    ) -> list[str]:
+        """Get the event IDs of unexpired sticky events which have been sent by users on this homeserver
+        and are in a room that we send events from to the destination.
+
+        Used when sending sticky events eagerly to newly joined servers, or when catching up over federation.
+
+        Args:
+            room_id: The room to fetch sticky events in.
+            from_stream_pos: The stream position to return events from. May be 0 for newly joined servers.
+                Exclusive.
+        Returns:
+            A list of event IDs, which may be empty.
+
+            The event IDs will be sorted in event stream order.
+        """
+        return await self.db_pool.runInteraction(
+            "get_sticky_event_ids_sent_by_self_for_destination",
+            self._get_sticky_event_ids_sent_by_self_for_destination_txn,
+            destination,
+            from_exc=from_exc,
+            to_inc=to_inc,
+            limit=limit,
+        )
+
+    def _get_sticky_event_ids_sent_by_self_for_destination_txn(
+        self,
+        txn: LoggingTransaction,
+        destination: str,
+        *,
+        from_exc: int,
+        to_inc: int,
+        limit: int,
+    ) -> list[str]:
+        now_ms = self.clock.time_msec()
+        sender_is_mine_like = "%:" + self.hs.hostname
+
+        txn.execute(
+            """
+            SELECT event_id
+            FROM destination_rooms
+            INNER JOIN sticky_events USING (room_id)
+            WHERE
+                destination = ?
+                AND NOT soft_failed
+                AND ? < expires_at
+                AND sender LIKE ?
+                AND ? < event_stream_ordering
+                AND event_stream_ordering <= ?
+            ORDER BY event_stream_ordering
+            LIMIT ?
+            """,
+            (destination, now_ms, sender_is_mine_like, from_exc, to_inc, limit),
+        )
+        return [cast(str, event_id) for (event_id,) in txn]
+
     def _run_background_cleanup(self) -> Deferred:
         return self.hs.run_as_background_process(
             "delete_expired_sticky_events",
