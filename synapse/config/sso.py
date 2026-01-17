@@ -44,15 +44,18 @@ class SsoAttributeRequirement:
 
     attribute: str
     # If neither `value` nor `one_of` is given, the attribute must simply exist.
-    value: str | None = None
-    one_of: list[str] | None = None
+    value: str | bool | None = None
+    one_of: list[str | bool] | None = None
 
     JSON_SCHEMA = {
         "type": "object",
         "properties": {
             "attribute": {"type": "string"},
-            "value": {"type": "string"},
-            "one_of": {"type": "array", "items": {"type": "string"}},
+            "value": {"oneOf": [{"type": "string"}, {"type": "boolean"}]},
+            "one_of": {
+                "type": "array",
+                "items": {"oneOf": [{"type": "string"}, {"type": "boolean"}]},
+            },
         },
         "required": ["attribute"],
     }

@@ -1417,6 +1417,66 @@ class OidcHandlerTestCase(HomeserverTestCase):
         {
             "oidc_config": {
                 **DEFAULT_CONFIG,
+                "attribute_requirements": [{"attribute": "verified", "value": True}],
+            }
+        }
+    )
+    def test_attribute_requirements_boolean(self) -> None:
+        """The required boolean attributes must be met from the OIDC userinfo response."""
+        # userinfo with incorrect `verified` value should fail (according to
+        # `attribute_requirements`)
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+            "verified": False,
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+        self.complete_sso_login.assert_not_called()
+
+        # userinfo with missing "verified" attribute should fail.
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+        self.complete_sso_login.assert_not_called()
+
+        # userinfo with string attribute should fail.
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+            "verified": "true",
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+        self.complete_sso_login.assert_not_called()
+
+        # userinfo with "verified": true attribute should succeed.
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+            "verified": True,
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+
+        # check that the auth handler got called as expected
+        self.complete_sso_login.assert_called_once_with(
+            "@tester:test",
+            self.provider.idp_id,
+            request,
+            ANY,
+            None,
+            new_user=True,
+            auth_provider_session_id=None,
+        )
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
                 "attribute_requirements": [{"attribute": "test", "value": "foobar"}],
             }
         }

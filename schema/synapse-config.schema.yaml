@@ -3986,13 +3986,13 @@ properties:
               type: string
               description: SAML attribute for which to allow logins.
             value:
-              type: string
+              type: ["boolean", "string"]
               description: Value the SAML attribute must match.
             one_of:
               type: array
-              description: List of values the SAML attribute must all match.
+              description: List of values, one of which the claim must match
               items:
-                type: string
+                type: ["boolean", "string"]
           required:
             - attribute
       idp_entityid:
@@ -4424,6 +4424,31 @@ properties:
                 attributes to send back to the client during login. Note that
                 these are non-standard and clients will ignore them without
                 modifications.
+        attribute_requirements:
+          type: array
+          description: >-
+            It is possible to configure Synapse to only allow logins if OIDC
+            claims match particular values. The requirements can be listed under
+            `attribute_requirements` as shown in the example. All of the listed
+            attributes must match for the login to be permitted. Values can be
+            specified in a `one_of` list to allow multiple values for a claim.
+          items:
+            type: object
+            description: Item allowing a specific OIDC claim
+            properties:
+              attribute:
+                type: string
+                description: OIDC claim for which to allow logins.
+              value:
+                type: ["boolean", "string"]
+                description: Value the claim must match.
+              one_of:
+                type: array
+                description: List of values, one of which the claim must match
+                items:
+                  type: ["boolean", "string"]
+            required:
+              - attribute
         backchannel_logout_enabled:
           type: boolean
           description: >-

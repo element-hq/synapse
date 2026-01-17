@@ -3459,9 +3459,9 @@ This setting has the following sub-options:
 
   * `attribute` (string): SAML attribute for which to allow logins.
 
-  * `value` (string): Value the SAML attribute must match.
+  * `value` (boolean|string): Value the SAML attribute must match.
 
-  * `one_of` (array): List of values the SAML attribute must all match.
+  * `one_of` (array): List of values, one of which the claim must match
 
 * `idp_entityid` (string|null): If the metadata XML contains multiple IdP entities then the `idp_entityid` option must be set to the entity to redirect users to. Most deployments only have a single IdP entity and so should omit this option. Defaults to `null`.
 
@@ -3677,6 +3677,16 @@ Options for each entry include:
     * `email_template`: Jinja2 template for the email address of the user. If unset, no email address will be added to the account.
 
     * `extra_attributes`: a map of Jinja2 templates for extra attributes to send back to the client during login. Note that these are non-standard and clients will ignore them without modifications.
+
+* `attribute_requirements` (array): It is possible to configure Synapse to only allow logins if OIDC claims match particular values. The requirements can be listed under `attribute_requirements` as shown in the example. All of the listed attributes must match for the login to be permitted. Values can be specified in a `one_of` list to allow multiple values for a claim.
+
+  Options for each entry include:
+
+  * `attribute` (string): OIDC claim for which to allow logins.
+
+  * `value` (boolean|string): Value the claim must match.
+
+  * `one_of` (array): List of values, one of which the claim must match
 
 * `backchannel_logout_enabled` (boolean): Set to `true` to process OIDC Back-Channel Logout notifications. Those notifications are expected to be received on `/_synapse/client/oidc/backchannel_logout`. Defaults to `false`.
 
