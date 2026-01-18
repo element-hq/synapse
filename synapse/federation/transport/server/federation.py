@@ -699,7 +699,7 @@ class FederationVersionServlet(BaseFederationServlet):
             200,
             {
                 "server": {
-                    "name": "Synapse",
+                    "name": "Starnapse",
                     "version": SYNAPSE_VERSION,
                 }
             },

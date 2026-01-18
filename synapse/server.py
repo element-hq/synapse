@@ -349,7 +349,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._instance_id = random_string(5)
         self._instance_name = config.worker.instance_name
 
-        self.version_string = f"Synapse/{SYNAPSE_VERSION}"
+        self.version_string = f"Starnapse/{SYNAPSE_VERSION}"
 
         self.datastores: Databases | None = None
 
