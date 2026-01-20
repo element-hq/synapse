@@ -1,1 +1,0 @@
-Fix `InFlightGauge` typing to allow upgrading to `prometheus_client` 0.24.
