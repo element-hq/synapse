@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-da313e20.js";
+            window.path_to_searchindex_js = "searchindex-8a203ec6.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -4965,7 +4965,7 @@ For more details, see the <a href="#using-a-forward-proxy-with-synapse">forward 
 </code></pre>
 <hr>
 <h3 id="limit_remote_rooms"><a class="header" href="#limit_remote_rooms"><code>limit_remote_rooms</code></a></h3>
-<p><em>(object)</em> When this option is enabled, the room “complexity” will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. Room complexity is an arbitrary measure based on factors such as the number of users in the room.</p>
+<p><em>(object)</em> When this option is enabled, the room “complexity” will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. In Synapse, the complexity of a room is measured by the number of current state events in a room, divided by 500. “Current” here means the latest state, i.e. if a user joins, then leaves, then joins, that will count as 1 current <code>m.room.member</code> state event.</p>
 <p>This setting has the following sub-options:</p>
 <ul>
 <li>

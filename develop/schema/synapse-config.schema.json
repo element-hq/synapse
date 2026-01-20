@@ -992,7 +992,7 @@
     },
     "limit_remote_rooms": {
       "type": "object",
-      "description": "When this option is enabled, the room \"complexity\" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. Room complexity is an arbitrary measure based on factors such as the number of users in the room.",
+      "description": "When this option is enabled, the room \"complexity\" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. In Synapse, the complexity of a room is measured by the number of current state events in a room, divided by 500. \"Current\" here means the latest state, i.e. if a user joins, then leaves, then joins, that will count as 1 current `m.room.member` state event.",
       "properties": {
         "enabled": {
           "type": "boolean",
