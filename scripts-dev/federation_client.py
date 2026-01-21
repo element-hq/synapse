@@ -145,7 +145,7 @@ def request(
     print("Requesting %s" % dest, file=sys.stderr)
 
     s = requests.Session()
-    s.mount("matrix-federation://", MatrixConnectionAdapter())
+    s.mount("matrix-federation://", MatrixConnectionAdapter(verify_tls=verify_tls))
 
     headers: dict[str, str] = {
         "Authorization": authorization_headers[0],
@@ -267,6 +267,17 @@ def read_args_from_config(args: argparse.Namespace) -> None:
 
 
 class MatrixConnectionAdapter(HTTPAdapter):
+    """
+    A Matrix federation-aware HTTP Adapter.
+    """
+
+    verify_tls: bool
+    """whether to verify the remote server's TLS certificate."""
+
+    def __init__(self, verify_tls: bool = True) -> None:
+        self.verify_tls = verify_tls
+        super().__init__()
+
     def send(
         self,
         request: PreparedRequest,
@@ -280,7 +291,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
         assert isinstance(request.url, str)
         parsed = urlparse.urlsplit(request.url)
         server_name = parsed.netloc
-        well_known = self._get_well_known(parsed.netloc)
+        well_known = self._get_well_known(parsed.netloc, verify_tls=self.verify_tls)
 
         if well_known:
             server_name = well_known
@@ -318,6 +329,21 @@ class MatrixConnectionAdapter(HTTPAdapter):
         print(
             f"Connecting to {host}:{port} with SNI {ssl_server_name}", file=sys.stderr
         )
+
+        if proxies:
+            scheme = parsed.scheme
+            if isinstance(scheme, bytes):
+                scheme = scheme.decode("utf-8")
+
+            proxy_for_scheme = proxies.get(scheme)
+            if proxy_for_scheme:
+                return self.proxy_manager_for(proxy_for_scheme).connection_from_host(
+                    host,
+                    port=port,
+                    scheme="https",
+                    pool_kwargs={"server_hostname": ssl_server_name},
+                )
+
         return self.poolmanager.connection_from_host(
             host,
             port=port,
@@ -368,7 +394,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
             return server_name, 8448, server_name
 
     @staticmethod
-    def _get_well_known(server_name: str) -> str | None:
+    def _get_well_known(server_name: str, verify_tls: bool = True) -> str | None:
         if ":" in server_name:
             # explicit port, or ipv6 literal. Either way, no .well-known
             return None
@@ -379,7 +405,7 @@ class MatrixConnectionAdapter(HTTPAdapter):
         print(f"fetching {uri}", file=sys.stderr)
 
         try:
-            resp = requests.get(uri)
+            resp = requests.get(uri, verify=verify_tls)
             if resp.status_code != 200:
                 print("%s gave %i" % (uri, resp.status_code), file=sys.stderr)
                 return None

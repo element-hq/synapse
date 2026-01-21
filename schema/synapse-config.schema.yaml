@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.144/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.146/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -1113,8 +1113,11 @@ properties:
       When this option is enabled, the room "complexity" will be checked before
       a user joins a new remote room. If it is above the complexity limit, the
       server will disallow joining, or will instantly leave. This is useful for
-      homeservers that are resource-constrained. Room complexity is an arbitrary
-      measure based on factors such as the number of users in the room.
+      homeservers that are resource-constrained. In Synapse, the complexity of a
+      room is measured by the number of current state events in a room, divided
+      by 500. "Current" here means the latest state, i.e. if a user joins, then
+      leaves, then joins, that will count as 1 current `m.room.member` state
+      event.
     properties:
       enabled:
         type: boolean
@@ -2274,6 +2277,16 @@ properties:
     examples:
       - per_second: 1.0
         burst_count: 5.0
+  rc_user_directory:
+    $ref: "#/$defs/rc"
+    description: >-
+      This option allows admins to ratelimit searches in the user directory.
+
+
+      _Added in Synapse 1.145.0._
+    default:
+      per_second: 0.016
+      burst_count: 200.0
   federation_rr_transactions_per_room_per_second:
     type: integer
     description: >-
@@ -2335,6 +2348,19 @@ properties:
     description: >-
       Enable the media store service in the Synapse master. Set to false if you
       are using a separate media store worker.
+    default: true
+    examples:
+      - false
+  enable_local_media_storage:
+    type: boolean
+    description: >-
+      Enable the local on-disk media storage provider. When disabled, media is
+      stored only in configured `media_storage_providers` and temporary files are
+      used for processing.
+      
+      **Warning:** If this option is set to `false` and no `media_storage_providers`
+      are configured, all media requests will return 404 errors as there will be
+      no storage backend available.
     default: true
     examples:
       - false

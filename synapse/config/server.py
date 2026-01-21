@@ -923,26 +923,21 @@ class ServerConfig(Config):
 
     def generate_config_section(
         self,
+        *,
         config_dir_path: str,
         data_dir_path: str,
         server_name: str,
-        open_private_ports: bool,
-        listeners: list[dict] | None,
+        open_private_ports: bool = False,
+        listeners: list[dict] | None = None,
         **kwargs: Any,
     ) -> str:
-        _, bind_port = parse_and_validate_server_name(server_name)
-        if bind_port is not None:
-            unsecure_port = bind_port - 400
-        else:
-            bind_port = 8448
-            unsecure_port = 8008
-
         pid_file = os.path.join(data_dir_path, "homeserver.pid")
 
-        secure_listeners = []
-        unsecure_listeners = []
+        http_bindings = "[]"
         private_addresses = ["::1", "127.0.0.1"]
         if listeners:
+            secure_listeners = []
+            unsecure_listeners = []
             for listener in listeners:
                 if listener["tls"]:
                     secure_listeners.append(listener)
@@ -957,43 +952,17 @@ class ServerConfig(Config):
 
                     unsecure_listeners.append(listener)
 
-            secure_http_bindings = indent(
-                yaml.dump(secure_listeners), " " * 10
+            # `lstrip` is used because the first line already has whitespace in the
+            # template below
+            http_bindings = indent(
+                yaml.dump(secure_listeners + unsecure_listeners), " " * 10
             ).lstrip()
-
-            unsecure_http_bindings = indent(
-                yaml.dump(unsecure_listeners), " " * 10
-            ).lstrip()
-
-        if not unsecure_listeners:
-            unsecure_http_bindings = """- port: %(unsecure_port)s
-            tls: false
-            type: http
-            x_forwarded: true""" % locals()
-
-            if not open_private_ports:
-                unsecure_http_bindings += (
-                    "\n            bind_addresses: ['::1', '127.0.0.1']"
-                )
-
-            unsecure_http_bindings += """
-
-            resources:
-              - names: [client, federation]
-                compress: false"""
-
-            if listeners:
-                unsecure_http_bindings = ""
-
-        if not secure_listeners:
-            secure_http_bindings = ""
 
         return """\
         server_name: "%(server_name)s"
         pid_file: %(pid_file)s
         listeners:
-          %(secure_http_bindings)s
-          %(unsecure_http_bindings)s
+          %(http_bindings)s
         """ % locals()
 
     def read_arguments(self, args: argparse.Namespace) -> None:

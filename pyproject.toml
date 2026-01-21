@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.144.0"
+version = "1.146.0rc1"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -109,7 +109,12 @@ dependencies = [
     "pyrsistent>=0.18.0",  # via jsonschema
     "requests>=2.16.0", # 2.16.0+ no longer vendors urllib3, avoiding Python 3.10+ incompatibility
     "urllib3>=1.26.5", # via treq; 1.26.5 fixes Python 3.10+ collections.abc compatibility
-    "zope-interface>=6.2", # via twisted
+    # 5.2 is the current version in Debian oldstable. If we don't care to support that, then 5.4 is
+    # the minimum version from Ubuntu 22.04 and RHEL 9. (as of 2025-12)
+    # When bumping this version to 6.2 or above, refer to https://github.com/element-hq/synapse/pull/19274
+    # for details of Synapse improvements that may be unlocked. Particularly around the use of `|`
+    # syntax with zope interface types.
+    "zope-interface>=5.2", # via twisted
 ]
 
 [project.optional-dependencies]
@@ -383,15 +388,10 @@ select = [
     "G",
     # pyupgrade
     "UP006",
-    "UP007",
-    "UP045",
 ]
 extend-safe-fixes = [
     # pyupgrade rules compatible with Python >= 3.9
     "UP006",
-    "UP007",
-    # pyupgrade rules compatible with Python >= 3.10
-    "UP045",
     # Allow ruff to automatically fix trailing spaces within a multi-line string/comment.
     "W293"
 ]
@@ -415,28 +415,32 @@ line-ending = "auto"
 manifest-path = "rust/Cargo.toml"
 module-name = "synapse.synapse_rust"
 python-source = "."
-sdist-include = [
-    "AUTHORS.rst",
-    "book.toml",
-    "changelog.d",
-    "CHANGES.md",
-    "CONTRIBUTING.md",
-    "demo",
-    "docs",
-    "INSTALL.md",
-    "mypy.ini",
-    "scripts-dev",
-    "synmark",
-    "sytest-blacklist",
-    "tests",
-    "UPGRADE.rst",
-    "Cargo.toml",
-    "Cargo.lock",
-    "rust/Cargo.toml",
-    "rust/build.rs",
-    "rust/src/**",
+include = [
+    { path = "AUTHORS.rst", format = "sdist" },
+    { path = "book.toml", format = "sdist" },
+    { path = "changelog.d/**/*", format = "sdist" },
+    { path = "CHANGES.md", format = "sdist" },
+    { path = "CONTRIBUTING.md", format = "sdist" },
+    { path = "demo/**/*", format = "sdist" },
+    { path = "docs/**/*", format = "sdist" },
+    { path = "INSTALL.md", format = "sdist" },
+    { path = "LICENSE-AGPL-3.0", format = "sdist" },
+    { path = "LICENSE-COMMERCIAL", format = "sdist" },
+    { path = "mypy.ini", format = "sdist" },
+    { path = "scripts-dev/**/*", format = "sdist" },
+    { path = "synmark/**/*", format = "sdist" },
+    { path = "sytest-blacklist", format = "sdist" },
+    { path = "tests/**/*", format = "sdist" },
+    { path = "UPGRADE.rst", format = "sdist" },
+    { path = "Cargo.toml", format = "sdist" },
+    { path = "Cargo.lock", format = "sdist" },
+    { path = "rust/Cargo.toml", format = "sdist" },
+    { path = "rust/build.rs", format = "sdist" },
+    { path = "rust/src/**", format = "sdist" },
 ]
-sdist-exclude = ["synapse/*.so"]
+exclude = [
+    { path = "synapse/*.so", format = "sdist" },
+]
 
 [build-system]
 # The upper bounds here are defensive, intended to prevent situations like
@@ -471,9 +475,6 @@ skip = "cp3??t-* *i686* *macosx*"
 enable = "pypy"
 
 # We need a rust compiler.
-#
-# We temporarily pin Rust to 1.82.0 to work around
-# https://github.com/element-hq/synapse/issues/17988
 before-all =  "sh .ci/before_build_wheel.sh"
 environment= { PATH = "$PATH:$HOME/.cargo/bin" }
 

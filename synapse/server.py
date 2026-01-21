@@ -34,6 +34,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Optional,
     TypeVar,
     cast,
 )
@@ -146,8 +147,10 @@ from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     all_later_gauges_to_clean_up_on_shutdown,
     register_threadpool,
+    synapse_server_name_info,
 )
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
@@ -320,7 +323,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self,
         hostname: str,
         config: HomeServerConfig,
-        reactor: ISynapseReactor | None = None,
+        reactor: Optional[ISynapseReactor] = None,
     ):
         """
         Args:
@@ -353,12 +356,15 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._module_web_resources_consumed = False
 
         # This attribute is set by the free function `refresh_certificate`.
-        self.tls_server_context_factory: IOpenSSLContextFactory | None = None
+        self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
         self._is_shutdown = False
         self._async_shutdown_handlers: list[ShutdownInfo] = []
         self._sync_shutdown_handlers: list[ShutdownInfo] = []
         self._background_processes: set[defer.Deferred[Any | None]] = set()
+
+        # For every server we spawn in the process, track it in the metrics
+        synapse_server_name_info.labels(**{SERVER_NAME_LABEL: self.hostname}).set(1)
 
     def run_as_background_process(
         self,
