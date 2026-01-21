@@ -27,6 +27,8 @@ import platform
 import threading
 from importlib import metadata
 from typing import (
+    TYPE_CHECKING,
+    Any,
     Callable,
     Generic,
     Iterable,
@@ -262,8 +264,12 @@ shutdown.
 MetricsEntry = TypeVar("MetricsEntry")
 
 
-class InFlightGauge(Generic[MetricsEntry], Collector):
-    """Tracks number of things (e.g. requests, Measure blocks, etc) in flight
+class _InFlightGaugeRuntime(Collector):
+    """
+    Runtime class for InFlightGauge. Contains all actual logic.
+    Does not inherit from Generic to avoid method resolution order (MRO) conflicts.
+
+    Tracks number of things (e.g. requests, Measure blocks, etc) in flight
     at any given time.
 
     Each InFlightGauge will create a metric called `<name>_total` that counts
@@ -292,16 +298,20 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
 
         # Create a class which have the sub_metrics values as attributes, which
         # default to 0 on initialization. Used to pass to registered callbacks.
-        self._metrics_class: type[MetricsEntry] = attr.make_class(
+        self._metrics_class = attr.make_class(
             "_MetricsEntry",
             attrs={x: attr.ib(default=0) for x in sub_metrics},
             slots=True,
         )
 
         # Counts number of in flight blocks for a given set of label values
-        self._registrations: dict[
-            tuple[str, ...], set[Callable[[MetricsEntry], None]]
-        ] = {}
+        # `Callable` should be of type `Callable[[MetricsEntry], None]`, but
+        # `MetricsEntry` has no meaning in this context without the higher level
+        # `InFlightGauge` typing information.
+        # Instead, the typing is enforced by having `_registrations` be private and all
+        # accessor functions have proper `Callable[[MetricsEntry], None]` type
+        # annotations.
+        self._registrations: dict[tuple[str, ...], set[Callable[[Any], None]]] = {}
 
         # Protects access to _registrations
         self._lock = threading.Lock()
@@ -396,6 +406,17 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
             for key, metrics in metrics_by_key.items():
                 gauge.add_metric(labels=key, value=getattr(metrics, name))
             yield gauge
+
+
+if TYPE_CHECKING:
+
+    class InFlightGauge(_InFlightGaugeRuntime, Generic[MetricsEntry]):
+        """
+        Typing-only generic wrapper.
+        Provides InFlightGauge[T] support to type checkers.
+        """
+else:
+    InFlightGauge = _InFlightGaugeRuntime
 
 
 class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):

@@ -1,3 +1,52 @@
+# Synapse 1.146.0rc1 (2026-01-20)
+
+## Deprecations and Removals
+
+- [MSC2697](https://github.com/matrix-org/matrix-spec-proposals/pull/2697) (Dehydrated devices) has been removed, as the MSC is closed. Developers should migrate to [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814). ([\#19346](https://github.com/element-hq/synapse/issues/19346))
+- Support for Ubuntu 25.04 (Plucky Puffin) has been dropped. Synapse no longer builds debian packages for Ubuntu 25.04.
+
+## Features
+
+- Add a new config option [`enable_local_media_storage`](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#enable_local_media_storage) which controls whether media is additionally stored locally when using configured `media_storage_providers`. Setting this to `false` allows off-site media storage without a local cache. Contributed by Patrice Brend'amour @dr.allgood. ([\#19204](https://github.com/element-hq/synapse/issues/19204))
+- Stabilise support for [MSC4312](https://github.com/matrix-org/matrix-spec-proposals/pull/4312)'s `m.oauth` User-Interactive Auth stage for resetting cross-signing identity with the OAuth 2.0 API. The old, unstable name (`org.matrix.cross_signing_reset`) is now deprecated and will be removed in a future release. ([\#19273](https://github.com/element-hq/synapse/issues/19273))
+- Refactor Grafana dashboard to use `server_name` label (instead of `instance`). ([\#19337](https://github.com/element-hq/synapse/issues/19337))
+
+## Bugfixes
+
+- Fix joining a restricted v12 room locally when no local room creator is present but local users with sufficient power levels are. Contributed by @nexy7574. ([\#19321](https://github.com/element-hq/synapse/issues/19321))
+- Fixed parallel calls to `/_matrix/media/v1/create` being ratelimited for appservices even if `rate_limited: false` was set in the registration. Contributed by @tulir @ Beeper. ([\#19335](https://github.com/element-hq/synapse/issues/19335))
+- Fix a bug introduced in 1.61.0 where a user's membership in a room was accidentally ignored when considering access to historical state events in rooms with the "shared" history visibility. Contributed by Lukas Tautz. ([\#19353](https://github.com/element-hq/synapse/issues/19353))
+- [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Store the JSON content of scheduled delayed events as text instead of a byte array. This fixes the inability to schedule a delayed event with non-ASCII characters in its content. ([\#19360](https://github.com/element-hq/synapse/issues/19360))
+- Always rollback database transactions when retrying (avoid orphaned connections). ([\#19372](https://github.com/element-hq/synapse/issues/19372))
+- Fix `InFlightGauge` typing to allow upgrading to `prometheus_client` 0.24. ([\#19379](https://github.com/element-hq/synapse/issues/19379))
+
+## Updates to the Docker image
+
+- Add [Prometheus HTTP service discovery](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#http_sd_config) endpoint for easy discovery of all workers when using the `docker/Dockerfile-workers` image (see the [*Metrics* section of our Docker testing docs](docker/README-testing.md#metrics)). ([\#19336](https://github.com/element-hq/synapse/issues/19336))
+
+## Improved Documentation
+
+- Remove docs on legacy metric names (no longer in the codebase since 2022-12-06). ([\#19341](https://github.com/element-hq/synapse/issues/19341))
+- Clarify how the estimated value of room complexity is calculated internally. ([\#19384](https://github.com/element-hq/synapse/issues/19384))
+
+## Internal Changes
+
+- Add an internal `cancel_task` API to the task scheduler. ([\#19310](https://github.com/element-hq/synapse/issues/19310))
+- Tweak docstrings and signatures of `auth_types_for_event` and `get_catchup_room_event_ids`. ([\#19320](https://github.com/element-hq/synapse/issues/19320))
+- Replace usage of deprecated `assertEquals` with `assertEqual` in unit test code. ([\#19345](https://github.com/element-hq/synapse/issues/19345))
+- Drop support for Ubuntu 25.04 'Plucky Puffin', add support for Ubuntu 25.10 'Questing Quokka'. ([\#19348](https://github.com/element-hq/synapse/issues/19348))
+- Revert "Add an Admin API endpoint for listing quarantined media (#19268)". ([\#19351](https://github.com/element-hq/synapse/issues/19351))
+- Bump `mdbook` from 0.4.17 to 0.5.2 and remove our custom table-of-contents plugin in favour of the new default functionality. ([\#19356](https://github.com/element-hq/synapse/issues/19356))
+- Replace deprecated usage of PyGitHub's `GitRelease.title` with `.name` in release script. ([\#19358](https://github.com/element-hq/synapse/issues/19358))
+- Update the Element logo in Synapse's README to be an absolute URL, allowing it to render on other sites (such as PyPI). ([\#19368](https://github.com/element-hq/synapse/issues/19368))
+- Apply minor tweaks to v1.145.0 changelog. ([\#19376](https://github.com/element-hq/synapse/issues/19376))
+- Update Grafana dashboard syntax to use the latest from importing/exporting with Grafana 12.3.1. ([\#19381](https://github.com/element-hq/synapse/issues/19381))
+- Warn about skipping reactor metrics when using unknown reactor type. ([\#19383](https://github.com/element-hq/synapse/issues/19383))
+- Add support for reactor metrics with the `ProxiedReactor` used in worker Complement tests. ([\#19385](https://github.com/element-hq/synapse/issues/19385))
+
+
+
+
 # Synapse 1.145.0 (2026-01-13)
 
 No significant changes since 1.145.0rc4.
