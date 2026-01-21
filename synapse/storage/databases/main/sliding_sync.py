@@ -488,9 +488,10 @@ class SlidingSyncStore(SQLBaseStore):
             ),
         )
 
-        required_state_map: dict[int, dict[str, set[str]]] = {}
+        # Map from required_state_id -> event type -> set of state keys.
+        stored_required_state_id_maps: dict[int, dict[str, set[str]]] = {}
         for row in rows:
-            state = required_state_map[row[0]] = {}
+            state = stored_required_state_id_maps[row[0]] = {}
             for event_type, state_key in db_to_json(row[1]):
                 state.setdefault(event_type, set()).add(state_key)
 
@@ -515,7 +516,7 @@ class SlidingSyncStore(SQLBaseStore):
         ) in room_config_rows:
             room_configs[room_id] = RoomSyncConfig(
                 timeline_limit=timeline_limit,
-                required_state_map=required_state_map[required_state_id],
+                required_state_map=stored_required_state_id_maps[required_state_id],
             )
 
         # Clean up any required state IDs that are no longer used by any
@@ -541,7 +542,9 @@ class SlidingSyncStore(SQLBaseStore):
             required_state_id for _, _, required_state_id in room_config_rows
         }
 
-        unused_required_state_ids = required_state_map.keys() - used_required_state_ids
+        unused_required_state_ids = (
+            stored_required_state_id_maps.keys() - used_required_state_ids
+        )
         if unused_required_state_ids:
             self.db_pool.simple_delete_many_batch_txn(
                 txn,
