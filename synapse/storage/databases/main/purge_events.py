@@ -401,6 +401,11 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         for event_id, should_delete in event_rows:
             if should_delete:
                 self.invalidate_get_event_cache_after_txn(txn, event_id)
+                # Send that invalidation to replication so that other workers also invalidate
+                # the event cache.
+                self._send_invalidation_to_replication(
+                    txn, "_get_event_cache", (event_id,)
+                )
 
         logger.info("[purge] done")
 
