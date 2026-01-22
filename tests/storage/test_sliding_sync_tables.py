@@ -3190,7 +3190,8 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
 
         # We need to send a message to cause the room to come down the next
         # sync. This shouldn't be necessary, but we don't currently implement
-        # immediately sending down the room when required_state is updated.
+        # immediately sending down the room when required_state is updated,
+        # see https://github.com/element-hq/synapse/issues/18844
         self.helper.send(room_id, "msg1", tok=user1_tok)
 
         _, from_token = self.do_sync(sync_body, since=from_token, tok=user1_tok)
