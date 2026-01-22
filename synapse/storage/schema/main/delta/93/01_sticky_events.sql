@@ -35,7 +35,7 @@ CREATE TABLE sticky_events (
   -- from our homeserver.
   sender TEXT NOT NULL,
 
-  -- When the sticky event expires.
+  -- When the sticky event expires, in milliseconds since the Unix epoch.
   expires_at BIGINT NOT NULL,
 
   -- Whether the event is soft-failed.
