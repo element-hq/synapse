@@ -26,6 +26,8 @@
 import enum
 from typing import Final, TypedDict
 
+from synapse.util.duration import Duration
+
 # the max size of a (canonical-json-encoded) event
 MAX_PDU_SIZE = 65536
 
@@ -388,7 +390,7 @@ class StickyEventField(TypedDict):
 class StickyEvent:
     QUERY_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
     FIELD_NAME: Final = "msc4354_sticky"
-    MAX_DURATION_MS: Final = 3600000  # 1 hour
+    MAX_DURATION: Duration = Duration(hours=1)
     """
     Maximum stickiness duration as specified in MSC4354.
     Ensures that data in the /sync response can go down and not grow unbounded.

@@ -48,6 +48,7 @@ from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.api.errors import Codes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
+from synapse.util.duration import Duration
 
 from tests.server import FakeChannel, make_request
 from tests.test_utils.html_parsers import TestHtmlParser
@@ -458,7 +459,7 @@ class RestHelper:
         room_id: str,
         type: str,
         *,
-        duration_ms: int,
+        duration: Duration,
         content: dict | None = None,
         txn_id: str | None = None,
         tok: str | None = None,
@@ -468,7 +469,7 @@ class RestHelper:
         if txn_id is None:
             txn_id = f"m{time.time()}"
 
-        path = f"/_matrix/client/r0/rooms/{room_id}/send/{type}/{txn_id}?org.matrix.msc4354.sticky_duration_ms={duration_ms}"
+        path = f"/_matrix/client/r0/rooms/{room_id}/send/{type}/{txn_id}?org.matrix.msc4354.sticky_duration_ms={duration.as_millis()}"
         if tok:
             path = path + f"&access_token={tok}"
 

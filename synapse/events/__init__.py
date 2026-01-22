@@ -49,6 +49,7 @@ from synapse.types import (
     StrCollection,
 )
 from synapse.util.caches import intern_dict
+from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze
 
 if TYPE_CHECKING:
@@ -323,7 +324,7 @@ class EventBase(metaclass=abc.ABCMeta):
         # this will be a no-op if the event dict is already frozen.
         self._dict = freeze(self._dict)
 
-    def sticky_duration(self) -> int | None:
+    def sticky_duration(self) -> Duration | None:
         """
         Returns the effective sticky duration of this event, or None
         if the event does not have a sticky duration.
@@ -335,9 +336,13 @@ class EventBase(metaclass=abc.ABCMeta):
         if type(sticky_obj) is not dict:
             return None
         sticky_duration_ms = sticky_obj.get("duration_ms", None)
-        # MSC: Valid values are the integer range 0-MAX_DURATION_MS
+        # MSC: Clamp to 0 and MAX_DURATION (1 hour)
+        # `type(..) is int` needed to avoid accepting bool
         if type(sticky_duration_ms) is int and sticky_duration_ms >= 0:
-            return min(sticky_duration_ms, StickyEvent.MAX_DURATION_MS)
+            return min(
+                Duration(milliseconds=sticky_duration_ms),
+                StickyEvent.MAX_DURATION,
+            )
         return None
 
     def __str__(self) -> str:

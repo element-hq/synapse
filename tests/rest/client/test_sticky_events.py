@@ -21,6 +21,7 @@ from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 
@@ -94,8 +95,7 @@ class StickyEventsClientTestCase(unittest.HomeserverTestCase):
         sticky_event_response = self.helper.send_sticky_event(
             self.room_id,
             EventTypes.Message,
-            # sticky duration is 1 minute
-            duration_ms=60_000,
+            duration=Duration(minutes=1),
             content={"body": "sticky message", "msgtype": "m.text"},
             tok=self.token,
         )
