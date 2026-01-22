@@ -450,6 +450,9 @@ class SlidingSyncStore(SQLBaseStore):
 
         # Now that we have seen the client has received and used the connection
         # position, we can delete all the other connection positions.
+        #
+        # Note: the rest of the code here assumes this is the only remaining
+        # connection position.
         sql = """
             DELETE FROM sliding_sync_connection_positions
             WHERE connection_key = ? AND connection_position != ?
@@ -485,9 +488,10 @@ class SlidingSyncStore(SQLBaseStore):
             ),
         )
 
-        required_state_map: dict[int, dict[str, set[str]]] = {}
+        # Map from required_state_id -> event type -> set of state keys.
+        stored_required_state_id_maps: dict[int, dict[str, set[str]]] = {}
         for row in rows:
-            state = required_state_map[row[0]] = {}
+            state = stored_required_state_id_maps[row[0]] = {}
             for event_type, state_key in db_to_json(row[1]):
                 state.setdefault(event_type, set()).add(state_key)
 
@@ -512,7 +516,44 @@ class SlidingSyncStore(SQLBaseStore):
         ) in room_config_rows:
             room_configs[room_id] = RoomSyncConfig(
                 timeline_limit=timeline_limit,
-                required_state_map=required_state_map[required_state_id],
+                required_state_map=stored_required_state_id_maps[required_state_id],
+            )
+
+        # Clean up any `required_state_id`s that are no longer used by any
+        # connection position on this connection.
+        #
+        # We store the required state config per-connection per-room. Since this
+        # can be a lot of data, we deduplicate the required state JSON and store
+        # it separately, with multiple rooms referencing the same `required_state_id`.
+        # Over time as the required state configs change, some `required_state_id`s
+        # may no longer be referenced by any room config, so we need
+        # to clean them up.
+        #
+        # We do this by noting that we have pulled out *all* rows from
+        # `sliding_sync_connection_required_state` for this connection above. We
+        # have also pulled out all referenced `required_state_id`s for *this*
+        # connection position, which is the only connection position that
+        # remains (we deleted the others above).
+        #
+        # Thus we can compute the unused `required_state_id`s by looking for any
+        # `required_state_id`s that are not referenced by the remaining connection
+        # position.
+        used_required_state_ids = {
+            required_state_id for _, _, required_state_id in room_config_rows
+        }
+
+        unused_required_state_ids = (
+            stored_required_state_id_maps.keys() - used_required_state_ids
+        )
+        if unused_required_state_ids:
+            self.db_pool.simple_delete_many_batch_txn(
+                txn,
+                table="sliding_sync_connection_required_state",
+                keys=("connection_key", "required_state_id"),
+                values=[
+                    (connection_key, required_state_id)
+                    for required_state_id in unused_required_state_ids
+                ],
             )
 
         # Now look up the per-room stream data.
