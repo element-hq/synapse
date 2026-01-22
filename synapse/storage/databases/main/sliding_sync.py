@@ -519,24 +519,24 @@ class SlidingSyncStore(SQLBaseStore):
                 required_state_map=stored_required_state_id_maps[required_state_id],
             )
 
-        # Clean up any required state IDs that are no longer used by any
+        # Clean up any `required_state_id`s that are no longer used by any
         # connection position on this connection.
         #
         # We store the required state config per-connection per-room. Since this
         # can be a lot of data, we deduplicate the required state JSON and store
-        # it separately, with multiple rooms referencing the same required state
-        # ID. Over time as the required state configs change, some required
-        # state IDs may no longer be referenced by any room config, so we need
+        # it separately, with multiple rooms referencing the same `required_state_id`.
+        # Over time as the required state configs change, some `required_state_id`s
+        # may no longer be referenced by any room config, so we need
         # to clean them up.
         #
         # We do this by noting that we have pulled out *all* rows from
         # `sliding_sync_connection_required_state` for this connection above. We
-        # have also pulled out all referenced required state IDs for *this*
+        # have also pulled out all referenced `required_state_id`s for *this*
         # connection position, which is the only connection position that
         # remains (we deleted the others above).
         #
-        # Thus we can compute the unused required state IDs by looking for any
-        # required state IDs that are not referenced by the remaining connection
+        # Thus we can compute the unused `required_state_id`s by looking for any
+        # `required_state_id`s that are not referenced by the remaining connection
         # position.
         used_required_state_ids = {
             required_state_id for _, _, required_state_id in room_config_rows
