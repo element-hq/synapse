@@ -748,7 +748,7 @@ jobs:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
 
-      - name: Formatted Complement test logs
+      - name: Formatted in-repo Complement test logs
         # Always run this step if we attempted to run the Complement tests.
         if: always() && steps.run_in_repo_complement_tests.outcome != 'skipped'
         run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
