@@ -1,0 +1,1 @@
+When purging room history, send `cache` replication message for `_get_event_cache`.
