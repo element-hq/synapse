@@ -340,16 +340,8 @@ main() {
   set -x
   
   if [ -n "$use_in_repo_tests" ]; then
-    # TODO: Remove CI debug
-    echo "Script path: $0"
-    echo "Script dir: $(dirname "$0")"
-    echo "Current directory: $(pwd)"
-    echo "Looking for: $(dirname "$0")/../complement"
-    ls -la "$(dirname "$0")/../complement"
-
     # Run the suite of Complement tests in the `./complement` directory in this repo
-    in_repo_test_suite=${SUITE:-$(realpath $(dirname $0)/../complement)}
-    cd "$in_repo_test_suite"
+    cd "./complement"
     go test "${test_args[@]}" "$@" "${default_in_repo_complement_test_packages[@]}"
   else
     # Run the tests (from the Complement repo)!
