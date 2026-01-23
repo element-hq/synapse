@@ -21,7 +21,11 @@ import (
 	"github.com/matrix-org/gomatrixserverlib/spec"
 )
 
-// Test to homeservers can communicate with each other (federation works correctly).
+// Stub test to ensure that homeservers can communicate with each other (federation works correctly).
+//
+// TODO: This test will disappear once we have other real Synapse specific tests in
+// place. This is simply here as an example without bloating the PR with some specific
+// new tests.
 func TestFederation(t *testing.T) {
 	// Create two homeservers
 	deployment := complement.Deploy(t, 2)
