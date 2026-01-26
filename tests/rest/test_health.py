@@ -44,3 +44,5 @@ class HealthCheckTests(unittest.HomeserverTestCase):
         channel = self.make_request("GET", "/health/extra/path", shorthand=False)
 
         self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
+        self.assertIn("error", channel.json_body)
