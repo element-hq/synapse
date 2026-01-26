@@ -82,7 +82,7 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
 
             # Recall that pump() will advance time of the given amount 100 times, this
             # amounts to about 10 seconds passing
-            self.pump(10.0)
+            self.pump(0.1)
 
             # Should be timed out 6 times, but do not fail on that exact count
             wrapped_lock2_increment_timeout_interval_method.assert_called()
