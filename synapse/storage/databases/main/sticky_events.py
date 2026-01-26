@@ -36,9 +36,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Remove entries from the sticky_events table at this frequency.
-# Note: this does NOT mean we don't honour shorter expiration timeouts.
-# Consumers call 'get_sticky_events_in_rooms' which has `WHERE expires_at > ?`
-# to filter out expired sticky events that have yet to be deleted.
+# Note: don't be misled, we still honour shorter expiration timeouts,
+# because readers of the sticky_events table filter out expired sticky events
+# themselves, even if they aren't deleted from the table yet.
 DELETE_EXPIRED_STICKY_EVENTS_INTERVAL = Duration(hours=1)
 
 
