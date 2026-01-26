@@ -113,6 +113,8 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     ) -> list[tuple[int, str, str, bool]]:
         """Get updates to sticky events between two stream IDs.
 
+        Bounds: from_id < ... <= to_id
+
         Args:
             from_id: The starting stream ID (exclusive)
             to_id: The ending stream ID (inclusive)
