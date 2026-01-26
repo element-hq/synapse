@@ -384,15 +384,37 @@ class ProfileFields:
 
 
 class StickyEventField(TypedDict):
+    """
+    Dict content of the `sticky` part of an event.
+    """
+
     duration_ms: int
 
 
 class StickyEvent:
     QUERY_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
+    """
+    Query parameter used by clients for setting the sticky duration of an event they are sending.
+
+    Applies to:
+        - /rooms/.../send/...
+        - /rooms/.../state/...
+    """
+
     FIELD_NAME: Final = "msc4354_sticky"
+    """
+    Name of the field in the top-level event dict that contains the sticky event dict.
+    """
+
     MAX_DURATION: Duration = Duration(hours=1)
     """
     Maximum stickiness duration as specified in MSC4354.
     Ensures that data in the /sync response can go down and not grow unbounded.
     """
+
     MAX_EVENTS_IN_SYNC: Final = 100
+    """
+    Maximum number of sticky events to include in /sync.
+
+    This is the default specified in the MSC. Chosen arbitrarily.
+    """
