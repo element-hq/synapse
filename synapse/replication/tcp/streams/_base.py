@@ -797,11 +797,11 @@ class StickyEventsStream(_StreamFromIdGen):
         )
         rows = [
             (
-                stream_id,
+                update.stream_id,
                 # These are the args to `StickyEventsStreamRow`
-                (room_id, event_id),
+                (update.room_id, update.event_id),
             )
-            for stream_id, room_id, event_id, _ in updates
+            for update in updates
         ]
 
         if not rows:

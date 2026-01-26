@@ -12,9 +12,9 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import logging
 import random
+from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
-    cast,
 )
 
 from twisted.internet.defer import Deferred
@@ -45,6 +45,14 @@ logger = logging.getLogger(__name__)
 # Frequent enough to clean up expired sticky events promptly,
 # especially given the short cap on the lifetime of sticky events.
 DELETE_EXPIRED_STICKY_EVENTS_INTERVAL = Duration(hours=1)
+
+
+@dataclass(frozen=True)
+class StickyEventUpdate:
+    stream_id: int
+    room_id: str
+    event_id: str
+    soft_failed: bool
 
 
 class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
@@ -110,7 +118,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
     async def get_updated_sticky_events(
         self, from_id: int, to_id: int, limit: int
-    ) -> list[tuple[int, str, str, bool]]:
+    ) -> list[StickyEventUpdate]:
         """Get updates to sticky events between two stream IDs.
 
         Bounds: from_id < ... <= to_id
@@ -121,7 +129,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             limit: The maximum number of rows to return
 
         Returns:
-            list of (stream_id, room_id, event_id, soft_failed) tuples
+            list of StickyEventUpdate update rows
         """
         return await self.db_pool.runInteraction(
             "get_updated_sticky_events",
@@ -133,7 +141,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
     def _get_updated_sticky_events_txn(
         self, txn: LoggingTransaction, from_id: int, to_id: int, limit: int
-    ) -> list[tuple[int, str, str, bool]]:
+    ) -> list[StickyEventUpdate]:
         txn.execute(
             """
             SELECT stream_id, room_id, event_id, soft_failed
@@ -143,7 +151,15 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             """,
             (from_id, to_id, limit),
         )
-        return cast(list[tuple[int, str, str, bool]], txn.fetchall())
+        return [
+            StickyEventUpdate(
+                stream_id=stream_id,
+                room_id=room_id,
+                event_id=event_id,
+                soft_failed=soft_failed,
+            )
+            for stream_id, room_id, event_id, soft_failed in txn
+        ]
 
     def insert_sticky_events_txn(
         self,
