@@ -332,7 +332,7 @@ class EventBase(metaclass=abc.ABCMeta):
 
         Clamps the sticky duration to the maximum allowed duration.
         """
-        sticky_obj = self.get_dict().get(StickyEvent.FIELD_NAME, None)
+        sticky_obj = self.get_dict().get(StickyEvent.EVENT_FIELD_NAME, None)
         if type(sticky_obj) is not dict:
             return None
         sticky_duration_ms = sticky_obj.get("duration_ms", None)

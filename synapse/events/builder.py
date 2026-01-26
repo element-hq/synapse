@@ -274,7 +274,7 @@ class EventBuilder:
             event_dict["origin_server_ts"] = self._origin_server_ts
 
         if self.sticky is not None:
-            event_dict[StickyEvent.FIELD_NAME] = self.sticky
+            event_dict[StickyEvent.EVENT_FIELD_NAME] = self.sticky
 
         return create_local_event_from_event_dict(
             clock=self._clock,
@@ -325,7 +325,7 @@ class EventBuilderFactory:
             unsigned=key_values.get("unsigned", {}),
             redacts=key_values.get("redacts", None),
             origin_server_ts=key_values.get("origin_server_ts", None),
-            sticky=key_values.get(StickyEvent.FIELD_NAME, None),
+            sticky=key_values.get(StickyEvent.EVENT_FIELD_NAME, None),
         )
 
 

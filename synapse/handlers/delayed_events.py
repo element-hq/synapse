@@ -575,7 +575,7 @@ class DelayedEventsHandler:
                 if event.state_key is not None:
                     event_dict["state_key"] = event.state_key
                 if event.sticky_duration_ms is not None:
-                    event_dict[StickyEvent.FIELD_NAME] = {
+                    event_dict[StickyEvent.EVENT_FIELD_NAME] = {
                         "duration_ms": event.sticky_duration_ms,
                     }
                 (

@@ -375,7 +375,7 @@ class RoomStateEventRestServlet(RestServlet):
                     "sender": requester.user.to_string(),
                 }
                 if sticky_duration_ms is not None:
-                    event_dict[StickyEvent.FIELD_NAME] = {
+                    event_dict[StickyEvent.EVENT_FIELD_NAME] = {
                         "duration_ms": sticky_duration_ms,
                     }
 
@@ -463,7 +463,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             event_dict["origin_server_ts"] = origin_server_ts
 
         if sticky_duration_ms is not None:
-            event_dict[StickyEvent.FIELD_NAME] = {
+            event_dict[StickyEvent.EVENT_FIELD_NAME] = {
                 "duration_ms": sticky_duration_ms,
             }
 

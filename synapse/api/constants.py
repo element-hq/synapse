@@ -401,7 +401,7 @@ class StickyEvent:
         - /rooms/.../state/...
     """
 
-    FIELD_NAME: Final = "msc4354_sticky"
+    EVENT_FIELD_NAME: Final = "msc4354_sticky"
     """
     Name of the field in the top-level event dict that contains the sticky event dict.
     """
