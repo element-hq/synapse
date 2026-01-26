@@ -1,0 +1,1 @@
+Disallow requests to the health endpoint from containing trailing path characters.
