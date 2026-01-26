@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 # Note: don't be misled, we still honour shorter expiration timeouts,
 # because readers of the sticky_events table filter out expired sticky events
 # themselves, even if they aren't deleted from the table yet.
+#
+# Currently just an arbitrary choice.
+# Frequent enough to clean up expired sticky events promptly,
+# especially given the short cap on the lifetime of sticky events.
 DELETE_EXPIRED_STICKY_EVENTS_INTERVAL = Duration(hours=1)
 
 
