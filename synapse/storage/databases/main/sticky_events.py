@@ -11,6 +11,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import logging
+import random
 from typing import (
     TYPE_CHECKING,
     cast,
@@ -61,8 +62,18 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
         # Technically this means we will cleanup N times, once per event persister, maybe put on master?
         if self._can_write_to_sticky_events:
-            self.clock.looping_call(
-                self._run_background_cleanup, DELETE_EXPIRED_STICKY_EVENTS_INTERVAL
+            # Start a looping call to clean up the sticky_events table
+            # Because this will run once per event persister,
+            # randomly stagger the initial time so that they don't all
+            # coincide with each other if the workers are deployed at the
+            # same time.
+            # It's not critical, this is just best-effort.
+            self.clock.call_later(
+                # random() is 0.0 to 1.0
+                DELETE_EXPIRED_STICKY_EVENTS_INTERVAL * random.random(),
+                self.clock.looping_call,
+                self._run_background_cleanup,
+                DELETE_EXPIRED_STICKY_EVENTS_INTERVAL,
             )
 
         self._sticky_events_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
