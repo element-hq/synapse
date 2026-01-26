@@ -244,6 +244,13 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     def _delete_expired_sticky_events_txn(
         self, txn: LoggingTransaction, now: int
     ) -> None:
+        """
+        From the `sticky_events` table, deletes all entries whose expiry is in the past
+        (older than `now`).
+
+        This is fine because we don't consider the events as sticky anymore when that's
+        happened.
+        """
         txn.execute(
             """
             DELETE FROM sticky_events WHERE expires_at < ?
