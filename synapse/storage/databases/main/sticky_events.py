@@ -235,7 +235,6 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         )
 
     async def _delete_expired_sticky_events(self) -> None:
-        logger.info("delete_expired_sticky_events")
         await self.db_pool.runInteraction(
             "_delete_expired_sticky_events",
             self._delete_expired_sticky_events_txn,
