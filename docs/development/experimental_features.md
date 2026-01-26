@@ -35,3 +35,7 @@ but one should be used if unsure.
 New experimental configuration flags should be added under the `experimental`
 configuration key (see the `synapse.config.experimental` file) and either explain
 (briefly) what is being enabled, or include the MSC number.
+
+All new experimental features should have a tracking issue with the
+[`T-ExperimentalFeatures` label](https://github.com/element-hq/synapse/issues?q=sort%3Aupdated-desc+state%3Aopen+label%3A%22T-ExperimentalFeature%22),
+kept open as long as the experimental feature is present in Synapse.
