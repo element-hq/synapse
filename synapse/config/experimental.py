@@ -598,6 +598,7 @@ class ExperimentalConfig(Config):
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
 
         # MSC4354: Sticky Events
+        # Tracked in: https://github.com/element-hq/synapse/issues/19409
         self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
 
         # MSC4380: Invite blocking
