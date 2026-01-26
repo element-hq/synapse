@@ -34,7 +34,13 @@ from prometheus_client.core import Histogram
 from twisted.web.server import Request
 
 from synapse import event_auth
-from synapse.api.constants import Direction, EventTypes, Membership, StickyEvent
+from synapse.api.constants import (
+    Direction,
+    EventTypes,
+    Membership,
+    StickyEvent,
+    StickyEventField,
+)
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -375,9 +381,9 @@ class RoomStateEventRestServlet(RestServlet):
                     "sender": requester.user.to_string(),
                 }
                 if sticky_duration_ms is not None:
-                    event_dict[StickyEvent.EVENT_FIELD_NAME] = {
-                        "duration_ms": sticky_duration_ms,
-                    }
+                    event_dict[StickyEvent.EVENT_FIELD_NAME] = StickyEventField(
+                        duration_ms=sticky_duration_ms
+                    )
 
                 if state_key is not None:
                     event_dict["state_key"] = state_key
@@ -463,9 +469,9 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             event_dict["origin_server_ts"] = origin_server_ts
 
         if sticky_duration_ms is not None:
-            event_dict[StickyEvent.EVENT_FIELD_NAME] = {
-                "duration_ms": sticky_duration_ms,
-            }
+            event_dict[StickyEvent.EVENT_FIELD_NAME] = StickyEventField(
+                duration_ms=sticky_duration_ms
+            )
 
         try:
             (

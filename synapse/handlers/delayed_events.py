@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.interfaces import IDelayedCall
 
-from synapse.api.constants import EventTypes, StickyEvent
+from synapse.api.constants import EventTypes, StickyEvent, StickyEventField
 from synapse.api.errors import ShadowBanError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
@@ -575,9 +575,9 @@ class DelayedEventsHandler:
                 if event.state_key is not None:
                     event_dict["state_key"] = event.state_key
                 if event.sticky_duration_ms is not None:
-                    event_dict[StickyEvent.EVENT_FIELD_NAME] = {
-                        "duration_ms": event.sticky_duration_ms,
-                    }
+                    event_dict[StickyEvent.EVENT_FIELD_NAME] = StickyEventField(
+                        duration_ms=event.sticky_duration_ms
+                    )
                 (
                     sent_event,
                     _,
