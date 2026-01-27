@@ -1,9 +1,15 @@
-# Synapse 1.146.0rc1 (2026-01-20)
+# Synapse 1.146.0 (2026-01-27)
+
+No significant changes since 1.146.0rc1.
 
 ## Deprecations and Removals
 
 - [MSC2697](https://github.com/matrix-org/matrix-spec-proposals/pull/2697) (Dehydrated devices) has been removed, as the MSC is closed. Developers should migrate to [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814). ([\#19346](https://github.com/element-hq/synapse/issues/19346))
 - Support for Ubuntu 25.04 (Plucky Puffin) has been dropped. Synapse no longer builds debian packages for Ubuntu 25.04.
+
+
+
+# Synapse 1.146.0rc1 (2026-01-20)
 
 ## Features
 
