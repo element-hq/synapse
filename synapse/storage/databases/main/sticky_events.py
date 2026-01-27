@@ -28,6 +28,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
+from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.util.duration import Duration
 
@@ -117,7 +118,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         return self._sticky_events_id_gen
 
     async def get_updated_sticky_events(
-        self, from_id: int, to_id: int, limit: int
+        self, *, from_id: int, to_id: int, limit: int
     ) -> list[StickyEventUpdate]:
         """Get updates to sticky events between two stream IDs.
 
@@ -142,21 +143,29 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     def _get_updated_sticky_events_txn(
         self, txn: LoggingTransaction, from_id: int, to_id: int, limit: int
     ) -> list[StickyEventUpdate]:
+        if isinstance(self.database_engine, PostgresEngine):
+            expr_soft_failed = "COALESCE(((ej.internal_metadata::jsonb)->>'soft_failed')::boolean, FALSE)"
+        else:
+            expr_soft_failed = "COALESCE(ej.internal_metadata->>'soft_failed', FALSE)"
+
         txn.execute(
-            """
-            SELECT stream_id, room_id, event_id, soft_failed
-            FROM sticky_events
+            f"""
+            SELECT se.stream_id, se.room_id, se.event_id,
+            {expr_soft_failed} AS "soft_failed"
+            FROM sticky_events se
+            INNER JOIN event_json ej USING (event_id)
             WHERE ? < stream_id AND stream_id <= ?
             LIMIT ?
             """,
             (from_id, to_id, limit),
         )
+
         return [
             StickyEventUpdate(
                 stream_id=stream_id,
                 room_id=room_id,
                 event_id=event_id,
-                soft_failed=soft_failed,
+                soft_failed=bool(soft_failed),
             )
             for stream_id, room_id, event_id, soft_failed in txn
         ]
@@ -217,7 +226,6 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                 "event_stream_ordering",
                 "sender",
                 "expires_at",
-                "soft_failed",
             ),
             values=[
                 (
@@ -228,7 +236,6 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                     ev.internal_metadata.stream_ordering,
                     ev.sender,
                     expires_at,
-                    ev.internal_metadata.is_soft_failed(),
                 )
                 for (ev, expires_at), stream_id in sticky_events_with_ids
             ],

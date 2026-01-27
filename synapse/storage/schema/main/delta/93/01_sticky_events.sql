@@ -36,16 +36,11 @@ CREATE TABLE sticky_events (
   sender TEXT NOT NULL,
 
   -- When the sticky event expires, in milliseconds since the Unix epoch.
-  expires_at BIGINT NOT NULL,
-
-  -- Whether the event is soft-failed.
-  -- Denormalised for performance when we want to re-evaluate the soft-failed state of sticky events.
-  soft_failed BOOLEAN NOT NULL
+  expires_at BIGINT NOT NULL
 );
 
--- 1. For pulling out sticky events by room at send time, obeying stream ordering range limits.
--- 2. For pulling out soft failed events by room
-CREATE INDEX sticky_events_room_idx ON sticky_events (room_id, event_stream_ordering, soft_failed);
+-- For pulling out sticky events by room at send time, obeying stream ordering range limits.
+CREATE INDEX sticky_events_room_idx ON sticky_events (room_id, event_stream_ordering);
 
 -- A optional integer for combining sticky events with delayed events. Used at send time.
 ALTER TABLE delayed_events ADD COLUMN sticky_duration_ms BIGINT;
