@@ -316,5 +316,8 @@ fn make_deferred_yieldable<'py>(
         func
     });
 
-    make_deferred_yieldable.call1(py, (deferred,))?.extract(py)
+    make_deferred_yieldable
+        .call1(py, (deferred,))?
+        .extract(py)
+        .map_err(Into::into)
 }
