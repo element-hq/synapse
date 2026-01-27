@@ -599,6 +599,8 @@ class ExperimentalConfig(Config):
 
         # MSC4354: Sticky Events
         # Tracked in: https://github.com/element-hq/synapse/issues/19409
+        # Note that sticky events persisted before this feature is enabled will not be
+        # considered sticky by the local homeserver.
         self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
 
         # MSC4380: Invite blocking
