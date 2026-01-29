@@ -12,7 +12,7 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 -- Tracks sticky events.
--- Excludes 'polisy_server_spammy' events, outliers, rejected events.
+-- Excludes 'policy_server_spammy' events, outliers, rejected events.
 -- May contain sticky events that have expired since being inserted,
 -- although they will be periodically cleaned up in the background.
 CREATE TABLE sticky_events (
