@@ -116,7 +116,7 @@ class OEmbedProvider:
             The URL to use for oEmbed information, or None if no URL was found.
         """
         # Search for link elements with the proper rel and type attributes.
-        # Some providers (e.g. Flickr) use alternative instead of alternate.
+        # Some providers (e.g. Flickr) use `alternative` instead of `alternate`.
         tag = soup.find(
             "link",
             rel=("alternate", "alternative"),
