@@ -217,15 +217,14 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
             # Try to find images which are larger than 10px by 10px.
             #
             # TODO: consider inlined CSS styles as well as width & height attribs
-            images = cast(
-                list["Tag"],
-                soup.find_all("img", src=NON_BLANK, width=NON_BLANK, height=NON_BLANK),
+            raw_images = soup.find_all(
+                "img", src=NON_BLANK, width=NON_BLANK, height=NON_BLANK
             )
             images = sorted(
                 filter(
                     lambda tag: int(cast(str, tag["width"])) > 10
                     and int(cast(str, tag["height"])) > 10,
-                    images,
+                    raw_images,
                 ),
                 key=lambda i: (
                     -1 * float(cast(str, i["width"])) * float(cast(str, i["height"]))
@@ -239,7 +238,7 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
 
             # Finally, fallback to the favicon if nothing else.
             else:
-                favicon = cast("Tag", soup.find("link", href=NON_BLANK, rel="icon"))
+                favicon = soup.find("link", href=NON_BLANK, rel="icon")
                 if favicon:
                     og["og:image"] = cast(str, favicon["href"])
 
@@ -320,7 +319,7 @@ def _iterate_over_text(
     skipping text nodes inside certain tags.
 
     Args:
-        tree: The parent element to iterate. Can be None if there isn't one.
+        soup: The parent element to iterate.
         tags_to_ignore: Set of tags to ignore
         stack_limit: Maximum stack size limit for depth-first traversal.
             Nodes will be dropped if this limit is hit, which may truncate the
