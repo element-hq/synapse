@@ -15,6 +15,7 @@
 
 
 import logging
+from functools import wraps
 from typing import (
     Any,
     Callable,
@@ -194,6 +195,7 @@ class Clock:
         if now:
             looping_call_context_string = "looping_call_now"
 
+        @wraps(f)
         def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> Deferred:
             clock_debug_logger.debug(
                 "%s(%s): Executing callback", looping_call_context_string, instance_id
@@ -303,6 +305,7 @@ class Clock:
         if self._is_shutdown:
             raise Exception("Cannot start delayed call. Clock has been shutdown")
 
+        @wraps(callback)
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
             clock_debug_logger.debug("call_later(%s): Executing callback", call_id)
 
