@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import itertools
 import logging
 import re
 from typing import (
@@ -26,7 +25,6 @@ from typing import (
     Callable,
     Generator,
     Iterable,
-    Iterator,
     Optional,
     cast,
 )
@@ -314,7 +312,7 @@ def parse_html_description(soup: "BeautifulSoup") -> str | None:
 
 
 def _iterate_over_text(
-    soup: "BeautifulSoup",
+    soup: "Tag",
     tags_to_ignore: Iterable[str],
     stack_limit: int = 1024,
 ) -> Generator[str, None, None]:
@@ -322,32 +320,37 @@ def _iterate_over_text(
     skipping text nodes inside certain tags.
 
     Args:
-        soup: The parent element to iterate. Can be None if there isn't one.
+        tree: The parent element to iterate. Can be None if there isn't one.
         tags_to_ignore: Set of tags to ignore
         stack_limit: Maximum stack size limit for depth-first traversal.
             Nodes will be dropped if this limit is hit, which may truncate the
             textual result.
             Intended to limit the maximum working memory when generating a preview.
     """
-
     from bs4.element import NavigableString, Tag
 
     # This is basically a stack that we extend using itertools.chain.
     # This will either consist of an element to iterate over *or* a string
     # to be returned.
-    elements: Iterator["PageElement"] = iter([soup])
-    while True:
-        el = next(elements, None)
-        if el is None:
-            return
+    elements: list["PageElement"] = [soup]
+    while elements:
+        el = elements.pop()
 
         # Do not consider sub-classes of NavigableString since those represent
-        # comments, etc.
+        # stylesheets, etc.
         if type(el) == NavigableString:  # noqa: E721
             yield str(el)
         elif isinstance(el, Tag) and el.name not in tags_to_ignore:
             # We add to the stack all the element's children.
-            elements = itertools.chain(el.contents, elements)
+            #
+            # We iterate in reverse order so that earlier pieces of text appear
+            # closer to the top of the stack.
+            for child in reversed(el.contents):
+                if len(elements) > stack_limit:
+                    # We've hit our limit for working memory
+                    break
+
+                elements.append(child)
 
 
 def summarize_paragraphs(
