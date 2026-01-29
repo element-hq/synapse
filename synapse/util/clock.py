@@ -19,6 +19,7 @@ from typing import (
     Any,
     Callable,
 )
+from weakref import WeakSet
 
 from typing_extensions import ParamSpec
 from zope.interface import implementer
@@ -86,7 +87,7 @@ class Clock:
         self._delayed_call_id: int = 0
         """Unique ID used to track delayed calls"""
 
-        self._looping_calls: list[LoopingCall] = []
+        self._looping_calls: WeakSet[LoopingCall] = WeakSet()
         """List of active looping calls"""
 
         self._call_id_to_delayed_call: dict[int, IDelayedCall] = {}
@@ -240,7 +241,7 @@ class Clock:
         with context.PreserveLoggingContext():
             d = call.start(duration.as_secs(), now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
-        self._looping_calls.append(call)
+        self._looping_calls.add(call)
 
         clock_debug_logger.debug(
             "%s(%s): Scheduled looping call every %sms later",
