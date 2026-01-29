@@ -22,6 +22,8 @@
 from twisted.web.resource import Resource
 from twisted.web.server import Request
 
+from synapse.api.errors import Codes
+
 
 class HealthResource(Resource):
     """A resource that does nothing except return a 200 with a body of `OK`,
@@ -34,5 +36,15 @@ class HealthResource(Resource):
     isLeaf = 1
 
     def render_GET(self, request: Request) -> bytes:
+        # Prevent path traversal by ensuring the request path is exactly /health.
+        if request.path != b"/health":
+            request.setResponseCode(404)
+            body = (
+                '{"errcode":"'
+                + Codes.UNRECOGNIZED
+                + '","error":"Unrecognized request"}'
+            )
+            return body.encode("utf-8")
+
         request.setHeader(b"Content-Type", b"text/plain")
         return b"OK"
