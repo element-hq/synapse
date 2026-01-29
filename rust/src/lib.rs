@@ -16,6 +16,9 @@ pub mod push;
 pub mod rendezvous;
 pub mod segmenter;
 
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 lazy_static! {
     static ref LOGGING_HANDLE: ResetHandle = pyo3_log::init();
 }
