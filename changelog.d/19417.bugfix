@@ -1,0 +1,1 @@
+Fix a typo that incorrectly made `setuptools_rust` a runtime dependency.
