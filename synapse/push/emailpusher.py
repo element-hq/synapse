@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.error import AlreadyCalled, AlreadyCancelled
 from twisted.internet.interfaces import IDelayedCall
@@ -29,6 +29,7 @@ from synapse.push import Pusher, PusherConfig, PusherConfigException, ThrottlePa
 from synapse.push.mailer import Mailer
 from synapse.push.push_types import EmailReason
 from synapse.storage.databases.main.event_push_actions import EmailPushAction
+from synapse.util.duration import Duration
 from synapse.util.threepids import validate_email
 
 if TYPE_CHECKING:
@@ -70,7 +71,7 @@ class EmailPusher(Pusher):
         self.server_name = hs.hostname
         self.store = self.hs.get_datastores().main
         self.email = pusher_config.pushkey
-        self.timed_call: IDelayedCall | None = None
+        self.timed_call: Optional[IDelayedCall] = None
         self.throttle_params: dict[str, ThrottleParams] = {}
         self._inited = False
 
@@ -229,7 +230,7 @@ class EmailPusher(Pusher):
         if soonest_due_at is not None:
             delay = self.seconds_until(soonest_due_at)
             self.timed_call = self.hs.get_clock().call_later(
-                delay,
+                Duration(seconds=delay),
                 self.on_timer,
             )
 

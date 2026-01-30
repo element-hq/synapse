@@ -378,26 +378,8 @@ class ExperimentalConfig(Config):
         # MSC3026 (busy presence state)
         self.msc3026_enabled: bool = experimental.get("msc3026_enabled", False)
 
-        # MSC2697 (device dehydration)
-        # Enabled by default since this option was added after adding the feature.
-        # It is not recommended that both MSC2697 and MSC3814 both be enabled at
-        # once.
-        self.msc2697_enabled: bool = experimental.get("msc2697_enabled", True)
-
         # MSC3814 (dehydrated devices with SSSS)
-        # This is an alternative method to achieve the same goals as MSC2697.
-        # It is not recommended that both MSC2697 and MSC3814 both be enabled at
-        # once.
         self.msc3814_enabled: bool = experimental.get("msc3814_enabled", False)
-
-        if self.msc2697_enabled and self.msc3814_enabled:
-            raise ConfigError(
-                "MSC2697 and MSC3814 should not both be enabled.",
-                (
-                    "experimental_features",
-                    "msc3814_enabled",
-                ),
-            )
 
         # MSC3244 (room version capabilities)
         self.msc3244_enabled: bool = experimental.get("msc3244_enabled", True)
@@ -437,6 +419,9 @@ class ExperimentalConfig(Config):
         # Note that enabling this will result in an incorrect unread count for
         # previously calculated push actions.
         self.msc2654_enabled: bool = experimental.get("msc2654_enabled", False)
+
+        # MSC2666: Query mutual rooms between two users.
+        self.msc2666_enabled: bool = experimental.get("msc2666_enabled", False)
 
         # MSC2815 (allow room moderators to view redacted event content)
         self.msc2815_enabled: bool = experimental.get("msc2815_enabled", False)
@@ -593,3 +578,6 @@ class ExperimentalConfig(Config):
         # MSC4306: Thread Subscriptions
         # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
+
+        # MSC4380: Invite blocking
+        self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)

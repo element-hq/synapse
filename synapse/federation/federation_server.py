@@ -89,6 +89,7 @@ from synapse.types import JsonDict, StateMap, UserID, get_domain_from_id
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import Linearizer, concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.duration import Duration
 from synapse.util.stringutils import parse_server_name
 
 if TYPE_CHECKING:
@@ -226,7 +227,7 @@ class FederationServer(FederationBase):
                 )
 
             # We pause a bit so that we don't start handling all rooms at once.
-            await self._clock.sleep(random.uniform(0, 0.1))
+            await self._clock.sleep(Duration(seconds=random.uniform(0, 0.1)))
 
     async def on_backfill_request(
         self, origin: str, room_id: str, versions: list[str], limit: int
@@ -301,7 +302,9 @@ class FederationServer(FederationBase):
             # Start a periodic check for old staged events. This is to handle
             # the case where locks time out, e.g. if another process gets killed
             # without dropping its locks.
-            self._clock.looping_call(self._handle_old_staged_events, 60 * 1000)
+            self._clock.looping_call(
+                self._handle_old_staged_events, Duration(minutes=1)
+            )
 
         # keep this as early as possible to make the calculated origin ts as
         # accurate as possible.

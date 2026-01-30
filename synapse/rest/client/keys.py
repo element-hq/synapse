@@ -44,7 +44,7 @@ from synapse.http.servlet import (
     validate_json_object,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.opentracing import log_kv, set_tag
+from synapse.logging.opentracing import set_tag
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
 from synapse.types import JsonDict, StreamToken
 from synapse.types.rest import RequestBodyModel
@@ -105,7 +105,7 @@ class KeyUploadServlet(RestServlet):
 
     """
 
-    PATTERNS = client_patterns("/keys/upload(/(?P<device_id>[^/]+))?$")
+    PATTERNS = client_patterns("/keys/upload$")
     CATEGORY = "Encryption requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -220,9 +220,7 @@ class KeyUploadServlet(RestServlet):
                     )
             return v
 
-    async def on_POST(
-        self, request: SynapseRequest, device_id: str | None
-    ) -> tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
 
@@ -236,31 +234,7 @@ class KeyUploadServlet(RestServlet):
         body = parse_json_object_from_request(request)
         validate_json_object(body, self.KeyUploadRequestBody)
 
-        if device_id is not None:
-            # Providing the device_id should only be done for setting keys
-            # for dehydrated devices; however, we allow it for any device for
-            # compatibility with older clients.
-            if requester.device_id is not None and device_id != requester.device_id:
-                dehydrated_device = await self.device_handler.get_dehydrated_device(
-                    user_id
-                )
-                if dehydrated_device is not None and device_id != dehydrated_device[0]:
-                    set_tag("error", True)
-                    log_kv(
-                        {
-                            "message": "Client uploading keys for a different device",
-                            "logged_in_id": requester.device_id,
-                            "key_being_uploaded": device_id,
-                        }
-                    )
-                    logger.warning(
-                        "Client uploading keys for a different device "
-                        "(logged in as %s, uploading for %s)",
-                        requester.device_id,
-                        device_id,
-                    )
-        else:
-            device_id = requester.device_id
+        device_id = requester.device_id
 
         if device_id is None:
             raise SynapseError(
@@ -560,9 +534,14 @@ class SigningKeyUploadServlet(RestServlet):
                         {
                             "session": "dummy",
                             "flows": [
+                                {"stages": ["m.oauth"]},
+                                # The unstable name from MSC4312 should be supported until enough clients have adopted the stable (`m.oauth`) name:
                                 {"stages": ["org.matrix.cross_signing_reset"]},
                             ],
                             "params": {
+                                "m.oauth": {
+                                    "url": url,
+                                },
                                 "org.matrix.cross_signing_reset": {
                                     "url": url,
                                 },
@@ -594,9 +573,14 @@ class SigningKeyUploadServlet(RestServlet):
                         {
                             "session": "dummy",
                             "flows": [
+                                {"stages": ["m.oauth"]},
+                                # The unstable name from MSC4312 should be supported until enough clients have adopted the stable (`m.oauth`) name:
                                 {"stages": ["org.matrix.cross_signing_reset"]},
                             ],
                             "params": {
+                                "m.oauth": {
+                                    "url": url,
+                                },
                                 "org.matrix.cross_signing_reset": {
                                     "url": url,
                                 },

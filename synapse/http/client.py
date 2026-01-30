@@ -28,6 +28,7 @@ from typing import (
     BinaryIO,
     Callable,
     Mapping,
+    Optional,
     Protocol,
 )
 
@@ -87,6 +88,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, StrSequence
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
@@ -161,7 +163,9 @@ def _is_ip_blocked(
     return False
 
 
-_EPSILON = 0.00000001
+# The delay used by the scheduler to schedule tasks "as soon as possible", while
+# still allowing other tasks to run between runs.
+_EPSILON = Duration(microseconds=1)
 
 
 def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCall]:
@@ -310,7 +314,7 @@ class BlocklistingAgentWrapper(Agent):
         method: bytes,
         uri: bytes,
         headers: Headers | None = None,
-        bodyProducer: IBodyProducer | None = None,
+        bodyProducer: Optional[IBodyProducer] = None,
     ) -> defer.Deferred:
         h = urllib.parse.urlparse(uri.decode("ascii"))
 
@@ -1030,7 +1034,7 @@ class BodyExceededMaxSize(Exception):
 class _DiscardBodyWithMaxSizeProtocol(protocol.Protocol):
     """A protocol which immediately errors upon receiving data."""
 
-    transport: ITCPTransport | None = None
+    transport: Optional[ITCPTransport] = None
 
     def __init__(self, deferred: defer.Deferred):
         self.deferred = deferred
@@ -1072,7 +1076,7 @@ class _MultipartParserProtocol(protocol.Protocol):
     Protocol to read and parse a MSC3916 multipart/mixed response
     """
 
-    transport: ITCPTransport | None = None
+    transport: Optional[ITCPTransport] = None
 
     def __init__(
         self,
@@ -1185,7 +1189,7 @@ class _MultipartParserProtocol(protocol.Protocol):
 class _ReadBodyWithMaxSizeProtocol(protocol.Protocol):
     """A protocol which reads body to a stream, erroring if the body exceeds a maximum size."""
 
-    transport: ITCPTransport | None = None
+    transport: Optional[ITCPTransport] = None
 
     def __init__(
         self, stream: ByteWriteable, deferred: defer.Deferred, max_size: int | None

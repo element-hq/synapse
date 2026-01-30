@@ -5,6 +5,7 @@
 
 # Setup
   - [Installation](setup/installation.md)
+  - [Security](setup/security.md)
   - [Using Postgres](postgres.md)
   - [Configuring a Reverse Proxy](reverse_proxy.md)
   - [Configuring a Forward/Outbound Proxy](setup/forward_proxy.md)

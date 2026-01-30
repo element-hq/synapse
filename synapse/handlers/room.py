@@ -92,9 +92,10 @@ from synapse.types.state import StateFilter
 from synapse.util import stringutils
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.stringutils import parse_and_validate_server_name
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -1179,7 +1180,7 @@ class RoomCreationHandler:
 
         if (invite_list or invite_3pid_list) and requester.shadow_banned:
             # We randomly sleep a bit just to annoy the requester.
-            await self.clock.sleep(random.randint(1, 10))
+            await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
 
             # Allow the request to go through, but remove any associated invites.
             invite_3pid_list = []
@@ -1918,7 +1919,7 @@ class RoomContextHandler:
         async def filter_evts(events: list[EventBase]) -> list[EventBase]:
             if use_admin_priviledge:
                 return events
-            return await filter_events_for_client(
+            return await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user.to_string(),
                 events,

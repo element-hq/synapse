@@ -32,6 +32,7 @@ from synapse.metrics.background_process_metrics import wrap_as_background_proces
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases import Databases
 from synapse.types.storage import _BackgroundUpdates
+from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
@@ -50,7 +51,7 @@ class PurgeEventsStorageController:
 
         if hs.config.worker.run_background_tasks:
             self._delete_state_loop_call = hs.get_clock().looping_call(
-                self._delete_state_groups_loop, 60 * 1000
+                self._delete_state_groups_loop, Duration(minutes=1)
             )
 
         self.stores.state.db_pool.updates.register_background_update_handler(

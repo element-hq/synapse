@@ -22,6 +22,7 @@
 import logging
 from typing import TYPE_CHECKING, Awaitable, Callable
 
+from twisted.internet import defer
 from twisted.python.failure import Failure
 
 from synapse.logging.context import (
@@ -35,6 +36,7 @@ from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -92,8 +94,8 @@ class TaskScheduler:
     """
 
     # Precision of the scheduler, evaluation of tasks to run will only happen
-    # every `SCHEDULE_INTERVAL_MS` ms
-    SCHEDULE_INTERVAL_MS = 1 * 60 * 1000  # 1mn
+    # every `SCHEDULE_INTERVAL`
+    SCHEDULE_INTERVAL = Duration(minutes=1)
     # How often to clean up old tasks.
     CLEANUP_INTERVAL_MS = 30 * 60 * 1000
     # Time before a complete or failed task is deleted from the DB
@@ -103,14 +105,15 @@ class TaskScheduler:
     # Time from the last task update after which we will log a warning
     LAST_UPDATE_BEFORE_WARNING_MS = 24 * 60 * 60 * 1000  # 24hrs
     # Report a running task's status and usage every so often.
-    OCCASIONAL_REPORT_INTERVAL_MS = 5 * 60 * 1000  # 5 minutes
+    OCCASIONAL_REPORT_INTERVAL = Duration(minutes=5)
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs  # nb must be called this for @wrap_as_background_process
         self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
-        self._running_tasks: set[str] = set()
+        # A map between a task's ID and a deferred linked to the task
+        self._running_tasks: dict[str, defer.Deferred] = {}
         # A map between action names and their registered function
         self._actions: dict[
             str,
@@ -127,11 +130,11 @@ class TaskScheduler:
         if self._run_background_tasks:
             self._clock.looping_call(
                 self._launch_scheduled_tasks,
-                TaskScheduler.SCHEDULE_INTERVAL_MS,
+                TaskScheduler.SCHEDULE_INTERVAL,
             )
             self._clock.looping_call(
                 self._clean_scheduled_tasks,
-                TaskScheduler.SCHEDULE_INTERVAL_MS,
+                TaskScheduler.SCHEDULE_INTERVAL,
             )
 
         running_tasks_gauge.register_hook(
@@ -324,6 +327,37 @@ class TaskScheduler:
             raise Exception(f"Task {id} is currently ACTIVE and can't be deleted")
         await self._store.delete_scheduled_task(id)
 
+    async def cancel_task(self, id: str) -> None:
+        """Cancel an ACTIVE or SCHEDULED task.
+
+        Args:
+            id: id of the task to cancel
+        """
+        task = await self.get_task(id)
+        if not task:
+            logger.debug("Can't cancel task %s because it doesn't exist in the DB", id)
+            return
+
+        if not (
+            task.status == TaskStatus.ACTIVE or task.status == TaskStatus.SCHEDULED
+        ):
+            logger.debug(
+                "Can't cancel task %s because it is neither ACTIVE nor SCHEDULED", id
+            )
+            return
+
+        if self._run_background_tasks:
+            await self.on_cancel_task(id)
+        else:
+            self.hs.get_replication_command_handler().send_cancel_task(id)
+
+    async def on_cancel_task(self, id: str) -> None:
+        if id in self._running_tasks:
+            deferred = self._running_tasks[id]
+            deferred.cancel()
+            self._running_tasks.pop(id)
+        await self.update_task(id, status=TaskStatus.CANCELLED)
+
     def on_new_task(self, task_id: str) -> None:
         """Handle a notification that a new ready-to-run task has been added to the queue"""
         # Just run the scheduler
@@ -433,7 +467,7 @@ class TaskScheduler:
                 start_time = self._clock.time()
                 occasional_status_call = self._clock.looping_call(
                     _occasional_report,
-                    TaskScheduler.OCCASIONAL_REPORT_INTERVAL_MS,
+                    TaskScheduler.OCCASIONAL_REPORT_INTERVAL,
                     log_context,
                     start_time,
                 )
@@ -457,7 +491,7 @@ class TaskScheduler:
                     result=result,
                     error=error,
                 )
-                self._running_tasks.remove(task.id)
+                self._running_tasks.pop(task.id)
 
                 current_time = self._clock.time()
                 usage = log_context.get_resource_usage()
@@ -468,7 +502,7 @@ class TaskScheduler:
 
             # Try launch a new task since we've finished with this one.
             self._clock.call_later(
-                0.1,
+                Duration(milliseconds=100),
                 self._launch_scheduled_tasks,
             )
 
@@ -488,6 +522,6 @@ class TaskScheduler:
         if task.id in self._running_tasks:
             return
 
-        self._running_tasks.add(task.id)
         await self.update_task(task.id, status=TaskStatus.ACTIVE)
-        self.hs.run_as_background_process(f"task-{task.action}", wrapper)
+        deferred = self.hs.run_as_background_process(f"task-{task.action}", wrapper)
+        self._running_tasks[task.id] = deferred

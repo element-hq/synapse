@@ -34,6 +34,7 @@ from synapse.replication.tcp.commands import PositionCommand
 from synapse.replication.tcp.protocol import ServerReplicationStreamProtocol
 from synapse.replication.tcp.streams import EventsStream
 from synapse.replication.tcp.streams._base import CachesStream, StreamRow, Token
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 
 if TYPE_CHECKING:
@@ -116,7 +117,7 @@ class ReplicationStreamer:
         #
         # Note that if the position hasn't advanced then we won't send anything.
         if any(EventsStream.NAME == s.NAME for s in self.streams):
-            self.clock.looping_call(self.on_notifier_poke, 1000)
+            self.clock.looping_call(self.on_notifier_poke, Duration(seconds=1))
 
     def on_notifier_poke(self) -> None:
         """Checks if there is actually any new data and sends it to the

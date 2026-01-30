@@ -72,6 +72,7 @@ from synapse.storage.invite_rule import InviteRule
 from synapse.types import JsonDict, StrCollection, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
+from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.visibility import filter_events_for_server
 
@@ -1787,6 +1788,10 @@ class FederationHandler:
                 room_id=room_id,
             )
 
+            # We don't start all the partial state room syncs at once, to avoid
+            # overloading the process.
+            await self.clock.sleep(Duration(milliseconds=10))
+
     def _start_partial_state_room_sync(
         self,
         initial_destination: str | None,
@@ -1972,7 +1977,9 @@ class FederationHandler:
                                 logger.warning(
                                     "%s; waiting for %d ms...", e, e.retry_after_ms
                                 )
-                                await self.clock.sleep(e.retry_after_ms / 1000)
+                                await self.clock.sleep(
+                                    Duration(milliseconds=e.retry_after_ms)
+                                )
 
                         # Success, no need to try the rest of the destinations.
                         break

@@ -39,7 +39,7 @@ from synapse.metrics.background_process_metrics import wrap_as_background_proces
 from synapse.storage.databases.main.lock import Lock, LockStore
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.clock import Clock
-from synapse.util.constants import ONE_MINUTE_SECONDS
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.logging.opentracing import opentracing
@@ -72,7 +72,7 @@ class WorkerLocksHandler:
         # that lock.
         self._locks: dict[tuple[str, str], WeakSet[WaitingLock | WaitingMultiLock]] = {}
 
-        self._clock.looping_call(self._cleanup_locks, 30_000)
+        self._clock.looping_call(self._cleanup_locks, Duration(seconds=30))
 
         self._notifier.add_lock_released_callback(self._on_lock_released)
 
@@ -187,7 +187,7 @@ class WorkerLocksHandler:
                 lock.release_lock()
 
         self._clock.call_later(
-            0,
+            Duration(seconds=0),
             _wake_all_locks,
             locks,
         )
@@ -276,7 +276,7 @@ class WaitingLock:
     def _get_next_retry_interval(self) -> float:
         next = self._retry_interval
         self._retry_interval = max(5, next * 2)
-        if self._retry_interval > 10 * ONE_MINUTE_SECONDS:  # >7 iterations
+        if self._retry_interval > Duration(minutes=10).as_secs():  # >7 iterations
             logger.warning(
                 "Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 self._retry_interval,
@@ -363,7 +363,7 @@ class WaitingMultiLock:
     def _get_next_retry_interval(self) -> float:
         next = self._retry_interval
         self._retry_interval = max(5, next * 2)
-        if self._retry_interval > 10 * ONE_MINUTE_SECONDS:  # >7 iterations
+        if self._retry_interval > Duration(minutes=10).as_secs():  # >7 iterations
             logger.warning(
                 "Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 self._retry_interval,

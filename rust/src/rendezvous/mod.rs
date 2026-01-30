@@ -35,6 +35,7 @@ use ulid::Ulid;
 
 use self::session::Session;
 use crate::{
+    duration::SynapseDuration,
     errors::{NotFoundError, SynapseError},
     http::{http_request_from_twisted, http_response_to_twisted, HeaderMapPyExt},
     UnwrapInfallible,
@@ -132,6 +133,8 @@ impl RendezvousHandler {
             .unwrap_infallible()
             .unbind();
 
+        let eviction_duration = SynapseDuration::from_milliseconds(eviction_interval);
+
         // Construct a Python object so that we can get a reference to the
         // evict method and schedule it to run.
         let self_ = Py::new(
@@ -149,7 +152,7 @@ impl RendezvousHandler {
         let evict = self_.getattr(py, "_evict")?;
         homeserver.call_method0("get_clock")?.call_method(
             "looping_call",
-            (evict, eviction_interval),
+            (evict, &eviction_duration),
             None,
         )?;
 

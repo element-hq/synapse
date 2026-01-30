@@ -53,6 +53,15 @@ listeners:
       - names: [federation]
         compress: false
 
+{% if SYNAPSE_ENABLE_METRICS %}
+  - type: metrics
+    # The main process always uses the same port 19090
+    #
+    # Prometheus does not support Unix sockets so we don't bother with
+    # `SYNAPSE_USE_UNIX_SOCKET`, https://github.com/prometheus/prometheus/issues/12024
+    port: 19090
+{% endif %}
+
 ## Database ##
 
 {% if POSTGRES_PASSWORD %}
