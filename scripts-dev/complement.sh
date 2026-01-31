@@ -210,7 +210,7 @@ main() {
       echo_if_github "::endgroup::"
 
     fi
-  
+
     echo "Docker images built."
   else
     echo "Skipping Docker image build as requested."
@@ -281,7 +281,8 @@ main() {
     export COMPLEMENT_SPAWN_HS_TIMEOUT_SECS=120
   else
     export PASS_SYNAPSE_COMPLEMENT_USE_WORKERS=
-    if [[ "$POSTGRES" = "psycopg" ]]; then
+    # A handy pattern for lower-casing all letters in a variable, `${variable,,}`
+    if [[ "${POSTGRES,,}" = "psycopg" ]]; then
       export PASS_SYNAPSE_COMPLEMENT_DATABASE=psycopg
     elif [[ -n "$POSTGRES" ]]; then
       export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
@@ -319,7 +320,7 @@ main() {
     echo "Skipping Complement run as requested."
     return 0
   fi
-  
+
   # Run the tests!
   echo "Running Complement with ${test_args[@]} $@ ${test_packages[@]}"
   cd "$COMPLEMENT_DIR"
