@@ -33,6 +33,14 @@ class PsycopgEngine(
         psycopg.Connection[tuple], psycopg.Cursor[tuple], psycopg.IsolationLevel  # type: ignore[type-var]
     ]
 ):
+    """
+    The class that defines how Synapse will interact with Postgres using the psycopg
+    version 3+ module.
+
+    NOTE: While psycopg does allow for return types other than tuples, for now that is
+        forced in order to match with existing psycopg2 behavior.
+    """
+
     def __init__(self, database_config: Mapping[str, Any]):
         super().__init__(psycopg, database_config)  # type: ignore[arg-type]
         # psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)

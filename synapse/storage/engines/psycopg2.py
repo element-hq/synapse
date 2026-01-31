@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 class Psycopg2Engine(
     PostgresEngine[psycopg2.extensions.connection, psycopg2.extensions.cursor, int]
 ):
+    """
+    The class that defines how Synapse will interact with Postgres using the psycopg
+    version 2.x module.
+
+    """
+
     def __init__(self, database_config: Mapping[str, Any]):
         super().__init__(psycopg2, database_config)
         psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)

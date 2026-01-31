@@ -44,6 +44,13 @@ class PostgresEngine(
     BaseDatabaseEngine[ConnectionType, CursorType, IsolationLevelType],
     metaclass=abc.ABCMeta,
 ):
+    """
+    An Abstract Base Class for use by Postgres connection libraries.
+    Currently supported:
+    * Psycopg2 -> `Psycopg2Engine`
+    * Psycopg -> `PsycopgEngine`
+    """
+
     isolation_level_map: Mapping[IsolationLevel, IsolationLevelType]
     default_isolation_level: IsolationLevelType
 
