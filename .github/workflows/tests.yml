@@ -689,7 +689,7 @@ jobs:
           - arrangement: workers
             database: Postgres
 
-          - arrangement: workers
+          - arrangement: monolith
             database: Psycopg
 
     steps:
