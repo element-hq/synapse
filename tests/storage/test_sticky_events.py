@@ -91,9 +91,6 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
 
     def test_delete_expired_sticky_events(self) -> None:
         """Test deletion of expired sticky events."""
-        # Get the starting stream_id
-        start_id = self.store.get_max_sticky_events_stream_id()
-
         # Insert an expired event by advancing time past its duration
         self.helper.send_sticky_event(
             self.room_id,
@@ -113,17 +110,23 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )["event_id"]
 
+        end_id = self.store.get_max_sticky_events_stream_id()
+
         # Delete expired events
         self.get_success(self.store._delete_expired_sticky_events())
 
         # Check that only the non-expired event remains
-        updates = self.get_success(
-            self.store.get_updated_sticky_events(
-                from_id=start_id, to_id=start_id + 2, limit=10
+        sticky_events = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="sticky_events", keyvalues=None, retcols=("stream_id", "event_id")
             )
         )
-        self.assertEqual(len(updates), 1)
-        self.assertEqual(updates[0].event_id, event_id_2)
+        self.assertEqual(
+            sticky_events,
+            [
+                (end_id, event_id_2),
+            ],
+        )
 
     def test_get_updated_sticky_events_with_limit(self) -> None:
         """Test that the limit parameter works correctly."""
