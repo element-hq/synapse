@@ -184,6 +184,15 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             - if they are rejected;
             - if they are outliers (they should be reconsidered for insertion when de-outliered); or
             - if they are not sticky (e.g. if the stickiness expired).
+
+        Skipping the insertion of these types of 'invalid' events is useful for performance reasons because
+        they would fill up the table yet we wouldn't show them to clients anyway.
+
+        Since syncing clients can't (easily?) 'skip over' sticky events (due to being in-order, reliably delivered),
+        tracking loads of invalid events in the table could make it expensive for servers to retrieve the sticky events that are actually valid.
+
+        For instance, someone spamming 1000s of rejected or 'policy_server_spammy' events could clog up this table in a way that means we either
+        have to deliver empty payloads to syncing clients, or consider substantially more than 100 events in order to gather a 100-sized batch to send down.
         """
 
         now_ms = self.clock.time_msec()
