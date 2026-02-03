@@ -57,6 +57,8 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )["event_id"]
 
+        mid_id = self.store.get_max_sticky_events_stream_id()
+
         event_id_2 = self.helper.send_sticky_event(
             self.room_id,
             EventTypes.Message,
@@ -65,10 +67,12 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )["event_id"]
 
+        end_id = self.store.get_max_sticky_events_stream_id()
+
         # Get all updates
         updates = self.get_success(
             self.store.get_updated_sticky_events(
-                from_id=start_id, to_id=start_id + 2, limit=10
+                from_id=start_id, to_id=end_id, limit=10
             )
         )
         self.assertEqual(len(updates), 2)
@@ -79,9 +83,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
 
         # Get only the second update
         updates = self.get_success(
-            self.store.get_updated_sticky_events(
-                from_id=start_id + 1, to_id=start_id + 2, limit=10
-            )
+            self.store.get_updated_sticky_events(from_id=mid_id, to_id=end_id, limit=10)
         )
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0].event_id, event_id_2)
