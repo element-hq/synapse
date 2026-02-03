@@ -40,6 +40,7 @@ from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Connection, Cursor
 from synapse.types import JsonDict, StrCollection
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 from . import engines
@@ -162,7 +163,7 @@ class _BackgroundUpdateContextManager:
 
     async def __aenter__(self) -> int:
         if self._sleep:
-            await self._clock.sleep(self._sleep_duration_ms / 1000)
+            await self._clock.sleep(Duration(milliseconds=self._sleep_duration_ms))
 
         return self._update_duration_ms
 

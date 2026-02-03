@@ -88,6 +88,20 @@ is quarantined, Synapse will:
  - Quarantine any existing cached remote media.
  - Quarantine any future remote media.
 
+## Downloading quarantined media
+
+Normally, when media is quarantined, it will return a 404 error when downloaded.
+Admins can bypass this by adding `?admin_unsafely_bypass_quarantine=true`
+to the [normal download URL](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1mediadownloadservernamemediaid).
+
+Bypassing the quarantine check is not recommended. Media is typically quarantined
+to prevent harmful content from being served to users, which includes admins. Only
+set the bypass parameter if you intentionally want to access potentially harmful
+content.
+
+Non-admin users cannot bypass quarantine checks, even when specifying the above
+query parameter.
+
 ## Quarantining media by ID
 
 This API quarantines a single piece of local or remote media.

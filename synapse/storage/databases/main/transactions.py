@@ -37,6 +37,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.types import JsonDict, StrCollection
 from synapse.util.caches.descriptors import cached, cachedList
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -81,7 +82,7 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
         super().__init__(database, db_conn, hs)
 
         if hs.config.worker.run_background_tasks:
-            self.clock.looping_call(self._cleanup_transactions, 30 * 60 * 1000)
+            self.clock.looping_call(self._cleanup_transactions, Duration(minutes=30))
 
     @wrap_as_background_process("cleanup_transactions")
     async def _cleanup_transactions(self) -> None:
@@ -380,7 +381,7 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
     ) -> list[str]:
         """
         Returns at most 50 event IDs and their corresponding stream_orderings
-        that correspond to the oldest events that have not yet been sent to
+        that correspond to the newest events that have not yet been sent to
         the destination.
 
         Args:

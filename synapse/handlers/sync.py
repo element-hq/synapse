@@ -36,7 +36,6 @@ from synapse.api.constants import (
     Direction,
     EventContentFields,
     EventTypes,
-    JoinRules,
     Membership,
 )
 from synapse.api.filtering import FilterCollection
@@ -79,7 +78,7 @@ from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 from synapse.util.metrics import Measure
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -680,7 +679,7 @@ class SyncHandler:
                         )
                     )
 
-                recents = await filter_events_for_client(
+                recents = await filter_and_transform_events_for_client(
                     self._storage_controllers,
                     sync_config.user.to_string(),
                     recents,
@@ -790,21 +789,12 @@ class SyncHandler:
                         )
                     )
 
-                filtered_recents = await filter_events_for_client(
+                loaded_recents = await filter_and_transform_events_for_client(
                     self._storage_controllers,
                     sync_config.user.to_string(),
                     loaded_recents,
                     always_include_ids=current_state_ids,
                 )
-
-                loaded_recents = []
-                for event in filtered_recents:
-                    if event.type == EventTypes.CallInvite:
-                        room_info = await self.store.get_room_with_stats(event.room_id)
-                        assert room_info is not None
-                        if room_info.join_rules == JoinRules.PUBLIC:
-                            continue
-                    loaded_recents.append(event)
 
                 log_kv({"loaded_recents_after_client_filtering": len(loaded_recents)})
 

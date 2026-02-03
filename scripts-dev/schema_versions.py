@@ -172,7 +172,7 @@ if __name__ == "__main__":
         # Expect JSON data on stdin.
         context, book = json.load(sys.stdin)
 
-        for section in book["sections"]:
+        for section in book["items"]:
             if "Chapter" in section and section["Chapter"]["path"] == "upgrade.md":
                 section["Chapter"]["content"] = section["Chapter"]["content"].replace(
                     "<!-- REPLACE_WITH_SCHEMA_VERSIONS -->", calculate_version_chart()

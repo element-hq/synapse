@@ -21,7 +21,7 @@
 import logging
 import random
 import urllib.parse
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from prometheus_client import Counter
 
@@ -40,6 +40,7 @@ from . import push_tools
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+from synapse.util.duration import Duration
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class HttpPusher(Pusher):
         self.data = pusher_config.data
         self.backoff_delay = HttpPusher.INITIAL_BACKOFF_SEC
         self.failing_since = pusher_config.failing_since
-        self.timed_call: IDelayedCall | None = None
+        self.timed_call: Optional[IDelayedCall] = None
         self._is_processing = False
         self._group_unread_count_by_room = (
             hs.config.push.push_group_unread_count_by_room
@@ -336,7 +337,7 @@ class HttpPusher(Pusher):
                 else:
                     logger.info("Push failed: delaying for %ds", self.backoff_delay)
                     self.timed_call = self.hs.get_clock().call_later(
-                        self.backoff_delay,
+                        Duration(seconds=self.backoff_delay),
                         self.on_timer,
                     )
                     self.backoff_delay = min(
@@ -371,7 +372,7 @@ class HttpPusher(Pusher):
             delay_ms = random.randint(1, self.push_jitter_delay_ms)
             diff_ms = event.origin_server_ts + delay_ms - self.clock.time_msec()
             if diff_ms > 0:
-                await self.clock.sleep(diff_ms / 1000)
+                await self.clock.sleep(Duration(milliseconds=diff_ms))
 
         rejected = await self.dispatch_push_event(event, tweaks, badge)
         if rejected is False:

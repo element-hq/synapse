@@ -121,6 +121,7 @@ from synapse.types import (
     get_domain_from_id,
 )
 from synapse.util.async_helpers import Linearizer
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.wheel_timer import WheelTimer
 
@@ -203,7 +204,7 @@ EXTERNAL_PROCESS_EXPIRY = 5 * 60 * 1000
 
 # Delay before a worker tells the presence handler that a user has stopped
 # syncing.
-UPDATE_SYNCING_USERS_MS = 10 * 1000
+UPDATE_SYNCING_USERS = Duration(seconds=10)
 
 assert LAST_ACTIVE_GRANULARITY < IDLE_TIMER
 
@@ -528,7 +529,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS_MS)
+        self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS)
 
         hs.register_async_shutdown_handler(
             phase="before",
@@ -581,7 +582,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
         for (user_id, device_id), last_sync_ms in list(
             self._user_devices_going_offline.items()
         ):
-            if now - last_sync_ms > UPDATE_SYNCING_USERS_MS:
+            if now - last_sync_ms > UPDATE_SYNCING_USERS.as_millis():
                 self._user_devices_going_offline.pop((user_id, device_id), None)
                 self.send_user_sync(user_id, device_id, False, last_sync_ms)
 
@@ -861,20 +862,20 @@ class PresenceHandler(BasePresenceHandler):
             # The initial delay is to allow disconnected clients a chance to
             # reconnect before we treat them as offline.
             self.clock.call_later(
-                30,
+                Duration(seconds=30),
                 self.clock.looping_call,
                 self._handle_timeouts,
-                5000,
+                Duration(seconds=5),
             )
 
         # Presence information is persisted, whether or not it is being tracked
         # internally.
         if self._presence_enabled:
             self.clock.call_later(
-                60,
+                Duration(minutes=1),
                 self.clock.looping_call,
                 self._persist_unpersisted_changes,
-                60 * 1000,
+                Duration(minutes=1),
             )
 
         presence_wheel_timer_size_gauge.register_hook(
@@ -2430,7 +2431,7 @@ class PresenceFederationQueue:
     _KEEP_ITEMS_IN_QUEUE_FOR_MS = 5 * 60 * 1000
 
     # How often to check if we can expire entries from the queue.
-    _CLEAR_ITEMS_EVERY_MS = 60 * 1000
+    _CLEAR_ITEMS_EVERY_MS = Duration(minutes=1)
 
     def __init__(self, hs: "HomeServer", presence_handler: BasePresenceHandler):
         self._clock = hs.get_clock()

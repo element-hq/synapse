@@ -37,6 +37,7 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.types import ISynapseThreadlessReactor
 from synapse.util.caches.ttlcache import TTLCache
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.json import json_decoder
 from synapse.util.metrics import Measure
 
@@ -315,7 +316,7 @@ class WellKnownResolver:
                 logger.info("Error fetching %s: %s. Retrying", uri_str, e)
 
             # Sleep briefly in the hopes that they come back up
-            await self._clock.sleep(0.5)
+            await self._clock.sleep(Duration(milliseconds=500))
 
 
 def _cache_period_from_headers(

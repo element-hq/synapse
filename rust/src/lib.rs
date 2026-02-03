@@ -5,6 +5,7 @@ use pyo3::prelude::*;
 use pyo3_log::ResetHandle;
 
 pub mod acl;
+pub mod duration;
 pub mod errors;
 pub mod events;
 pub mod http;

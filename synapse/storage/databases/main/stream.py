@@ -740,13 +740,25 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         from_key: RoomStreamToken,
     ) -> StrCollection:
         """Return the rooms that probably have had updates since the given
-        token (changes that are > `from_key`)."""
+        token (changes that are > `from_key`).
+
+        May return false positives, but must not return false negatives.
+
+        If `have_finished_sliding_sync_background_jobs` is False, then we return
+        all the room IDs, as we can't be sure that the sliding sync table is
+        fully populated.
+        """
         # If the stream change cache is valid for the stream token, we can just
         # use the result of that.
         if from_key.stream >= self._events_stream_cache.get_earliest_known_position():
             return self._events_stream_cache.get_entities_changed(
                 room_ids, from_key.stream
             )
+
+        if not self.have_finished_sliding_sync_background_jobs():
+            # If the table hasn't been populated yet, we have to assume all rooms
+            # have updates.
+            return room_ids
 
         def get_rooms_that_have_updates_since_sliding_sync_table_txn(
             txn: LoggingTransaction,
