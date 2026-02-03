@@ -27,8 +27,6 @@ from tests import unittest
 
 
 class StickyEventsClientTestCase(unittest.HomeserverTestCase):
-    """Tests sticky events retrieved via the /event/ endpoint."""
-
     servlets = [
         room.register_servlets,
         login.register_servlets,
@@ -42,11 +40,11 @@ class StickyEventsClientTestCase(unittest.HomeserverTestCase):
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        # Arrange: Register an account
+        # Register an account
         self.user_id = self.register_user("user1", "pass")
         self.token = self.login(self.user_id, "pass")
 
-        # Arrange: Create a room
+        # Create a room
         self.room_id = self.helper.create_room_as(self.user_id, tok=self.token)
 
     def _assert_event_sticky_for(self, event_id: str, sticky_ttl: int) -> None:
@@ -114,4 +112,57 @@ class StickyEventsClientTestCase(unittest.HomeserverTestCase):
 
         # Advancing time any more, the event is no longer sticky
         self.reactor.advance(0.001)
+        self._assert_event_not_sticky(event_id)
+
+
+class StickyEventsDisabledClientTestCase(unittest.HomeserverTestCase):
+    """
+    Tests client-facing behaviour of sticky events when the feature is
+    disabled.
+    """
+
+    servlets = [
+        room.register_servlets,
+        login.register_servlets,
+        register.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # Register an account
+        self.user_id = self.register_user("user1", "pass")
+        self.token = self.login(self.user_id, "pass")
+
+        # Create a room
+        self.room_id = self.helper.create_room_as(self.user_id, tok=self.token)
+
+    def _assert_event_not_sticky(self, event_id: str) -> None:
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/event/{event_id}",
+            access_token=self.token,
+        )
+
+        self.assertEqual(
+            channel.code, 200, f"could not retrieve event {event_id}: {channel.result}"
+        )
+        event = channel.json_body
+
+        self.assertNotIn(
+            EventUnsignedContentFields.STICKY_TTL,
+            event["unsigned"],
+            f"{EventUnsignedContentFields.STICKY_TTL} field unexpectedly found in {event_id}: {event}",
+        )
+
+    def test_sticky_event_via_event_endpoint(self) -> None:
+        sticky_event_response = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "sticky message", "msgtype": "m.text"},
+            tok=self.token,
+        )
+        event_id = sticky_event_response["event_id"]
+
+        # Since the feature is disabled, the event isn't sticky
         self._assert_event_not_sticky(event_id)
