@@ -20,14 +20,7 @@
 #
 import logging
 import re
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-    Generator,
-    Iterable,
-    Optional,
-    cast,
-)
+from typing import TYPE_CHECKING, Callable, Generator, Iterable, Optional
 
 if TYPE_CHECKING:
     from bs4 import BeautifulSoup
@@ -73,6 +66,30 @@ def decode_body(body: bytes | str, uri: str) -> Optional["BeautifulSoup"]:
         return None
 
 
+def get_attribute(tag: "Tag", attribute_name: str) -> str:
+    """
+    Get an attribute from a beautifulsoup tag.
+
+    Fetching an attribute may return either a string or list of strings depending
+    on if the attribute is a "multi-valued" attribute.
+
+    The multi-valued attributes are never used in the HTML preview code, but this
+    function helps enforce type safety without casts.
+
+    Args:
+        tag: The Tag object to get the attribute from.
+        attribute_name: The name of the attribute to get.
+
+    Returns:
+        The attribute value as a string.
+    """
+    attribute = tag[attribute_name]
+    assert isinstance(attribute, str), (
+        f"Expected attribute {attribute_name} to have a string value"
+    )
+    return attribute
+
+
 def _get_meta_tags(
     soup: "BeautifulSoup",
     property: str,
@@ -106,7 +123,7 @@ def _get_meta_tags(
             )
             return {}
 
-        key = cast(str, tag[property])
+        key = get_attribute(tag, property)
         if property_mapper:
             new_key = property_mapper(key)
             # None is a special value used to ignore a value.
@@ -114,7 +131,7 @@ def _get_meta_tags(
                 continue
             key = new_key
 
-        results[key] = cast(str, tag["content"])
+        results[key] = get_attribute(tag, "content")
 
     return results
 
@@ -212,7 +229,7 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
         )
         # If a meta image is found, use it.
         if meta_image:
-            og["og:image"] = cast(str, meta_image["content"])
+            og["og:image"] = get_attribute(meta_image, "content")
         else:
             # Try to find images which are larger than 10px by 10px.
             #
@@ -222,25 +239,27 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
             )
             images = sorted(
                 filter(
-                    lambda tag: int(cast(str, tag["width"])) > 10
-                    and int(cast(str, tag["height"])) > 10,
+                    lambda tag: int(get_attribute(tag, "width")) > 10
+                    and int(get_attribute(tag, "height")) > 10,
                     raw_images,
                 ),
                 key=lambda i: (
-                    -1 * float(cast(str, i["width"])) * float(cast(str, i["height"]))
+                    -1
+                    * float(get_attribute(i, "width"))
+                    * float(get_attribute(i, "height"))
                 ),
             )
             # If no images were found, try to find *any* images.
             if not images:
                 images = soup.find_all("img", src=NON_BLANK, limit=1)
             if images:
-                og["og:image"] = cast(str, images[0]["src"])
+                og["og:image"] = get_attribute(images[0], "src")
 
             # Finally, fallback to the favicon if nothing else.
             else:
                 favicon = soup.find("link", href=NON_BLANK, rel="icon")
                 if favicon:
-                    og["og:image"] = cast(str, favicon["href"])
+                    og["og:image"] = get_attribute(favicon, "href")
 
     if "og:description" not in og:
         # Check the first meta description tag for content.
@@ -252,7 +271,7 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
 
         # If a meta description is found with content, use it.
         if meta_description:
-            og["og:description"] = cast(str, meta_description["content"])
+            og["og:description"] = get_attribute(meta_description, "content")
         else:
             og["og:description"] = parse_html_description(soup)
     elif og["og:description"]:

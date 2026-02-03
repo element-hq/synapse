@@ -21,11 +21,16 @@
 import html
 import logging
 import urllib.parse
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import attr
 
-from synapse.media.preview_html import NON_BLANK, decode_body, parse_html_description
+from synapse.media.preview_html import (
+    NON_BLANK,
+    decode_body,
+    get_attribute,
+    parse_html_description,
+)
 from synapse.types import JsonDict
 from synapse.util.json import json_decoder
 
@@ -123,7 +128,7 @@ class OEmbedProvider:
             type="application/json+oembed",
             href=NON_BLANK,
         )
-        return cast(str, tag["href"]) if tag else None
+        return get_attribute(tag, "href") if tag else None
 
     def parse_oembed_response(self, url: str, raw_body: bytes) -> OEmbedResult:
         """
@@ -215,7 +220,7 @@ class OEmbedProvider:
 
 def _fetch_url(soup: "BeautifulSoup", tag_name: str) -> str | None:
     tag = soup.find(tag_name, src=NON_BLANK)
-    return cast(str, tag["src"]) if tag else None
+    return get_attribute(tag, "src") if tag else None
 
 
 def calc_description_and_urls(
