@@ -32,6 +32,7 @@ from typing import Any, Iterable, NamedTuple, Sequence, cast
 
 from packaging.markers import Marker, Value, Variable, default_environment
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 DISTRIBUTION_NAME = "matrix-synapse"
 
@@ -96,7 +97,7 @@ def _should_ignore_runtime_requirement(req: Requirement) -> bool:
     # In any case, workaround this by ignoring setuptools_rust here. (It might be
     # slightly cleaner to put `setuptools_rust` in a `build` extra or similar, but for
     # now let's do something quick and dirty.
-    if req.name == "setuptools_rust":
+    if canonicalize_name(req.name) == "setuptools-rust":
         return True
     return False
 
