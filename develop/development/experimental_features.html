@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-723e99dc.js";
+            window.path_to_searchindex_js = "../searchindex-c14b7afa.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-4dc10a98.js"></script>
@@ -229,7 +229,36 @@ expected and not an issue.</p>
 but one should be used if unsure.</p>
 <p>New experimental configuration flags should be added under the <code>experimental</code>
 configuration key (see the <code>synapse.config.experimental</code> file) and either explain
-(briefly) what is being enabled, or include the MSC number.</p>
+(briefly) what is being enabled, or include the MSC number.
+The configuration flag should link to the tracking issue for the experimental feature (see below).</p>
+<h2 id="tracking-issues-for-experimental-features"><a class="header" href="#tracking-issues-for-experimental-features">Tracking issues for experimental features</a></h2>
+<p>In the interest of having some documentation around experimental features, without
+polluting the stable documentation, all new experimental features should have a tracking issue with
+<a href="https://github.com/element-hq/synapse/issues?q=sort%3Aupdated-desc+state%3Aopen+label%3A%22T-ExperimentalFeature%22">the <code>T-ExperimentalFeature</code> label</a>,
+kept open as long as the experimental feature is present in Synapse.</p>
+<p>The configuration option for the feature should have a comment linking to the tracking issue,
+for ease of discoverability.</p>
+<p>As a guideline, the issue should contain:</p>
+<ul>
+<li>Context for why this experimental feature is in Synapse
+<ul>
+<li>This could well be a link to somewhere else, where this context is already available.</li>
+</ul>
+</li>
+<li>If applicable, why the feature is enabled by default. (Why do we need to enable it by default and why is it safe?)</li>
+<li>If applicable, setup instructions for any non-standard components or configuration needed by the feature.
+(Ideally this will be moved to the configuration manual after stabilisation.)</li>
+<li>Design decisions behind the Synapse implementation.
+(Ideally this will be moved to the developers’ documentation after stabilisation.)</li>
+<li>Any caveats around the current implementation of the feature, such as:
+<ul>
+<li>missing aspects</li>
+<li>breakage or incompatibility that is expected if/when the feature is stabilised,
+or when the feature is turned on/off</li>
+</ul>
+</li>
+<li>Criteria for how we know whether we can remove the feature in the future.</li>
+</ul>
 
                     </main>
 
