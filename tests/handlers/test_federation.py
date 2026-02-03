@@ -652,6 +652,7 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
                 ],
                 partial_state=True,
                 servers_in_room={"example.com"},
+                state_dag=None,
             )
         )
 

@@ -69,7 +69,10 @@ class TransportLayerClient:
         self.client.shutdown()
 
     async def get_room_state_ids(
-        self, destination: str, room_id: str, event_id: str
+        self,
+        destination: str,
+        room_id: str,
+        event_id: str,
     ) -> JsonDict:
         """Requests the IDs of all state for a given room at the given event.
 
@@ -78,22 +81,26 @@ class TransportLayerClient:
                 to get the state from.
             room_id: the room we want the state of
             event_id: The event we want the context at.
-
         Returns:
             Results in a dict received from the remote homeserver.
         """
         logger.debug("get_room_state_ids dest=%s, room=%s", destination, room_id)
 
         path = _create_v1_path("/state_ids/%s", room_id)
+        qps = {"event_id": event_id}
         return await self.client.get_json(
             destination,
             path=path,
-            args={"event_id": event_id},
+            args=qps,
             try_trailing_slash_on_400=True,
         )
 
     async def get_room_state(
-        self, room_version: RoomVersion, destination: str, room_id: str, event_id: str
+        self,
+        room_version: RoomVersion,
+        destination: str,
+        room_id: str,
+        event_id: str,
     ) -> "StateRequestResponse":
         """Requests the full state for a given room at the given event.
 
@@ -103,15 +110,15 @@ class TransportLayerClient:
                 to get the state from.
             room_id: the room we want the state of
             event_id: The event we want the context at.
-
         Returns:
             Results in a dict received from the remote homeserver.
         """
         path = _create_v1_path("/state/%s", room_id)
+        qps = {"event_id": event_id}
         return await self.client.get_json(
             destination,
             path=path,
-            args={"event_id": event_id},
+            args=qps,
             # This can take a looooooong time for large rooms. Give this a generous
             # timeout of 10 minutes to avoid the partial state resync timing out early
             # and trying a bunch of servers who haven't seen our join yet.
@@ -787,18 +794,21 @@ class TransportLayerClient:
         limit: int,
         min_depth: int,
         timeout: int,
+        state_dag: bool,
     ) -> JsonDict:
         path = _create_v1_path("/get_missing_events/%s", room_id)
-
+        data = {
+            "limit": int(limit),
+            "min_depth": int(min_depth),
+            "earliest_events": earliest_events,
+            "latest_events": latest_events,
+        }
+        if state_dag:
+            data["org.matrix.msc4242.state_dag"] = True
         return await self.client.post_json(
             destination=destination,
             path=path,
-            data={
-                "limit": int(limit),
-                "min_depth": int(min_depth),
-                "earliest_events": earliest_events,
-                "latest_events": latest_events,
-            },
+            data=data,
             timeout=timeout,
         )
 
@@ -993,6 +1003,9 @@ class SendJoinResponse:
     state: list[EventBase]
     # The raw join event from the /send_join response.
     event_dict: JsonDict
+    # MSC4242: State DAGs. Always included for state dag rooms, else an empty list.
+    # Replaces auth_events.
+    state_dag: list[EventBase]
     # The parsed join event from the /send_join response. This will be None if
     # "event" is not included in the response.
     event: EventBase | None = None
@@ -1079,7 +1092,7 @@ class SendJoinParser(ByteParser[SendJoinResponse]):
     MAX_RESPONSE_SIZE = 500 * 1024 * 1024
 
     def __init__(self, room_version: RoomVersion, v1_api: bool):
-        self._response = SendJoinResponse([], [], event_dict={})
+        self._response = SendJoinResponse([], [], event_dict={}, state_dag=[])
         self._room_version = room_version
         self._coros: list[Generator[None, bytes, None]] = []
 
@@ -1122,6 +1135,15 @@ class SendJoinParser(ByteParser[SendJoinResponse]):
                     use_float="True",
                 )
             )
+
+            if room_version.msc4242_state_dags:
+                self._coros.append(
+                    ijson.items_coro(
+                        _event_list_parser(room_version, self._response.state_dag),
+                        prefix + "state_dag.item",
+                        use_float=True,
+                    )
+                )
 
     def write(self, data: bytes) -> int:
         for c in self._coros:

@@ -60,7 +60,7 @@ from synapse.event_auth import (
     check_state_independent_auth_rules,
     validate_event_for_room_version,
 )
-from synapse.events import EventBase
+from synapse.events import EventBase, FrozenEventVMSC4242, event_exists_in_state_dag
 from synapse.events.snapshot import (
     EventContext,
     EventPersistencePair,
@@ -522,8 +522,10 @@ class FederationEventHandler:
         Args:
             origin: Where the events came from
             room_id:
-            auth_events
-            state
+            auth_events: The auth chain from the send_join response. For MSC4242 State DAG rooms,
+            this is ignored.
+            state The current state of the room. For MSC4242 rooms, this is the state DAG and so
+            includes the auth chains for state.
             event
             room_version: The room version we expect this room to have, and
                 will raise if it doesn't match the version in the create event.
@@ -555,6 +557,14 @@ class FederationEventHandler:
         if room_version.identifier != room_version_id:
             raise SynapseError(400, "Room version mismatch")
 
+        if room_version.msc4242_state_dags:
+            # We should be provided with a connected state DAG, so check it before persisting them.
+            # If we find a gap, the response is invalid so refuse the join.
+            if not is_state_dag_connected(
+                [ev for ev in state if isinstance(ev, FrozenEventVMSC4242)]
+            ):
+                raise SynapseError(502, "State DAG is not connected")
+
         # persist the auth chain and state events.
         #
         # any invalid events here will be marked as rejected, and we'll carry on.
@@ -566,9 +576,14 @@ class FederationEventHandler:
         # signatures right now doesn't mean that we will *never* be able to, so it
         # is premature to reject them.
         #
-        await self._auth_and_persist_outliers(
-            room_id, itertools.chain(auth_events, state)
+        has_rejected_events = await self._auth_and_persist_outliers(
+            room_id,
+            # for state DAG rooms, auth_events = [] so this is fine
+            itertools.chain(auth_events, state),
+            from_send_join=True,
         )
+        if room_version.msc4242_state_dags and has_rejected_events:
+            raise SynapseError(502, "State DAG included rejected events")
 
         # and now persist the join event itself.
         logger.info(
@@ -619,6 +634,19 @@ class FederationEventHandler:
                             self._store, self._state_deletion_store
                         ),
                     )
+                )
+            elif room_version.msc4242_state_dags:
+                assert isinstance(event, FrozenEventVMSC4242)
+                # we don't blindly trust the 'current state', and instead do state res to calculate it,
+                # which we can do because we just did _auth_and_persist_outliers on the state DAG.
+                state_before = (
+                    await self._state_handler.resolve_state_groups_for_events(
+                        event.room_id,
+                        event.prev_state_events,
+                    )
+                )
+                state_ids_before_event = await state_before.get_state(
+                    self._state_storage_controller
                 )
             else:
                 state_ids_before_event = {
@@ -1119,6 +1147,10 @@ class FederationEventHandler:
         In other words: we should only call this method if `event` has been *pulled*
         as part of a batch of missing prev events, or similar.
 
+        For state DAG rooms, we simply fill in the state DAG instead of asking the remote server
+        for the state after each missing `prev_event`, thereby avoiding security issues that can
+        occur if the remote server lies about the room state.
+
         Params:
             dest: the remote server to ask for state at the missing prevs. Typically,
                 this will be the server we got `event` from.
@@ -1136,6 +1168,13 @@ class FederationEventHandler:
         """
         room_id = event.room_id
         event_id = event.event_id
+        room_version = await self._store.get_room_version_id(room_id)
+        room_version_obj = KNOWN_ROOM_VERSIONS[room_version]
+
+        if room_version_obj.msc4242_state_dags:
+            return await self._compute_event_context_with_maybe_missing_prevs_state_dag(
+                dest, event
+            )
 
         prevs = set(event.prev_event_ids())
         seen = await self._store.have_events_in_timeline(prevs)
@@ -1195,7 +1234,10 @@ class FederationEventHandler:
                     # by the get_pdu_cache in federation_client.
                     remote_state_map = (
                         await self._get_state_ids_after_missing_prev_event(
-                            dest, room_id, p
+                            dest,
+                            room_id,
+                            p,
+                            event.room_version,
                         )
                     )
 
@@ -1212,7 +1254,6 @@ class FederationEventHandler:
             # we don't need this any more, let's delete it.
             del ours
 
-            room_version = await self._store.get_room_version_id(room_id)
             state_map = await self._state_resolution_handler.resolve_events_with_store(
                 room_id,
                 room_version,
@@ -1237,6 +1278,24 @@ class FederationEventHandler:
             event, state_ids_before_event=state_map, partial_state=partial_state
         )
 
+    async def _compute_event_context_with_maybe_missing_prevs_state_dag(
+        self, dest: str, event: EventBase
+    ) -> EventContext:
+        # before we can compute the event context we need to calculate the auth event IDs
+        # for this event. Before we can do that, we need to calculate the auth state before
+        # this event. Before we can do that, we need to fill in the state DAG for the
+        # prev_state_events in this event.
+        assert isinstance(event, FrozenEventVMSC4242)
+        missed_events = await self._fetch_missing_state_dag_events(dest, event)
+        await self._auth_and_persist_outliers(event.room_id, missed_events)
+        (
+            ctx,
+            calculated_auth_event_ids,
+        ) = await self._calculate_state_dag_context(event)
+        event.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
+
+        return ctx
+
     @trace
     @tag_args
     async def _get_state_ids_after_missing_prev_event(
@@ -1244,6 +1303,7 @@ class FederationEventHandler:
         destination: str,
         room_id: str,
         event_id: str,
+        room_version: RoomVersion,
     ) -> StateMap[str]:
         """Requests all of the room state at a given event from a remote homeserver.
 
@@ -1251,7 +1311,7 @@ class FederationEventHandler:
             destination: The remote homeserver to query for the state.
             room_id: The id of the room we're interested in.
             event_id: The id of the event we want the state at.
-
+            room_version: The version of the room
         Returns:
             The event ids of the state *after* the given event.
 
@@ -1271,7 +1331,9 @@ class FederationEventHandler:
             state_event_ids,
             auth_event_ids,
         ) = await self._federation_client.get_room_state_ids(
-            destination, room_id, event_id=event_id
+            destination,
+            room_id,
+            event_id=event_id,
         )
 
         logger.debug(
@@ -1280,6 +1342,92 @@ class FederationEventHandler:
             len(auth_event_ids),
         )
 
+        # ensure all these events are in the DB before we continue further.
+        await self._persist_state_response(
+            destination, room_id, event_id, state_event_ids, auth_event_ids
+        )
+
+        # if we couldn't get the prev event in question, that's a problem.
+        remote_event = await self._store.get_event(
+            event_id,
+            allow_none=True,
+            allow_rejected=True,
+            redact_behaviour=EventRedactBehaviour.as_is,
+        )
+        if not remote_event:
+            raise Exception("Unable to get missing prev_event %s" % (event_id,))
+
+        # We now need to fill out the state map, which involves fetching the
+        # type and state key for each event ID in the state.
+        state_map = {}
+
+        event_metadata = await self._store.get_metadata_for_events(state_event_ids)
+        for state_event_id, metadata in event_metadata.items():
+            if metadata.room_id != room_id:
+                # This is a bogus situation, but since we may only discover it a long time
+                # after it happened, we try our best to carry on, by just omitting the
+                # bad events from the returned state set.
+                #
+                # This can happen if a remote server claims that the state or
+                # auth_events at an event in room A are actually events in room B
+                logger.warning(
+                    "Remote server %s claims event %s in room %s is an auth/state "
+                    "event in room %s",
+                    destination,
+                    state_event_id,
+                    metadata.room_id,
+                    room_id,
+                )
+                continue
+
+            if metadata.state_key is None:
+                logger.warning(
+                    "Remote server gave us non-state event in state: %s", state_event_id
+                )
+                continue
+
+            state_map[(metadata.event_type, metadata.state_key)] = state_event_id
+
+        # missing state at that event is a warning, not a blocker
+        # XXX: this doesn't sound right? it means that we'll end up with incomplete
+        #   state.
+        failed_to_fetch = set(state_event_ids) - event_metadata.keys()
+        # `event_id` could be missing from `event_metadata` because it's not necessarily
+        # a state event. We've already checked that we've fetched it above.
+        failed_to_fetch.discard(event_id)
+        if failed_to_fetch:
+            logger.warning(
+                "Failed to fetch missing state events for %s %s",
+                event_id,
+                failed_to_fetch,
+            )
+            set_tag(
+                SynapseTags.RESULT_PREFIX + "failed_to_fetch",
+                str(failed_to_fetch),
+            )
+            set_tag(
+                SynapseTags.RESULT_PREFIX + "failed_to_fetch.length",
+                str(len(failed_to_fetch)),
+            )
+
+        if remote_event.is_state() and remote_event.rejected_reason is None:
+            state_map[(remote_event.type, remote_event.state_key)] = (
+                remote_event.event_id
+            )
+
+        return state_map
+
+    async def _persist_state_response(
+        self,
+        destination: str,
+        room_id: str,
+        event_id: str,
+        state_event_ids: list[str],
+        auth_event_ids: list[str],
+    ) -> None:
+        """Ensure that all events from a /state{_ids} response have been seen and are in the database.
+        This function side-effects by inserting missed events into the database.
+        """
         # Start by checking events we already have in the DB
         desired_events = set(state_event_ids)
         desired_events.add(event_id)
@@ -1344,76 +1492,6 @@ class FederationEventHandler:
                 destination=destination, room_id=room_id, event_ids=missing_event_ids
             )
 
-        # We now need to fill out the state map, which involves fetching the
-        # type and state key for each event ID in the state.
-        state_map = {}
-
-        event_metadata = await self._store.get_metadata_for_events(state_event_ids)
-        for state_event_id, metadata in event_metadata.items():
-            if metadata.room_id != room_id:
-                # This is a bogus situation, but since we may only discover it a long time
-                # after it happened, we try our best to carry on, by just omitting the
-                # bad events from the returned state set.
-                #
-                # This can happen if a remote server claims that the state or
-                # auth_events at an event in room A are actually events in room B
-                logger.warning(
-                    "Remote server %s claims event %s in room %s is an auth/state "
-                    "event in room %s",
-                    destination,
-                    state_event_id,
-                    metadata.room_id,
-                    room_id,
-                )
-                continue
-
-            if metadata.state_key is None:
-                logger.warning(
-                    "Remote server gave us non-state event in state: %s", state_event_id
-                )
-                continue
-
-            state_map[(metadata.event_type, metadata.state_key)] = state_event_id
-
-        # if we couldn't get the prev event in question, that's a problem.
-        remote_event = await self._store.get_event(
-            event_id,
-            allow_none=True,
-            allow_rejected=True,
-            redact_behaviour=EventRedactBehaviour.as_is,
-        )
-        if not remote_event:
-            raise Exception("Unable to get missing prev_event %s" % (event_id,))
-
-        # missing state at that event is a warning, not a blocker
-        # XXX: this doesn't sound right? it means that we'll end up with incomplete
-        #   state.
-        failed_to_fetch = desired_events - event_metadata.keys()
-        # `event_id` could be missing from `event_metadata` because it's not necessarily
-        # a state event. We've already checked that we've fetched it above.
-        failed_to_fetch.discard(event_id)
-        if failed_to_fetch:
-            logger.warning(
-                "Failed to fetch missing state events for %s %s",
-                event_id,
-                failed_to_fetch,
-            )
-            set_tag(
-                SynapseTags.RESULT_PREFIX + "failed_to_fetch",
-                str(failed_to_fetch),
-            )
-            set_tag(
-                SynapseTags.RESULT_PREFIX + "failed_to_fetch.length",
-                str(len(failed_to_fetch)),
-            )
-
-        if remote_event.is_state() and remote_event.rejected_reason is None:
-            state_map[(remote_event.type, remote_event.state_key)] = (
-                remote_event.event_id
-            )
-
-        return state_map
-
     @trace
     @tag_args
     async def _get_state_and_persist(
@@ -1422,7 +1500,7 @@ class FederationEventHandler:
         """Get the complete room state at a given event, and persist any new events
         as outliers"""
         room_version = await self._store.get_room_version(room_id)
-        auth_events, state_events = await self._federation_client.get_room_state(
+        state_events, auth_events = await self._federation_client.get_room_state(
             destination, room_id, event_id=event_id, room_version=room_version
         )
         logger.info("/state returned %i events", len(auth_events) + len(state_events))
@@ -1629,10 +1707,10 @@ class FederationEventHandler:
 
     @trace
     @tag_args
-    async def _get_events_and_persist(
+    async def _get_events_from_remote(
         self, destination: str, room_id: str, event_ids: StrCollection
-    ) -> None:
-        """Fetch the given events from a server, and persist them as outliers.
+    ) -> list[EventBase]:
+        """Fetch the given events from a server.
 
         This function *does not* recursively get missing auth events of the
         newly fetched events. Callers must include in the `event_ids` argument
@@ -1671,13 +1749,32 @@ class FederationEventHandler:
                     )
 
         await concurrently_execute(get_event, event_ids, 5)
+        return events
+
+    @trace
+    @tag_args
+    async def _get_events_and_persist(
+        self, destination: str, room_id: str, event_ids: StrCollection
+    ) -> None:
+        """Fetch the given events from a server, and persist them as outliers.
+
+        This function *does not* recursively get missing auth events of the
+        newly fetched events. Callers must include in the `event_ids` argument
+        any missing events from the auth chain.
+
+        Logs a warning if we can't find the given event.
+        """
+        events = await self._get_events_from_remote(destination, room_id, event_ids)
         logger.info("Fetched %i events of %i requested", len(events), len(event_ids))
         await self._auth_and_persist_outliers(room_id, events)
 
     @trace
     async def _auth_and_persist_outliers(
-        self, room_id: str, events: Iterable[EventBase]
-    ) -> None:
+        self,
+        room_id: str,
+        events: Iterable[EventBase],
+        from_send_join: bool = False,
+    ) -> bool:
         """Persist a batch of outlier events fetched from remote servers.
 
         We first sort the events to make sure that we process each event's auth_events
@@ -1690,8 +1787,15 @@ class FederationEventHandler:
             room_id: the room that the events are meant to be in (though this has
                not yet been checked)
             events: the events that have been fetched
+            from_send_join: If True, the events in `events` are from a /send_join response. This
+            allows some optimisations to be performed as we know we don't need to query the database
+            for events. State DAG rooms use this.
+        Returns:
+            True if some outlier events were rejected.
         """
         event_map = {event.event_id: event for event in events}
+        if len(event_map) == 0:
+            return False  # nothing to do
 
         event_ids = event_map.keys()
         set_tag(
@@ -1702,6 +1806,9 @@ class FederationEventHandler:
             SynapseTags.FUNC_ARG_PREFIX + "event_ids.length",
             str(len(event_ids)),
         )
+        is_state_dag_room = event_map[
+            list(event_ids)[0]
+        ].room_version.msc4242_state_dags
 
         # filter out any events we have already seen. This might happen because
         # the events were eagerly pushed to us (eg, during a room join), or because
@@ -1718,9 +1825,18 @@ class FederationEventHandler:
 
         # We need to persist an event's auth events before the event.
         auth_graph = {
-            ev.event_id: [e_id for e_id in ev.auth_event_ids() if e_id in event_map]
+            ev.event_id: [
+                e_id
+                for e_id in (
+                    ev.auth_event_ids()
+                    if not isinstance(ev, FrozenEventVMSC4242)
+                    else ev.prev_state_events
+                )
+                if e_id in event_map
+            ]
             for ev in event_map.values()
         }
+        # XXX: confusing name: this isn't _only_ auth events!
         sorted_auth_event_ids = sorted_topologically(event_map.keys(), auth_graph)
         sorted_auth_events = [event_map[e_id] for e_id in sorted_auth_event_ids]
         logger.info(
@@ -1729,92 +1845,234 @@ class FederationEventHandler:
             shortstr(e.event_id for e in sorted_auth_events),
         )
 
-        # get all the auth events for all the events in this batch. By now, they should
-        # have been persisted.
-        auth_event_ids = {
-            aid for event in sorted_auth_events for aid in event.auth_event_ids()
-        }
-        auth_map = {
-            ev.event_id: ev
-            for ev in sorted_auth_events
-            if ev.event_id in auth_event_ids
-        }
-
-        missing_events = auth_event_ids.difference(auth_map)
-        if missing_events:
-            persisted_events = await self._store.get_events(
-                missing_events,
-                allow_rejected=True,
-                redact_behaviour=EventRedactBehaviour.as_is,
-            )
-            auth_map.update(persisted_events)
+        has_rejected_events = False
 
         events_and_contexts_to_persist: list[EventPersistencePair] = []
 
-        async def prep(event: EventBase) -> None:
-            with nested_logging_context(suffix=event.event_id):
-                auth = []
-                for auth_event_id in event.auth_event_ids():
-                    ae = auth_map.get(auth_event_id)
-                    if not ae:
-                        # the fact we can't find the auth event doesn't mean it doesn't
-                        # exist, which means it is premature to reject `event`. Instead we
-                        # just ignore it for now.
-                        logger.warning(
-                            "Dropping event %s, which relies on auth_event %s, which could not be found",
-                            event,
-                            auth_event_id,
-                        )
-                        # Drop the event from the auth_map too, else we may incorrectly persist
-                        # events which depend on this dropped event.
-                        auth_map.pop(event.event_id, None)
-                        return
-                    auth.append(ae)
+        if is_state_dag_room:
+            event_id_to_state_group: dict[str, int] = {}
+            state_group_to_state_map: dict[int, StateMap[str]] = {}
+            processed_event_map: dict[str, EventBase] = {}
 
-                # we're not bothering about room state, so flag the event as an outlier.
-                event.internal_metadata.outlier = True
-
-                context = EventContext.for_outlier(self._storage_controllers)
-                try:
-                    validate_event_for_room_version(event)
-                    await check_state_independent_auth_rules(
-                        self._store, event, batched_auth_events=auth_map
+            # other room versions now fetch missed auth_events and check that the event is allowed
+            # according to event-supplied auth_events. MSC4242 rooms instead _calculate_ the auth
+            # state and then determine if the event is allowed.
+            async def process(event: EventBase) -> tuple[EventBase, EventContext]:
+                assert isinstance(event, FrozenEventVMSC4242)
+                with nested_logging_context(suffix=event.event_id):
+                    known_prev_state_maps = None
+                    if from_send_join:
+                        state_groups = [
+                            event_id_to_state_group[event_id]
+                            for event_id in event.prev_state_events
+                        ]
+                        known_prev_state_maps = {
+                            sg: state_group_to_state_map[sg] for sg in state_groups
+                        }
+                    # The following is very similar to EventBuilder.build which also calculates
+                    # what the auth events should be.
+                    (
+                        context,
+                        calculated_auth_event_ids,
+                    ) = await self._calculate_state_dag_context(
+                        event,
+                        known_prev_state_maps=known_prev_state_maps,
+                        event_map=processed_event_map,
                     )
-                    check_state_dependent_auth_rules(event, auth)
-                except AuthError as e:
-                    logger.warning("Rejecting %r because %s", event, e)
-                    context.rejected = RejectedReason.AUTH_ERROR
-                except EventSizeError as e:
-                    if e.unpersistable:
-                        # This event is completely unpersistable.
-                        raise e
-                    # Otherwise, we are somewhat lenient and just persist the event
-                    # as rejected, for moderate compatibility with older Synapse
-                    # versions.
-                    logger.warning("While validating received event %r: %s", event, e)
-                    context.rejected = RejectedReason.OVERSIZED_EVENT
+                    # set metadata fields
+                    event.internal_metadata.calculated_auth_event_ids = (
+                        calculated_auth_event_ids
+                    )
+                    event.internal_metadata.outlier = True
+                    # fetch the calculated auth events for checking auth rules
+                    batched_auth_events = None
+                    if from_send_join:
+                        # we already have the auth events as we're processing a /send_join response.
+                        # So let's pull them out now.
+                        calculated_auth_events = {
+                            event_id: event_map[event_id]
+                            for event_id in calculated_auth_event_ids
+                        }
+                        batched_auth_events = {
+                            event_id: event_map[event_id]
+                            for event_id in (
+                                calculated_auth_event_ids + event.prev_state_events
+                            )
+                        }
+                        if context._state_group is not None:
+                            event_id_to_state_group[event.event_id] = (
+                                context._state_group
+                            )
+                            state_group_to_state_map[
+                                context._state_group
+                            ] = await context.get_current_state_ids()
 
-            events_and_contexts_to_persist.append((event, context))
+                    else:
+                        calculated_auth_events = await self._store.get_events(
+                            calculated_auth_event_ids,
+                            allow_rejected=True,
+                            redact_behaviour=EventRedactBehaviour.as_is,
+                        )
+                    try:
+                        validate_event_for_room_version(event)
+                        await check_state_independent_auth_rules(
+                            self._store, event, batched_auth_events
+                        )
+                        check_state_dependent_auth_rules(
+                            event, calculated_auth_events.values()
+                        )
+                    except AuthError as e:
+                        logger.warning("Rejecting %r because %s", event, e)
+                        context.rejected = RejectedReason.AUTH_ERROR
+                    except EventSizeError as e:
+                        if e.unpersistable:
+                            # This event is completely unpersistable.
+                            raise e
+                        # TODO(kegan): check before merging if we can be stricter here.
+                        # Otherwise, we are somewhat lenient and just persist the event
+                        # as rejected, for moderate compatibility with older Synapse
+                        # versions.
+                        logger.warning(
+                            "While validating received event %r: %s", event, e
+                        )
+                        context.rejected = RejectedReason.OVERSIZED_EVENT
 
-        for i, event in enumerate(sorted_auth_events):
-            await prep(event)
+                processed_event_map[event.event_id] = event
+                return (event, context)
 
-            # The above function is typically not async, and so won't yield to
-            # the reactor. For large rooms let's yield to the reactor
-            # occasionally to ensure we don't block other work.
-            if (i + 1) % 1000 == 0:
-                await self._clock.sleep(Duration(seconds=0))
+            # we cannot prep in a batch then persist in a batch like with other room versions
+            # because we need to have persisted the state before the prev_state_events _before_
+            # we can work out what the calculated auth_events are for the next event. If we try
+            # to do what other room versions do, _calculate_state_dag_context will fail due
+            # to not knowing the state groups at prev_state_events.
+            # The exception to this is when processing a /send_join response as we have all the
+            # events in-memory.
+            if from_send_join:
+                for i, event in enumerate(sorted_auth_events):
+                    event, context = await process(event)
+                    if context.rejected is not None:
+                        has_rejected_events = True
+                    events_and_contexts_to_persist.append((event, context))
+                    # The above function is typically not async, and so won't yield to
+                    # the reactor. For large rooms let's yield to the reactor
+                    # occasionally to ensure we don't block other work.
+                    if (i + 1) % 1000 == 0:
+                        await self._clock.sleep(Duration(seconds=0))
 
-        # Also persist the new event in batches for similar reasons as above.
-        for batch in batch_iter(events_and_contexts_to_persist, 1000):
-            await self.persist_events_and_notify(
-                room_id,
-                batch,
-                # Mark these events as backfilled as they're historic events that will
-                # eventually be backfilled. For example, missing events we fetch
-                # during backfill should be marked as backfilled as well.
-                backfilled=True,
-            )
+                for batch in batch_iter(events_and_contexts_to_persist, 1000):
+                    await self.persist_events_and_notify(
+                        room_id,
+                        batch,
+                        # Mark these events as backfilled as they're historic events that will
+                        # eventually be backfilled. For example, missing events we fetch
+                        # during backfill should be marked as backfilled as well.
+                        backfilled=True,
+                    )
+            else:
+                for event in sorted_auth_events:
+                    event_and_context = await process(event)
+                    await self.persist_events_and_notify(
+                        room_id,
+                        [event_and_context],
+                        # Mark these events as backfilled as they're historic events that will
+                        # eventually be backfilled. For example, missing events we fetch
+                        # during backfill should be marked as backfilled as well.
+                        backfilled=True,
+                    )
+                    if event_and_context[1].rejected is not None:
+                        has_rejected_events = True
+        else:
+            # get all the auth events for all the events in this batch. By now, they should
+            # have been persisted.
+            auth_event_ids = {
+                aid for event in sorted_auth_events for aid in event.auth_event_ids()
+            }
+            auth_map = {
+                ev.event_id: ev
+                for ev in sorted_auth_events
+                if ev.event_id in auth_event_ids
+            }
+
+            missing_events = auth_event_ids.difference(auth_map)
+            if missing_events:
+                persisted_events = await self._store.get_events(
+                    missing_events,
+                    allow_rejected=True,
+                    redact_behaviour=EventRedactBehaviour.as_is,
+                )
+                auth_map.update(persisted_events)
+
+            async def prep(event: EventBase) -> bool:
+                with nested_logging_context(suffix=event.event_id):
+                    auth = []
+                    for auth_event_id in event.auth_event_ids():
+                        ae = auth_map.get(auth_event_id)
+                        if not ae:
+                            # the fact we can't find the auth event doesn't mean it doesn't
+                            # exist, which means it is premature to reject `event`. Instead we
+                            # just ignore it for now.
+                            logger.warning(
+                                "Dropping event %s, which relies on auth_event %s, which could not be found",
+                                event,
+                                auth_event_id,
+                            )
+                            # Drop the event from the auth_map too, else we may incorrectly persist
+                            # events which depend on this dropped event.
+                            auth_map.pop(event.event_id, None)
+                            return False
+                        auth.append(ae)
+
+                    # we're not bothering about room state, so flag the event as an outlier.
+                    event.internal_metadata.outlier = True
+
+                    context = EventContext.for_outlier(self._storage_controllers)
+                    try:
+                        validate_event_for_room_version(event)
+                        await check_state_independent_auth_rules(
+                            self._store, event, batched_auth_events=auth_map
+                        )
+                        check_state_dependent_auth_rules(event, auth)
+                    except AuthError as e:
+                        logger.warning("Rejecting %r because %s", event, e)
+                        context.rejected = RejectedReason.AUTH_ERROR
+                    except EventSizeError as e:
+                        if e.unpersistable:
+                            # This event is completely unpersistable.
+                            raise e
+                        # Otherwise, we are somewhat lenient and just persist the event
+                        # as rejected, for moderate compatibility with older Synapse
+                        # versions.
+                        logger.warning(
+                            "While validating received event %r: %s", event, e
+                        )
+                        context.rejected = RejectedReason.OVERSIZED_EVENT
+
+                events_and_contexts_to_persist.append((event, context))
+                return context.rejected is not None
+
+            for i, event in enumerate(sorted_auth_events):
+                is_rejected = await prep(event)
+                if is_rejected:
+                    has_rejected_events = True
+
+                # The above function is typically not async, and so won't yield to
+                # the reactor. For large rooms let's yield to the reactor
+                # occasionally to ensure we don't block other work.
+                if (i + 1) % 1000 == 0:
+                    await self._clock.sleep(Duration(seconds=0))
+
+            # Also persist the new event in batches for similar reasons as above.
+            for batch in batch_iter(events_and_contexts_to_persist, 1000):
+                await self.persist_events_and_notify(
+                    room_id,
+                    batch,
+                    # Mark these events as backfilled as they're historic events that will
+                    # eventually be backfilled. For example, missing events we fetch
+                    # during backfill should be marked as backfilled as well.
+                    backfilled=True,
+                )
+
+        return has_rejected_events
 
     @trace
     async def _check_event_auth(
@@ -1863,7 +2121,9 @@ class FederationEventHandler:
         # caller rather than swallow with `context.rejected` (since we cannot be
         # certain that there is a permanent problem with the event).
         claimed_auth_events = await self._load_or_fetch_auth_events_for_event(
-            origin, event
+            origin,
+            event,
+            context,
         )
         set_tag(
             SynapseTags.RESULT_PREFIX + "claimed_auth_events",
@@ -1886,6 +2146,11 @@ class FederationEventHandler:
                 "While checking auth of %r against auth_events: %s", event, e
             )
             context.rejected = RejectedReason.AUTH_ERROR
+            return
+
+        if event.room_version.msc4242_state_dags:
+            # Step 4 also did Step 5 as we calculated the auth events from the state before the event
+            # so we're done.
             return
 
         # now check the auth rules pass against the room state before the event
@@ -1987,6 +2252,78 @@ class FederationEventHandler:
         current_state_list = list(current_state.values())
         await self._get_room_member_handler().kick_guest_users(current_state_list)
 
+    async def _calculate_state_dag_context(
+        self,
+        event: FrozenEventVMSC4242,
+        existing_context: EventContext | None = None,
+        known_prev_state_maps: dict[int, StateMap[str]] | None = None,
+        event_map: dict[str, EventBase] | None = None,
+    ) -> tuple[EventContext, list[str]]:
+        """Calculates the state events for an event based on any provided existing context.
+        If no context is provided, calculates the state before the prev state events and
+        returns a new one.
+
+        Args:
+            event: The event to calculate the state at.
+            existing_context: The precalculated state if known.
+            known_prev_state_maps: The state maps for all the prev_state_events, if known.
+            This avoids an event ID to state group lookup which allow batch processing if the events
+            aren't yet persisted.
+        Returns:
+            The persisted EventContext and the calculated auth event IDs.
+        """
+        if len(event.prev_state_events) == 0 and event.type != EventTypes.Create:
+            raise SynapseError(502, f"event {event.event_id} has no prev_state_events")
+
+        if existing_context:
+            state_ids = await existing_context.get_prev_state_ids()
+            return existing_context, self._event_auth_handler.compute_auth_events(
+                event, state_ids
+            )
+        # load the room state at the prev_state_events. This is the expensive bit but
+        # it's a one-time cost as we remember the calculated auth events.
+        # TODO(kegan): we could be smarter here and cache what the calculated auth events are
+        # so we don't need to do state res, keyed off ([prev_state_events], sender), since the
+        # auth events for a given event is determined by its position in the state DAG and who is
+        # performing the operation. Without this cache, the same user sending 5 events incurs
+        # 5 state res operations. The cache must also be accessible to EventBuilder.build for local
+        # event creation, so somewhere in state handler perhaps?
+        if known_prev_state_maps is not None and len(known_prev_state_maps) > 0:
+            if len(known_prev_state_maps) == 1:
+                state_ids = list(known_prev_state_maps.values())[0]
+            else:
+                res = await self._state_resolution_handler.resolve_state_groups(
+                    event.room_id,
+                    event.room_version.identifier,
+                    known_prev_state_maps,
+                    event_map=event_map,
+                    state_res_store=StateResolutionStore(
+                        self._store, self._state_deletion_store
+                    ),
+                )
+                state_ids = await res.get_state(self._state_storage_controller)
+        else:
+            state_ids = await self._state_handler.compute_state_after_events(
+                event.room_id,
+                event.prev_state_events,
+                state_filter=None,  # can't apply this as we need to persist the state group afterwards
+                await_full_state=False,
+            )
+        # we should always have some kind of resolved state after the prev_state_events, except for
+        # the create event. If we don't, yell loudly.
+        if event.type != EventTypes.Create:
+            assert len(state_ids) > 0
+        context = await self._state_handler.compute_event_context(
+            event,
+            state_ids,
+            # Ideally this would always be False but code asserts this is None if there are no
+            # state_ids, which can happen normally if we reach the create event, so appease it.
+            partial_state=None
+            if len(event.prev_state_events) == 0 and event.type == EventTypes.Create
+            else False,
+        )
+        return context, self._event_auth_handler.compute_auth_events(event, state_ids)
+
     async def _check_for_soft_fail(
         self,
         event: EventBase,
@@ -2010,9 +2347,15 @@ class FederationEventHandler:
             # current state, it may have been derived from state resolution between
             # partial and full state and may not be accurate.
             return
+        is_state_dag_room = event.room_version.msc4242_state_dags
 
-        extrem_ids = await self._store.get_latest_event_ids_in_room(event.room_id)
-        prev_event_ids = set(event.prev_event_ids())
+        if is_state_dag_room:
+            extrem_ids = await self._store.get_state_dag_extremities(event.room_id)
+            assert isinstance(event, FrozenEventVMSC4242)
+            prev_event_ids = set(event.prev_state_events)
+        else:
+            extrem_ids = await self._store.get_latest_event_ids_in_room(event.room_id)
+            prev_event_ids = set(event.prev_event_ids())
 
         if extrem_ids == prev_event_ids:
             # If they're the same then the current state is the same as the
@@ -2026,27 +2369,17 @@ class FederationEventHandler:
         auth_types = auth_types_for_event(room_version_obj, event)
 
         # Calculate the "current state".
-        seen_event_ids = await self._store.have_events_in_timeline(prev_event_ids)
-        has_missing_prevs = bool(prev_event_ids - seen_event_ids)
-        if has_missing_prevs:
-            # We don't have all the prev_events of this event, which means we have a
-            # gap in the graph, and the new event is going to become a new backwards
-            # extremity.
-            #
-            # In this case we want to be a little careful as we might have been
-            # down for a while and have an incorrect view of the current state,
-            # however we still want to do checks as gaps are easy to
-            # maliciously manufacture.
-            #
-            # So we use a "current state" that is actually a state
-            # resolution across the current forward extremities and the
-            # given state at the event. This should correctly handle cases
-            # like bans, especially with state res v2.
-
-            state_sets_d = await self._state_storage_controller.get_state_groups_ids(
+        if is_state_dag_room:
+            # Because we may have just come back online after a long time, we don't know
+            # which is newer: our forward extremities or the event's state. As such,
+            # we do state resolution across those state sets to try to ensure we are seeing
+            # the 'current' state, particularly for catching bans. The block comment below
+            # says much the same thing but conditionally applies it based on missing prev_events,
+            # but in a state DAG world we always have prev_state_events.
+            state_sets_fwd = await self._state_storage_controller.get_state_groups_ids(
                 event.room_id, extrem_ids
             )
-            state_sets: list[StateMap[str]] = list(state_sets_d.values())
+            state_sets: list[StateMap[str]] = list(state_sets_fwd.values())
             state_ids = await context.get_prev_state_ids()
             state_sets.append(state_ids)
             current_state_ids = (
@@ -2061,11 +2394,48 @@ class FederationEventHandler:
                 )
             )
         else:
-            current_state_ids = (
-                await self._state_storage_controller.get_current_state_ids(
-                    event.room_id, StateFilter.from_types(auth_types)
+            seen_event_ids = await self._store.have_events_in_timeline(prev_event_ids)
+            has_missing_prevs = bool(prev_event_ids - seen_event_ids)
+            if has_missing_prevs:
+                # We don't have all the prev_events of this event, which means we have a
+                # gap in the graph, and the new event is going to become a new backwards
+                # extremity.
+                #
+                # In this case we want to be a little careful as we might have been
+                # down for a while and have an incorrect view of the current state,
+                # however we still want to do checks as gaps are easy to
+                # maliciously manufacture.
+                #
+                # So we use a "current state" that is actually a state
+                # resolution across the current forward extremities and the
+                # given state at the event. This should correctly handle cases
+                # like bans, especially with state res v2.
+
+                state_sets_d = (
+                    await self._state_storage_controller.get_state_groups_ids(
+                        event.room_id, extrem_ids
+                    )
                 )
-            )
+                state_sets = list(state_sets_d.values())
+                state_ids = await context.get_prev_state_ids()
+                state_sets.append(state_ids)
+                current_state_ids = (
+                    await self._state_resolution_handler.resolve_events_with_store(
+                        event.room_id,
+                        room_version,
+                        state_sets,
+                        event_map=None,
+                        state_res_store=StateResolutionStore(
+                            self._store, self._state_deletion_store
+                        ),
+                    )
+                )
+            else:
+                current_state_ids = (
+                    await self._state_storage_controller.get_current_state_ids(
+                        event.room_id, StateFilter.from_types(auth_types)
+                    )
+                )
 
         logger.debug(
             "Doing soft-fail check for %s: state %s",
@@ -2101,7 +2471,10 @@ class FederationEventHandler:
             event.internal_metadata.soft_failed = True
 
     async def _load_or_fetch_auth_events_for_event(
-        self, destination: str | None, event: EventBase
+        self,
+        destination: str | None,
+        event: EventBase,
+        context: EventContext,
     ) -> Collection[EventBase]:
         """Fetch this event's auth_events, from database or remote
 
@@ -2123,6 +2496,8 @@ class FederationEventHandler:
 
             event: the event whose auth_events we want
 
+            context: The state before the event, if known.
+
         Returns:
             all of the events listed in `event.auth_events_ids`, after deduplication
 
@@ -2132,7 +2507,11 @@ class FederationEventHandler:
 
             AuthError if we were unable to fetch the auth_events for any reason.
         """
-        event_auth_event_ids = set(event.auth_event_ids())
+        event_auth_event_ids = set(
+            event.auth_event_ids()
+            if not isinstance(event, FrozenEventVMSC4242)
+            else event.prev_state_events
+        )
         event_auth_events = await self._store.get_events(
             event_auth_event_ids, allow_rejected=True
         )
@@ -2140,6 +2519,21 @@ class FederationEventHandler:
             event_auth_events.keys()
         )
         if not missing_auth_event_ids:
+            if isinstance(event, FrozenEventVMSC4242):
+                # we still need to calculate the auth_events before returning, as we only made
+                # sure we know of the prev_state_events.
+                _, calculated_auth_event_ids = await self._calculate_state_dag_context(
+                    event,
+                    context,
+                )
+                event.internal_metadata.calculated_auth_event_ids = (
+                    calculated_auth_event_ids
+                )
+                calculated_events = await self._store.get_events(
+                    calculated_auth_event_ids,
+                    allow_rejected=True,  # TODO(kegan): probably False?
+                )
+                return calculated_events.values()
             return event_auth_events.values()
         if destination is None:
             # this shouldn't happen: destination must be set unless we know we have already
@@ -2155,9 +2549,16 @@ class FederationEventHandler:
             missing_auth_event_ids,
         )
         try:
-            await self._get_remote_auth_chain_for_event(
-                destination, event.room_id, event.event_id
-            )
+            if event.room_version.msc4242_state_dags:
+                assert isinstance(event, FrozenEventVMSC4242)
+                missed_events = await self._fetch_missing_state_dag_events(
+                    destination, event
+                )
+                await self._auth_and_persist_outliers(event.room_id, missed_events)
+            else:
+                await self._get_remote_auth_chain_for_event(
+                    destination, event.room_id, event.event_id
+                )
         except Exception as e:
             logger.warning("Failed to get auth chain for %s: %s", event, e)
             # in this case, it's very likely we still won't have all the auth
@@ -2170,6 +2571,20 @@ class FederationEventHandler:
         missing_auth_event_ids.difference_update(extra_auth_events.keys())
         event_auth_events.update(extra_auth_events)
         if not missing_auth_event_ids:
+            if isinstance(event, FrozenEventVMSC4242):
+                # we still need to calculate the auth_events before returning.
+                _, calculated_auth_event_ids = await self._calculate_state_dag_context(
+                    event,
+                    context,
+                )
+                event.internal_metadata.calculated_auth_event_ids = (
+                    calculated_auth_event_ids
+                )
+                calculated_events = await self._store.get_events(
+                    calculated_auth_event_ids,
+                    allow_rejected=True,  # TODO(kegan): probably False?
+                )
+                return calculated_events.values()
             return event_auth_events.values()
 
         # we still don't have all the auth events.
@@ -2212,6 +2627,225 @@ class FederationEventHandler:
         remote_auth_events = (e for e in remote_events if e.event_id != event_id)
 
         await self._auth_and_persist_outliers(room_id, remote_auth_events)
+
+    @trace
+    @tag_args
+    async def _fetch_missing_state_dag_events(
+        self,
+        destination: str,
+        event: FrozenEventVMSC4242,
+    ) -> Iterable[EventBase]:
+        """If we are missing some of an event's prev state events, request them until we fill in
+        the complete state DAG.
+
+        Args:
+            destination: where to fetch the state dag from
+            event: The event we're missing prev_state_events for.
+        Returns:
+            The missed state DAG events.
+        """
+        # The logic for this is gnarly but the general idea is to hit /get_missing_events with
+        # the event ID (hence known as the "back set") to walk back up the state DAG
+        # breadth first. We then need to see if we have seen any of these events, in which case they
+        # can be removed from the back set.
+        # When the back set size reaches 0, we have filled in the entire DAG. It's gnarly because
+        # we don't have a clear idea when we have filled in the state DAG without checking with the
+        # database for potentially a lot of events. Consider the following graph:
+        #                  .-- E <- F <- G
+        #  A <- B <- C <- D
+        #                  `-- H <- I <- J
+        # Assume this server knows A-G and receives J. Knowing the forwards extremities in the room
+        # (G) does nothing to help us know when we have connected up the state DAG at D.
+        # Thus, this function queries the database for all returned events to see if we have seen
+        # them, and then filters them out.
+        #
+        # This function terminates when either:
+        # - the back set size is 0 (we filled in the gap)
+        # - the back set entries do not change after a round of /get_missing_events
+        #   (we're not making forward progress), in which case this indicates the remote server is
+        #   lying to us and not sending us events we need.
+        #
+        # There are tradeoffs here between # round trips, amount of memory consumed and # DB hits.
+        # We could reduce memory consumed by persisting intermediate events in a staging area
+        # on disk. We could reduce DB hits by only querying a subset of events (and using the
+        # topological ordering) which may mean we try to process events we've already seen. We try
+        # to reduce the # round trips by exponentially increasing the limit in each request.
+        # Better algorithms exist here (search for "set reconciliation") but as of today, we don't
+        # do any of them.
+
+        # this function is expensive. See if we need to do it at all.
+        seen = await self._store.have_seen_events(
+            event.room_id, event.prev_state_events
+        )
+        if seen == set(event.prev_state_events):
+            return []
+
+        room_id = event.room_id
+        # we allow this amount of time for each event we're going to receive.
+        # This dynamically adjusts the timeout to account for very large responses.
+        timeout_ms_per_event = 100
+        iteration = 0
+        limit = 8
+        # we maintain 3 sets: the back set is what the next /gme request will be, and the
+        # /gme response events get bucketed into one of these 3 sets (seen, missed, back) sets.
+        missed_events: dict[str, FrozenEventVMSC4242] = {}
+        seen_event_ids: set[str] = set()
+        # we operate on state events, but we may have originally hit the backwards extremity with
+        # a message event. If we do, we need to grab the prev_state_events first to seed the
+        # back set. /get_missing_events will not return the event we provide to it in latest_events.
+        back_set: dict[str, FrozenEventVMSC4242] = {}
+        if event_exists_in_state_dag(event):
+            back_set = {event.event_id: event}
+        else:
+            prev_state_events = await self._get_events_from_remote(
+                destination, room_id, event.prev_state_events
+            )
+            back_set = {
+                e.event_id: e
+                for e in prev_state_events
+                if e.event_id not in seen and isinstance(e, FrozenEventVMSC4242)
+            }
+            # the back set now consists of state events we have not seen, so ensure we return them
+            # to the caller
+            missed_events = {e.event_id: e for e in back_set.values()}
+
+        while len(back_set) > 0:
+            logger.info(
+                "missed=%s seen=%s back_set=%s",
+                missed_events.keys(),
+                seen_event_ids,
+                back_set.keys(),
+            )
+            # remember which events we're querying for. If we don't make forward progress we'll bail
+            before_back_set = set(back_set)
+            max_events_per_req = limit * pow(2, iteration)  # 8x1, 8x2, 8x4, ...
+            try:
+                # 10s base then +(100ms x # events) on top e.g 64 events = +6400ms = 16.4s
+                timeout = 10000 + (limit * timeout_ms_per_event)
+                remote_events = await self._federation_client.get_missing_events(
+                    destination,
+                    room_id,
+                    earliest_events_ids=[],
+                    latest_events=back_set.values(),
+                    limit=max_events_per_req,
+                    min_depth=0,
+                    timeout=timeout,
+                    state_dag=True,
+                )
+                remote_events_map = {
+                    ev.event_id: ev
+                    for ev in remote_events
+                    if isinstance(ev, FrozenEventVMSC4242)
+                }
+            except RequestSendFailed as e1:
+                logger.warning(
+                    "Failed to get missing state dag events from remote: %s", e1
+                )
+                # by returning nothing we all but guarantee that the processing of the event
+                # received over federation will fail. We'll try doing this again the next time
+                # this server sends an event to us.
+                # TODO(kegan): Having a staging area of auth events we have got but not yet authed
+                # would help us stop doing repeat work.
+                return []
+
+            # bucket the remote events into seen / unseen. We include each event's prev_state_events
+            # here because that way we might be able to skip another request i.e we know we have
+            # seen the prev_state_events so don't bother fetching them again.
+            remote_event_ids = {
+                event_id
+                for event in remote_events_map.values()
+                for event_id in event.prev_state_events
+            }
+            remote_event_ids.update(remote_events_map.keys())
+            seen_remotes = await self._store.have_seen_events(
+                room_id,
+                remote_event_ids,
+            )
+            seen_event_ids.update(seen_remotes)
+            unseen_remotes = set(remote_events_map).difference(seen_remotes)
+
+            # all unseen events must be returned
+            missed_events.update(
+                {k: v for (k, v) in remote_events_map.items() if k in unseen_remotes}
+            )
+
+            # now figure out what the new back set is. In the common case, remote events will have
+            # a long chain of new events e.g A <- B <- C <- D so we want to walk up this graph
+            # if all the events are unseen. If there are seen events (e.g A) then when we reach A
+            # we terminate that branch as we have filled in the gap.
+            # In order to avoid mutating the dict whilst iterating, we iterate over the back set
+            # snapshot we took earlier, and try to exhaust it (i.e it maps an event ID to a new
+            # earlier event ID(s) or None if we filled in the gap.)
+            back_queue = list(before_back_set)
+            new_back_set: set[str] = set()
+            while back_queue:
+                # If the prevs are:
+                #  - All seen: we've filled in the gap, don't add this event to the back set.
+                #  - All fetched: add all the prevs to the back set.
+                #  - Mixed seen/fetched: add all the fetched prevs to the back set
+                #  - Any unseen: keep this event in the back set.
+                back_event_id = back_queue.pop(0)
+                back_event = missed_events.get(
+                    back_event_id, back_set.get(back_event_id)
+                )
+                if back_event is None:
+                    continue
+                seen_all_prevs = all(
+                    pae in seen_event_ids for pae in back_event.prev_state_events
+                )
+                if seen_all_prevs:
+                    continue
+                has_any_unseen_prev = any(
+                    pae not in seen_event_ids and pae not in missed_events
+                    for pae in back_event.prev_state_events
+                )
+                if has_any_unseen_prev:
+                    new_back_set.add(back_event_id)
+                    continue
+
+                # if we reach here then we have a mixture of seen/fetched prevs. Add the fetched
+                # prevs to the queue
+                back_queue.extend(
+                    pae
+                    for pae in back_event.prev_state_events
+                    if pae not in seen_event_ids
+                )
+
+            # if there is an event with lots of prev_state_events, so many that our limit won't
+            # pull them all in, then we have a problem if we give up trying to walk backwards.
+            # Ensure the limit is at least that large before giving up.
+            max_prev_state_events_on_single_event = max(
+                [len(ev.prev_state_events) for (_, ev) in back_set.items()]
+            )
+            if (
+                new_back_set == before_back_set
+                and max_events_per_req > max_prev_state_events_on_single_event
+            ):
+                # we didn't make forward progress, give up.
+                logger.warning(
+                    "Failed to make forward progress when walking back through state dag, stuck at back set %s",
+                    before_back_set,
+                )
+                return []
+            iteration += 1  # let the limit exponentially increase
+
+            # edge case: the initial event we put as latest_events has so many prev_state_events that
+            # we did not make forward progress yet. In this case, missed_events does NOT have the
+            # initial event, as it was not returned from /get_missing_events. Therefore, we just
+            # special case this scenario and set the back set accordingly.
+            if new_back_set == {event.event_id}:
+                back_set = {event.event_id: event}
+            else:
+                back_set = {
+                    event_id: missed_events[event_id] for event_id in new_back_set
+                }
+
+        logger.info(
+            "fetch_missing_state_dag_events returning %s events from %s",
+            len(missed_events),
+            event.event_id,
+        )
+        return missed_events.values()
 
     @trace
     async def _run_push_actions_and_persist_event(
@@ -2411,10 +3045,23 @@ class FederationEventHandler:
             )
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many prev_events")
 
-        if len(ev.auth_event_ids()) > 10:
+        if not isinstance(ev, FrozenEventVMSC4242) and len(ev.auth_event_ids()) > 10:
             logger.warning(
                 "Rejecting event %s which has %i auth_events",
                 ev.event_id,
                 len(ev.auth_event_ids()),
             )
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many auth_events")
+
+
+def is_state_dag_connected(state_dag: list[FrozenEventVMSC4242]) -> bool:
+    assert len(state_dag) > 0
+    have_event_ids = {ev.event_id for ev in state_dag}
+    all_prev_state_events = {
+        ev_id
+        for state_events in [ev.prev_state_events for ev in state_dag]
+        for ev_id in state_events
+    }
+    # have_event_ids should consist of all events including forward extremities,
+    # making all_prev_state_events a strict subset.
+    return all_prev_state_events.issubset(have_event_ids)
