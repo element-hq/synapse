@@ -129,7 +129,6 @@ class DeviceHandler:
         self._auth_handler = hs.get_auth_handler()
         self._account_data_handler = hs.get_account_data_handler()
         self._event_sources = hs.get_event_sources()
-        self._msc3852_enabled = hs.config.experimental.msc3852_enabled
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
         )
