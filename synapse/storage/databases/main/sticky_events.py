@@ -71,12 +71,21 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
         # Technically this means we will cleanup N times, once per event persister, maybe put on master?
         if self._can_write_to_sticky_events:
-            # Start a looping call to clean up the sticky_events table
-            # Because this will run once per event persister,
+            # Start a looping call to clean up the `sticky_events` table
+            #
+            # Because this will run once per event persister (for now),
             # randomly stagger the initial time so that they don't all
             # coincide with each other if the workers are deployed at the
-            # same time.
-            # It's not critical, this is just best-effort.
+            # same time. This allows each cleanup to be somewhat more effective
+            # than if they all started at the same time, as they would all be
+            # cleaning up the same thing whereas each worker gets to clean up a little
+            # throughout the hour when they're staggered.
+            #
+            # Concurrent execution of the same deletions could also lead to
+            # repeatable serialisation violations in the database transaction,
+            # meaning we'd have to retry the transaction several times.
+            #
+            # This staggering is not critical, it's just best-effort.
             self.clock.call_later(
                 # random() is 0.0 to 1.0
                 DELETE_EXPIRED_STICKY_EVENTS_INTERVAL * random.random(),
