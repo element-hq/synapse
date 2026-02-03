@@ -38,7 +38,7 @@ import attr
 from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.api.errors import NotFoundError, UnsupportedRoomVersionError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
-from synapse.events import EventBase
+from synapse.events import EventBase, EventMetadata
 from synapse.events.snapshot import EventContext
 from synapse.logging.opentracing import trace
 from synapse.replication.tcp.streams import UnPartialStatedEventStream
@@ -76,16 +76,6 @@ class Sentinel:
 
 
 ROOM_UNKNOWN_SENTINEL = Sentinel()
-
-
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class EventMetadata:
-    """Returned by `get_metadata_for_events`"""
-
-    room_id: str
-    event_type: str
-    state_key: str | None
-    rejection_reason: str | None
 
 
 def _retrieve_and_check_room_version(room_id: str, room_version_id: str) -> RoomVersion:

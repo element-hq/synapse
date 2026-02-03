@@ -37,6 +37,7 @@ class EventFormatVersions:
     ROOM_V3 = 2  # MSC1659-style $hash event id format: used for room v3
     ROOM_V4_PLUS = 3  # MSC1884-style $hash format: introduced for room v4
     ROOM_V11_HYDRA_PLUS = 4  # MSC4291 room IDs as hashes: introduced for room HydraV11
+    ROOM_VMSC4242 = 5
 
 
 KNOWN_EVENT_FORMAT_VERSIONS = {
@@ -44,6 +45,7 @@ KNOWN_EVENT_FORMAT_VERSIONS = {
     EventFormatVersions.ROOM_V3,
     EventFormatVersions.ROOM_V4_PLUS,
     EventFormatVersions.ROOM_V11_HYDRA_PLUS,
+    EventFormatVersions.ROOM_VMSC4242,
 }
 
 
@@ -112,6 +114,8 @@ class RoomVersion:
     msc3931_push_features: tuple[str, ...]  # values from PushRuleRoomFlag
     # MSC3757: Restricting who can overwrite a state event
     msc3757_enabled: bool
+    # MSC4242: Creates events with prev_state_events instead of auth_events and derives state from it.
+    msc4242_state_dags: bool
     # MSC4289: Creator power enabled
     msc4289_creator_power_enabled: bool
     # MSC4291: Room IDs as hashes of the create event
@@ -138,6 +142,7 @@ class RoomVersions:
         enforce_int_power_levels=False,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -160,6 +165,7 @@ class RoomVersions:
         enforce_int_power_levels=False,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -182,6 +188,7 @@ class RoomVersions:
         enforce_int_power_levels=False,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -204,6 +211,7 @@ class RoomVersions:
         enforce_int_power_levels=False,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -226,6 +234,7 @@ class RoomVersions:
         enforce_int_power_levels=False,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -248,6 +257,7 @@ class RoomVersions:
         enforce_int_power_levels=False,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -270,6 +280,7 @@ class RoomVersions:
         enforce_int_power_levels=False,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -292,6 +303,7 @@ class RoomVersions:
         enforce_int_power_levels=False,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -314,6 +326,7 @@ class RoomVersions:
         enforce_int_power_levels=False,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -336,6 +349,7 @@ class RoomVersions:
         enforce_int_power_levels=True,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -359,6 +373,7 @@ class RoomVersions:
         enforce_int_power_levels=True,
         msc3931_push_features=(PushRuleRoomFlag.EXTENSIBLE_EVENTS,),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -382,6 +397,7 @@ class RoomVersions:
         enforce_int_power_levels=True,
         msc3931_push_features=(),
         msc3757_enabled=True,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -404,6 +420,7 @@ class RoomVersions:
         enforce_int_power_levels=True,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -427,6 +444,7 @@ class RoomVersions:
         enforce_int_power_levels=True,
         msc3931_push_features=(),
         msc3757_enabled=True,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
@@ -439,8 +457,8 @@ class RoomVersions:
         special_case_aliases_auth=False,
         strict_canonicaljson=True,
         limit_notifications_power_levels=True,
-        implicit_room_creator=True,  # Used by MSC3820
-        updated_redaction_rules=True,  # Used by MSC3820
+        implicit_room_creator=True,
+        updated_redaction_rules=True,
         restricted_join_rule=True,
         restricted_join_rule_fix=True,
         knock_join_rule=True,
@@ -449,6 +467,7 @@ class RoomVersions:
         enforce_int_power_levels=True,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=True,  # Changed from v11
         msc4291_room_ids_as_hashes=True,  # Changed from v11
     )
@@ -471,8 +490,32 @@ class RoomVersions:
         enforce_int_power_levels=True,
         msc3931_push_features=(),
         msc3757_enabled=False,
+        msc4242_state_dags=False,
         msc4289_creator_power_enabled=True,  # Changed from v11
         msc4291_room_ids_as_hashes=True,  # Changed from v11
+    )
+    MSC4242v12 = RoomVersion(
+        "org.matrix.msc4242.12",  # MSC4242 (State DAGs) based on room version "12"
+        RoomDisposition.UNSTABLE,
+        EventFormatVersions.ROOM_VMSC4242,
+        StateResolutionVersions.V2_1,
+        enforce_key_validity=True,
+        special_case_aliases_auth=False,
+        strict_canonicaljson=True,
+        limit_notifications_power_levels=True,
+        implicit_room_creator=True,
+        updated_redaction_rules=True,
+        restricted_join_rule=True,
+        restricted_join_rule_fix=True,
+        knock_join_rule=True,
+        msc3389_relation_redactions=False,
+        knock_restricted_join_rule=True,
+        enforce_int_power_levels=True,
+        msc3931_push_features=(),
+        msc3757_enabled=False,
+        msc4289_creator_power_enabled=True,
+        msc4291_room_ids_as_hashes=True,
+        msc4242_state_dags=True,
     )
 
 
@@ -493,6 +536,7 @@ KNOWN_ROOM_VERSIONS: dict[str, RoomVersion] = {
         RoomVersions.V12,
         RoomVersions.MSC3757v10,
         RoomVersions.MSC3757v11,
+        RoomVersions.MSC4242v12,
         RoomVersions.HydraV11,
     )
 }
