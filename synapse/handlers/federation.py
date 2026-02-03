@@ -669,6 +669,13 @@ class FederationHandler:
 
                 logger.debug("do_invite_join auth_chain: %s", auth_chain)
                 logger.debug("do_invite_join state: %s", state)
+                # If the 'state_dag' field is set, everything will be derived from it.
+                if ret.state_dag:
+                    logger.debug("do_invite_join state_dag: %s", ret.state_dag)
+                    state = ret.state_dag
+                    # TODO(kegan): is this actually important for processing? Shouldn't we be using
+                    # the actual DAG here?
+                    state.sort(key=lambda e: e.depth)
 
                 logger.debug("do_invite_join event: %s", event)
 
@@ -965,6 +972,7 @@ class FederationHandler:
         # Note that this requires the /send_join request to come back to the
         # same server.
         prev_event_ids = None
+        prev_state_events = None
         if room_version.restricted_join_rule:
             # Note that the room's state can change out from under us and render our
             # nice join rules-conformant event non-conformant by the time we build the
@@ -980,6 +988,9 @@ class FederationHandler:
             prev_event_ids = await self.store.get_prev_events_for_room(room_id)
             state_ids = await self._state_storage_controller.get_current_state_ids(
                 room_id
+            )
+            prev_state_events = list(
+                await self.store.get_state_dag_extremities(room_id)
             )
             if await self._event_auth_handler.has_restricted_join_rules(
                 state_ids, room_version
@@ -1021,6 +1032,7 @@ class FederationHandler:
             ) = await self.event_creation_handler.create_new_client_event(
                 builder=builder,
                 prev_event_ids=prev_event_ids,
+                prev_state_events=prev_state_events,
             )
         except SynapseError as e:
             logger.warning("Failed to create join to %s because %s", room_id, e)
@@ -1301,7 +1313,11 @@ class FederationHandler:
 
     @trace
     @tag_args
-    async def get_state_ids_for_pdu(self, room_id: str, event_id: str) -> list[str]:
+    async def get_state_ids_for_pdu(
+        self,
+        room_id: str,
+        event_id: str,
+    ) -> list[str]:
         """Returns the state at the event. i.e. not including said event."""
         event = await self.store.get_event(event_id, check_room_id=room_id)
         if event.internal_metadata.outlier:
@@ -1412,10 +1428,16 @@ class FederationHandler:
         earliest_events: list[str],
         latest_events: list[str],
         limit: int,
+        walk_state_dag: bool,
     ) -> list[EventBase]:
         # We allow partially joined rooms since in this case we are filtering out
         # non-local events in `filter_events_for_server`.
         await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
+
+        if walk_state_dag:
+            return await self.on_get_missing_events_state_dag(
+                room_id, earliest_events, latest_events, limit
+            )
 
         # Only allow up to 20 events to be retrieved per request.
         limit = min(limit, 20)
@@ -1437,6 +1459,32 @@ class FederationHandler:
             filter_out_remote_partial_state_events=True,
         )
 
+        return missing_events
+
+    async def on_get_missing_events_state_dag(
+        self,
+        room_id: str,
+        earliest_events: list[str],
+        latest_events: list[str],
+        limit: int,
+    ) -> list[EventBase]:
+        """Processes a /get_missing_events request for the state DAG.
+
+        This is similar to processing the normal DAG with a few notable exceptions:
+          * There is no max 20 limit applied. As the entire state DAG needs to be filled in, we
+            cannot arbitrarily set a low limit. If the state DAG delta is 1000s of events, we need
+            to rely on the sender to set sensible limits depending on the bandwidth/round trip
+            tradeoff. We rely on existing server rate limits here to prevent abuse.
+          * We do not filter any events in the state DAG. History visibility does not filter out
+            delivery of auth chain events, so neither should this. All of the returned events will
+            be treated as outliers and as such will not be delivered to clients.
+        """
+        missing_events = await self.store.get_missing_events_state_dag(
+            room_id=room_id,
+            earliest_events=earliest_events,
+            latest_events=latest_events,
+            limit=limit,
+        )
         return missing_events
 
     async def exchange_third_party_invite(

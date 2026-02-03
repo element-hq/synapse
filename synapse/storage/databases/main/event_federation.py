@@ -37,7 +37,7 @@ from prometheus_client import Counter, Gauge
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.errors import StoreError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase, FrozenEventVMSC4242, make_event_from_dict
 from synapse.logging.opentracing import tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -257,6 +257,59 @@ class EventFederationWorkerStore(
             event_ids,
             include_given,
         )
+
+    async def get_state_dag(
+        self, room_id: str, forward_extrems: set[str]
+    ) -> dict[str, FrozenEventVMSC4242]:
+        """Get the current state DAG for the given room.
+
+        This function is called when calculating a /send_join response.
+        This does not check that the room is an state DAG room, so check this
+        before calling this function!
+
+        This functions guarantees that the returned state DAG is connected.
+
+        Args:
+            room_id: The room to get the state dag for
+        Returns:
+            A map of event_id => event
+        """
+
+        def _get_state_events_txn(txn: LoggingTransaction, room_id: str) -> list[str]:
+            sql = """
+                SELECT event_id FROM msc4242_state_dag_edges WHERE room_id = ?
+            """
+            txn.execute(sql, (room_id,))
+            event_ids = [ev_id for (ev_id,) in txn]
+            return event_ids
+
+        # Pull out all auth events for this room using the events_by_room_and_type index.
+        # This is going to pull in erroneous events e.g m.room.members with no state keys but that's
+        # okay as we'll filter them out next.
+        event_ids = await self.db_pool.runInteraction(
+            "_get_state_events_txn",
+            _get_state_events_txn,
+            room_id,
+        )
+        event_map = await self.get_events(event_ids)
+        # Filter the returned state events to only include ones on the paths back from the forward
+        # extremities.
+        result: dict[str, FrozenEventVMSC4242] = {}
+        next = forward_extrems
+        seen: set[str] = set()
+        while len(next) > 0:
+            # Pull the event and add the prev_state_events.
+            # We must have the event.
+            event_id = next.pop()
+            if event_id in seen:
+                continue
+            seen.add(event_id)
+            ev = event_map[event_id]
+            assert isinstance(ev, FrozenEventVMSC4242)
+            result[event_id] = ev
+            for pae in ev.prev_state_events:
+                next.add(pae)
+        return result
 
     def _get_auth_chain_ids_using_cover_index_txn(
         self,
@@ -1985,6 +2038,57 @@ class EventFederationWorkerStore(
         # we built the list working backwards from latest_events; we now need to
         # reverse it so that the events are approximately chronological.
         event_results.reverse()
+        return event_results
+
+    async def get_missing_events_state_dag(
+        self,
+        room_id: str,
+        earliest_events: list[str],
+        latest_events: list[str],
+        limit: int,
+    ) -> list[EventBase]:
+        ids = await self.db_pool.runInteraction(
+            "get_missing_events_state_dag",
+            self._get_missing_events_state_dag,
+            room_id,
+            earliest_events,
+            latest_events,
+            limit,
+        )
+        return await self.get_events_as_list(ids)
+
+    def _get_missing_events_state_dag(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        earliest_events: list[str],
+        latest_events: list[str],
+        limit: int,
+    ) -> list[str]:
+        seen_events = set(earliest_events)
+        # ascii sort
+        front_queue = sorted(set(latest_events) - seen_events)
+        event_results: list[str] = []
+        # TODO(kegan): use a recursive CTE?
+        query = (
+            "SELECT prev_state_event_id FROM msc4242_state_dag_edges "
+            "WHERE room_id = ? AND event_id = ? "
+            "ORDER BY prev_state_event_id ASC "
+            "LIMIT ?"
+        )
+
+        while front_queue and len(event_results) < limit:
+            event_id = front_queue.pop(0)
+            txn.execute(query, (room_id, event_id, limit - len(event_results)))
+            # None check because the m.room.create event has NULL prev_state_events
+            new_results = [
+                t[0] for t in txn if t[0] is not None and t[0] not in seen_events
+            ]
+            for next in new_results:
+                front_queue.append(next)
+            seen_events |= set(new_results)
+            event_results.extend(new_results)
+
         return event_results
 
     @trace

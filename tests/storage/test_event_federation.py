@@ -19,6 +19,7 @@
 #
 
 import datetime
+from collections import namedtuple
 from typing import (
     Collection,
     Iterable,
@@ -38,8 +39,9 @@ from synapse.api.room_versions import (
     KNOWN_ROOM_VERSIONS,
     EventFormatVersions,
     RoomVersion,
+    RoomVersions,
 )
-from synapse.events import EventBase
+from synapse.events import EventBase, FrozenEventVMSC4242
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -1414,6 +1416,174 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         # elapsed past the backoff range so there is no events to backoff from.
         self.assertEqual(event_ids_with_backoff, {})
 
+    def test_get_state_dag(self) -> None:
+        """
+        Test that MSC4242 state dag rooms can return the complete state dag on request.
+        """
+        # Create the room
+        user_id = self.register_user("alice", "test")
+        tok = self.login("alice", "test")
+        room_id = self.helper.create_room_as(
+            room_creator=user_id,
+            tok=tok,
+            room_version=RoomVersions.MSC4242v12.identifier,
+        )
+        resp = self.helper.send_state(
+            room_id,
+            "m.room.join_rules",
+            {"join_rule": "knock"},
+            tok=tok,
+        )
+        latest = resp["event_id"]
+        state_dag = self.get_success(
+            self.store.get_state_dag(room_id, {latest}),
+        )
+        # create <- member <- pl <- join_rules <- his vis <- join_rules
+        self.assertEquals(len(state_dag), 6)
+        want_types = [
+            EventTypes.Create,
+            EventTypes.Member,
+            EventTypes.PowerLevels,
+            EventTypes.JoinRules,
+            EventTypes.RoomHistoryVisibility,
+            EventTypes.JoinRules,
+        ]
+        curr = {latest}
+        while len(curr) > 0:
+            event_id = curr.pop()
+            ev = state_dag[event_id]
+            want_type = want_types.pop()
+            self.assertEqual(ev.type, want_type)
+            curr.update(ev.prev_state_events)
+
+    def test_get_missing_events_state_dag(self) -> None:
+        # Primarily testing to make sure that we sort events
+        # correctly when there are multiple prev_state_events
+        #       .- C -- D ---.
+        # A <- B             E
+        #       `- R -- W --`
+        #           `-- T -`
+        graph = {
+            "A": [],
+            "B": ["A"],
+            "C": ["B"],
+            "R": ["B"],
+            "D": ["C"],
+            "W": ["R"],
+            "T": ["R"],
+            "E": ["W", "D", "T"],
+        }
+        room_id = "@state_dag:local"
+        events = [
+            cast(
+                FrozenEventVMSC4242,
+                StateDAGFakeEvent(
+                    event_id,
+                    room_id,
+                    EventTypes.Create if len(graph[event_id]) == 0 else "foo",
+                    graph[event_id],
+                ),
+            )
+            for event_id in graph
+        ]
+
+        def insert(txn: LoggingTransaction) -> None:
+            # store these to satisfy fk constraints
+            self.persist_events.db_pool.simple_insert_many_txn(
+                txn,
+                table="events",
+                keys=(
+                    "instance_name",
+                    "stream_ordering",
+                    "topological_ordering",
+                    "depth",
+                    "event_id",
+                    "room_id",
+                    "type",
+                    "processed",
+                    "outlier",
+                    "origin_server_ts",
+                    "received_ts",
+                    "sender",
+                    "contains_url",
+                    "state_key",
+                    "rejection_reason",
+                ),
+                values=[
+                    (
+                        "test",
+                        event.internal_metadata.stream_ordering,
+                        event.depth,  # topological_ordering
+                        event.depth,  # depth
+                        event.event_id,
+                        event.room_id,
+                        event.type,
+                        True,  # processed
+                        False,  # outlier
+                        1337,
+                        1741622420,
+                        event.sender,
+                        False,  # contains url
+                        event.state_key,
+                        False,  # rejected
+                    )
+                    for event in events
+                ],
+            )
+            for ev in events:
+                self.persist_events._store_state_dag_edges(
+                    txn,
+                    ev,
+                )
+
+        # satisfy fk constraints
+        self.get_success(
+            self.store.store_room(room_id, "foo", False, RoomVersions.MSC4242v12)
+        )
+        self.get_success(
+            self.store.db_pool.runInteraction(
+                "_store_state_dag_edges",
+                insert,
+            )
+        )
+
+        #       .- C -- D ---.
+        # A <- B             E
+        #       `- R -- W --`
+        #           `-- T -`
+        TestCase = namedtuple("TestCase", "latest want limit")
+        test_cases = [
+            TestCase(latest=["E"], want=["D", "T", "W"], limit=3),
+            TestCase(latest=["W", "T", "D"], want=["C", "R"], limit=2),
+            # breadth first and new entries are added to the end, sorted lexicographically
+            TestCase(latest=["E"], want=["D", "T", "W", "C", "R", "B", "A"], limit=100),
+            # we should sort the latest values initially
+            TestCase(latest=["E", "C"], want=["B", "D", "T", "W"], limit=4),
+            TestCase(latest=["C", "E"], want=["B", "D", "T", "W"], limit=4),
+            # dupes are ignored
+            TestCase(
+                latest=["E", "E", "C", "C", "C"], want=["B", "D", "T", "W"], limit=4
+            ),
+            # include latest events in response
+            TestCase(latest=["W", "E"], want=["D", "T", "W", "R"], limit=4),
+        ]
+
+        for test_case in test_cases:
+
+            def do_test(txn: LoggingTransaction) -> None:
+                got = self.store._get_missing_events_state_dag(
+                    txn,
+                    room_id,
+                    [],
+                    test_case.latest,
+                    test_case.limit,
+                )
+                self.assertEquals(got, test_case.want)
+
+            self.get_success(
+                self.store.db_pool.runInteraction("test_case", do_test),
+            )
+
 
 @attr.s(auto_attribs=True)
 class FakeEvent:
@@ -1428,6 +1598,22 @@ class FakeEvent:
 
     def auth_event_ids(self) -> list[str]:
         return self.auth_events
+
+    def is_state(self) -> bool:
+        return True
+
+
+@attr.s(auto_attribs=True)
+class StateDAGFakeEvent:
+    event_id: str
+    room_id: str
+    type: str
+    prev_state_events: list[str]
+    state_key = "foo"
+    depth = 1
+    sender = "foo"
+
+    internal_metadata = EventInternalMetadata({})
 
     def is_state(self) -> bool:
         return True
