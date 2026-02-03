@@ -366,7 +366,11 @@ class MSC3866Config:
 
 
 class ExperimentalConfig(Config):
-    """Config section for enabling experimental features"""
+    """Config section for enabling experimental features
+
+    All new experimental features should have a tracking issue with the
+    `T-ExperimentalFeatures` label, kept open as long as the experimental
+    feature is present in Synapse."""
 
     section = "experimental"
 
