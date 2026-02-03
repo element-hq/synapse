@@ -1045,7 +1045,7 @@ class EventAuthTestCase(unittest.TestCase):
                 base.update(ev)
                 event = make_event_from_dict(base, RoomVersions.V10)
                 got = event_exists_in_state_dag(event)
-                self.assertEquals(
+                self.assertEqual(
                     got, should_exist, f"{ev} should_exist={should_exist} but got {got}"
                 )
 
