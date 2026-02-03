@@ -17,7 +17,7 @@
 -- Skipping the insertion of these types of 'invalid' events is useful for performance reasons because
 -- they would fill up the table yet we wouldn't show them to clients anyway.
 --
--- Since syncing clients can't (easily?) 'skip over' sticky events (due to being in-order, reliably delivered),
+-- Since syncing clients can't (easily) 'skip over' sticky events (due to being in-order, reliably delivered),
 -- tracking loads of invalid events in the table could make it expensive for servers to retrieve the sticky events that are actually valid.
 --
 -- For instance, someone spamming 1000s of rejected or 'policy_server_spammy' events could clog up this table in a way that means we either
