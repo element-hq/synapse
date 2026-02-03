@@ -242,6 +242,9 @@ async def filter_and_transform_events_for_client(
             if sticky_duration:
                 now_ms = storage.main.clock.time_msec()
                 expires_at = (
+                    # min() ensures that the origin server can't lie about the time and
+                    # send the event 'in the future', as that would allow them to exceed
+                    # the 1 hour limit on stickiness duration.
                     min(cloned.origin_server_ts, now_ms) + sticky_duration.as_millis()
                 )
                 if expires_at > now_ms:
