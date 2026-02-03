@@ -337,7 +337,8 @@ class EventBase(metaclass=abc.ABCMeta):
             return None
         sticky_duration_ms = sticky_obj.get("duration_ms", None)
         # MSC: Clamp to 0 and MAX_DURATION (1 hour)
-        # `type(..) is int` needed to avoid accepting bool
+        # We use `type(...) is int` to avoid accepting bools as `isinstance(True, int)`
+        # (bool is a subclass of int)
         if type(sticky_duration_ms) is int and sticky_duration_ms >= 0:
             return min(
                 Duration(milliseconds=sticky_duration_ms),
