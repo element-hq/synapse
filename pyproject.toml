@@ -124,7 +124,10 @@ postgres = [
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
 ]
-psycopg = ["psycopg>=3.1"]
+# v3.1 was selected here as minimum to support debian bookworm. If in the future the
+# `c` extra is chosen instead, the minimum will v3.2.8 for postgres 18's libpq5 support.
+# See: https://github.com/psycopg/psycopg/pull/1084
+psycopg = ["psycopg[c]>=3.1"]
 saml2 = [
     "pysaml2>=4.5.0",
 
@@ -179,7 +182,7 @@ all = [
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
     # experimental psycopg for postgres
-    "psycopg>=3.1",
+    "psycopg[c]>=3.1",
     # saml2
     "pysaml2>=4.5.0",
     # oidc and jwt
