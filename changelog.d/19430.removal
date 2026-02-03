@@ -1,0 +1,1 @@
+Remove support for [MSC3852: Expose user agent information on Device](https://github.com/matrix-org/matrix-spec-proposals/pull/3852) as the MSC was closed.
