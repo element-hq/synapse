@@ -27,6 +27,10 @@ from tests import unittest
 
 
 class StickyEventsClientTestCase(unittest.HomeserverTestCase):
+    """
+    Tests for the client-server API parts of MSC4354: Sticky Events
+    """
+
     servlets = [
         room.register_servlets,
         login.register_servlets,
@@ -117,7 +121,7 @@ class StickyEventsClientTestCase(unittest.HomeserverTestCase):
 
 class StickyEventsDisabledClientTestCase(unittest.HomeserverTestCase):
     """
-    Tests client-facing behaviour of sticky events when the feature is
+    Tests client-facing behaviour of MSC4354: Sticky Events when the feature is
     disabled.
     """
 

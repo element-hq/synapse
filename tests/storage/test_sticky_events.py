@@ -24,6 +24,10 @@ from tests import unittest
 
 
 class StickyEventsTestCase(unittest.HomeserverTestCase):
+    """
+    Tests for the storage functions related to MSC4354: Sticky Events
+    """
+
     servlets = [
         room.register_servlets,
         login.register_servlets,

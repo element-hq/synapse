@@ -466,6 +466,10 @@ class RestHelper:
         expect_code: int = HTTPStatus.OK,
         custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
     ) -> JsonDict:
+        """
+        Send an event that has a sticky duration according to MSC4354.
+        """
+
         if txn_id is None:
             txn_id = f"m{time.time()}"
 

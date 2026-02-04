@@ -36,17 +36,17 @@ CREATE TABLE sticky_events (
   event_id TEXT NOT NULL,
 
   -- The room ID that the sticky event is in.
-  -- Denormalised for performance.
+  -- Denormalised for performance. (Safe as it's an immutable property of the event.)
   room_id TEXT NOT NULL,
 
   -- The stream_ordering of the event.
   -- Denormalised for performance since we will want to sort these by stream_ordering
-  -- when fetching them.
+  -- when fetching them. (Safe as it's an immutable property of the event.)
   event_stream_ordering INTEGER NOT NULL UNIQUE,
 
   -- Sender of the sticky event.
   -- Denormalised for performance so we can query only for sticky events originating
-  -- from our homeserver.
+  -- from our homeserver. (Safe as it's an immutable property of the event.)
   sender TEXT NOT NULL,
 
   -- When the sticky event expires, in milliseconds since the Unix epoch.
