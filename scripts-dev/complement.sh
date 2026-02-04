@@ -245,7 +245,7 @@ main() {
   # scripts can use it.
   export SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES="${default_complement_test_packages[@]}"
 
-  # Default set of Complement tests to run when using test the in-repo test suite. Most
+  # Default set of Complement tests to run when using the in-repo test suite. Most
   # likely, this should be all tests.
   #
   # Relative to the `./complement` repo in this project
