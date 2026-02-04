@@ -32,7 +32,7 @@ fn read_io_body(body: &Bound<'_, PyAny>, chunk_size: usize) -> PyResult<Bytes> {
     let mut buf = BytesMut::new();
     loop {
         let bound = &body.call_method1("read", (chunk_size,))?;
-        let bytes: &Bound<'_, PyBytes> = bound.downcast()?;
+        let bytes: &Bound<'_, PyBytes> = bound.cast()?;
         if bytes.as_bytes().is_empty() {
             return Ok(buf.into());
         }
@@ -58,12 +58,12 @@ pub fn http_request_from_twisted(request: &Bound<'_, PyAny>) -> PyResult<Request
     let mut req = Request::new(body);
 
     let bound = &request.getattr("uri")?;
-    let uri: &Bound<'_, PyBytes> = bound.downcast()?;
+    let uri: &Bound<'_, PyBytes> = bound.cast()?;
     *req.uri_mut() =
         Uri::try_from(uri.as_bytes()).map_err(|_| PyValueError::new_err("invalid uri"))?;
 
     let bound = &request.getattr("method")?;
-    let method: &Bound<'_, PyBytes> = bound.downcast()?;
+    let method: &Bound<'_, PyBytes> = bound.cast()?;
     *req.method_mut() = Method::from_bytes(method.as_bytes())
         .map_err(|_| PyValueError::new_err("invalid method"))?;
 
@@ -74,17 +74,17 @@ pub fn http_request_from_twisted(request: &Bound<'_, PyAny>) -> PyResult<Request
 
     for header in headers_iter {
         let header = header?;
-        let header: &Bound<'_, PyTuple> = header.downcast()?;
+        let header: &Bound<'_, PyTuple> = header.cast()?;
         let bound = &header.get_item(0)?;
-        let name: &Bound<'_, PyBytes> = bound.downcast()?;
+        let name: &Bound<'_, PyBytes> = bound.cast()?;
         let name = HeaderName::from_bytes(name.as_bytes())
             .map_err(|_| PyValueError::new_err("invalid header name"))?;
 
         let bound = &header.get_item(1)?;
-        let values: &Bound<'_, PySequence> = bound.downcast()?;
+        let values: &Bound<'_, PySequence> = bound.cast()?;
         for index in 0..values.len()? {
             let bound = &values.get_item(index)?;
-            let value: &Bound<'_, PyBytes> = bound.downcast()?;
+            let value: &Bound<'_, PyBytes> = bound.cast()?;
             let value = HeaderValue::from_bytes(value.as_bytes())
                 .map_err(|_| PyValueError::new_err("invalid header value"))?;
             req.headers_mut().append(name.clone(), value);
