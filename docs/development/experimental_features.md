@@ -32,7 +32,7 @@ expected and not an issue.
 It is not a requirement for experimental features to be behind a configuration flag,
 but one should be used if unsure.
 
-New experimental configuration flags should be added under the `experimental`
+New experimental configuration flags should be added under the `experimental_features`
 configuration key (see the `synapse.config.experimental` file) and either explain
 (briefly) what is being enabled, or include the MSC number.
 The configuration flag should link to the tracking issue for the experimental feature (see below).
