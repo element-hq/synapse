@@ -509,6 +509,7 @@ class ExperimentalConfig(Config):
         )
 
         # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version:
+        # See: https://github.com/element-hq/synapse/issues/19434
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
 
         self.msc4108_delegation_endpoint: str | None = experimental.get(
@@ -534,6 +535,7 @@ class ExperimentalConfig(Config):
             )
 
         # MSC4388: Secure out-of-band channel for sign in with QR:
+        # See: https://github.com/element-hq/synapse/issues/19433
         msc4388_mode = experimental.get("msc4388_mode", "off")
 
         if ["off", "public", "authenticated"].count(msc4388_mode) != 1:
