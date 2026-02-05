@@ -28,7 +28,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
-from synapse.storage.engines import PostgresEngine
+from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.util.duration import Duration
 
@@ -110,6 +110,16 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             writers=hs.config.worker.writers.events,
         )
 
+        if hs.config.experimental.msc4354_enabled and isinstance(
+            self.database_engine, Sqlite3Engine
+        ):
+            import sqlite3
+
+            if sqlite3.sqlite_version_info < (3, 40, 0):
+                raise RuntimeError(
+                    f"Experimental MSC4354 Sticky Events enabled but SQLite3 version is too old: {sqlite3.sqlite_version_info}, must be at least 3.40. Disable MSC4354 Sticky Events, switch to Postgres, or upgrade SQLite. See https://github.com/element-hq/synapse/issues/19428"
+                )
+
     def process_replication_position(
         self, stream_name: str, instance_name: str, token: int
     ) -> None:
@@ -143,6 +153,15 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         Returns:
             list of StickyEventUpdate update rows
         """
+
+        if not self.hs.config.experimental.msc4354_enabled:
+            # We need to prevent `_get_updated_sticky_events_txn`
+            # from running when MSC4354 is turned off, because the query used
+            # for SQLite is not compatible with Ubuntu 22.04 (as used in our CI olddeps run).
+            # It's technically out of support.
+            # See: https://github.com/element-hq/synapse/issues/19428
+            return []
+
         return await self.db_pool.runInteraction(
             "get_updated_sticky_events",
             self._get_updated_sticky_events_txn,
