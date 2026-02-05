@@ -13,6 +13,8 @@
 #
 #
 
+import sqlite3
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, EventUnsignedContentFields
@@ -24,12 +26,17 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests import unittest
+from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
 class StickyEventsClientTestCase(unittest.HomeserverTestCase):
     """
     Tests for the client-server API parts of MSC4354: Sticky Events
     """
+
+    if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
+        # We need the JSON functionality in SQLite
+        skip = f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
 
     servlets = [
         room.register_servlets,
