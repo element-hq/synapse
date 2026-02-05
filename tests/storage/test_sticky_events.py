@@ -14,11 +14,18 @@ import sqlite3
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes
+from synapse.api.constants import (
+    EventContentFields,
+    EventTypes,
+    Membership,
+    StickyEvent,
+    StickyEventField,
+)
+from synapse.api.room_versions import RoomVersions
 from synapse.rest import admin
 from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -168,3 +175,104 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0].event_id, event_id_1)
+
+    def test_outlier_events_not_in_table(self) -> None:
+        """
+        Tests the behaviour of outliered and then de-outliered events in the
+        sticky_events table: they should only be added once they are de-outliered.
+        """
+        persist_controller = self.hs.get_storage_controllers().persistence
+        assert persist_controller is not None
+
+        user1_id = self.register_user("user1", "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        start_id = self.store.get_max_sticky_events_stream_id()
+
+        room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, room_version=RoomVersions.V10.identifier
+        )
+
+        # Create a membership event
+        event_dict = {
+            "type": EventTypes.Member,
+            "state_key": user1_id,
+            "sender": user1_id,
+            "room_id": room_id,
+            "content": {EventContentFields.MEMBERSHIP: Membership.JOIN},
+            StickyEvent.EVENT_FIELD_NAME: StickyEventField(
+                duration_ms=Duration(hours=1).as_millis()
+            ),
+        }
+
+        # Create the event twice: once as an outlier, once as a non-outlier.
+        # It's not at all obvious, but event creation before is deterministic
+        # (provided we don't change the forward extremities of the room!),
+        # so these two events are actually the same event with the same event ID.
+        (
+            event_outlier,
+            unpersisted_context_outlier,
+        ) = self.get_success(
+            self.hs.get_event_creation_handler().create_event(
+                requester=create_requester(user1_id),
+                event_dict=event_dict,
+                outlier=True,
+            )
+        )
+        (
+            event_non_outlier,
+            unpersisted_context_non_outlier,
+        ) = self.get_success(
+            self.hs.get_event_creation_handler().create_event(
+                requester=create_requester(user1_id),
+                event_dict=event_dict,
+                outlier=False,
+            )
+        )
+
+        # Safety check that we're testing what we think we are
+        self.assertEqual(event_outlier.event_id, event_non_outlier.event_id)
+
+        # Now persist the event as an outlier first of all
+        # FIXME: Should we use an `EventContext.for_outlier(...)` here?
+        # Doesn't seem to matter for this test.
+        context_outlier = self.get_success(
+            unpersisted_context_outlier.persist(event_outlier)
+        )
+        self.get_success(
+            persist_controller.persist_event(
+                event_outlier,
+                context_outlier,
+            )
+        )
+
+        # Since the event is outliered, it won't show up in the sticky_events table...
+        sticky_events = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="sticky_events", keyvalues=None, retcols=("stream_id", "event_id")
+            )
+        )
+        self.assertEqual(len(sticky_events), 0)
+
+        # Now persist the event properly so that it gets de-outliered.
+        context_non_outlier = self.get_success(
+            unpersisted_context_non_outlier.persist(event_non_outlier)
+        )
+        self.get_success(
+            persist_controller.persist_event(
+                event_non_outlier,
+                context_non_outlier,
+            )
+        )
+
+        end_id = self.store.get_max_sticky_events_stream_id()
+
+        # Check the event made it into the sticky_events table
+        updates = self.get_success(
+            self.store.get_updated_sticky_events(
+                from_id=start_id, to_id=end_id, limit=10
+            )
+        )
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].event_id, event_non_outlier.event_id)
