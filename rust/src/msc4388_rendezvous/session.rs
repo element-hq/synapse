@@ -82,7 +82,7 @@ impl<'source> IntoPyObject<'source> for PutResponse {
 impl Session {
     /// Create a new session with the given data and time-to-live.
     pub fn new(id: Ulid, data: String, now: SystemTime, ttl: Duration) -> Self {
-        let hash = Sha256::digest(&data).into();
+        let hash = Self::compute_hash(&data, now);
         Self {
             id,
             hash,
@@ -99,9 +99,21 @@ impl Session {
 
     /// Update the session with new data and last modified time.
     pub fn update(&mut self, data: String, now: SystemTime) {
-        self.hash = Sha256::digest(&data).into();
+        self.hash = Self::compute_hash(&data, now);
         self.data = data;
         self.last_modified = now;
+    }
+
+    /// Compute the hash of the data and timestamp.
+    fn compute_hash(data: &str, now: SystemTime) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        let now_millis = now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        hasher.update(now_millis.to_be_bytes());
+        hasher.finalize().into()
     }
 
     /// The sequence token for the session.
