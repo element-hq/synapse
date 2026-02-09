@@ -100,8 +100,8 @@ class MSC4388UpdateRendezvousServlet(RestServlet):
         super().__init__()
         self._handler = hs.get_msc4388_rendezvous_handler()
 
-    def on_GET(self, _request: SynapseRequest, rendezvous_id: str) -> tuple[int, Any]:
-        return self._handler.handle_get(rendezvous_id)
+    def on_GET(self, request: SynapseRequest, rendezvous_id: str) -> tuple[int, Any]:
+        return self._handler.handle_get(rendezvous_id, request)
 
     def on_PUT(self, request: SynapseRequest, rendezvous_id: str) -> tuple[int, Any]:
         return self._handler.handle_put(rendezvous_id, request)

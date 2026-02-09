@@ -17,6 +17,8 @@ import urllib.parse
 from typing import Any, Mapping
 from unittest.mock import Mock
 
+from parameterized import parameterized
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
@@ -634,3 +636,120 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 413)
         self.assertEqual(channel.json_body["errcode"], "M_TOO_LARGE")
+
+    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
+    @parameterized.expand(
+        [
+            ("Sec-Fetch-Dest", "document"),
+            ("Sec-Fetch-Dest", "image"),
+            ("Sec-Fetch-Dest", "iframe"),
+            ("Sec-Fetch-Dest", "embed"),
+            ("Sec-Fetch-Dest", "video"),
+            ("Sec-Fetch-Mode", "navigate"),
+            ("Sec-Fetch-User", "?1"),
+            ("Sec-Fetch-Site", "none"),
+        ]
+    )
+    @override_config(
+        {
+            "disable_registration": True,
+            "matrix_authentication_service": {
+                "enabled": True,
+                "secret": "secret_value",
+                "endpoint": "https://issuer",
+            },
+            "experimental_features": {
+                "msc4388_mode": "public",
+            },
+        }
+    )
+    def test_rendezvous_rejects_unsafe_get_requests(
+        self, header_name: str, header_value: str
+    ) -> None:
+        """
+        Tests that GET requests have the appropriate Sec-Fetch-* controls applied as per the MSC.
+        The mode is set to `public` but this doesn't actually matter.
+        """
+        # We can post arbitrary data to the endpoint
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        rendezvous_id = channel.json_body["id"]
+
+        session_endpoint = rz_endpoint + f"/{rendezvous_id}"
+
+        # We can get the data back
+        channel = self.make_request(
+            "GET",
+            session_endpoint,
+            access_token=None,
+        )
+
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "GET",
+            session_endpoint,
+            access_token=None,
+            custom_headers=[(header_name, header_value)],
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
+    @override_config(
+        {
+            "disable_registration": True,
+            "matrix_authentication_service": {
+                "enabled": True,
+                "secret": "secret_value",
+                "endpoint": "https://issuer",
+            },
+            "experimental_features": {
+                "msc4388_mode": "public",
+            },
+        }
+    )
+    def test_rendezvous_allows_from_browser_fetch(self) -> None:
+        """
+        We check that the GET policy does allow for an expected browser fetch
+        The mode is set to `public` but this doesn't actually matter.
+        """
+        # We can post arbitrary data to the endpoint
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        rendezvous_id = channel.json_body["id"]
+
+        session_endpoint = rz_endpoint + f"/{rendezvous_id}"
+
+        # We can get the data back
+        channel = self.make_request(
+            "GET",
+            session_endpoint,
+            access_token=None,
+        )
+
+        self.assertEqual(channel.code, 200)
+
+        # Test for a typical browser fetch from a client hosted on a different origin
+        channel = self.make_request(
+            "GET",
+            session_endpoint,
+            access_token=None,
+            custom_headers=[
+                ("Sec-Fetch-Dest", "empty"),
+                ("Sec-Fetch-Mode", "cors"),
+                ("Sec-Fetch-Site", "cross-site"),
+            ],
+        )
+
+        self.assertEqual(channel.code, 200)

@@ -180,7 +180,103 @@ impl MSC4388RendezvousHandler {
         Ok((200, response))
     }
 
-    fn handle_get(&mut self, py: Python<'_>, id: &str) -> PyResult<(u8, GetResponse)> {
+    fn handle_get(
+        &mut self,
+        py: Python<'_>,
+        id: &str,
+        twisted_request: &Bound<'_, PyAny>,
+    ) -> PyResult<(u8, GetResponse)> {
+        let request = http_request_from_twisted(twisted_request)?;
+
+        // As per the MSC, we check the Sec-Fetch-* headers to ensure this request did not come from somewhere that will
+        // be rendered directly to the user, as the response may contain sensitive data. These headers are added by
+        // well behaved browsers so are helpful for protecting regular users.
+
+        // Sec-Fetch-Dest: https://www.w3.org/TR/fetch-metadata/#sec-fetch-dest-header
+        //
+        // If the header is present then this must be "empty". All other values such as document, image etc.
+        // are considered potentially dangerous as they might be rendered to the user.
+        let sec_fetch_dest: Option<String> = request
+            .headers()
+            .get("sec-fetch-dest")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_owned());
+        if sec_fetch_dest.is_some() && sec_fetch_dest.as_deref() != Some("empty") {
+            return Err(SynapseError::new(
+                StatusCode::FORBIDDEN,
+                "Rendezvous content is not accessible from the request destination".to_owned(),
+                "M_FORBIDDEN",
+                None,
+                None,
+            ));
+        }
+
+        // Sec-Fetch-Mode: https://www.w3.org/TR/fetch-metadata/#sec-fetch-mode-header
+        //
+        // A request mode of "navigate" is not allowed as this indicates the request is being made by the
+        // browser to navigate to a URL, which could lead to the response being rendered directly to the user.
+        //
+        // Note that usually Sec-Fetch-Dest would be "document" in this case and so the request would be rejected earlier,
+        // but we check the mode just in case the destination is not set correctly.
+        let sec_fetch_mode: Option<String> = request
+            .headers()
+            .get("sec-fetch-mode")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_owned());
+        if sec_fetch_mode.as_deref() == Some("navigate") {
+            return Err(SynapseError::new(
+                StatusCode::FORBIDDEN,
+                "Rendezvous content is not accessible via top-level navigation".to_owned(),
+                "M_FORBIDDEN",
+                None,
+                None,
+            ));
+        }
+
+        // Sec-Fetch-User: https://www.w3.org/TR/fetch-metadata/#sec-fetch-user-header
+        //
+        // If the request has a Sec-Fetch-User header with a value of "?1", this indicates that the
+        // request was triggered by user activation, such as a click.
+        //
+        // Note that usually Sec-Fetch-Mode would be "navigate" or the Sec-Fetch-Dest would be "document" in this case
+        // and so the request would be rejected earlier, but we check the user activation just in case those headers are
+        // not set correctly.
+        let sec_fetch_user: Option<String> = request
+            .headers()
+            .get("sec-fetch-user")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_owned());
+        if sec_fetch_user.as_deref() == Some("?1") {
+            return Err(SynapseError::new(
+                StatusCode::FORBIDDEN,
+                "Rendezvous content is not accessible from requests with user activation"
+                    .to_owned(),
+                "M_FORBIDDEN",
+                None,
+                None,
+            ));
+        }
+
+        // Sec-Fetch-Site: https://www.w3.org/TR/fetch-metadata/#sec-fetch-site-header
+        //
+        // "none" indicates the request did not originate from a web page
+        // (e.g. typed URL, bookmark, or browser extension), so we disallow it.
+        let sec_fetch_site: Option<String> = request
+            .headers()
+            .get("sec-fetch-site")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_owned());
+        if sec_fetch_site.as_deref() == Some("none") {
+            return Err(SynapseError::new(
+                StatusCode::FORBIDDEN,
+                "Rendezvous content is not accessible from requests from user interaction"
+                    .to_owned(),
+                "M_FORBIDDEN",
+                None,
+                None,
+            ));
+        }
+
         let clock = self.clock.bind(py);
         let now: u64 = clock.call_method0("time_msec")?.extract()?;
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
