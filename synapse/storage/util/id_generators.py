@@ -339,6 +339,10 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             # position with the current minimum.
             self._current_positions[self._instance_name] = self._persisted_upto_position
 
+        # We remember the last inserted position so that we don't insert the same
+        # position twice, avoiding unnecessary writes.
+        self._last_inserted_stream_positions: int | None = None
+
     def _load_current_ids(
         self,
         db_conn: LoggingDatabaseConnection,
@@ -840,7 +844,11 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         """
 
         pos = self.get_current_token_for_writer(self._instance_name)
-        txn.execute(sql, (self._stream_name, self._instance_name, pos))
+        with self._lock:
+            if self._last_inserted_stream_positions == pos:
+                return
+            txn.execute(sql, (self._stream_name, self._instance_name, pos))
+            self._last_inserted_stream_positions = pos
 
     async def get_max_allocated_token(self) -> int:
         return await self._db.runInteraction(
