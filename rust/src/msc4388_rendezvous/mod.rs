@@ -17,12 +17,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use bytes::Bytes;
-use headers::{
-    AccessControlAllowHeaders, AccessControlAllowMethods, AccessControlAllowOrigin, HeaderMapExt,
-};
-use http::header::HeaderName;
-use http::{header, HeaderMap, Method, Response, StatusCode};
+use http::StatusCode;
 use pyo3::{
     pyclass, pymethods,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
@@ -34,29 +29,12 @@ use self::session::Session;
 use crate::{
     duration::SynapseDuration,
     errors::{NotFoundError, SynapseError},
-    http::{http_request_from_twisted, http_response_to_twisted},
+    http::http_request_from_twisted,
+    msc4388_rendezvous::session::{GetResponse, PostResponse, PutResponse},
     UnwrapInfallible,
 };
 
 mod session;
-
-// Annoyingly we need to set the normal CORS headers on every response as the Python layer doesn't do it for us.
-// List is taken from https://spec.matrix.org/v1.16/client-server-api/#web-browser-clients
-fn prepare_headers(headers: &mut HeaderMap) {
-    headers.typed_insert(AccessControlAllowOrigin::ANY);
-    headers.typed_insert(AccessControlAllowMethods::from_iter([
-        Method::POST,
-        Method::GET,
-        Method::PUT,
-        Method::DELETE,
-        Method::OPTIONS,
-    ]));
-    headers.typed_insert(AccessControlAllowHeaders::from_iter([
-        HeaderName::from_static("x-requested-with"),
-        header::CONTENT_TYPE,
-        header::AUTHORIZATION,
-    ]));
-}
 
 #[pyclass]
 struct MSC4388RendezvousHandler {
@@ -72,15 +50,12 @@ impl MSC4388RendezvousHandler {
     fn check_data_length(&self, data: &str) -> PyResult<()> {
         let data_length = data.len() as u64;
         if data_length > self.max_content_length {
-            let mut headers = HeaderMap::new();
-            prepare_headers(&mut headers);
-
             return Err(SynapseError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "Payload too large".to_owned(),
                 "M_TOO_LARGE",
                 None,
-                Some(headers),
+                None,
             ));
         }
         Ok(())
@@ -150,9 +125,11 @@ impl MSC4388RendezvousHandler {
         Ok(())
     }
 
-    fn handle_post(&mut self, py: Python<'_>, twisted_request: &Bound<'_, PyAny>) -> PyResult<()> {
-        let request = http_request_from_twisted(twisted_request)?;
-
+    fn handle_post(
+        &mut self,
+        py: Python<'_>,
+        twisted_request: &Bound<'_, PyAny>,
+    ) -> PyResult<(u8, PostResponse)> {
         let clock = self.clock.bind(py);
         let now: u64 = clock.call_method0("time_msec")?.extract()?;
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
@@ -165,67 +142,39 @@ impl MSC4388RendezvousHandler {
         // Generate a new ULID for the session from the current time.
         let id = Ulid::from_datetime(now);
 
-        // parse JSON body out of request
+        let request = http_request_from_twisted(twisted_request)?;
+        // parse JSON body
         let json: serde_json::Value =
             serde_json::from_slice(&request.into_body()).map_err(|_| {
-                let mut headers = HeaderMap::new();
-                prepare_headers(&mut headers);
-
                 SynapseError::new(
                     StatusCode::BAD_REQUEST,
                     "Invalid JSON in request body".to_owned(),
                     "M_INVALID_PARAM",
                     None,
-                    Some(headers),
+                    None,
                 )
             })?;
 
         let data: String = json["data"].as_str().map(|s| s.to_owned()).ok_or_else(|| {
-            let mut headers = HeaderMap::new();
-            prepare_headers(&mut headers);
-
             SynapseError::new(
                 StatusCode::BAD_REQUEST,
                 "Missing 'data' field in JSON body".to_owned(),
                 "M_INVALID_PARAM",
                 None,
-                Some(headers),
+                None,
             )
         })?;
 
         self.check_data_length(&data)?;
 
         let session = Session::new(id, data, now, self.ttl);
-
-        let response_body = serde_json::to_string(&session.post_response(now)).map_err(|_| {
-            let mut headers = HeaderMap::new();
-            prepare_headers(&mut headers);
-
-            SynapseError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to serialize response".to_owned(),
-                "M_UNKNOWN",
-                None,
-                Some(headers),
-            )
-        })?;
-        let mut response = Response::new(response_body.as_bytes());
-        *response.status_mut() = StatusCode::OK;
-        let headers = response.headers_mut();
-        prepare_headers(headers);
-        http_response_to_twisted(twisted_request, response)?;
-
+        let response = session.post_response(now);
         self.sessions.insert(id, session);
 
-        Ok(())
+        Ok((200, response))
     }
 
-    fn handle_get(
-        &mut self,
-        py: Python<'_>,
-        twisted_request: &Bound<'_, PyAny>,
-        id: &str,
-    ) -> PyResult<()> {
+    fn handle_get(&mut self, py: Python<'_>, id: &str) -> PyResult<(u8, GetResponse)> {
         let clock = self.clock.bind(py);
         let now: u64 = clock.call_method0("time_msec")?.extract()?;
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
@@ -237,46 +186,25 @@ impl MSC4388RendezvousHandler {
             .filter(|s| !s.expired(now))
             .ok_or_else(NotFoundError::new)?;
 
-        let response_body = serde_json::to_string(&session.get_response(now)).map_err(|_| {
-            let mut headers = HeaderMap::new();
-            prepare_headers(&mut headers);
-
-            SynapseError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to serialize response".to_owned(),
-                "M_UNKNOWN",
-                None,
-                Some(headers),
-            )
-        })?;
-        let mut response = Response::new(response_body.as_bytes());
-        *response.status_mut() = StatusCode::OK;
-        prepare_headers(response.headers_mut());
-        http_response_to_twisted(twisted_request, response)?;
-
-        Ok(())
+        Ok((200, session.get_response(now)))
     }
 
     fn handle_put(
         &mut self,
         py: Python<'_>,
-        twisted_request: &Bound<'_, PyAny>,
         id: &str,
-    ) -> PyResult<()> {
+        twisted_request: &Bound<'_, PyAny>,
+    ) -> PyResult<(u8, PutResponse)> {
         let request = http_request_from_twisted(twisted_request)?;
-
-        // parse JSON body out of request
+        // parse JSON body
         let json: serde_json::Value =
             serde_json::from_slice(&request.into_body()).map_err(|_| {
-                let mut headers = HeaderMap::new();
-                prepare_headers(&mut headers);
-
                 SynapseError::new(
                     StatusCode::BAD_REQUEST,
                     "Invalid JSON in request body".to_owned(),
                     "M_INVALID_PARAM",
                     None,
-                    Some(headers),
+                    None,
                 )
             })?;
 
@@ -284,28 +212,22 @@ impl MSC4388RendezvousHandler {
             .as_str()
             .map(|s| s.to_owned())
             .ok_or_else(|| {
-                let mut headers = HeaderMap::new();
-                prepare_headers(&mut headers);
-
                 SynapseError::new(
                     StatusCode::BAD_REQUEST,
                     "Missing 'sequence_token' field in JSON body".to_owned(),
                     "M_INVALID_PARAM",
                     None,
-                    Some(headers),
+                    None,
                 )
             })?;
 
         let data: String = json["data"].as_str().map(|s| s.to_owned()).ok_or_else(|| {
-            let mut headers = HeaderMap::new();
-            prepare_headers(&mut headers);
-
             SynapseError::new(
                 StatusCode::BAD_REQUEST,
                 "Missing 'data' field in JSON body".to_owned(),
                 "M_INVALID_PARAM",
                 None,
-                Some(headers),
+                None,
             )
         })?;
 
@@ -323,49 +245,25 @@ impl MSC4388RendezvousHandler {
             .ok_or_else(NotFoundError::new)?;
 
         if !session.sequence_token().eq(&sequence_token) {
-            let mut headers = HeaderMap::new();
-            prepare_headers(&mut headers);
-
             return Err(SynapseError::new(
                 StatusCode::CONFLICT,
                 "sequence_token does not match".to_owned(),
                 "IO_ELEMENT_MSC4388_CONCURRENT_WRITE",
                 None,
-                Some(headers),
+                None,
             ));
         }
 
         session.update(data, now);
 
-        let response_body = serde_json::to_string(&session.put_response()).map_err(|_| {
-            SynapseError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to serialize response".to_owned(),
-                "M_UNKNOWN",
-                None,
-                None,
-            )
-        })?;
-        let mut response = Response::new(response_body.as_bytes());
-        *response.status_mut() = StatusCode::OK;
-        prepare_headers(response.headers_mut());
-        http_response_to_twisted(twisted_request, response)?;
-
-        Ok(())
+        Ok((200, session.put_response()))
     }
 
-    fn handle_delete(&mut self, twisted_request: &Bound<'_, PyAny>, id: &str) -> PyResult<()> {
-        let _request = http_request_from_twisted(twisted_request)?;
-
+    fn handle_delete(&mut self, id: &str) -> PyResult<(u8, ())> {
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let _session = self.sessions.remove(&id).ok_or_else(NotFoundError::new)?;
 
-        let mut response = Response::new(Bytes::new());
-        *response.status_mut() = StatusCode::OK;
-        prepare_headers(response.headers_mut());
-        http_response_to_twisted(twisted_request, response)?;
-
-        Ok(())
+        Ok((200, ()))
     }
 }
 

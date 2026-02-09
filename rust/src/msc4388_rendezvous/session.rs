@@ -15,6 +15,8 @@
 use std::time::{Duration, SystemTime};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use pyo3::{Bound, IntoPyObject, PyAny, Python};
+use pythonize::{pythonize, PythonizeError};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use ulid::Ulid;
@@ -35,6 +37,16 @@ pub struct PostResponse {
     expires_in_ms: u64,
 }
 
+impl<'source> IntoPyObject<'source> for PostResponse {
+    type Target = PyAny;
+    type Output = Bound<'source, Self::Target>;
+    type Error = PythonizeError;
+
+    fn into_pyobject(self, py: Python<'source>) -> Result<Self::Output, Self::Error> {
+        pythonize(py, &self)
+    }
+}
+
 #[derive(Serialize)]
 pub struct GetResponse {
     data: String,
@@ -42,9 +54,29 @@ pub struct GetResponse {
     expires_in_ms: u64,
 }
 
+impl<'source> IntoPyObject<'source> for GetResponse {
+    type Target = PyAny;
+    type Output = Bound<'source, Self::Target>;
+    type Error = PythonizeError;
+
+    fn into_pyobject(self, py: Python<'source>) -> Result<Self::Output, Self::Error> {
+        pythonize(py, &self)
+    }
+}
+
 #[derive(Serialize)]
 pub struct PutResponse {
     sequence_token: String,
+}
+
+impl<'source> IntoPyObject<'source> for PutResponse {
+    type Target = PyAny;
+    type Output = Bound<'source, Self::Target>;
+    type Error = PythonizeError;
+
+    fn into_pyobject(self, py: Python<'source>) -> Result<Self::Output, Self::Error> {
+        pythonize(py, &self)
+    }
 }
 
 impl Session {

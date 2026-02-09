@@ -171,12 +171,10 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         expires_in_ms = channel.json_body["expires_in_ms"]
         self.assertGreater(expires_in_ms, 0)
 
-        # Advance the clock
-        self.reactor.advance(1)
-
         session_endpoint = rz_endpoint + f"/{rendezvous_id}"
 
         # We can get the data back
+        # Advances clock by 100ms
         channel = self.make_request(
             "GET",
             session_endpoint,
@@ -186,9 +184,10 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=bar")
         self.assertEqual(channel.json_body["sequence_token"], sequence_token)
-        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 1000)
+        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 100)
 
         # We can update the data
+        # Advances clock by 100ms
         channel = self.make_request(
             "PUT",
             session_endpoint,
@@ -201,6 +200,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         new_sequence_token = channel.json_body["sequence_token"]
 
         # If we try to update it again with the old etag, it should fail
+        # Advances clock by 100ms
         channel = self.make_request(
             "PUT",
             session_endpoint,
@@ -213,10 +213,8 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             channel.json_body["errcode"], "IO_ELEMENT_MSC4388_CONCURRENT_WRITE"
         )
 
-        # Advance the clock
-        self.reactor.advance(0.9)
-
         # We should get the updated data
+        # Advances clock by 100ms
         channel = self.make_request(
             "GET",
             session_endpoint,
@@ -226,7 +224,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=baz")
         self.assertEqual(channel.json_body["sequence_token"], new_sequence_token)
-        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 2000)
+        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 400)
 
         # We can delete the data
         channel = self.make_request(
@@ -330,7 +328,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=baz")
         self.assertEqual(channel.json_body["sequence_token"], new_sequence_token)
-        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms)
+        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 200)
 
         # We can delete the data without authentication
         channel = self.make_request(

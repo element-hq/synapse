@@ -21,7 +21,7 @@
 
 import logging
 from http.client import TEMPORARY_REDIRECT
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from synapse.http.server import HttpServer, respond_with_redirect
 from synapse.http.servlet import RestServlet
@@ -81,11 +81,11 @@ class MSC4388CreateRendezvousServlet(RestServlet):
             hs.config.experimental.msc4388_requires_authentication
         )
 
-    async def on_POST(self, request: SynapseRequest) -> None:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, Any]:
         if self.require_authentication:
             # This will raise if the user is not authenticated
             await self.auth.get_user_by_req(request)
-        self._handler.handle_post(request)
+        return self._handler.handle_post(request)
 
 
 class MSC4388UpdateRendezvousServlet(RestServlet):
@@ -100,14 +100,16 @@ class MSC4388UpdateRendezvousServlet(RestServlet):
         super().__init__()
         self._handler = hs.get_msc4388_rendezvous_handler()
 
-    def on_GET(self, request: SynapseRequest, rendezvous_id: str) -> None:
-        self._handler.handle_get(request, rendezvous_id)
+    def on_GET(self, _request: SynapseRequest, rendezvous_id: str) -> tuple[int, Any]:
+        return self._handler.handle_get(rendezvous_id)
 
-    def on_PUT(self, request: SynapseRequest, rendezvous_id: str) -> None:
-        self._handler.handle_put(request, rendezvous_id)
+    def on_PUT(self, request: SynapseRequest, rendezvous_id: str) -> tuple[int, Any]:
+        return self._handler.handle_put(rendezvous_id, request)
 
-    def on_DELETE(self, request: SynapseRequest, rendezvous_id: str) -> None:
-        self._handler.handle_delete(request, rendezvous_id)
+    def on_DELETE(
+        self, _request: SynapseRequest, rendezvous_id: str
+    ) -> tuple[int, Any]:
+        return self._handler.handle_delete(rendezvous_id)
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
