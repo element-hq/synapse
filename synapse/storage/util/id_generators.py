@@ -342,6 +342,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # We remember the last inserted position so that we don't insert the same
         # position twice, avoiding unnecessary writes.
         self._last_inserted_stream_positions: int | None = None
+        self._last_inserted_stream_position_lock = threading.Lock()
 
     def _load_current_ids(
         self,
@@ -844,7 +845,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         """
 
         pos = self.get_current_token_for_writer(self._instance_name)
-        with self._lock:
+        with self._last_inserted_stream_position_lock:
             if self._last_inserted_stream_positions == pos:
                 return
             txn.execute(sql, (self._stream_name, self._instance_name, pos))
