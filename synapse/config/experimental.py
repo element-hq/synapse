@@ -538,7 +538,7 @@ class ExperimentalConfig(Config):
         # See: https://github.com/element-hq/synapse/issues/19433
         msc4388_mode = experimental.get("msc4388_mode", "off")
 
-        if msc4388_mode in ["off", "public", "authenticated"]:
+        if msc4388_mode not in ["off", "public", "authenticated"]:
             raise ConfigError(
                 "msc4388_mode must be one of 'off', 'public' or 'authenticated'",
                 ("experimental", "msc4388_mode"),
