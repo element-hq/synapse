@@ -41,7 +41,8 @@ mod session;
 struct MSC4388RendezvousHandler {
     clock: Py<PyAny>,
     sessions: BTreeMap<Ulid, Session>,
-    capacity: usize,
+    soft_limit: usize,
+    hard_limit: usize,
     max_content_length: u64,
     ttl: Duration,
 }
@@ -67,8 +68,8 @@ impl MSC4388RendezvousHandler {
         // First remove all the entries which expired
         self.sessions.retain(|_, session| !session.expired(now));
 
-        // Then we remove the oldest entries until we're under the limit
-        while self.sessions.len() > self.capacity {
+        // Then we remove the oldest entries until we're under the soft limit
+        while self.sessions.len() > self.soft_limit {
             self.sessions.pop_first();
         }
     }
@@ -88,11 +89,12 @@ pub struct PutRequest {
 #[pymethods]
 impl MSC4388RendezvousHandler {
     #[new]
-    #[pyo3(signature = (homeserver, /, capacity=100, max_content_length=4*1024, eviction_interval=60*1000, ttl=2*60*1000))]
+    #[pyo3(signature = (homeserver, /, soft_limit=100, hard_limit=200,max_content_length=4*1024, eviction_interval=60*1000, ttl=2*60*1000))]
     fn new(
         py: Python<'_>,
         homeserver: &Bound<'_, PyAny>,
-        capacity: usize,
+        soft_limit: usize,
+        hard_limit: usize,
         max_content_length: u64,
         eviction_interval: u64,
         ttl: u64,
@@ -110,7 +112,8 @@ impl MSC4388RendezvousHandler {
             Self {
                 clock,
                 sessions: BTreeMap::new(),
-                capacity,
+                soft_limit,
+                hard_limit,
                 max_content_length,
                 ttl: Duration::from_millis(ttl),
             },
@@ -146,8 +149,8 @@ impl MSC4388RendezvousHandler {
         let now: u64 = clock.call_method0("time_msec")?.extract()?;
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
 
-        // We trigger an immediate eviction if we're at 2x the capacity
-        if self.sessions.len() >= self.capacity * 2 {
+        // We trigger an immediate eviction if we're at the hard limit
+        if self.sessions.len() >= self.hard_limit {
             self.evict(now);
         }
 

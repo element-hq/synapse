@@ -413,7 +413,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
     )
     def test_capacity(self) -> None:
         """
-        Test that a capacity limit is enforced on the rendezvous sessions, as old
+        Test that the soft capacity limit is enforced on the rendezvous sessions, as old
         entries are evicted at an interval when the limit is reached.
         """
         # Start a new session
@@ -485,7 +485,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
     )
     def test_hard_capacity(self) -> None:
         """
-        Test that a hard capacity limit is enforced on the rendezvous sessions, as old
+        Test that the hard capacity limit is enforced on the rendezvous sessions, as old
         entries are evicted immediately when the limit is reached.
         """
         # Start a new session

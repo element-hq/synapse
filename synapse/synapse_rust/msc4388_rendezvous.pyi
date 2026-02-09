@@ -21,7 +21,8 @@ class MSC4388RendezvousHandler:
         self,
         homeserver: HomeServer,
         /,
-        capacity: int = 100,  # This should be configurable
+        soft_limit: int = 100,  # On each background eviction run sessions will be removed until we're under this limit
+        hard_limit: int = 200,  # If this limit is reached an immediate eviction will be triggered
         max_content_length: int = 4 * 1024,  # MSC4388 specifies maximum of 4KB
         eviction_interval: int = 60 * 1000,
         ttl: int = 2 * 60 * 1000,  # MSC4388 specifies minimum of 120 seconds
