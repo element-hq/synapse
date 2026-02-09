@@ -23,6 +23,7 @@ use pyo3::{
     types::{PyAnyMethods, PyModule, PyModuleMethods},
     Bound, IntoPyObject, Py, PyAny, PyResult, Python,
 };
+use serde::Deserialize;
 use ulid::Ulid;
 
 use self::session::Session;
@@ -71,6 +72,17 @@ impl MSC4388RendezvousHandler {
             self.sessions.pop_first();
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct PostRequest {
+    data: String,
+}
+
+#[derive(Deserialize)]
+pub struct PutRequest {
+    sequence_token: String,
+    data: String,
 }
 
 #[pymethods]
@@ -144,7 +156,7 @@ impl MSC4388RendezvousHandler {
 
         let request = http_request_from_twisted(twisted_request)?;
         // parse JSON body
-        let json: serde_json::Value =
+        let post_request: PostRequest =
             serde_json::from_slice(&request.into_body()).map_err(|_| {
                 SynapseError::new(
                     StatusCode::BAD_REQUEST,
@@ -155,16 +167,7 @@ impl MSC4388RendezvousHandler {
                 )
             })?;
 
-        let data: String = json["data"].as_str().map(|s| s.to_owned()).ok_or_else(|| {
-            SynapseError::new(
-                StatusCode::BAD_REQUEST,
-                "Missing 'data' field in JSON body".to_owned(),
-                "M_INVALID_PARAM",
-                None,
-                None,
-            )
-        })?;
-
+        let data: String = post_request.data;
         self.check_data_length(&data)?;
 
         let session = Session::new(id, data, now, self.ttl);
@@ -197,7 +200,7 @@ impl MSC4388RendezvousHandler {
     ) -> PyResult<(u8, PutResponse)> {
         let request = http_request_from_twisted(twisted_request)?;
         // parse JSON body
-        let json: serde_json::Value =
+        let put_request: PutRequest =
             serde_json::from_slice(&request.into_body()).map_err(|_| {
                 SynapseError::new(
                     StatusCode::BAD_REQUEST,
@@ -208,28 +211,19 @@ impl MSC4388RendezvousHandler {
                 )
             })?;
 
-        let sequence_token: String = json["sequence_token"]
-            .as_str()
-            .map(|s| s.to_owned())
-            .ok_or_else(|| {
-                SynapseError::new(
-                    StatusCode::BAD_REQUEST,
-                    "Missing 'sequence_token' field in JSON body".to_owned(),
-                    "M_INVALID_PARAM",
-                    None,
-                    None,
-                )
-            })?;
+        let sequence_token: String = put_request.sequence_token;
 
-        let data: String = json["data"].as_str().map(|s| s.to_owned()).ok_or_else(|| {
-            SynapseError::new(
+        if sequence_token.is_empty() {
+            return Err(SynapseError::new(
                 StatusCode::BAD_REQUEST,
-                "Missing 'data' field in JSON body".to_owned(),
+                "Missing 'sequence_token' field in JSON body".to_owned(),
                 "M_INVALID_PARAM",
                 None,
                 None,
-            )
-        })?;
+            ));
+        }
+
+        let data: String = put_request.data;
 
         self.check_data_length(&data)?;
 
