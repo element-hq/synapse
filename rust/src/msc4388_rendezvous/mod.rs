@@ -196,6 +196,9 @@ impl MSC4388RendezvousHandler {
         //
         // If the header is present then this must be "empty". All other values such as document, image etc.
         // are considered potentially dangerous as they might be rendered to the user.
+        //
+        // Note that because we only ever return JSON, so it is unlikely that it could somehow be rendered as an image,
+        // video or other media.
         let sec_fetch_dest: Option<String> = request
             .headers()
             .get("sec-fetch-dest")
