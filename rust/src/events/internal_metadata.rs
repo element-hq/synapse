@@ -55,6 +55,7 @@ enum EventInternalMetadataData {
     SoftFailed(bool),
     ProactivelySend(bool),
     PolicyServerSpammy(bool),
+    SpamCheckerSpammy(bool),
     Redacted(bool),
     TxnId(Box<str>),
     TokenId(i64),
@@ -99,6 +100,13 @@ impl EventInternalMetadataData {
             ),
             EventInternalMetadataData::PolicyServerSpammy(o) => (
                 pyo3::intern!(py, "policy_server_spammy"),
+                o.into_pyobject(py)
+                    .unwrap_infallible()
+                    .to_owned()
+                    .into_any(),
+            ),
+            EventInternalMetadataData::SpamCheckerSpammy(o) => (
+                pyo3::intern!(py, "spam_checker_spammy"),
                 o.into_pyobject(py)
                     .unwrap_infallible()
                     .to_owned()
@@ -164,6 +172,11 @@ impl EventInternalMetadataData {
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
             "policy_server_spammy" => EventInternalMetadataData::PolicyServerSpammy(
+                value
+                    .extract()
+                    .with_context(|| format!("'{key_str}' has invalid type"))?,
+            ),
+            "spam_checker_spammy" => EventInternalMetadataData::SpamCheckerSpammy(
                 value
                     .extract()
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
@@ -449,6 +462,17 @@ impl EventInternalMetadata {
     #[setter]
     fn set_policy_server_spammy(&mut self, obj: bool) {
         set_property!(self, PolicyServerSpammy, obj);
+    }
+
+    #[getter]
+    fn get_spam_checker_spammy(&self) -> PyResult<bool> {
+        Ok(get_property_opt!(self, SpamCheckerSpammy)
+            .copied()
+            .unwrap_or(false))
+    }
+    #[setter]
+    fn set_spam_checker_spammy(&mut self, obj: bool) {
+        set_property!(self, SpamCheckerSpammy, obj);
     }
 
     #[getter]
