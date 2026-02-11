@@ -211,9 +211,13 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         Skips inserting events:
             - if they are considered spammy by the policy server;
               (unsure if correct, track: https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r2727593350)
+            - if they are considered spammy by a Synapse spam checker module;
             - if they are rejected;
             - if they are outliers (they should be reconsidered for insertion when de-outliered); or
             - if they are not sticky (e.g. if the stickiness expired).
+
+        Note: Soft-failed sticky events ARE inserted, as their soft-failed status
+            could be re-evaluated later.
 
         Skipping the insertion of these types of 'invalid' events is useful for performance reasons because
         they would fill up the table yet we wouldn't show them to clients anyway.
@@ -230,7 +234,12 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         sticky_events: list[tuple[EventBase, int]] = []
         for ev in events:
             # MSC: Note: policy servers and other similar antispam techniques still apply to these events.
-            if ev.internal_metadata.policy_server_spammy:
+            # We don't filter out soft-failed events altogether (in case they get re-evaluated later),
+            # so filter out `spam_checker_spammy` events specifically as we don't want to re-evaluate _those_ later.
+            if (
+                ev.internal_metadata.policy_server_spammy
+                or ev.internal_metadata.spam_checker_spammy
+            ):
                 continue
             # We shouldn't be passed rejected events, but if we do, we filter them out too.
             if ev.rejected_reason is not None:
