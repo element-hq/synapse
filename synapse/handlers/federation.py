@@ -1788,6 +1788,10 @@ class FederationHandler:
                 room_id=room_id,
             )
 
+            # We don't start all the partial state room syncs at once, to avoid
+            # overloading the process.
+            await self.clock.sleep(Duration(milliseconds=10))
+
     def _start_partial_state_room_sync(
         self,
         initial_destination: str | None,
