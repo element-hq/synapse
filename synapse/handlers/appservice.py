@@ -26,6 +26,7 @@ from typing import (
     Mapping,
 )
 
+import attr
 from prometheus_client import Counter
 
 from twisted.internet import defer
@@ -66,6 +67,12 @@ logger = logging.getLogger(__name__)
 events_processed_counter = Counter(
     "synapse_handlers_appservice_events_processed", "", labelnames=[SERVER_NAME_LABEL]
 )
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class ApplicationServiceUrlPreviewResult:
+    exclusive: bool
+    result: JsonDict | None
 
 
 class ApplicationServicesHandler:
@@ -714,6 +721,34 @@ class ApplicationServicesHandler:
 
         return False
 
+    async def query_preview_url(
+        self, url: str, user_id: UserID
+    ) -> ApplicationServiceUrlPreviewResult:
+        """Query application services for url previews.
+
+        Args:
+            url: The url to query on the AS.
+            user_id: The user making the query.
+        Returns:
+            A response containing a possible response and whether the homeserver
+            should attempt to fetch it's own preview.
+        """
+        exclusive_appservice = self._get_exclusive_service_for_preview_url(url)
+        if exclusive_appservice:
+            result = await self.appservice_api.query_preview_url(
+                exclusive_appservice, url, user_id
+            )
+            return ApplicationServiceUrlPreviewResult(exclusive=True, result=result)
+        for appservice in self._get_services_for_preview_url(url=url):
+            result = await self.appservice_api.query_preview_url(
+                appservice, url, user_id
+            )
+            if result:
+                return ApplicationServiceUrlPreviewResult(
+                    exclusive=False, result=result
+                )
+        return ApplicationServiceUrlPreviewResult(exclusive=False, result=None)
+
     async def query_user_exists(self, user_id: str) -> bool:
         """Check if any application service knows this user_id exists.
 
@@ -844,6 +879,19 @@ class ApplicationServicesHandler:
     def _get_services_for_3pn(self, protocol: str) -> list[ApplicationService]:
         services = self.store.get_app_services()
         return [s for s in services if s.is_interested_in_protocol(protocol)]
+
+    def _get_exclusive_service_for_preview_url(
+        self, url: str
+    ) -> ApplicationService | None:
+        for service in self.store.get_app_services():
+            ns = service.is_interested_in_preview_url(url)
+            if ns is not None and ns.exclusive:
+                return service
+        return None
+
+    def _get_services_for_preview_url(self, url: str) -> list[ApplicationService]:
+        services = self.store.get_app_services()
+        return [s for s in services if s.is_interested_in_preview_url(url)]
 
     async def _is_unknown_user(self, user_id: str) -> bool:
         if not self.is_mine_id(user_id):

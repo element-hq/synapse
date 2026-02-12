@@ -44,7 +44,13 @@ from synapse.events.utils import SerializeEventConfig, serialize_event
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID
+from synapse.types import (
+    DeviceListUpdates,
+    JsonDict,
+    JsonMapping,
+    ThirdPartyInstanceID,
+    UserID,
+)
 from synapse.util.caches.response_cache import ResponseCache
 
 if TYPE_CHECKING:
@@ -535,6 +541,48 @@ class ApplicationServiceApi(SimpleHttpClient):
         except Exception as ex:
             logger.warning("query_keys to %s threw exception %s", uri, ex)
             return {}
+
+        return response
+
+    async def query_preview_url(
+        self, service: "ApplicationService", url: str, user_id: UserID
+    ) -> JsonDict | None:
+        """Query the application service for url preview data.
+
+        Note that any error (including a timeout) is treated as the application
+        service having no information.
+
+        Args:
+            service: The application service to query.
+            query: An iterable of tuples of (user ID, device ID, algorithm).
+
+        Returns:
+            A map of device_keys/master_keys/self_signing_keys/user_signing_keys:
+
+            device_keys is a map of user ID -> a map device ID -> device info.
+        """
+        if service.url is None:
+            return None
+
+        # This is required by the configuration.
+        assert service.hs_token is not None
+
+        uri = f"{service.url}/_matrix/app/unstable/uk.half-shot.msc4417/preview_url"
+        try:
+            response = await self.get_json(
+                uri,
+                {"user_id": user_id.to_string(), "url": url},
+                headers=self._get_headers(service),
+            )
+        except HttpResponseException as e:
+            # The appservice doesn't support this endpoint.
+            # Since the AS has opted into these requests, we warn if the AS squarks about unknown
+            # endpoints.
+            logger.warning("query_url_preview to %s received %s", uri, e.code)
+            return None
+        except Exception as ex:
+            logger.warning("query_keys to %s threw exception %s", uri, ex)
+            return None
 
         return response
 

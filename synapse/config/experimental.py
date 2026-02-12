@@ -588,3 +588,5 @@ class ExperimentalConfig(Config):
 
         # MSC4380: Invite blocking
         self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
+        # MSC4417: URL Previews via Appservices
+        self.msc4417_enabled: bool = experimental.get("msc4417_enabled", False)

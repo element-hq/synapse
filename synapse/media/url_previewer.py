@@ -182,6 +182,8 @@ class UrlPreviewer:
         self.media_repo = media_repo
         self.primary_base_path = media_repo.primary_base_path
         self.media_storage = media_storage
+        self.as_services = hs.get_application_service_handler()
+        self.allow_as_previews = hs.config.experimental.msc4417_enabled
 
         self._oembed = OEmbedProvider(hs)
 
@@ -222,6 +224,21 @@ class UrlPreviewer:
         #
         # Note that autodiscovered oEmbed URLs and pre-caching of images
         # are not captured in the in-memory cache.
+        if self.allow_as_previews:
+            as_og_data = await self.as_services.query_preview_url(url, user)
+            if as_og_data.result:
+                # This data is never cached in the homeserver, but the appservice
+                # is expected to cache the data.
+                return json_encoder.encode(as_og_data).encode("utf8")
+
+            if as_og_data.exclusive:
+                # This is NOT the same as the Bad Gateway error we usually return for
+                # failed requests. Maybe this is wrong.
+                raise SynapseError(
+                    404,
+                    "Not able to preview URL",
+                    Codes.NOT_FOUND,
+                )
 
         observable = self._cache.get(url)
 
