@@ -49,6 +49,7 @@ from synapse.handlers.profile import MAX_AVATAR_URL_LEN, MAX_DISPLAYNAME_LEN
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
+from synapse.logging.opentracing import tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
 from synapse.storage.databases.main.state_deltas import StateDelta
@@ -390,6 +391,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         if requester is not None:
             await self._invites_per_issuer_limiter.ratelimit(requester)
 
+    @trace
     async def _local_membership_update(
         self,
         *,
@@ -1221,6 +1223,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         if result is None or result == (None, None):
             raise AuthError(403, f"User {user_id} has no membership in room {room_id}")
 
+    @trace
+    @tag_args
     async def _should_perform_remote_join(
         self,
         user_id: str,
@@ -1897,6 +1901,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
 
         return complexity["v1"] > max_complexity
 
+    @trace
     async def _remote_join(
         self,
         requester: Requester,
@@ -1975,6 +1980,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
 
         return event_id, stream_id
 
+    @trace
     async def remote_reject_invite(
         self,
         invite_event_id: str,
@@ -2012,6 +2018,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
                 invite_event, txn_id, requester, content
             )
 
+    @trace
     async def remote_rescind_knock(
         self,
         knock_event_id: str,
@@ -2124,6 +2131,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
 
         return result_event.event_id, result_event.internal_metadata.stream_ordering
 
+    @trace
     async def remote_knock(
         self,
         requester: Requester,
