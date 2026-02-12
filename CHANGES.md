@@ -1,4 +1,4 @@
-# synapse 1.147.1 (2026-02-12)
+# Synapse 1.147.1 (2026-02-12)
 
 ## Internal Changes
 
