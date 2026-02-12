@@ -1,1 +1,0 @@
-Block federation requests and events authenticated using a known insecure signing key. See [CVE-2026-24044](https://www.cve.org/CVERecord?id=CVE-2026-24044) / [ELEMENTSEC-2025-1670](https://github.com/element-hq/ess-helm/security/advisories/GHSA-qwcj-h6m8-vp6q).
