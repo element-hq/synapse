@@ -23,6 +23,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from synapse.handlers.room_member import NoKnownServersError, RoomMemberHandler
+from synapse.logging.opentracing import trace
 from synapse.replication.http.membership import (
     ReplicationRemoteJoinRestServlet as ReplRemoteJoin,
     ReplicationRemoteKnockRestServlet as ReplRemoteKnock,
