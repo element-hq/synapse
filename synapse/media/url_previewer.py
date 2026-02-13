@@ -229,7 +229,7 @@ class UrlPreviewer:
             if as_og_data.result:
                 # This data is never cached in the homeserver, but the appservice
                 # is expected to cache the data.
-                return json_encoder.encode(as_og_data).encode("utf8")
+                return json_encoder.encode(as_og_data.result).encode("utf8")
 
             if as_og_data.exclusive:
                 # This is NOT the same as the Bad Gateway error we usually return for

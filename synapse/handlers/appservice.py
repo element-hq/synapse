@@ -883,15 +883,18 @@ class ApplicationServicesHandler:
     def _get_exclusive_service_for_preview_url(
         self, url: str
     ) -> ApplicationService | None:
-        for service in self.store.get_app_services():
-            ns = service.is_interested_in_preview_url(url)
-            if ns is not None and ns.exclusive:
-                return service
-        return None
+        return next(
+            (
+                service
+                for service in self.store.get_app_services()
+                if service.is_exclusive_preview_url(url)
+            ),
+            None,
+        )
 
     def _get_services_for_preview_url(self, url: str) -> list[ApplicationService]:
         services = self.store.get_app_services()
-        return [s for s in services if s.is_interested_in_preview_url(url)]
+        return [s for s in services if s.is_preview_url_in_namespace(url)]
 
     async def _is_unknown_user(self, user_id: str) -> bool:
         if not self.is_mine_id(user_id):

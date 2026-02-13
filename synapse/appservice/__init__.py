@@ -84,7 +84,7 @@ class ApplicationService:
     NS_USERS = "users"
     NS_ALIASES = "aliases"
     NS_ROOMS = "rooms"
-    NS_PREVIEW_URLS = "uk_half-shot_msc4417_preview_urls"
+    NS_PREVIEW_URLS = "uk.half-shot.msc4417.preview_urls"
     # The ordering here is important as it is used to map database values (which
     # are stored as ints representing the position in this list) to namespace
     # values.
@@ -370,17 +370,20 @@ class ApplicationService:
     def is_room_id_in_namespace(self, room_id: str) -> bool:
         return bool(self._matches_regex(ApplicationService.NS_ROOMS, room_id))
 
+    def is_preview_url_in_namespace(self, url: str) -> bool:
+        return bool(self._matches_regex(ApplicationService.NS_PREVIEW_URLS, url))
+
     def is_exclusive_user(self, user_id: str) -> bool:
         return (
             self._is_exclusive(ApplicationService.NS_USERS, user_id)
             or user_id == self.sender.to_string()
         )
 
+    def is_exclusive_preview_url(self, url: str) -> bool:
+        return self._is_exclusive(ApplicationService.NS_PREVIEW_URLS, url)
+
     def is_interested_in_protocol(self, protocol: str) -> bool:
         return protocol in self.protocols
-
-    def is_interested_in_preview_url(self, url: str) -> Namespace | None:
-        return self._matches_regex(ApplicationService.NS_PREVIEW_URLS, url)
 
     def is_exclusive_alias(self, alias: str) -> bool:
         return self._is_exclusive(ApplicationService.NS_ALIASES, alias)

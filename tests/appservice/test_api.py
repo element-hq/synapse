@@ -251,3 +251,46 @@ class ApplicationServiceApiTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(claimed_keys, RESPONSE)
         self.assertEqual(missing, MISSING_KEYS)
+
+    def test_query_preview_url(self) -> None:
+        """
+        Tests that 3pe queries to the appservice are authenticated
+        with the appservice's token.
+        """
+
+        SUCCESS_RESULT = {"og:title": "The matrix.org site!"}
+
+        URL_ENDPOINT = f"{URL}/_matrix/app/unstable/uk.half-shot.msc4417/preview_url"
+
+        QUERY_URL = "https://matrix.org"
+        QUERY_USER = UserID.from_string("@a:user")
+
+        self.request_url = None
+
+        async def get_json(
+            url: str,
+            args: Mapping[Any, Any],
+            headers: Mapping[str | bytes, Sequence[str | bytes]] | None = None,
+        ) -> JsonDict:
+            if not headers or not headers.get(b"Authorization"):
+                raise RuntimeError("Access token should be provided in auth headers.")
+            self.assertEqual(args.get("url"), QUERY_URL)
+            self.assertEqual(args.get("user_id"), QUERY_USER.to_string())
+            self.assertEqual(
+                headers.get(b"Authorization"), [f"Bearer {TOKEN}".encode()]
+            )
+            self.request_url = url
+            if url == URL_ENDPOINT:
+                return SUCCESS_RESULT
+            else:
+                raise RuntimeError(
+                    "URL provided was invalid. This should never be seen."
+                )
+
+        # We assign to a method, which mypy doesn't like.
+        self.api.get_json = Mock(side_effect=get_json)  # type: ignore[method-assign]
+
+        result = self.get_success(
+            self.api.query_preview_url(self.service, QUERY_URL, QUERY_USER)
+        )
+        self.assertEqual(result, SUCCESS_RESULT)
