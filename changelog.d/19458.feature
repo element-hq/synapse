@@ -1,1 +1,1 @@
-Add support for MSC4417 URL Previews via Appservices. 
+Add support for MSC4417 URL Previews via Appservices.
