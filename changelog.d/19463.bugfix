@@ -1,0 +1,1 @@
+Fix missing membership event in `/sync` `state_after` (experimental MSC4222 implementation).
