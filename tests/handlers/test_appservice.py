@@ -499,7 +499,9 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         service.url = "mock_service_url"
         return service
 
-    def _mkservice_url_preview(self, is_in_namespace=True, is_exclusive=False) -> Mock:
+    def _mkservice_url_preview(
+        self, is_in_namespace: bool = True, is_exclusive: bool = False
+    ) -> Mock:
         """
         Create a new mock representing an ApplicationService that is or is not interested
         in any preview urls.

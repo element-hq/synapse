@@ -130,7 +130,8 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """
         Tests that previews fail if the appservice returns an empty response and is exclusive.
         """
-        query_preview_url = self.url_previewer.as_services.query_preview_url = (
+        # We assign to a method, which mypy doesn't like.
+        query_preview_url = self.url_previewer.as_services.query_preview_url = (  # type: ignore[method-assign]
             AsyncMock()
         )
         query_preview_url.return_value = ApplicationServiceUrlPreviewResult(
@@ -147,7 +148,8 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """
         Tests that previews succeed with an appservice provided result.
         """
-        query_preview_url = self.url_previewer.as_services.query_preview_url = (
+        # We assign to a method, which mypy doesn't like.
+        query_preview_url = self.url_previewer.as_services.query_preview_url = (  # type: ignore[method-assign]
             AsyncMock()
         )
         query_preview_url.return_value = ApplicationServiceUrlPreviewResult(
@@ -166,9 +168,10 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """
         Tests that previews fall through to the homeserver when the empty result is non-exclusive.
         """
-        do_preview_mock = self.url_previewer._do_preview = AsyncMock()
+        # We assign to a method, which mypy doesn't like.
+        do_preview_mock = self.url_previewer._do_preview = AsyncMock()  # type: ignore[method-assign]
         do_preview_mock.return_value = b"HS provided bytes"
-        query_preview_url = self.url_previewer.as_services.query_preview_url = (
+        query_preview_url = self.url_previewer.as_services.query_preview_url = (  # type: ignore[method-assign]
             AsyncMock()
         )
         query_preview_url.return_value = ApplicationServiceUrlPreviewResult(
