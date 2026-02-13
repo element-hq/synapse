@@ -54,6 +54,7 @@ from synapse.replication.tcp.protocol import (
     tcp_outbound_commands_counter,
 )
 from synapse.util.duration import Duration
+from synapse.util.metrics import Measure
 
 if TYPE_CHECKING:
     from synapse.replication.tcp.handler import ReplicationCommandHandler
@@ -222,8 +223,13 @@ class RedisSubscriber(SubscriberProtocol):
         # if so.
 
         if isawaitable(res):
+
+            async def wrapper():
+                with Measure(f"reireplication_on_{cmd.NAME}"):
+                    return await res
+
             self.hs.run_as_background_process(
-                "replication-" + cmd.get_logcontext_id(), lambda: res
+                "replication-" + cmd.get_logcontext_id(), wrapper
             )
 
     def connectionLost(self, reason: Failure) -> None:  # type: ignore[override]
