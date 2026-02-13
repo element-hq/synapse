@@ -232,8 +232,9 @@ class UrlPreviewer:
                 return json_encoder.encode(as_og_data.result).encode("utf8")
 
             if as_og_data.exclusive:
-                # This is NOT the same as the Bad Gateway error we usually return for
-                # failed requests. Maybe this is wrong.
+                # XXX: _do_preview typically returns a 500 for any failed
+                # requests but in this case we know the appservice requested
+                # exclusivity over this URL pattern, so we can say it's a 404.
                 raise SynapseError(
                     404,
                     "Not able to preview URL",

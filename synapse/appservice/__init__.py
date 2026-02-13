@@ -149,7 +149,7 @@ class ApplicationService:
         #   users: [ {regex: "[A-z]+.*", exclusive: true}, ...],
         #   aliases: [ {regex: "[A-z]+.*", exclusive: true}, ...],
         #   rooms: [ {regex: "[A-z]+.*", exclusive: true}, ...],
-        #   uk_half-shot_msc4417_preview_urls: [ {regex: "[A-z]+.*", exclusive: true}, ...],
+        #   uk.half-shot.msc4417.preview_urls: [ {regex: "[A-z]+.*", exclusive: true}, ...],
         # }
         if namespaces is None:
             namespaces = {}
@@ -371,6 +371,9 @@ class ApplicationService:
         return bool(self._matches_regex(ApplicationService.NS_ROOMS, room_id))
 
     def is_preview_url_in_namespace(self, url: str) -> bool:
+        """
+        Determines whether a given url should be previewed by this service.
+        """
         return bool(self._matches_regex(ApplicationService.NS_PREVIEW_URLS, url))
 
     def is_exclusive_user(self, user_id: str) -> bool:
@@ -380,6 +383,9 @@ class ApplicationService:
         )
 
     def is_exclusive_preview_url(self, url: str) -> bool:
+        """
+        Determines whether a given url should be *exclusively* previewed by this service.
+        """
         return self._is_exclusive(ApplicationService.NS_PREVIEW_URLS, url)
 
     def is_interested_in_protocol(self, protocol: str) -> bool:
