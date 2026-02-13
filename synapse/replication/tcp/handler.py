@@ -251,6 +251,9 @@ class ReplicationCommandHandler:
         # The factory used to create connections.
         self._factory: ReconnectingClientFactory | None = None
 
+        # The factory used to create performance debug connections.
+        self._performance_debug_factory: ReconnectingClientFactory | None = None
+
         # The currently connected connections. (The list of places we need to send
         # outgoing replication commands to.)
         self._connections: list[IReplicationConnection] = []
@@ -386,7 +389,10 @@ class ReplicationCommandHandler:
 
     def start_replication(self, hs: "HomeServer") -> None:
         """Helper method to start replication."""
-        from synapse.replication.tcp.redis import RedisDirectTcpReplicationClientFactory
+        from synapse.replication.tcp.redis import (
+            RedisDirectTcpReplicationClientFactory,
+            RedisPerformanceDebugSubscriberFactory,
+        )
 
         # First let's ensure that we have a ReplicationStreamer started.
         hs.get_replication_streamer()
@@ -405,12 +411,26 @@ class ReplicationCommandHandler:
             channel_names=self._channels_to_subscribe_to,
         )
 
+        # Also create a performance debug subscriber that decodes but doesn't process
+        # commands, allowing us to measure parsing overhead separately from processing.
+        self._performance_debug_factory = RedisPerformanceDebugSubscriberFactory(
+            hs,
+            channel_names=self._channels_to_subscribe_to,
+        )
+
         reactor = hs.get_reactor()
         redis_config = hs.config.redis
         if redis_config.redis_path is not None:
             reactor.connectUNIX(
                 redis_config.redis_path,
                 self._factory,
+                timeout=30,
+                checkPID=False,
+            )
+            # Connect the performance debug subscriber as well
+            reactor.connectUNIX(
+                redis_config.redis_path,
+                self._performance_debug_factory,
                 timeout=30,
                 checkPID=False,
             )
@@ -425,11 +445,28 @@ class ReplicationCommandHandler:
                 timeout=30,
                 bindAddress=None,
             )
+            # Connect the performance debug subscriber as well
+            reactor.connectSSL(
+                redis_config.redis_host,
+                redis_config.redis_port,
+                self._performance_debug_factory,
+                ssl_context_factory,
+                timeout=30,
+                bindAddress=None,
+            )
         else:
             reactor.connectTCP(
                 redis_config.redis_host,
                 redis_config.redis_port,
                 self._factory,
+                timeout=30,
+                bindAddress=None,
+            )
+            # Connect the performance debug subscriber as well
+            reactor.connectTCP(
+                redis_config.redis_host,
+                redis_config.redis_port,
+                self._performance_debug_factory,
                 timeout=30,
                 bindAddress=None,
             )

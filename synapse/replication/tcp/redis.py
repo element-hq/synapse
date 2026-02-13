@@ -281,6 +281,126 @@ class RedisSubscriber(SubscriberProtocol):
         )
 
 
+class RedisPerformanceDebugSubscriber(SubscriberProtocol):
+    """Connection to redis subscribed to replication stream for performance debugging.
+
+    This class subscribes to the same channels as the main RedisSubscriber but
+    only decodes the payloads without processing them. This allows measuring the
+    overhead of parsing commands without the processing overhead.
+
+    Attributes:
+        server_name: The homeserver name of the Synapse instance.
+        hs: The HomeServer instance.
+        synapse_stream_prefix: The redis stream name to subscribe to.
+        synapse_channel_names: List of channel names to subscribe to.
+    """
+
+    server_name: str
+    hs: "HomeServer"
+    synapse_stream_prefix: str
+    synapse_channel_names: list[str]
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+
+        # a logcontext which we use for processing incoming commands. We declare it as a
+        # background process so that the CPU stats get reported to prometheus.
+        self._logging_context: BackgroundProcessLoggingContext | None = None
+
+    def _get_logging_context(self) -> BackgroundProcessLoggingContext:
+        """
+        We lazily create the logging context so that `self.server_name` is set and
+        available.
+        """
+        assert self.server_name is not None, (
+            "self.server_name must be set before using _get_logging_context()"
+        )
+        if self._logging_context is None:
+            # a logcontext which we use for processing incoming commands. We declare it as a
+            # background process so that the CPU stats get reported to prometheus.
+            with PreserveLoggingContext():
+                # thanks to `PreserveLoggingContext()`, the new logcontext is guaranteed to
+                # capture the sentinel context as its containing context and won't prevent
+                # GC of / unintentionally reactivate what would be the current context.
+                self._logging_context = BackgroundProcessLoggingContext(
+                    name="replication_performance_debug", server_name=self.server_name
+                )
+        return self._logging_context
+
+    def connectionMade(self) -> None:
+        logger.info("Performance debug subscriber connected to redis")
+        super().connectionMade()
+        self.hs.run_as_background_process(
+            "subscribe-replication-debug", self._send_subscribe
+        )
+
+    async def _send_subscribe(self) -> None:
+        """Subscribe to the same channels as the main subscriber."""
+        fully_qualified_stream_names = [
+            f"{self.synapse_stream_prefix}/{stream_suffix}"
+            for stream_suffix in self.synapse_channel_names
+        ] + [self.synapse_stream_prefix]
+        logger.info(
+            "Performance debug subscriber sending redis SUBSCRIBE for %r",
+            fully_qualified_stream_names,
+        )
+        await make_deferred_yieldable(self.subscribe(fully_qualified_stream_names))
+
+        logger.info(
+            "Performance debug subscriber successfully subscribed to redis stream"
+        )
+
+    def messageReceived(self, pattern: str, channel: str, message: str) -> None:
+        """Received a message from redis.
+
+        Parse the command to measure parsing overhead, but don't process it.
+        """
+        with PreserveLoggingContext(self._get_logging_context()):
+            self._parse_message_only(message)
+
+    def _parse_message_only(self, message: str) -> None:
+        """Parse the message without processing it.
+
+        This measures the overhead of parsing replication commands (e.g., RDATA)
+        without the overhead of actually handling them.
+        """
+        if message.strip() == "":
+            # Ignore blank lines
+            return
+
+        try:
+            # Parse the command to measure parsing overhead
+            cmd = parse_command_from_line(message)
+
+            # We use "redis" as the name here as we don't have 1:1 connections to
+            # remote instances.
+            tcp_inbound_commands_counter.labels(
+                command=cmd.NAME,
+                name="redis_debug",
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
+
+            # Intentionally do NOT process the command - we're only measuring
+            # the parsing overhead for performance debugging
+        except Exception:
+            logger.exception(
+                "Performance debug subscriber failed to parse replication line: %r",
+                message,
+            )
+            return
+
+    def connectionLost(self, reason: Failure) -> None:  # type: ignore[override]
+        logger.info("Performance debug subscriber lost connection to redis")
+        super().connectionLost(reason)
+
+        # mark the logging context as finished by triggering `__exit__()`
+        with PreserveLoggingContext():
+            with self._get_logging_context():
+                pass
+            # the sentinel context is now active, which may not be correct.
+            # PreserveLoggingContext() will restore the correct logging context.
+
+
 class SynapseRedisFactory(RedisFactory):
     """A subclass of RedisFactory that periodically sends pings to ensure that
     we detect dead connections.
@@ -413,6 +533,59 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
         p.hs = self.hs
         p.synapse_handler = self.synapse_handler
         p.synapse_outbound_redis_connection = self.synapse_outbound_redis_connection
+        p.synapse_stream_prefix = self.synapse_stream_prefix
+        p.synapse_channel_names = self.synapse_channel_names
+
+        return p
+
+
+class RedisPerformanceDebugSubscriberFactory(SynapseRedisFactory):
+    """This is a reconnecting factory that connects to redis and immediately
+    subscribes to some streams for performance debugging purposes.
+
+    This factory creates connections that decode payloads but do not process them,
+    allowing measurement of parsing overhead without processing overhead.
+
+    Args:
+        hs: The HomeServer instance.
+        channel_names: A list of channel names to append to the base channel name
+            to additionally subscribe to.
+            e.g. if ['ABC', 'DEF'] is specified then we'll listen to:
+            example.com; example.com/ABC; and example.com/DEF.
+    """
+
+    maxDelay = 5
+    protocol = RedisPerformanceDebugSubscriber
+
+    def __init__(
+        self,
+        hs: "HomeServer",
+        channel_names: list[str],
+    ):
+        super().__init__(
+            hs,
+            uuid="performance_debug_subscriber",
+            dbid=None,
+            poolsize=1,
+            replyTimeout=30,
+            password=hs.config.redis.redis_password,
+        )
+
+        self.server_name = hs.hostname
+        self.hs = hs
+        self.synapse_stream_prefix = hs.hostname
+        self.synapse_channel_names = channel_names
+
+    def buildProtocol(self, addr: IAddress) -> RedisPerformanceDebugSubscriber:
+        p = super().buildProtocol(addr)
+        p = cast(RedisPerformanceDebugSubscriber, p)
+
+        # We do this here rather than add to the constructor of `RedisPerformanceDebugSubscriber`
+        # as to do so would involve overriding `buildProtocol` entirely, however
+        # the base method does some other things than just instantiating the
+        # protocol.
+        p.server_name = self.server_name
+        p.hs = self.hs
         p.synapse_stream_prefix = self.synapse_stream_prefix
         p.synapse_channel_names = self.synapse_channel_names
 
