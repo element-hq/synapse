@@ -52,10 +52,11 @@ class ChannelsTestCase(BaseMultiWorkerStreamTestCase):
         # Advance so the Redis subscription gets processed
         self.pump(0.1)
 
-        # The counts are 2 because both the main process and the worker are subscribed.
-        self.assertEqual(len(self._redis_server._subscribers_by_channel[b"test"]), 2)
+        # The counts are 4 because both the main process and the worker have a regular
+        # subscriber and a performance debug subscriber.
+        self.assertEqual(len(self._redis_server._subscribers_by_channel[b"test"]), 4)
         self.assertEqual(
-            len(self._redis_server._subscribers_by_channel[b"test/USER_IP"]), 2
+            len(self._redis_server._subscribers_by_channel[b"test/USER_IP"]), 4
         )
 
     def test_non_background_worker_not_subscribed_to_user_ip(self) -> None:
@@ -76,12 +77,30 @@ class ChannelsTestCase(BaseMultiWorkerStreamTestCase):
         # Advance so the Redis subscription gets processed
         self.pump(0.1)
 
-        # The count is 2 because both the main process and the worker are subscribed.
-        self.assertEqual(len(self._redis_server._subscribers_by_channel[b"test"]), 2)
-        # For USER_IP, the count is 1 because only the main process is subscribed.
+        # The count is 4 because both the main process and the worker have a regular
+        # subscriber and a performance debug subscriber.
+        self.assertEqual(len(self._redis_server._subscribers_by_channel[b"test"]), 4)
+        # For USER_IP, the count is 2 because only the main process is subscribed
+        # (but both main and worker have performance debug subscribers).
         self.assertEqual(
-            len(self._redis_server._subscribers_by_channel[b"test/USER_IP"]), 1
+            len(self._redis_server._subscribers_by_channel[b"test/USER_IP"]), 2
         )
+
+    def test_performance_debug_subscriber_created(self) -> None:
+        """Test that the performance debug subscriber is created and subscribes to channels."""
+        # The performance debug factory should be created when replication starts
+        cmd_handler = self.hs.get_replication_command_handler()
+        self.assertIsNotNone(
+            cmd_handler._performance_debug_factory,
+            "Performance debug factory should be created",
+        )
+
+        # Advance so the Redis subscription gets processed
+        self.pump(0.1)
+
+        # Both the regular subscriber and performance debug subscriber should be connected
+        # to the base channel
+        self.assertEqual(len(self._redis_server._subscribers_by_channel[b"test"]), 2)
 
     def test_wait_for_stream_position(self) -> None:
         """Check that wait for stream position correctly waits for an update from the
