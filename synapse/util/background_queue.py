@@ -28,6 +28,7 @@ from twisted.internet import defer
 
 from synapse.util.async_helpers import DeferredEvent
 from synapse.util.duration import Duration
+from synapse.util.metrics import Measure
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -65,6 +66,7 @@ class BackgroundQueue(Generic[T]):
         timeout_ms: int = 1000,
     ) -> None:
         self._hs = hs
+        self._clock = hs.get_clock()
         self._name = name
         self._callback = callback
         self._timeout_ms = Duration(milliseconds=timeout_ms)
@@ -110,7 +112,12 @@ class BackgroundQueue(Generic[T]):
                 while self._queue:
                     item = self._queue.popleft()
                     try:
-                        await self._callback(item)
+                        with Measure(
+                            self._clock,
+                            name=f"rei_bgq_{self._name}",
+                            server_name=self._hs.hostname,
+                        ):
+                            await self._callback(item)
                     except defer.CancelledError:
                         raise
                     except Exception:

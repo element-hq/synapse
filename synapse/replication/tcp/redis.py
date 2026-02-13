@@ -224,8 +224,12 @@ class RedisSubscriber(SubscriberProtocol):
 
         if isawaitable(res):
 
-            async def wrapper():
-                with Measure(f"reireplication_on_{cmd.NAME}"):
+            async def wrapper() -> None:
+                with Measure(
+                    self.hs.get_clock(),
+                    name=f"reireplication_on_{cmd.NAME}",
+                    server_name=self.server_name,
+                ):
                     return await res
 
             self.hs.run_as_background_process(

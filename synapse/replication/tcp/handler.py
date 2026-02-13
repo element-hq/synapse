@@ -274,7 +274,7 @@ class ReplicationCommandHandler:
         self._command_queues_by_stream = {
             stream_name: BackgroundQueue[_StreamCommandQueueItem](
                 hs,
-                "process-replication-data",
+                f"process-replication-data-rei{stream_name}",
                 self._unsafe_process_item,
             )
             for stream_name in self._streams
