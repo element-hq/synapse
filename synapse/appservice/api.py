@@ -554,12 +554,13 @@ class ApplicationServiceApi(SimpleHttpClient):
 
         Args:
             service: The application service to query.
-            query: An iterable of tuples of (user ID, device ID, algorithm).
+            url: The url to query for.
+            user_id: The user who is requesting the preview.
 
         Returns:
-            A map of device_keys/master_keys/self_signing_keys/user_signing_keys:
+            A unstructrued map of data from the application service OR
+            None if the service could not be contacted, or returned any other response.
 
-            device_keys is a map of user ID -> a map device ID -> device info.
         """
         if service.url is None:
             return None
@@ -574,6 +575,8 @@ class ApplicationServiceApi(SimpleHttpClient):
                 {"user_id": user_id.to_string(), "url": url},
                 headers=self._get_headers(service),
             )
+            # The response *must* be a JsonDict if successful.
+            assert isinstance(response, dict)
         except HttpResponseException as e:
             # The appservice doesn't support this endpoint.
             # Since the AS has opted into these requests, we warn if the AS squarks about unknown
@@ -581,7 +584,7 @@ class ApplicationServiceApi(SimpleHttpClient):
             logger.warning("query_url_preview to %s received %s", uri, e.code)
             return None
         except Exception as ex:
-            logger.warning("query_keys to %s threw exception %s", uri, ex)
+            logger.warning("query_url_preview to %s threw exception %s", uri, ex)
             return None
 
         return response
