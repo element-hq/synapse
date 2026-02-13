@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import Generic, Hashable, List, Set, TypeVar
+from typing import Generic, Hashable, TypeVar
 
 import attr
 
@@ -31,7 +31,7 @@ T = TypeVar("T", bound=Hashable)
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class _Entry(Generic[T]):
     end_key: int
-    elements: Set[T] = attr.Factory(set)
+    elements: set[T] = attr.Factory(set)
 
 
 class WheelTimer(Generic[T]):
@@ -46,7 +46,7 @@ class WheelTimer(Generic[T]):
                 accuracy of the timer.
         """
         self.bucket_size: int = bucket_size
-        self.entries: List[_Entry[T]] = []
+        self.entries: list[_Entry[T]] = []
 
     def insert(self, now: int, obj: T, then: int) -> None:
         """Inserts object into timer.
@@ -91,7 +91,7 @@ class WheelTimer(Generic[T]):
 
         self.entries[-1].elements.add(obj)
 
-    def fetch(self, now: int) -> List[T]:
+    def fetch(self, now: int) -> list[T]:
         """Fetch any objects that have timed out
 
         Args:
@@ -102,7 +102,7 @@ class WheelTimer(Generic[T]):
         """
         now_key = int(now / self.bucket_size)
 
-        ret: List[T] = []
+        ret: list[T] = []
         while self.entries and self.entries[0].end_key <= now_key:
             ret.extend(self.entries.pop(0).elements)
 

@@ -40,6 +40,147 @@ from tests.unittest import override_config
 from tests.utils import HAS_AUTHLIB
 
 
+class KeyUploadTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        keys.register_servlets,
+        admin.register_servlets_for_client_rest_resource,
+        login.register_servlets,
+    ]
+
+    def test_upload_keys_fails_on_invalid_structure(self) -> None:
+        """Check that we validate the structure of keys upon upload.
+
+        Regression test for https://github.com/element-hq/synapse/pull/17097
+        """
+        self.register_user("alice", "wonderland")
+        alice_token = self.login("alice", "wonderland")
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                # Error: device_keys must be a dict
+                "device_keys": ["some", "stuff", "weewoo"]
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"],
+            Codes.BAD_JSON,
+            channel.result,
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                # Error: properties of fallback_keys must be in the form `<algorithm>:<device_id>`
+                "fallback_keys": {"invalid_key": "signature_base64"}
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"],
+            Codes.BAD_JSON,
+            channel.result,
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                # Same as above, but for one_time_keys
+                "one_time_keys": {"invalid_key": "signature_base64"}
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"],
+            Codes.BAD_JSON,
+            channel.result,
+        )
+
+    def test_upload_keys_fails_on_invalid_user_id_or_device_id(self) -> None:
+        """
+        Validate that the requesting user is uploading their own keys and nobody
+        else's.
+        """
+        device_id = "DEVICE_ID"
+        alice_user_id = self.register_user("alice", "wonderland")
+        alice_token = self.login("alice", "wonderland", device_id=device_id)
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                "device_keys": {
+                    # Included `user_id` does not match requesting user.
+                    "user_id": "@unknown_user:test",
+                    "device_id": device_id,
+                    "algorithms": ["m.olm.curve25519-aes-sha2"],
+                    "keys": {
+                        f"ed25519:{device_id}": "publickey",
+                    },
+                    "signatures": {},
+                }
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"],
+            Codes.BAD_JSON,
+            channel.result,
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                "device_keys": {
+                    "user_id": alice_user_id,
+                    # Included `device_id` does not match requesting user's.
+                    "device_id": "UNKNOWN_DEVICE_ID",
+                    "algorithms": ["m.olm.curve25519-aes-sha2"],
+                    "keys": {
+                        f"ed25519:{device_id}": "publickey",
+                    },
+                    "signatures": {},
+                }
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"],
+            Codes.BAD_JSON,
+            channel.result,
+        )
+
+    def test_upload_keys_succeeds_when_fields_are_explicitly_set_to_null(self) -> None:
+        """
+        This is a regression test for https://github.com/element-hq/synapse/pull/19023.
+        """
+        device_id = "DEVICE_ID"
+        self.register_user("alice", "wonderland")
+        alice_token = self.login("alice", "wonderland", device_id=device_id)
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                "device_keys": None,
+                "one_time_keys": None,
+                "fallback_keys": None,
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+
 class KeyQueryTestCase(unittest.HomeserverTestCase):
     servlets = [
         keys.register_servlets,
@@ -212,6 +353,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
     ]
 
     OIDC_ADMIN_TOKEN = "_oidc_admin_token"
+    ACCOUNT_MANAGEMENT_URL = "https://my-account.issuer"
 
     @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
@@ -221,7 +363,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                 "msc3861": {
                     "enabled": True,
                     "issuer": "https://issuer",
-                    "account_management_url": "https://my-account.issuer",
+                    "account_management_url": ACCOUNT_MANAGEMENT_URL,
                     "client_id": "id",
                     "client_auth_method": "client_secret_post",
                     "client_secret": "secret",
@@ -316,6 +458,33 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                 },
             )
             self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
+            # Ensure that the response contains the expected UIA flows from https://spec.matrix.org/v1.17/client-server-api/#oauth-authentication
+            self.assertIn(
+                {"stages": ["m.oauth"]},
+                channel.json_body["flows"],
+                "m.oauth flow not found",
+            )
+            self.assertSubstring(
+                self.ACCOUNT_MANAGEMENT_URL,
+                channel.json_body["params"]["m.oauth"]["url"],
+                "m.oauth url does not match account management URL",
+            )
+            self.assertSubstring(
+                "action=org.matrix.cross_signing_reset",
+                channel.json_body["params"]["m.oauth"]["url"],
+                "m.oauth url does not include expected action",
+            )
+            # Unstable version of the flow
+            self.assertIn(
+                {"stages": ["org.matrix.cross_signing_reset"]},
+                channel.json_body["flows"],
+                "unstable org.matrix.cross_signing_reset flow not found",
+            )
+            self.assertEqual(
+                channel.json_body["params"]["org.matrix.cross_signing_reset"]["url"],
+                channel.json_body["params"]["m.oauth"]["url"],
+                "unstable org.matrix.cross_signing_reset url does not match m.oauth url",
+            )
 
         # Pretend that MAS did UIA and allowed us to replace the master key.
         channel = self.make_request(

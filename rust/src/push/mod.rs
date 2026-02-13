@@ -273,14 +273,16 @@ pub enum SimpleJsonValue {
     Null,
 }
 
-impl<'source> FromPyObject<'source> for SimpleJsonValue {
-    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
-        if let Ok(s) = ob.downcast::<PyString>() {
+impl<'source> FromPyObject<'_, 'source> for SimpleJsonValue {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'_, 'source, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(s) = ob.cast::<PyString>() {
             Ok(SimpleJsonValue::Str(Cow::Owned(s.to_string())))
         // A bool *is* an int, ensure we try bool first.
-        } else if let Ok(b) = ob.downcast::<PyBool>() {
+        } else if let Ok(b) = ob.cast::<PyBool>() {
             Ok(SimpleJsonValue::Bool(b.extract()?))
-        } else if let Ok(i) = ob.downcast::<PyInt>() {
+        } else if let Ok(i) = ob.cast::<PyInt>() {
             Ok(SimpleJsonValue::Int(i.extract()?))
         } else if ob.is_none() {
             Ok(SimpleJsonValue::Null)
@@ -301,12 +303,14 @@ pub enum JsonValue {
     Value(SimpleJsonValue),
 }
 
-impl<'source> FromPyObject<'source> for JsonValue {
-    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
-        if let Ok(l) = ob.downcast::<PyList>() {
+impl<'source> FromPyObject<'_, 'source> for JsonValue {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'_, 'source, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(l) = ob.cast::<PyList>() {
             match l
                 .iter()
-                .map(|it| SimpleJsonValue::extract_bound(&it))
+                .map(|it| SimpleJsonValue::extract(it.as_borrowed()))
                 .collect()
             {
                 Ok(a) => Ok(JsonValue::Array(a)),
@@ -314,7 +318,7 @@ impl<'source> FromPyObject<'source> for JsonValue {
                     "Can't convert to JsonValue::Array: {e}"
                 ))),
             }
-        } else if let Ok(v) = SimpleJsonValue::extract_bound(ob) {
+        } else if let Ok(v) = SimpleJsonValue::extract(ob) {
             Ok(JsonValue::Value(v))
         } else {
             Err(PyTypeError::new_err(format!(
@@ -369,6 +373,10 @@ pub enum KnownCondition {
     RoomVersionSupports {
         feature: Cow<'static, str>,
     },
+    #[serde(rename = "io.element.msc4306.thread_subscription")]
+    Msc4306ThreadSubscription {
+        subscribed: bool,
+    },
 }
 
 impl<'source> IntoPyObject<'source> for Condition {
@@ -381,9 +389,11 @@ impl<'source> IntoPyObject<'source> for Condition {
     }
 }
 
-impl<'source> FromPyObject<'source> for Condition {
-    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
-        Ok(depythonize(ob)?)
+impl<'source> FromPyObject<'_, 'source> for Condition {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'_, 'source, PyAny>) -> Result<Self, Self::Error> {
+        Ok(depythonize(&ob)?)
     }
 }
 
@@ -523,6 +533,7 @@ impl PushRules {
             .chain(base_rules::BASE_APPEND_OVERRIDE_RULES.iter())
             .chain(self.content.iter())
             .chain(base_rules::BASE_APPEND_CONTENT_RULES.iter())
+            .chain(base_rules::BASE_APPEND_POSTCONTENT_RULES.iter())
             .chain(self.room.iter())
             .chain(self.sender.iter())
             .chain(self.underride.iter())
@@ -547,11 +558,13 @@ pub struct FilteredPushRules {
     msc3664_enabled: bool,
     msc4028_push_encrypted_events: bool,
     msc4210_enabled: bool,
+    msc4306_enabled: bool,
 }
 
 #[pymethods]
 impl FilteredPushRules {
     #[new]
+    #[allow(clippy::too_many_arguments)]
     pub fn py_new(
         push_rules: PushRules,
         enabled_map: BTreeMap<String, bool>,
@@ -560,6 +573,7 @@ impl FilteredPushRules {
         msc3664_enabled: bool,
         msc4028_push_encrypted_events: bool,
         msc4210_enabled: bool,
+        msc4306_enabled: bool,
     ) -> Self {
         Self {
             push_rules,
@@ -569,6 +583,7 @@ impl FilteredPushRules {
             msc3664_enabled,
             msc4028_push_encrypted_events,
             msc4210_enabled,
+            msc4306_enabled,
         }
     }
 
@@ -616,6 +631,10 @@ impl FilteredPushRules {
                         || rule.rule_id == "global/content/.m.rule.contains_user_name"
                         || rule.rule_id == "global/override/.m.rule.roomnotif")
                 {
+                    return false;
+                }
+
+                if !self.msc4306_enabled && rule.rule_id.contains("/.io.element.msc4306.rule.") {
                     return false;
                 }
 

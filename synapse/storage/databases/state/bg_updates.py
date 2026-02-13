@@ -22,12 +22,7 @@
 import logging
 from typing import (
     TYPE_CHECKING,
-    Dict,
-    List,
     Mapping,
-    Optional,
-    Tuple,
-    Union,
 )
 
 from synapse.logging.opentracing import tag_args, trace
@@ -85,7 +80,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
         else:
             # We don't use WITH RECURSIVE on sqlite3 as there are distributions
             # that ship with an sqlite3 version that doesn't support it (e.g. wheezy)
-            next_group: Optional[int] = state_group
+            next_group: int | None = state_group
             count = 0
 
             while next_group:
@@ -106,8 +101,8 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
     def _get_state_groups_from_groups_txn(
         self,
         txn: LoggingTransaction,
-        groups: List[int],
-        state_filter: Optional[StateFilter] = None,
+        groups: list[int],
+        state_filter: StateFilter | None = None,
     ) -> Mapping[int, StateMap[str]]:
         """
         Given a number of state groups, fetch the latest state for each group.
@@ -123,7 +118,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
         if state_filter is None:
             state_filter = StateFilter.all()
 
-        results: Dict[int, MutableStateMap[str]] = {group: {} for group in groups}
+        results: dict[int, MutableStateMap[str]] = {group: {} for group in groups}
 
         if isinstance(self.database_engine, PostgresEngine):
             # Temporarily disable sequential scans in this transaction. This is
@@ -147,7 +142,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
                 %s
             """
 
-            overall_select_query_args: List[Union[int, str]] = []
+            overall_select_query_args: list[int | str] = []
 
             # This is an optimization to create a select clause per-condition. This
             # makes the query planner a lot smarter on what rows should pull out in the
@@ -156,7 +151,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
             use_condition_optimization = (
                 not state_filter.include_others and not state_filter.is_full()
             )
-            state_filter_condition_combos: List[Tuple[str, Optional[str]]] = []
+            state_filter_condition_combos: list[tuple[str, str | None]] = []
             # We don't need to caclculate this list if we're not using the condition
             # optimization
             if use_condition_optimization:
@@ -173,7 +168,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
             # `filter_events_for_client` which just uses 2 conditions
             # (`EventTypes.RoomHistoryVisibility` and `EventTypes.Member`).
             if use_condition_optimization and len(state_filter_condition_combos) < 10:
-                select_clause_list: List[str] = []
+                select_clause_list: list[str] = []
                 for etype, skey in state_filter_condition_combos:
                     if skey is None:
                         where_clause = "(type = ?)"
@@ -216,7 +211,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
                 """
 
             for group in groups:
-                args: List[Union[int, str]] = [group]
+                args: list[int | str] = [group]
                 args.extend(overall_select_query_args)
 
                 txn.execute(sql % (overall_select_clause,), args)
@@ -238,7 +233,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
             #
             # We just haven't put in the time to refactor this.
             for group in groups:
-                next_group: Optional[int] = group
+                next_group: int | None = group
 
                 while next_group:
                     # We did this before by getting the list of group ids, and
@@ -290,16 +285,6 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
     STATE_GROUPS_ROOM_INDEX_UPDATE_NAME = "state_groups_room_id_idx"
     STATE_GROUP_EDGES_UNIQUE_INDEX_UPDATE_NAME = "state_group_edges_unique_idx"
 
-    CURRENT_STATE_EVENTS_STREAM_ORDERING_INDEX_UPDATE_NAME = (
-        "current_state_events_stream_ordering_idx"
-    )
-    ROOM_MEMBERSHIPS_STREAM_ORDERING_INDEX_UPDATE_NAME = (
-        "room_memberships_stream_ordering_idx"
-    )
-    LOCAL_CURRENT_MEMBERSHIP_STREAM_ORDERING_INDEX_UPDATE_NAME = (
-        "local_current_membership_stream_ordering_idx"
-    )
-
     def __init__(
         self,
         database: DatabasePool,
@@ -336,27 +321,6 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
             replaces_index="state_group_edges_idx",
         )
 
-        # These indices are needed to validate the foreign key constraint
-        # when events are deleted.
-        self.db_pool.updates.register_background_index_update(
-            self.CURRENT_STATE_EVENTS_STREAM_ORDERING_INDEX_UPDATE_NAME,
-            index_name="current_state_events_stream_ordering_idx",
-            table="current_state_events",
-            columns=["event_stream_ordering"],
-        )
-        self.db_pool.updates.register_background_index_update(
-            self.ROOM_MEMBERSHIPS_STREAM_ORDERING_INDEX_UPDATE_NAME,
-            index_name="room_memberships_stream_ordering_idx",
-            table="room_memberships",
-            columns=["event_stream_ordering"],
-        )
-        self.db_pool.updates.register_background_index_update(
-            self.LOCAL_CURRENT_MEMBERSHIP_STREAM_ORDERING_INDEX_UPDATE_NAME,
-            index_name="local_current_membership_stream_ordering_idx",
-            table="local_current_membership",
-            columns=["event_stream_ordering"],
-        )
-
     async def _background_deduplicate_state(
         self, progress: dict, batch_size: int
     ) -> int:
@@ -378,7 +342,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
             )
             max_group = rows[0][0]
 
-        def reindex_txn(txn: LoggingTransaction) -> Tuple[bool, int]:
+        def reindex_txn(txn: LoggingTransaction) -> tuple[bool, int]:
             new_last_state_group = last_state_group
             for count in range(batch_size):
                 txn.execute(

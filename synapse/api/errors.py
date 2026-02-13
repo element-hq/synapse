@@ -26,11 +26,11 @@ import math
 import typing
 from enum import Enum
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional
 
 from twisted.web import http
 
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 
 if typing.TYPE_CHECKING:
     from synapse.config.homeserver import HomeServerConfig
@@ -137,6 +137,21 @@ class Codes(str, Enum):
     PROFILE_TOO_LARGE = "M_PROFILE_TOO_LARGE"
     KEY_TOO_LARGE = "M_KEY_TOO_LARGE"
 
+    # Part of MSC4155/MSC4380
+    INVITE_BLOCKED = "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED"
+
+    # Part of MSC4190
+    APPSERVICE_LOGIN_UNSUPPORTED = "IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED"
+
+    # Part of MSC4306: Thread Subscriptions
+    MSC4306_CONFLICTING_UNSUBSCRIPTION = (
+        "IO.ELEMENT.MSC4306.M_CONFLICTING_UNSUBSCRIPTION"
+    )
+    MSC4306_NOT_IN_THREAD = "IO.ELEMENT.MSC4306.M_NOT_IN_THREAD"
+
+    # Part of MSC4326
+    UNKNOWN_DEVICE = "ORG.MATRIX.MSC4326.M_UNKNOWN_DEVICE"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.
@@ -149,9 +164,9 @@ class CodeMessageException(RuntimeError):
 
     def __init__(
         self,
-        code: Union[int, HTTPStatus],
+        code: int | HTTPStatus,
         msg: str,
-        headers: Optional[Dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
     ):
         super().__init__("%d: %s" % (code, msg))
 
@@ -186,7 +201,7 @@ class RedirectException(CodeMessageException):
         super().__init__(code=http_code, msg=msg)
         self.location = location
 
-        self.cookies: List[bytes] = []
+        self.cookies: list[bytes] = []
 
 
 class SynapseError(CodeMessageException):
@@ -208,8 +223,8 @@ class SynapseError(CodeMessageException):
         code: int,
         msg: str,
         errcode: str = Codes.UNKNOWN,
-        additional_fields: Optional[Dict] = None,
-        headers: Optional[Dict[str, str]] = None,
+        additional_fields: dict | None = None,
+        headers: dict[str, str] | None = None,
     ):
         """Constructs a synapse error.
 
@@ -221,7 +236,7 @@ class SynapseError(CodeMessageException):
         super().__init__(code, msg, headers)
         self.errcode = errcode
         if additional_fields is None:
-            self._additional_fields: Dict = {}
+            self._additional_fields: dict = {}
         else:
             self._additional_fields = dict(additional_fields)
 
@@ -229,7 +244,7 @@ class SynapseError(CodeMessageException):
         return cs_error(self.msg, self.errcode, **self._additional_fields)
 
     @property
-    def debug_context(self) -> Optional[str]:
+    def debug_context(self) -> str | None:
         """Override this to add debugging context that shouldn't be sent to clients."""
         return None
 
@@ -261,7 +276,7 @@ class ProxiedRequestError(SynapseError):
         code: int,
         msg: str,
         errcode: str = Codes.UNKNOWN,
-        additional_fields: Optional[Dict] = None,
+        additional_fields: dict | None = None,
     ):
         super().__init__(code, msg, errcode, additional_fields)
 
@@ -303,6 +318,20 @@ class UserDeactivatedError(SynapseError):
         )
 
 
+class UserLockedError(SynapseError):
+    """The error returned to the client when the user attempted to access an
+    authenticated endpoint, but the account has been locked.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=HTTPStatus.UNAUTHORIZED,
+            msg="User account has been locked",
+            errcode=Codes.USER_LOCKED,
+            additional_fields={"soft_logout": True},
+        )
+
+
 class FederationDeniedError(SynapseError):
     """An error raised when the server tries to federate with a server which
     is not on its federation whitelist.
@@ -311,7 +340,7 @@ class FederationDeniedError(SynapseError):
         destination: The destination which has been denied
     """
 
-    def __init__(self, destination: Optional[str]):
+    def __init__(self, destination: str | None):
         """Raised by federation client or server to indicate that we are
         are deliberately not attempting to contact a given server because it is
         not on our federation whitelist.
@@ -370,7 +399,7 @@ class AuthError(SynapseError):
         code: int,
         msg: str,
         errcode: str = Codes.FORBIDDEN,
-        additional_fields: Optional[dict] = None,
+        additional_fields: dict | None = None,
     ):
         super().__init__(code, msg, errcode, additional_fields)
 
@@ -380,7 +409,7 @@ class OAuthInsufficientScopeError(SynapseError):
 
     def __init__(
         self,
-        required_scopes: List[str],
+        required_scopes: list[str],
     ):
         headers = {
             "WWW-Authenticate": 'Bearer error="insufficient_scope", scope="%s"'
@@ -403,7 +432,7 @@ class UnstableSpecAuthError(AuthError):
         msg: str,
         errcode: str,
         previous_errcode: str = Codes.FORBIDDEN,
-        additional_fields: Optional[dict] = None,
+        additional_fields: dict | None = None,
     ):
         self.previous_errcode = previous_errcode
         super().__init__(code, msg, errcode, additional_fields)
@@ -468,8 +497,8 @@ class ResourceLimitError(SynapseError):
         code: int,
         msg: str,
         errcode: str = Codes.RESOURCE_LIMIT_EXCEEDED,
-        admin_contact: Optional[str] = None,
-        limit_type: Optional[str] = None,
+        admin_contact: str | None = None,
+        limit_type: str | None = None,
     ):
         self.admin_contact = admin_contact
         self.limit_type = limit_type
@@ -513,7 +542,7 @@ class InvalidCaptchaError(SynapseError):
         self,
         code: int = 400,
         msg: str = "Invalid captcha.",
-        error_url: Optional[str] = None,
+        error_url: str | None = None,
         errcode: str = Codes.CAPTCHA_INVALID,
     ):
         super().__init__(code, msg, errcode)
@@ -524,14 +553,19 @@ class InvalidCaptchaError(SynapseError):
 
 
 class LimitExceededError(SynapseError):
-    """A client has sent too many requests and is being throttled."""
+    """A client has sent too many requests and is being throttled.
+
+    Args:
+        pause: Optional time in seconds to pause before responding to the client.
+    """
 
     def __init__(
         self,
         limiter_name: str,
         code: int = 429,
-        retry_after_ms: Optional[int] = None,
+        retry_after_ms: int | None = None,
         errcode: str = Codes.LIMIT_EXCEEDED,
+        pause: float | None = None,
     ):
         # Use HTTP header Retry-After to enable library-assisted retry handling.
         headers = (
@@ -542,12 +576,13 @@ class LimitExceededError(SynapseError):
         super().__init__(code, "Too Many Requests", errcode, headers=headers)
         self.retry_after_ms = retry_after_ms
         self.limiter_name = limiter_name
+        self.pause = pause
 
     def error_dict(self, config: Optional["HomeServerConfig"]) -> "JsonDict":
         return cs_error(self.msg, self.errcode, retry_after_ms=self.retry_after_ms)
 
     @property
-    def debug_context(self) -> Optional[str]:
+    def debug_context(self) -> str | None:
         return self.limiter_name
 
 
@@ -640,7 +675,7 @@ class RequestSendFailed(RuntimeError):
 
 
 class UnredactedContentDeletedError(SynapseError):
-    def __init__(self, content_keep_ms: Optional[int] = None):
+    def __init__(self, content_keep_ms: int | None = None):
         super().__init__(
             404,
             "The content for that event has already been erased from the database",
@@ -716,7 +751,7 @@ class FederationError(RuntimeError):
         code: int,
         reason: str,
         affected: str,
-        source: Optional[str] = None,
+        source: str | None = None,
     ):
         if level not in ["FATAL", "ERROR", "WARN"]:
             raise ValueError("Level is not valid: %s" % (level,))
@@ -751,7 +786,7 @@ class FederationPullAttemptBackoffError(RuntimeError):
     """
 
     def __init__(
-        self, event_ids: "StrCollection", message: Optional[str], retry_after_ms: int
+        self, event_ids: "StrCollection", message: str | None, retry_after_ms: int
     ):
         event_ids = list(event_ids)
 
@@ -819,6 +854,12 @@ class HttpResponseException(CodeMessageException):
         errmsg = j.pop("error", self.msg)
 
         return ProxiedRequestError(self.code, errmsg, errcode, j)
+
+
+class HomeServerNotSetupException(Exception):
+    """
+    Raised when an operation is attempted on the HomeServer before setup() has been called.
+    """
 
 
 class ShadowBanError(Exception):

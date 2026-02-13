@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Set
 
 from parameterized import parameterized
 
@@ -64,7 +63,7 @@ class ProxyTests(TestCase):
     def test_parse_connection_header_value(
         self,
         connection_header_value: bytes,
-        expected_extra_headers_to_remove: Set[str],
+        expected_extra_headers_to_remove: set[str],
     ) -> None:
         """
         Tests that the connection header value is parsed correctly

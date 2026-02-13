@@ -21,7 +21,9 @@
 import itertools
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Mapping
+
+import attr
 
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
 from synapse.api.errors import Codes, StoreError, SynapseError
@@ -42,7 +44,6 @@ from synapse.handlers.sync import (
     KnockedSyncResult,
     SyncConfig,
     SyncResult,
-    SyncVersion,
 )
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -57,8 +58,8 @@ from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
-from synapse.util import json_decoder
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.json import json_decoder
 
 from ._base import client_patterns, set_timeline_upper_limit
 
@@ -111,6 +112,7 @@ class SyncRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
+        self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.sync_handler = hs.get_sync_handler()
@@ -124,7 +126,9 @@ class SyncRestServlet(RestServlet):
 
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
+            clock=self.clock,
             cache_name="sync_valid_filter",
+            server_name=self.server_name,
         )
 
         # Ratelimiter for presence updates, keyed by requester.
@@ -134,7 +138,7 @@ class SyncRestServlet(RestServlet):
             cfg=hs.config.ratelimiting.rc_presence_per_user,
         )
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None
 
@@ -185,7 +189,7 @@ class SyncRestServlet(RestServlet):
         # in the response cache once the set of ignored users has changed.
         # (We filter out ignored users from timeline events, so our sync response
         # is invalid once the set of ignored users changes.)
-        last_ignore_accdata_streampos: Optional[int] = None
+        last_ignore_accdata_streampos: int | None = None
         if not since:
             # No `since`, so this is an initial sync.
             last_ignore_accdata_streampos = await self.store.get_latest_stream_id_for_global_account_data_by_type_for_user(
@@ -265,7 +269,6 @@ class SyncRestServlet(RestServlet):
             sync_result = await self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                SyncVersion.SYNC_V2,
                 request_key,
                 since_token=since_token,
                 timeout=timeout,
@@ -361,9 +364,6 @@ class SyncRestServlet(RestServlet):
 
         # https://github.com/matrix-org/matrix-doc/blob/54255851f642f84a4f1aaf7bc063eebe3d76752b/proposals/2732-olm-fallback-keys.md
         # states that this field should always be included, as long as the server supports the feature.
-        response["org.matrix.msc2732.device_unused_fallback_key_types"] = (
-            sync_result.device_unused_fallback_key_types
-        )
         response["device_unused_fallback_key_types"] = (
             sync_result.device_unused_fallback_key_types
         )
@@ -380,7 +380,7 @@ class SyncRestServlet(RestServlet):
         return response
 
     @staticmethod
-    def encode_presence(events: List[UserPresenceState], time_now: int) -> JsonDict:
+    def encode_presence(events: list[UserPresenceState], time_now: int) -> JsonDict:
         return {
             "events": [
                 {
@@ -398,7 +398,7 @@ class SyncRestServlet(RestServlet):
     async def encode_joined(
         self,
         sync_config: SyncConfig,
-        rooms: List[JoinedSyncResult],
+        rooms: list[JoinedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
     ) -> JsonDict:
@@ -428,7 +428,7 @@ class SyncRestServlet(RestServlet):
     @trace_with_opname("sync.encode_invited")
     async def encode_invited(
         self,
-        rooms: List[InvitedSyncResult],
+        rooms: list[InvitedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
     ) -> JsonDict:
@@ -464,10 +464,10 @@ class SyncRestServlet(RestServlet):
     @trace_with_opname("sync.encode_knocked")
     async def encode_knocked(
         self,
-        rooms: List[KnockedSyncResult],
+        rooms: list[KnockedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         """
         Encode the rooms we've knocked on in a sync result.
 
@@ -517,7 +517,7 @@ class SyncRestServlet(RestServlet):
     async def encode_archived(
         self,
         sync_config: SyncConfig,
-        rooms: List[ArchivedSyncResult],
+        rooms: list[ArchivedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
     ) -> JsonDict:
@@ -547,7 +547,7 @@ class SyncRestServlet(RestServlet):
     async def encode_room(
         self,
         sync_config: SyncConfig,
-        room: Union[JoinedSyncResult, ArchivedSyncResult],
+        room: JoinedSyncResult | ArchivedSyncResult,
         time_now: int,
         joined: bool,
         serialize_options: SerializeEventConfig,
@@ -630,184 +630,22 @@ class SyncRestServlet(RestServlet):
         return result
 
 
-class SlidingSyncE2eeRestServlet(RestServlet):
-    """
-    API endpoint for MSC3575 Sliding Sync `/sync/e2ee`. This is being introduced as part
-    of Sliding Sync but doesn't have any sliding window component. It's just a way to
-    get E2EE events without having to sit through a big initial sync (`/sync` v2). And
-    we can avoid encryption events being backed up by the main sync response.
-
-    Having To-Device messages split out to this sync endpoint also helps when clients
-    need to have 2 or more sync streams open at a time, e.g a push notification process
-    and a main process. This can cause the two processes to race to fetch the To-Device
-    events, resulting in the need for complex synchronisation rules to ensure the token
-    is correctly and atomically exchanged between processes.
-
-    GET parameters::
-        timeout(int): How long to wait for new events in milliseconds.
-        since(batch_token): Batch token when asking for incremental deltas.
-
-    Response JSON::
-        {
-            "next_batch": // batch token for the next /sync
-            "to_device": {
-                // list of to-device events
-                "events": [
-                    {
-                        "content: { "algorithm": "m.olm.v1.curve25519-aes-sha2", "ciphertext": { ... }, "org.matrix.msgid": "abcd", "session_id": "abcd" },
-                        "type": "m.room.encrypted",
-                        "sender": "@alice:example.com",
-                    }
-                    // ...
-                ]
-            },
-            "device_lists": {
-                "changed": ["@alice:example.com"],
-                "left": ["@bob:example.com"]
-            },
-            "device_one_time_keys_count": {
-                "signed_curve25519": 50
-            },
-            "device_unused_fallback_key_types": [
-                "signed_curve25519"
-            ]
-        }
-    """
-
-    PATTERNS = client_patterns(
-        "/org.matrix.msc3575/sync/e2ee$", releases=[], v1=False, unstable=True
-    )
-
-    def __init__(self, hs: "HomeServer"):
-        super().__init__()
-        self.hs = hs
-        self.auth = hs.get_auth()
-        self.store = hs.get_datastores().main
-        self.sync_handler = hs.get_sync_handler()
-
-        # Filtering only matters for the `device_lists` because it requires a bunch of
-        # derived information from rooms (see how `_generate_sync_entry_for_rooms()`
-        # prepares a bunch of data for `_generate_sync_entry_for_device_list()`).
-        self.only_member_events_filter_collection = FilterCollection(
-            self.hs,
-            {
-                "room": {
-                    # We only care about membership events for the `device_lists`.
-                    # Membership will tell us whether a user has joined/left a room and
-                    # if there are new devices to encrypt for.
-                    "timeline": {
-                        "types": ["m.room.member"],
-                    },
-                    "state": {
-                        "types": ["m.room.member"],
-                    },
-                    # We don't want any extra account_data generated because it's not
-                    # returned by this endpoint. This helps us avoid work in
-                    # `_generate_sync_entry_for_rooms()`
-                    "account_data": {
-                        "not_types": ["*"],
-                    },
-                    # We don't want any extra ephemeral data generated because it's not
-                    # returned by this endpoint. This helps us avoid work in
-                    # `_generate_sync_entry_for_rooms()`
-                    "ephemeral": {
-                        "not_types": ["*"],
-                    },
-                },
-                # We don't want any extra account_data generated because it's not
-                # returned by this endpoint. (This is just here for good measure)
-                "account_data": {
-                    "not_types": ["*"],
-                },
-                # We don't want any extra presence data generated because it's not
-                # returned by this endpoint. (This is just here for good measure)
-                "presence": {
-                    "not_types": ["*"],
-                },
-            },
-        )
-
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req_experimental_feature(
-            request, allow_guest=True, feature=ExperimentalFeature.MSC3575
-        )
-        user = requester.user
-        device_id = requester.device_id
-
-        timeout = parse_integer(request, "timeout", default=0)
-        since = parse_string(request, "since")
-
-        sync_config = SyncConfig(
-            user=user,
-            filter_collection=self.only_member_events_filter_collection,
-            is_guest=requester.is_guest,
-            device_id=device_id,
-            use_state_after=False,  # We don't return any rooms so this flag is a no-op
-        )
-
-        since_token = None
-        if since is not None:
-            since_token = await StreamToken.from_string(self.store, since)
-
-        # Request cache key
-        request_key = (
-            SyncVersion.E2EE_SYNC,
-            user,
-            timeout,
-            since,
-        )
-
-        # Gather data for the response
-        sync_result = await self.sync_handler.wait_for_sync_for_user(
-            requester,
-            sync_config,
-            SyncVersion.E2EE_SYNC,
-            request_key,
-            since_token=since_token,
-            timeout=timeout,
-            full_state=False,
-        )
-
-        # The client may have disconnected by now; don't bother to serialize the
-        # response if so.
-        if request._disconnected:
-            logger.info("Client has disconnected; not serializing response.")
-            return 200, {}
-
-        response: JsonDict = defaultdict(dict)
-        response["next_batch"] = await sync_result.next_batch.to_string(self.store)
-
-        if sync_result.to_device:
-            response["to_device"] = {"events": sync_result.to_device}
-
-        if sync_result.device_lists.changed:
-            response["device_lists"]["changed"] = list(sync_result.device_lists.changed)
-        if sync_result.device_lists.left:
-            response["device_lists"]["left"] = list(sync_result.device_lists.left)
-
-        # We always include this because https://github.com/vector-im/element-android/issues/3725
-        # The spec isn't terribly clear on when this can be omitted and how a client would tell
-        # the difference between "no keys present" and "nothing changed" in terms of whole field
-        # absent / individual key type entry absent
-        # Corresponding synapse issue: https://github.com/matrix-org/synapse/issues/10456
-        response["device_one_time_keys_count"] = sync_result.device_one_time_keys_count
-
-        # https://github.com/matrix-org/matrix-doc/blob/54255851f642f84a4f1aaf7bc063eebe3d76752b/proposals/2732-olm-fallback-keys.md
-        # states that this field should always be included, as long as the server supports the feature.
-        response["device_unused_fallback_key_types"] = (
-            sync_result.device_unused_fallback_key_types
-        )
-
-        return 200, response
-
-
 class SlidingSyncRestServlet(RestServlet):
     """
-    API endpoint for MSC3575 Sliding Sync `/sync`. Allows for clients to request a
+    API endpoint for MSC4186 Simplified Sliding Sync `/sync`, which was historically derived
+    from MSC3575 (Sliding Sync; now abandoned). Allows for clients to request a
     subset (sliding window) of rooms, state, and timeline events (just what they need)
     in order to bootstrap quickly and subscribe to only what the client cares about.
     Because the client can specify what it cares about, we can respond quickly and skip
     all of the work we would normally have to do with a sync v2 response.
+
+    Extensions of various features are defined in:
+        - to-device messaging (MSC3885)
+        - end-to-end encryption (MSC3884)
+        - typing notifications (MSC3961)
+        - receipts (MSC3960)
+        - account data (MSC3959)
+        - thread subscriptions (MSC4308)
 
     Request query parameters:
         timeout: How long to wait for new events in milliseconds.
@@ -930,7 +768,7 @@ class SlidingSyncRestServlet(RestServlet):
         self.sliding_sync_handler = hs.get_sliding_sync_handler()
         self.event_serializer = hs.get_event_client_serializer()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req_experimental_feature(
             request, allow_guest=True, feature=ExperimentalFeature.MSC3575
         )
@@ -992,12 +830,18 @@ class SlidingSyncRestServlet(RestServlet):
             extensions=body.extensions,
         )
 
-        sliding_sync_results = await self.sliding_sync_handler.wait_for_sync_for_user(
+        (
+            sliding_sync_results,
+            did_wait,
+        ) = await self.sliding_sync_handler.wait_for_sync_for_user(
             requester,
             sync_config,
             from_token,
             timeout,
         )
+        # Knowing whether we waited is useful in traces to filter out long-running
+        # requests where we were just waiting.
+        set_tag("sliding_sync.did_wait", str(did_wait))
 
         # The client may have disconnected by now; don't bother to serialize the
         # response if so.
@@ -1009,6 +853,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return 200, response_content
 
+    @trace_with_opname("sliding_sync.encode_response")
     async def encode_response(
         self,
         requester: Requester,
@@ -1029,6 +874,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return response
 
+    @trace_with_opname("sliding_sync.encode_lists")
     def encode_lists(
         self, lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
     ) -> JsonDict:
@@ -1050,10 +896,11 @@ class SlidingSyncRestServlet(RestServlet):
 
         return serialized_lists
 
+    @trace_with_opname("sliding_sync.encode_rooms")
     async def encode_rooms(
         self,
         requester: Requester,
-        rooms: Dict[str, SlidingSyncResult.RoomResult],
+        rooms: dict[str, SlidingSyncResult.RoomResult],
     ) -> JsonDict:
         time_now = self.clock.time_msec()
 
@@ -1062,7 +909,7 @@ class SlidingSyncRestServlet(RestServlet):
             requester=requester,
         )
 
-        serialized_rooms: Dict[str, JsonDict] = {}
+        serialized_rooms: dict[str, JsonDict] = {}
         for room_id, room_result in rooms.items():
             serialized_rooms[room_id] = {
                 "notification_count": room_result.notification_count,
@@ -1170,6 +1017,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return serialized_rooms
 
+    @trace_with_opname("sliding_sync.encode_extensions")
     async def encode_extensions(
         self, requester: Requester, extensions: SlidingSyncResult.Extensions
     ) -> JsonDict:
@@ -1235,11 +1083,49 @@ class SlidingSyncRestServlet(RestServlet):
                 "rooms": extensions.typing.room_id_to_typing_map,
             }
 
+        # excludes both None and falsy `thread_subscriptions`
+        if extensions.thread_subscriptions:
+            serialized_extensions["io.element.msc4308.thread_subscriptions"] = (
+                _serialise_thread_subscriptions(extensions.thread_subscriptions)
+            )
+
         return serialized_extensions
+
+
+def _serialise_thread_subscriptions(
+    thread_subscriptions: SlidingSyncResult.Extensions.ThreadSubscriptionsExtension,
+) -> JsonDict:
+    out: JsonDict = {}
+
+    if thread_subscriptions.subscribed:
+        out["subscribed"] = {
+            room_id: {
+                thread_root_id: attr.asdict(
+                    change, filter=lambda _attr, v: v is not None
+                )
+                for thread_root_id, change in room_threads.items()
+            }
+            for room_id, room_threads in thread_subscriptions.subscribed.items()
+        }
+
+    if thread_subscriptions.unsubscribed:
+        out["unsubscribed"] = {
+            room_id: {
+                thread_root_id: attr.asdict(
+                    change, filter=lambda _attr, v: v is not None
+                )
+                for thread_root_id, change in room_threads.items()
+            }
+            for room_id, room_threads in thread_subscriptions.unsubscribed.items()
+        }
+
+    if thread_subscriptions.prev_batch:
+        out["prev_batch"] = thread_subscriptions.prev_batch.to_string()
+
+    return out
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SyncRestServlet(hs).register(http_server)
 
     SlidingSyncRestServlet(hs).register(http_server)
-    SlidingSyncE2eeRestServlet(hs).register(http_server)

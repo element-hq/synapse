@@ -21,7 +21,7 @@
 import abc
 import logging
 import threading
-from typing import TYPE_CHECKING, Callable, List, Optional
+from typing import TYPE_CHECKING, Callable
 
 from synapse.storage.engines import (
     BaseDatabaseEngine,
@@ -61,7 +61,7 @@ class SequenceGenerator(metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
-    def get_next_mult_txn(self, txn: Cursor, n: int) -> List[int]:
+    def get_next_mult_txn(self, txn: Cursor, n: int) -> list[int]:
         """Get the next `n` IDs in the sequence"""
         ...
 
@@ -71,7 +71,7 @@ class SequenceGenerator(metaclass=abc.ABCMeta):
         db_conn: "LoggingDatabaseConnection",
         table: str,
         id_column: str,
-        stream_name: Optional[str] = None,
+        stream_name: str | None = None,
         positive: bool = True,
     ) -> None:
         """Should be called during start up to test that the current value of
@@ -105,7 +105,7 @@ class PostgresSequenceGenerator(SequenceGenerator):
         assert fetch_res is not None
         return fetch_res[0]
 
-    def get_next_mult_txn(self, txn: Cursor, n: int) -> List[int]:
+    def get_next_mult_txn(self, txn: Cursor, n: int) -> list[int]:
         txn.execute(
             "SELECT nextval(?) FROM generate_series(1, ?)", (self._sequence_name, n)
         )
@@ -116,7 +116,7 @@ class PostgresSequenceGenerator(SequenceGenerator):
         db_conn: "LoggingDatabaseConnection",
         table: str,
         id_column: str,
-        stream_name: Optional[str] = None,
+        stream_name: str | None = None,
         positive: bool = True,
     ) -> None:
         """See SequenceGenerator.check_consistency for docstring."""
@@ -223,10 +223,10 @@ class LocalSequenceGenerator(SequenceGenerator):
                  get_next_id_txn; should return the current maximum id
         """
         # the callback. this is cleared after it is called, so that it can be GCed.
-        self._callback: Optional[GetFirstCallbackType] = get_first_callback
+        self._callback: GetFirstCallbackType | None = get_first_callback
 
         # The current max value, or None if we haven't looked in the DB yet.
-        self._current_max_id: Optional[int] = None
+        self._current_max_id: int | None = None
         self._lock = threading.Lock()
 
     def get_next_id_txn(self, txn: Cursor) -> int:
@@ -241,7 +241,7 @@ class LocalSequenceGenerator(SequenceGenerator):
             self._current_max_id += 1
             return self._current_max_id
 
-    def get_next_mult_txn(self, txn: Cursor, n: int) -> List[int]:
+    def get_next_mult_txn(self, txn: Cursor, n: int) -> list[int]:
         with self._lock:
             if self._current_max_id is None:
                 assert self._callback is not None
@@ -257,7 +257,7 @@ class LocalSequenceGenerator(SequenceGenerator):
         db_conn: Connection,
         table: str,
         id_column: str,
-        stream_name: Optional[str] = None,
+        stream_name: str | None = None,
         positive: bool = True,
     ) -> None:
         # There is nothing to do for in memory sequences
@@ -278,9 +278,9 @@ def build_sequence_generator(
     database_engine: BaseDatabaseEngine,
     get_first_callback: GetFirstCallbackType,
     sequence_name: str,
-    table: Optional[str],
-    id_column: Optional[str],
-    stream_name: Optional[str] = None,
+    table: str | None,
+    id_column: str | None,
+    stream_name: str | None = None,
     positive: bool = True,
 ) -> SequenceGenerator:
     """Get the best impl of SequenceGenerator available

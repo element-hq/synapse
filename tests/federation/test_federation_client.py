@@ -23,14 +23,14 @@ from unittest import mock
 
 import twisted.web.client
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.test_utils import FakeResponse, event_injection
 from tests.unittest import FederatingHomeserverTestCase

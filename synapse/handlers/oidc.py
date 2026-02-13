@@ -26,14 +26,9 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Generic,
-    List,
-    Optional,
-    Type,
     TypedDict,
     TypeVar,
-    Union,
 )
 from urllib.parse import urlencode, urlparse
 
@@ -67,8 +62,9 @@ from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
 from synapse.module_api import ModuleApi
 from synapse.types import JsonDict, UserID, map_username_to_mxid_localpart
-from synapse.util import Clock, json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
+from synapse.util.clock import Clock
+from synapse.util.json import json_decoder
 from synapse.util.macaroons import MacaroonGenerator, OidcSessionData
 from synapse.util.templates import _localpart_from_email_filter
 
@@ -95,7 +91,7 @@ logger = logging.getLogger(__name__)
 # Here we have the names of the cookies, and the options we use to set them.
 _SESSION_COOKIES = [
     (b"oidc_session", b"HttpOnly; Secure; SameSite=None"),
-    (b"oidc_session_no_samesite", b"HttpOnly"),
+    (b"oidc_session_no_samesite", b"HttpOnly; Secure"),
 ]
 
 
@@ -104,22 +100,22 @@ _SESSION_COOKIES = [
 class Token(TypedDict):
     access_token: str
     token_type: str
-    id_token: Optional[str]
-    refresh_token: Optional[str]
+    id_token: str | None
+    refresh_token: str | None
     expires_in: int
-    scope: Optional[str]
+    scope: str | None
 
 
 #: A JWK, as per RFC7517 sec 4. The type could be more precise than that, but
 #: there is no real point of doing this in our case.
-JWK = Dict[str, str]
+JWK = dict[str, str]
 
 C = TypeVar("C")
 
 
 #: A JWK Set, as per RFC7517 sec 5.
 class JWKS(TypedDict):
-    keys: List[JWK]
+    keys: list[JWK]
 
 
 class OidcHandler:
@@ -133,7 +129,7 @@ class OidcHandler:
         assert provider_confs
 
         self._macaroon_generator = hs.get_macaroon_generator()
-        self._providers: Dict[str, "OidcProvider"] = {
+        self._providers: dict[str, "OidcProvider"] = {
             p.idp_id: OidcProvider(hs, self._macaroon_generator, p)
             for p in provider_confs
         }
@@ -208,7 +204,7 @@ class OidcHandler:
         # are two.
 
         for cookie_name, _ in _SESSION_COOKIES:
-            session: Optional[bytes] = request.getCookie(cookie_name)
+            session: bytes | None = request.getCookie(cookie_name)
             if session is not None:
                 break
         else:
@@ -331,13 +327,13 @@ class OidcHandler:
 
             # At this point we properly checked both claims types
             issuer: str = iss
-            audience: List[str] = aud
+            audience: list[str] = aud
         except (TypeError, KeyError):
             raise SynapseError(400, "Invalid issuer/audience in logout_token")
 
         # Now that we know the audience and the issuer, we can figure out from
         # what provider it is coming from
-        oidc_provider: Optional[OidcProvider] = None
+        oidc_provider: OidcProvider | None = None
         for provider in self._providers.values():
             if provider.issuer == issuer and provider.client_id in audience:
                 oidc_provider = provider
@@ -353,7 +349,7 @@ class OidcHandler:
 class OidcError(Exception):
     """Used to catch errors when calling the token_endpoint"""
 
-    def __init__(self, error: str, error_description: Optional[str] = None):
+    def __init__(self, error: str, error_description: str | None = None):
         self.error = error
         self.error_description = error_description
 
@@ -400,7 +396,7 @@ class OidcProvider:
         self._scopes = provider.scopes
         self._user_profile_method = provider.user_profile_method
 
-        client_secret: Optional[Union[str, JwtClientSecret]] = None
+        client_secret: str | JwtClientSecret | None = None
         if provider.client_secret:
             client_secret = provider.client_secret
         elif provider.client_secret_jwt_key:
@@ -427,8 +423,10 @@ class OidcProvider:
         # from the IdP's jwks_uri, if required.
         self._jwks = RetryOnExceptionCachedCall(self._load_jwks)
 
+        # type-ignore: we will not be instantiating a subclass of the provider class,
+        # so the warning about directly accessing __init__ being unsound does not apply here
         user_mapping_provider_init_method = (
-            provider.user_mapping_provider_class.__init__
+            provider.user_mapping_provider_class.__init__  # type: ignore[misc]
         )
         if len(inspect.signature(user_mapping_provider_init_method).parameters) == 3:
             self._user_mapping_provider = provider.user_mapping_provider_class(
@@ -563,12 +561,13 @@ class OidcProvider:
                         raise ValueError("Unexpected subject")
                 except Exception:
                     logger.warning(
-                        f"OIDC Back-Channel Logout is enabled for issuer {self.issuer!r} "
+                        "OIDC Back-Channel Logout is enabled for issuer %r "
                         "but it looks like the configured `user_mapping_provider` "
                         "does not use the `sub` claim as subject. If it is the case, "
                         "and you want Synapse to ignore the `sub` claim in OIDC "
                         "Back-Channel Logouts, set `backchannel_logout_ignore_sub` "
-                        "to `true` in the issuer config."
+                        "to `true` in the issuer config.",
+                        self.issuer,
                     )
 
     @property
@@ -756,7 +755,7 @@ class OidcProvider:
         """
         metadata = await self.load_metadata()
         token_endpoint = metadata.get("token_endpoint")
-        raw_headers: Dict[str, str] = {
+        raw_headers: dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": self._http_client.user_agent.decode("ascii"),
             "Accept": "application/json",
@@ -826,10 +825,10 @@ class OidcProvider:
             if response.code < 400:
                 logger.debug(
                     "Invalid response from the authorization server: "
-                    'responded with a "{status}" '
-                    "but body has an error field: {error!r}".format(
-                        status=status, error=resp["error"]
-                    )
+                    'responded with a "%s" '
+                    "but body has an error field: %r",
+                    status,
+                    resp["error"],
                 )
 
             description = resp.get("error_description", error)
@@ -900,11 +899,11 @@ class OidcProvider:
 
     async def _verify_jwt(
         self,
-        alg_values: List[str],
+        alg_values: list[str],
         token: str,
-        claims_cls: Type[C],
-        claims_options: Optional[dict] = None,
-        claims_params: Optional[dict] = None,
+        claims_cls: type[C],
+        claims_options: dict | None = None,
+        claims_params: dict | None = None,
     ) -> C:
         """Decode and validate a JWT, re-fetching the JWKS as needed.
 
@@ -1004,8 +1003,8 @@ class OidcProvider:
     async def handle_redirect_request(
         self,
         request: SynapseRequest,
-        client_redirect_url: Optional[bytes],
-        ui_auth_session_id: Optional[str] = None,
+        client_redirect_url: bytes | None,
+        ui_auth_session_id: str | None = None,
     ) -> str:
         """Handle an incoming request to /login/sso/redirect
 
@@ -1234,7 +1233,7 @@ class OidcProvider:
         token: Token,
         request: SynapseRequest,
         client_redirect_url: str,
-        sid: Optional[str],
+        sid: str | None,
     ) -> None:
         """Given a UserInfo response, complete the login flow
 
@@ -1299,7 +1298,7 @@ class OidcProvider:
 
             return UserAttributes(**attributes)
 
-        async def grandfather_existing_users() -> Optional[str]:
+        async def grandfather_existing_users() -> str | None:
             if self._allow_existing_users:
                 # If allowing existing users we want to generate a single localpart
                 # and attempt to match it.
@@ -1385,7 +1384,8 @@ class OidcProvider:
         # support dynamic registration in Synapse at some point.
         if not self._config.backchannel_logout_enabled:
             logger.warning(
-                f"Received an OIDC Back-Channel Logout request from issuer {self.issuer!r} but it is disabled in config"
+                "Received an OIDC Back-Channel Logout request from issuer %r but it is disabled in config",
+                self.issuer,
             )
 
             # TODO: this responds with a 400 status code, which is what the OIDC
@@ -1442,8 +1442,8 @@ class OidcProvider:
         # If the `sub` claim was included in the logout token, we check that it matches
         # that it matches the right user. We can have cases where the `sub` claim is not
         # the ID saved in database, so we let admins disable this check in config.
-        sub: Optional[str] = claims.get("sub")
-        expected_user_id: Optional[str] = None
+        sub: str | None = claims.get("sub")
+        expected_user_id: str | None = None
         if sub is not None and not self._config.backchannel_logout_ignore_sub:
             expected_user_id = await self._store.get_user_by_external_id(
                 self.idp_id, sub
@@ -1471,7 +1471,7 @@ class LogoutToken(JWTClaims):  # type: ignore[misc]
 
     REGISTERED_CLAIMS = ["iss", "sub", "aud", "iat", "jti", "events", "sid"]
 
-    def validate(self, now: Optional[int] = None, leeway: int = 0) -> None:
+    def validate(self, now: int | None = None, leeway: int = 0) -> None:
         """Validate everything in claims payload."""
         super().validate(now, leeway)
         self.validate_sid()
@@ -1582,11 +1582,11 @@ class JwtClientSecret:
 
 
 class UserAttributeDict(TypedDict):
-    localpart: Optional[str]
+    localpart: str | None
     confirm_localpart: bool
-    display_name: Optional[str]
-    picture: Optional[str]  # may be omitted by older `OidcMappingProviders`
-    emails: List[str]
+    display_name: str | None
+    picture: str | None  # may be omitted by older `OidcMappingProviders`
+    emails: list[str]
 
 
 class OidcMappingProvider(Generic[C]):
@@ -1672,10 +1672,10 @@ env.filters.update(
 class JinjaOidcMappingConfig:
     subject_template: Template
     picture_template: Template
-    localpart_template: Optional[Template]
-    display_name_template: Optional[Template]
-    email_template: Optional[Template]
-    extra_attributes: Dict[str, Template]
+    localpart_template: Template | None
+    display_name_template: Template | None
+    email_template: Template | None
+    extra_attributes: dict[str, Template]
     confirm_localpart: bool = False
 
 
@@ -1708,7 +1708,7 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
         subject_template = parse_template_config_with_claim("subject", "sub")
         picture_template = parse_template_config_with_claim("picture", "picture")
 
-        def parse_template_config(option_name: str) -> Optional[Template]:
+        def parse_template_config(option_name: str) -> Template | None:
             if option_name not in config:
                 return None
             try:
@@ -1766,7 +1766,7 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
             # a usable mxid.
             localpart += str(failures) if failures else ""
 
-        def render_template_field(template: Optional[Template]) -> Optional[str]:
+        def render_template_field(template: Template | None) -> str | None:
             if template is None:
                 return None
             return template.render(user=userinfo).strip()
@@ -1775,7 +1775,7 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
         if display_name == "":
             display_name = None
 
-        emails: List[str] = []
+        emails: list[str] = []
         email = render_template_field(self._config.email_template)
         if email:
             emails.append(email)
@@ -1791,11 +1791,11 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
         )
 
     async def get_extra_attributes(self, userinfo: UserInfo, token: Token) -> JsonDict:
-        extras: Dict[str, str] = {}
+        extras: dict[str, str] = {}
         for key, template in self._config.extra_attributes.items():
             try:
                 extras[key] = template.render(user=userinfo).strip()
             except Exception as e:
                 # Log an error and skip this value (don't break login for this).
-                logger.error("Failed to render OIDC extra attribute %s: %s" % (key, e))
+                logger.exception("Failed to render OIDC extra attribute %s: %s", key, e)
         return extras

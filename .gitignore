@@ -47,6 +47,7 @@ __pycache__/
 /.idea/
 /.ropeproject/
 /.vscode/
+/.zed/
 
 # build products
 !/.coveragerc

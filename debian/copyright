@@ -8,7 +8,7 @@ License: Apache-2.0
 
 Files: *
 Copyright: 2023 New Vector Ltd
-License: AGPL-3.0-or-later
+License: AGPL-3.0-or-later or LicenseRef-Element-Commercial
 
 Files: synapse/config/saml2.py
 Copyright: 2015, Ericsson

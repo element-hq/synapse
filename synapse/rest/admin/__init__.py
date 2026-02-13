@@ -35,7 +35,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.handlers.pagination import PURGE_HISTORY_ACTION_NAME
@@ -51,12 +51,14 @@ from synapse.rest.admin.background_updates import (
 from synapse.rest.admin.devices import (
     DeleteDevicesRestServlet,
     DeviceRestServlet,
-    DevicesGetRestServlet,
     DevicesRestServlet,
 )
 from synapse.rest.admin.event_reports import (
     EventReportDetailRestServlet,
     EventReportsRestServlet,
+)
+from synapse.rest.admin.events import (
+    EventRestServlet,
 )
 from synapse.rest.admin.experimental_features import ExperimentalFeaturesRestServlet
 from synapse.rest.admin.federation import (
@@ -72,6 +74,7 @@ from synapse.rest.admin.registration_tokens import (
     RegistrationTokenRestServlet,
 )
 from synapse.rest.admin.rooms import (
+    AdminRoomHierarchy,
     BlockRoomRestServlet,
     DeleteRoomStatusByDeleteIdRestServlet,
     DeleteRoomStatusByRoomIdRestServlet,
@@ -111,10 +114,12 @@ from synapse.rest.admin.users import (
     UserByThreePid,
     UserInvitesCount,
     UserJoinedRoomCount,
-    UserMembershipRestServlet,
+    UserJoinedRoomsRestServlet,
+    UserMembershipsRestServlet,
     UserRegisterServlet,
     UserReplaceMasterCrossSigningKeyRestServlet,
     UserRestServletV2,
+    UserRestServletV2Get,
     UsersRestServletV2,
     UsersRestServletV3,
     UserTokenRestServlet,
@@ -135,7 +140,7 @@ class VersionServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.res = {"server_version": SYNAPSE_VERSION}
 
-    def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         return HTTPStatus.OK, self.res
 
 
@@ -150,8 +155,8 @@ class PurgeHistoryRestServlet(RestServlet):
         self.auth = hs.get_auth()
 
     async def on_POST(
-        self, request: SynapseRequest, room_id: str, event_id: Optional[str]
-    ) -> Tuple[int, JsonDict]:
+        self, request: SynapseRequest, room_id: str, event_id: str | None
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         body = parse_json_object_from_request(request, allow_empty_body=True)
@@ -170,7 +175,7 @@ class PurgeHistoryRestServlet(RestServlet):
             if event.room_id != room_id:
                 raise SynapseError(HTTPStatus.BAD_REQUEST, "Event is for wrong room.")
 
-            # RoomStreamToken expects [int] not Optional[int]
+            # RoomStreamToken expects [int] not [int | None]
             assert event.internal_metadata.stream_ordering is not None
             room_token = RoomStreamToken(
                 topological=event.depth, stream=event.internal_metadata.stream_ordering
@@ -235,7 +240,7 @@ class PurgeHistoryStatusRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, purge_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         purge_task = await self.pagination_handler.get_delete_task(purge_id)
@@ -273,10 +278,16 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     # Admin servlets below may not work on workers.
     if hs.config.worker.worker_app is not None:
         # Some admin servlets can be mounted on workers when MSC3861 is enabled.
+        # Note that this is only for MSC3861 mode, as modern MAS using the
+        # matrix_authentication_service integration uses the dedicated MAS API.
         if hs.config.experimental.msc3861.enabled:
             register_servlets_for_msc3861_delegation(hs, http_server)
+        else:
+            UserRestServletV2Get(hs).register(http_server)
 
         return
+
+    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
 
     register_servlets_for_client_rest_resource(hs, http_server)
     BlockRoomRestServlet(hs).register(http_server)
@@ -288,10 +299,11 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     DeleteRoomStatusByRoomIdRestServlet(hs).register(http_server)
     JoinRoomAliasServlet(hs).register(http_server)
     VersionServlet(hs).register(http_server)
-    if not hs.config.experimental.msc3861.enabled:
+    if not auth_delegated:
         UserAdminServlet(hs).register(http_server)
-    UserMembershipRestServlet(hs).register(http_server)
-    if not hs.config.experimental.msc3861.enabled:
+    UserJoinedRoomsRestServlet(hs).register(http_server)
+    UserMembershipsRestServlet(hs).register(http_server)
+    if not auth_delegated:
         UserTokenRestServlet(hs).register(http_server)
     UserRestServletV2(hs).register(http_server)
     UsersRestServletV2(hs).register(http_server)
@@ -308,7 +320,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RoomEventContextServlet(hs).register(http_server)
     RateLimitRestServlet(hs).register(http_server)
     UsernameAvailableRestServlet(hs).register(http_server)
-    if not hs.config.experimental.msc3861.enabled:
+    if not auth_delegated:
         ListRegistrationTokensRestServlet(hs).register(http_server)
         NewRegistrationTokenRestServlet(hs).register(http_server)
         RegistrationTokenRestServlet(hs).register(http_server)
@@ -336,22 +348,26 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ExperimentalFeaturesRestServlet(hs).register(http_server)
     SuspendAccountRestServlet(hs).register(http_server)
     ScheduledTasksRestServlet(hs).register(http_server)
+    AdminRoomHierarchy(hs).register(http_server)
+    EventRestServlet(hs).register(http_server)
 
 
 def register_servlets_for_client_rest_resource(
     hs: "HomeServer", http_server: HttpServer
 ) -> None:
     """Register only the servlets which need to be exposed on /_matrix/client/xxx"""
+    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+
     WhoisRestServlet(hs).register(http_server)
     PurgeHistoryStatusRestServlet(hs).register(http_server)
     PurgeHistoryRestServlet(hs).register(http_server)
     # The following resources can only be run on the main process.
     if hs.config.worker.worker_app is None:
         DeactivateAccountRestServlet(hs).register(http_server)
-        if not hs.config.experimental.msc3861.enabled:
+        if not auth_delegated:
             ResetPasswordRestServlet(hs).register(http_server)
     SearchUsersRestServlet(hs).register(http_server)
-    if not hs.config.experimental.msc3861.enabled:
+    if not auth_delegated:
         UserRegisterServlet(hs).register(http_server)
         AccountValidityRenewServlet(hs).register(http_server)
 
@@ -375,4 +391,5 @@ def register_servlets_for_msc3861_delegation(
     UserRestServletV2(hs).register(http_server)
     UsernameAvailableRestServlet(hs).register(http_server)
     UserReplaceMasterCrossSigningKeyRestServlet(hs).register(http_server)
-    DevicesGetRestServlet(hs).register(http_server)
+    DeviceRestServlet(hs).register(http_server)
+    DevicesRestServlet(hs).register(http_server)

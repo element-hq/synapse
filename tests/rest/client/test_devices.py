@@ -18,10 +18,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from http import HTTPStatus
-
 from twisted.internet.defer import ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import NotFoundError
 from synapse.appservice import ApplicationService
@@ -29,7 +27,7 @@ from synapse.rest import admin, devices, sync
 from synapse.rest.client import keys, login, register
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -85,48 +83,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         self.registration = hs.get_registration_handler()
         self.message_handler = hs.get_device_message_handler()
 
-    def test_PUT(self) -> None:
-        """Sanity-check that we can PUT a dehydrated device.
-
-        Detects https://github.com/matrix-org/synapse/issues/14334.
-        """
-        alice = self.register_user("alice", "correcthorse")
-        token = self.login(alice, "correcthorse")
-
-        # Have alice update their device list
-        channel = self.make_request(
-            "PUT",
-            "_matrix/client/unstable/org.matrix.msc2697.v2/dehydrated_device",
-            {
-                "device_data": {
-                    "algorithm": "org.matrix.msc2697.v1.dehydration.v1.olm",
-                    "account": "dehydrated_device",
-                },
-                "device_keys": {
-                    "user_id": "@alice:test",
-                    "device_id": "device1",
-                    "valid_until_ts": "80",
-                    "algorithms": [
-                        "m.olm.curve25519-aes-sha2",
-                    ],
-                    "keys": {
-                        "<algorithm>:<device_id>": "<key_base64>",
-                    },
-                    "signatures": {
-                        "<user_id>": {"<algorithm>:<device_id>": "<signature_base64>"}
-                    },
-                },
-            },
-            access_token=token,
-            shorthand=False,
-        )
-        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
-        device_id = channel.json_body.get("device_id")
-        self.assertIsInstance(device_id, str)
-
-    @unittest.override_config(
-        {"experimental_features": {"msc2697_enabled": False, "msc3814_enabled": True}}
-    )
+    @unittest.override_config({"experimental_features": {"msc3814_enabled": True}})
     def test_dehydrate_msc3814(self) -> None:
         user = self.register_user("mikey", "pass")
         token = self.login(user, "pass", device_id="device1")
@@ -320,9 +277,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 401)
 
-    @unittest.override_config(
-        {"experimental_features": {"msc2697_enabled": False, "msc3814_enabled": True}}
-    )
+    @unittest.override_config({"experimental_features": {"msc3814_enabled": True}})
     def test_msc3814_dehydrated_device_delete_works(self) -> None:
         user = self.register_user("mikey", "pass")
         token = self.login(user, "pass", device_id="device1")
@@ -472,7 +427,7 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
             id="msc4190",
             token="some_token",
             hs_token="some_token",
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
             namespaces={
                 ApplicationService.NS_USERS: [{"regex": "@.*", "exclusive": False}]
             },
@@ -483,7 +438,7 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
             id="regular",
             token="other_token",
             hs_token="other_token",
-            sender="@as2:example.com",
+            sender=UserID.from_string("@as2:example.com"),
             namespaces={
                 ApplicationService.NS_USERS: [{"regex": "@.*", "exclusive": False}]
             },
@@ -494,7 +449,9 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         return self.hs
 
     def test_PUT_device(self) -> None:
-        self.register_appservice_user("alice", self.msc4190_service.token)
+        self.register_appservice_user(
+            "alice", self.msc4190_service.token, inhibit_login=True
+        )
         self.register_appservice_user("bob", self.pre_msc_service.token)
 
         channel = self.make_request(
@@ -531,18 +488,10 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # On the regular service, that API should not allow for the
-        # creation of new devices.
-        channel = self.make_request(
-            "PUT",
-            "/_matrix/client/v3/devices/AABBCCDD?user_id=@bob:test",
-            content={"display_name": "Bob's device"},
-            access_token=self.pre_msc_service.token,
-        )
-        self.assertEqual(channel.code, 404, channel.json_body)
-
     def test_DELETE_device(self) -> None:
-        self.register_appservice_user("alice", self.msc4190_service.token)
+        self.register_appservice_user(
+            "alice", self.msc4190_service.token, inhibit_login=True
+        )
 
         # There should be no device
         channel = self.make_request(
@@ -589,7 +538,9 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body, {"devices": []})
 
     def test_POST_delete_devices(self) -> None:
-        self.register_appservice_user("alice", self.msc4190_service.token)
+        self.register_appservice_user(
+            "alice", self.msc4190_service.token, inhibit_login=True
+        )
 
         # There should be no device
         channel = self.make_request(

@@ -18,17 +18,17 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes, EventTypes
 from synapse.api.errors import NotFoundError
 from synapse.events import EventBase
 from synapse.federation.units import Transaction
-from synapse.handlers.device import DeviceHandler
+from synapse.handlers.device import DeviceWriterHandler
 from synapse.handlers.presence import UserPresenceState
 from synapse.handlers.push_rules import InvalidRuleException
 from synapse.module_api import ModuleApi
@@ -36,7 +36,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, notifications, presence, profile, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.events.test_presence_router import send_presence_update, sync_presence
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -803,10 +803,10 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         )
 
         # Setup a callback counting the number of pushers.
-        number_of_pushers_in_callback: Optional[int] = None
+        number_of_pushers_in_callback: int | None = None
 
         async def _on_logged_out_mock(
-            user_id: str, device_id: Optional[str], access_token: str
+            user_id: str, device_id: str | None, access_token: str
         ) -> None:
             nonlocal number_of_pushers_in_callback
             number_of_pushers_in_callback = len(
@@ -819,7 +819,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
 
         # Delete the device.
         device_handler = self.hs.get_device_handler()
-        assert isinstance(device_handler, DeviceHandler)
+        assert isinstance(device_handler, DeviceWriterHandler)
         self.get_success(device_handler.delete_devices(user_id, [device_id]))
 
         # Check that the callback was called and the pushers still existed.
@@ -839,7 +839,7 @@ class ModuleApiWorkerTestCase(BaseModuleApiTestCase, BaseMultiWorkerStreamTestCa
         presence.register_servlets,
     ]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         conf = super().default_config()
         conf["stream_writers"] = {"presence": ["presence_writer"]}
         conf["instance_map"] = {

@@ -23,10 +23,10 @@ import logging
 import platform
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -65,8 +65,10 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
             timeout_seconds = 15  # Increased timeout for RISC-V
             # add a print or log statement here for visibility in CI logs
             logger.info(  # use logger.info
-                f"Detected RISC-V architecture ({current_machine}). "
-                f"Adjusting test_lock_contention: timeout={timeout_seconds}s"
+                "Detected RISC-V architecture (%s). "
+                "Adjusting test_lock_contention: timeout=%ss",
+                current_machine,
+                timeout_seconds,
             )
         else:
             # Settings for other architectures

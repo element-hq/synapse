@@ -21,23 +21,18 @@ from typing import (
     AbstractSet,
     Any,
     Callable,
-    Dict,
     Final,
     Generic,
-    List,
     Mapping,
     MutableMapping,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
     TypeVar,
     cast,
 )
 
 import attr
+from pydantic import ConfigDict
 
-from synapse._pydantic_compat import Extra
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.types import (
@@ -50,14 +45,24 @@ from synapse.types import (
     SlidingSyncStreamToken,
     StrCollection,
     StreamToken,
+    ThreadSubscriptionsToken,
     UserID,
 )
 from synapse.types.rest.client import SlidingSyncBody
+from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
 
 logger = logging.getLogger(__name__)
+
+# How often to update the last seen timestamp for lazy members.
+#
+# We don't update the timestamp every time to avoid hammering the DB with
+# writes, and we don't need the timestamp to be precise (as it is used to evict
+# old entries that haven't been used in a while).
+LAZY_MEMBERS_UPDATE_INTERVAL = Duration(hours=1)
 
 
 class SlidingSyncConfig(SlidingSyncBody):
@@ -68,15 +73,12 @@ class SlidingSyncConfig(SlidingSyncBody):
 
     user: UserID
     requester: Requester
-
-    # Pydantic config
-    class Config:
-        # By default, ignore fields that we don't recognise.
-        extra = Extra.ignore
-        # By default, don't allow fields to be reassigned after parsing.
-        allow_mutation = False
-        # Allow custom types like `UserID` to be used in the model
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(
+        extra="ignore",
+        frozen=True,
+        # Allow custom types like `UserID` to be used in the model.
+        arbitrary_types_allowed=True,
+    )
 
 
 class OperationType(Enum):
@@ -172,31 +174,31 @@ class SlidingSyncResult:
         @attr.s(slots=True, frozen=True, auto_attribs=True)
         class StrippedHero:
             user_id: str
-            display_name: Optional[str]
-            avatar_url: Optional[str]
+            display_name: str | None
+            avatar_url: str | None
 
-        name: Optional[str]
-        avatar: Optional[str]
-        heroes: Optional[List[StrippedHero]]
+        name: str | None
+        avatar: str | None
+        heroes: list[StrippedHero] | None
         is_dm: bool
         initial: bool
         unstable_expanded_timeline: bool
         # Should be empty for invite/knock rooms with `stripped_state`
-        required_state: List[EventBase]
+        required_state: list[EventBase]
         # Should be empty for invite/knock rooms with `stripped_state`
-        timeline_events: List[EventBase]
-        bundled_aggregations: Optional[Dict[str, "BundledAggregations"]]
+        timeline_events: list[EventBase]
+        bundled_aggregations: dict[str, "BundledAggregations"] | None
         # Optional because it's only relevant to invite/knock rooms
-        stripped_state: List[JsonDict]
+        stripped_state: list[JsonDict]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        prev_batch: Optional[StreamToken]
+        prev_batch: StreamToken | None
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        limited: Optional[bool]
+        limited: bool | None
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        num_live: Optional[int]
-        bump_stamp: Optional[int]
-        joined_count: Optional[int]
-        invited_count: Optional[int]
+        num_live: int | None
+        bump_stamp: int | None
+        joined_count: int | None
+        invited_count: int | None
         notification_count: int
         highlight_count: int
 
@@ -239,11 +241,11 @@ class SlidingSyncResult:
             """
 
             op: OperationType
-            range: Tuple[int, int]
-            room_ids: List[str]
+            range: tuple[int, int]
+            room_ids: list[str]
 
         count: int
-        ops: List[Operation]
+        ops: list[Operation]
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class Extensions:
@@ -287,7 +289,7 @@ class SlidingSyncResult:
             """
 
             # Only present on incremental syncs
-            device_list_updates: Optional[DeviceListUpdates]
+            device_list_updates: DeviceListUpdates | None
             device_one_time_keys_count: Mapping[str, int]
             device_unused_fallback_key_types: Sequence[str]
 
@@ -357,11 +359,50 @@ class SlidingSyncResult:
             def __bool__(self) -> bool:
                 return bool(self.room_id_to_typing_map)
 
-        to_device: Optional[ToDeviceExtension] = None
-        e2ee: Optional[E2eeExtension] = None
-        account_data: Optional[AccountDataExtension] = None
-        receipts: Optional[ReceiptsExtension] = None
-        typing: Optional[TypingExtension] = None
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ThreadSubscriptionsExtension:
+            """The Thread Subscriptions extension (MSC4308)
+
+            Attributes:
+                subscribed: map (room_id -> thread_root_id -> info) of new or changed subscriptions
+                unsubscribed: map (room_id -> thread_root_id -> info) of new unsubscriptions
+                prev_batch: if present, there is a gap and the client can use this token to backpaginate
+            """
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadSubscription:
+                # always present when `subscribed`
+                automatic: bool | None
+
+                # the same as our stream_id; useful for clients to resolve
+                # race conditions locally
+                bump_stamp: int
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadUnsubscription:
+                # the same as our stream_id; useful for clients to resolve
+                # race conditions locally
+                bump_stamp: int
+
+            # room_id -> event_id (of thread root) -> the subscription change
+            subscribed: Mapping[str, Mapping[str, ThreadSubscription]] | None
+            # room_id -> event_id (of thread root) -> the unsubscription
+            unsubscribed: Mapping[str, Mapping[str, ThreadUnsubscription]] | None
+            prev_batch: ThreadSubscriptionsToken | None
+
+            def __bool__(self) -> bool:
+                return (
+                    bool(self.subscribed)
+                    or bool(self.unsubscribed)
+                    or bool(self.prev_batch)
+                )
+
+        to_device: ToDeviceExtension | None = None
+        e2ee: E2eeExtension | None = None
+        account_data: AccountDataExtension | None = None
+        receipts: ReceiptsExtension | None = None
+        typing: TypingExtension | None = None
+        thread_subscriptions: ThreadSubscriptionsExtension | None = None
 
         def __bool__(self) -> bool:
             return bool(
@@ -370,11 +411,12 @@ class SlidingSyncResult:
                 or self.account_data
                 or self.receipts
                 or self.typing
+                or self.thread_subscriptions
             )
 
     next_pos: SlidingSyncStreamToken
     lists: Mapping[str, SlidingWindowList]
-    rooms: Dict[str, RoomResult]
+    rooms: dict[str, RoomResult]
     extensions: Extensions
 
     def __bool__(self) -> bool:
@@ -444,7 +486,7 @@ class RoomSyncConfig:
         Args:
             room_params: `SlidingSyncConfig.SlidingSyncList` or `SlidingSyncConfig.RoomSubscription`
         """
-        required_state_map: Dict[str, Set[str]] = {}
+        required_state_map: dict[str, set[str]] = {}
         for (
             state_type,
             state_key,
@@ -696,7 +738,7 @@ class HaveSentRoom(Generic[T]):
     """
 
     status: HaveSentRoomFlag
-    last_token: Optional[T]
+    last_token: T | None
 
     @staticmethod
     def live() -> "HaveSentRoom[T]":
@@ -817,11 +859,15 @@ class PerConnectionState:
     since the last time you made a sync request.
 
     Attributes:
+        last_used_ts: The time this connection was last used, in milliseconds.
+            This is only accurate to `UPDATE_CONNECTION_STATE_EVERY_MS`.
         rooms: The status of each room for the events stream.
         receipts: The status of each room for the receipts stream.
         room_configs: Map from room_id to the `RoomSyncConfig` of all
             rooms that we have previously sent down.
     """
+
+    last_used_ts: int | None = None
 
     rooms: RoomStatusMap[RoomStreamToken] = attr.Factory(RoomStatusMap)
     receipts: RoomStatusMap[MultiWriterStreamToken] = attr.Factory(RoomStatusMap)
@@ -834,6 +880,7 @@ class PerConnectionState:
         room_configs = cast(MutableMapping[str, RoomSyncConfig], self.room_configs)
 
         return MutablePerConnectionState(
+            last_used_ts=self.last_used_ts,
             rooms=self.rooms.get_mutable(),
             receipts=self.receipts.get_mutable(),
             account_data=self.account_data.get_mutable(),
@@ -842,6 +889,7 @@ class PerConnectionState:
 
     def copy(self) -> "PerConnectionState":
         return PerConnectionState(
+            last_used_ts=self.last_used_ts,
             rooms=self.rooms.copy(),
             receipts=self.receipts.copy(),
             account_data=self.account_data.copy(),
@@ -853,8 +901,73 @@ class PerConnectionState:
 
 
 @attr.s(auto_attribs=True)
+class RoomLazyMembershipChanges:
+    """Changes to lazily-loaded room memberships for a given room."""
+
+    returned_user_id_to_last_seen_ts_map: Mapping[str, int | None] = attr.Factory(dict)
+    """Map from user ID to timestamp for users whose membership we have lazily
+    loaded in this room an request. The timestamp indicates the time we
+    previously needed the membership, or None if we sent it down for the first
+    time in this request.
+
+    We track a *rough* `last_seen_ts` for each user in each room which indicates
+    when we last would've sent their member state to the client. This is used so
+    that we can remove members which haven't been seen for a while to save
+    space.
+
+    Note: this will include users whose membership we would have sent down but
+    didn't due to us having previously sent them.
+    """
+
+    invalidated_user_ids: AbstractSet[str] = attr.Factory(set)
+    """Set of user IDs whose latest membership we have *not* sent down"""
+
+    def get_returned_user_ids_to_update(self, clock: Clock) -> StrCollection:
+        """Get the user IDs whose last seen timestamp we need to update in the
+        database.
+
+        This is a subset of user IDs in `returned_user_id_to_last_seen_ts_map`,
+        whose timestamp is either None (first time we've sent them) or older
+        than `LAZY_MEMBERS_UPDATE_INTERVAL`.
+
+        We only update the timestamp in the database every so often to avoid
+        hammering the DB with writes. We don't need the timestamp to be precise,
+        as the timestamp is used to evict old entries that haven't been used in
+        a while.
+        """
+
+        now_ms = clock.time_msec()
+        return [
+            user_id
+            for user_id, last_seen_ts in self.returned_user_id_to_last_seen_ts_map.items()
+            if last_seen_ts is None
+            or now_ms - last_seen_ts >= LAZY_MEMBERS_UPDATE_INTERVAL.as_millis()
+        ]
+
+    def has_updates(self, clock: Clock) -> bool:
+        """Check if there are any updates to the lazy membership changes.
+
+        Called to check if we need to persist changes to the lazy membership
+        state for the room. We want to avoid persisting the state if there are
+        no changes, to avoid unnecessary writes (and cache misses due to new
+        connection position).
+        """
+
+        # We consider there to be updates if there are any invalidated user
+        # IDs...
+        if self.invalidated_user_ids:
+            return True
+
+        # ...or if any of the returned user IDs need their last seen timestamp
+        # updating in the database.
+        return bool(self.get_returned_user_ids_to_update(clock))
+
+
+@attr.s(auto_attribs=True)
 class MutablePerConnectionState(PerConnectionState):
     """A mutable version of `PerConnectionState`"""
+
+    last_used_ts: int | None
 
     rooms: MutableRoomStatusMap[RoomStreamToken]
     receipts: MutableRoomStatusMap[MultiWriterStreamToken]
@@ -862,12 +975,28 @@ class MutablePerConnectionState(PerConnectionState):
 
     room_configs: typing.ChainMap[str, RoomSyncConfig]
 
-    def has_updates(self) -> bool:
+    # A map from room ID to the lazily-loaded memberships needed for the
+    # request in that room.
+    room_lazy_membership: dict[str, RoomLazyMembershipChanges] = attr.Factory(dict)
+
+    def has_updates(self, clock: Clock) -> bool:
+        """Check if there are any updates to the per-connection state that need
+        persisting.
+
+        It is important that we don't spuriously do persistence, as that will
+        always generate a new connection position which will invalidate some of
+        the caches. It doesn't need to be perfect, but we should avoid always
+        generating new connection positions when doing lazy loading
+        """
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
             or bool(self.account_data.get_updates())
             or bool(self.get_room_config_updates())
+            or any(
+                change.has_updates(clock)
+                for change in self.room_lazy_membership.values()
+            )
         )
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:

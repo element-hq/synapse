@@ -20,7 +20,7 @@
 #
 #
 import argparse
-from typing import Any, Dict, Optional
+from typing import Any
 
 from synapse.api.constants import RoomCreationPreset
 from synapse.config._base import Config, ConfigError, read_file
@@ -148,15 +148,14 @@ class RegistrationConfig(Config):
         self.enable_set_displayname = config.get("enable_set_displayname", True)
         self.enable_set_avatar_url = config.get("enable_set_avatar_url", True)
 
+        auth_delegated = (config.get("experimental_features") or {}).get(
+            "msc3861", {}
+        ).get("enabled", False) or (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False)
+
         # The default value of enable_3pid_changes is True, unless msc3861 is enabled.
-        msc3861_enabled = (
-            (config.get("experimental_features") or {})
-            .get("msc3861", {})
-            .get("enabled", False)
-        )
-        self.enable_3pid_changes = config.get(
-            "enable_3pid_changes", not msc3861_enabled
-        )
+        self.enable_3pid_changes = config.get("enable_3pid_changes", not auth_delegated)
 
         self.disable_msisdn_registration = config.get(
             "disable_msisdn_registration", False
@@ -182,7 +181,7 @@ class RegistrationConfig(Config):
             refreshable_access_token_lifetime = self.parse_duration(
                 refreshable_access_token_lifetime
             )
-        self.refreshable_access_token_lifetime: Optional[int] = (
+        self.refreshable_access_token_lifetime: int | None = (
             refreshable_access_token_lifetime
         )
 
@@ -227,7 +226,7 @@ class RegistrationConfig(Config):
         refresh_token_lifetime = config.get("refresh_token_lifetime")
         if refresh_token_lifetime is not None:
             refresh_token_lifetime = self.parse_duration(refresh_token_lifetime)
-        self.refresh_token_lifetime: Optional[int] = refresh_token_lifetime
+        self.refresh_token_lifetime: int | None = refresh_token_lifetime
 
         if (
             self.session_lifetime is not None
@@ -267,7 +266,7 @@ class RegistrationConfig(Config):
         else:
             return ""
 
-    def generate_files(self, config: Dict[str, Any], config_dir_path: str) -> None:
+    def generate_files(self, config: dict[str, Any], config_dir_path: str) -> None:
         # if 'registration_shared_secret_path' is specified, and the target file
         # does not exist, generate it.
         registration_shared_secret_path = config.get("registration_shared_secret_path")

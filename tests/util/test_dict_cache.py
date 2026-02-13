@@ -23,12 +23,14 @@
 from synapse.util.caches.dictionary_cache import DictionaryCache
 
 from tests import unittest
+from tests.server import get_clock
 
 
 class DictCacheTestCase(unittest.TestCase):
     def setUp(self) -> None:
+        _, clock = get_clock()
         self.cache: DictionaryCache[str, str, str] = DictionaryCache(
-            "foobar", max_entries=10
+            name="foobar", clock=clock, server_name="test_server", max_entries=10
         )
 
     def test_simple_cache_hit_full(self) -> None:

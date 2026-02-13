@@ -20,15 +20,14 @@
 #
 
 from io import BytesIO
-from typing import Tuple, Union
 from unittest.mock import Mock
 
 from netaddr import IPSet
 
 from twisted.internet.defer import Deferred
 from twisted.internet.error import DNSLookupError
+from twisted.internet.testing import AccumulatingProtocol
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import AccumulatingProtocol
 from twisted.web.client import Agent, ResponseDone
 from twisted.web.iweb import UNKNOWN_LENGTH
 
@@ -58,8 +57,8 @@ class ReadMultipartResponseTests(TestCase):
     redirect_data = b"\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-Type: application/json\r\n\r\n{}\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nLocation: https://cdn.example.org/ab/c1/2345.txt\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n"
 
     def _build_multipart_response(
-        self, response_length: Union[int, str], max_length: int
-    ) -> Tuple[
+        self, response_length: int | str, max_length: int
+    ) -> tuple[
         BytesIO,
         "Deferred[MultipartResponse]",
         _MultipartParserProtocol,
@@ -208,8 +207,8 @@ class ReadMultipartResponseTests(TestCase):
 
 class ReadBodyWithMaxSizeTests(TestCase):
     def _build_response(
-        self, length: Union[int, str] = UNKNOWN_LENGTH
-    ) -> Tuple[
+        self, length: int | str = UNKNOWN_LENGTH
+    ) -> tuple[
         BytesIO,
         "Deferred[int]",
         _DiscardBodyWithMaxSizeProtocol,

@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 import attr
 
@@ -40,7 +40,7 @@ class RuleSpec:
     scope: str
     template: str
     rule_id: str
-    attr: Optional[str]
+    attr: str | None
 
 
 class PushRulesHandler:
@@ -51,7 +51,7 @@ class PushRulesHandler:
         self._main_store = hs.get_datastores().main
 
     async def set_rule_attr(
-        self, user_id: str, spec: RuleSpec, val: Union[bool, JsonDict]
+        self, user_id: str, spec: RuleSpec, val: bool | JsonDict
     ) -> None:
         """Set an attribute (enabled or actions) on an existing push rule.
 
@@ -127,7 +127,7 @@ class PushRulesHandler:
 
     async def push_rules_for_user(
         self, user: UserID
-    ) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+    ) -> dict[str, dict[str, list[dict[str, Any]]]]:
         """
         Push rules aren't really account data, but get formatted as such for /sync.
         """
@@ -137,7 +137,7 @@ class PushRulesHandler:
         return rules
 
 
-def check_actions(actions: List[Union[str, JsonDict]]) -> None:
+def check_actions(actions: list[str | JsonDict]) -> None:
     """Check if the given actions are spec compliant.
 
     Args:
