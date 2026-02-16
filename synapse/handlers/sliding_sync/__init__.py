@@ -850,20 +850,11 @@ class SlidingSyncHandler:
         # For incremental syncs, we can do this first to determine if something relevant
         # has changed and strategically avoid fetching other costly things.
         room_state_delta_id_map: MutableStateMap[str] = {}
-        name_event_id: str | None = None
+        room_name: str | None = None
         membership_changed = False
         name_changed = False
         avatar_changed = False
-        if initial:
-            # Check whether the room has a name set
-            name_state_ids = await self.get_current_state_ids_at(
-                room_id=room_id,
-                room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
-                state_filter=StateFilter.from_types([(EventTypes.Name, "")]),
-                to_token=to_token,
-            )
-            name_event_id = name_state_ids.get((EventTypes.Name, ""))
-        else:
+        if not initial:
             assert from_bound is not None
 
             # TODO: Limit the number of state events we're about to send down
@@ -911,6 +902,19 @@ class SlidingSyncHandler:
                 ):
                     avatar_changed = True
 
+        # TODO: Should we also check for `EventTypes.CanonicalAlias`
+        # (`m.room.canonical_alias`) as a fallback for the room name? see
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
+        name_state = await self.get_current_state_at(
+            room_id=room_id,
+            room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
+            state_filter=StateFilter.from_types([(EventTypes.Name, "")]),
+            to_token=to_token,
+        )
+        name_event = name_state.get((EventTypes.Name, ""))
+        if name_event is not None:
+            room_name = name_event.content.get("name")
+
         # We only need the room summary for calculating heroes, however if we do
         # fetch it then we can use it to calculate `joined_count` and
         # `invited_count`.
@@ -932,7 +936,10 @@ class SlidingSyncHandler:
         # We need to fetch the `heroes` if the room name is not set. But we only need to
         # get them on initial syncs (or the first time we send down the room) or if the
         # membership has changed which may change the heroes.
-        if name_event_id is None and (initial or (not initial and membership_changed)):
+        #
+        # As per https://spec.matrix.org/v1.17/client-server-api/#mroomname
+        # empty/missing name values should be treated as not having a name.
+        if not room_name and (initial or (not initial and membership_changed)):
             # We need the room summary to extract the heroes from
             if room_membership_for_user_at_to_token.membership != Membership.JOIN:
                 # TODO: Figure out how to get the membership summary for left/banned rooms
@@ -1310,15 +1317,7 @@ class SlidingSyncHandler:
         if required_state_filter != StateFilter.none():
             required_room_state = required_state_filter.filter_state(room_state)
 
-        # Find the room name and avatar from the state
-        room_name: str | None = None
-        # TODO: Should we also check for `EventTypes.CanonicalAlias`
-        # (`m.room.canonical_alias`) as a fallback for the room name? see
-        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
-        name_event = room_state.get((EventTypes.Name, ""))
-        if name_event is not None:
-            room_name = name_event.content.get("name")
-
+        # Find the room avatar from the state (name is fetched above)
         room_avatar: str | None = None
         avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
         if avatar_event is not None:
