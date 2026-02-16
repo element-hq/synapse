@@ -1143,6 +1143,35 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             The set of user_ids whose devices have changed since `from_key` (exclusive)
                 until `to_key` (inclusive).
         """
+        return {
+            user_id
+            for user_id, _ in await self.get_device_changes_for_users(
+                from_key, user_ids, to_key
+            )
+        }
+
+    @cancellable
+    async def get_device_changes_for_users(
+        self,
+        from_key: MultiWriterStreamToken,
+        user_ids: Collection[str],
+        to_key: MultiWriterStreamToken | None = None,
+    ) -> set[tuple[str, str]]:
+        """Get set of user/device ID tuple whose devices have changed since `from_key` that
+        are in the given list of user_ids.
+
+        Args:
+            from_key: The minimum device lists stream token to query device list changes for,
+                exclusive.
+            user_ids: If provided, only check if these users have changed their device lists.
+                Otherwise changes from all users are returned.
+            to_key: The maximum device lists stream token to query device list changes for,
+                inclusive.
+
+        Returns:
+            The set of user/device ID tuples whose devices have changed since `from_key`
+            (exclusive) until `to_key` (inclusive).
+        """
         # Get set of users who *may* have changed. Users not in the returned
         # list have definitely not changed.
         user_ids_to_check = self._device_list_stream_cache.get_entities_changed(
@@ -1156,18 +1185,18 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         if to_key is None:
             to_key = self.get_device_stream_token()
 
-        def _get_users_whose_devices_changed_txn(
+        def get_device_changes_for_users_txn(
             txn: LoggingTransaction,
             from_key: MultiWriterStreamToken,
             to_key: MultiWriterStreamToken,
-        ) -> set[str]:
+        ) -> set[tuple[str, str]]:
             sql = """
-                SELECT user_id, stream_id, instance_name
+                SELECT user_id, device_id, stream_id, instance_name
                 FROM device_lists_stream
                 WHERE  ? < stream_id AND stream_id <= ? AND %s
             """
 
-            changes: set[str] = set()
+            changes: set[tuple[str, str]] = set()
 
             # Query device changes with a batch of users at a time
             for chunk in batch_iter(user_ids_to_check, 100):
@@ -1179,8 +1208,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                     [from_key.stream, to_key.get_max_stream_pos()] + args,
                 )
                 changes.update(
-                    user_id
-                    for (user_id, stream_id, instance_name) in txn
+                    (user_id, device_id)
+                    for (user_id, device_id, stream_id, instance_name) in txn
                     if MultiWriterStreamToken.is_stream_position_in_range(
                         low=from_key,
                         high=to_key,
@@ -1192,8 +1221,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             return changes
 
         return await self.db_pool.runInteraction(
-            "get_users_whose_devices_changed",
-            _get_users_whose_devices_changed_txn,
+            "get_device_changes_for_users",
+            get_device_changes_for_users_txn,
             from_key,
             to_key,
         )
@@ -1808,7 +1837,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     async def get_device_list_changes_in_room(
         self, room_id: str, min_stream_id: int
-    ) -> Collection[tuple[str, str]]:
+    ) -> Collection[tuple[str, str]] | None:
         """Get all device list changes that happened in the room since the given
         stream ID.
 
@@ -1816,6 +1845,12 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             Collection of user ID/device ID tuples of all devices that have
             changed
         """
+
+        lowest_known_stream_id = await self._get_min_device_lists_changes_in_room()
+
+        # Return early if there are no rows to process in device_lists_changes_in_room
+        if lowest_known_stream_id > min_stream_id:
+            return None
 
         sql = """
             SELECT DISTINCT user_id, device_id FROM device_lists_changes_in_room
