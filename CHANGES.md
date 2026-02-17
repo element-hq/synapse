@@ -1,3 +1,27 @@
+# Synapse 1.148.0rc1 (2026-02-17)
+
+## Features
+
+- Support sending and receiving [MSC4354 Sticky Event](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) metadata. ([\#19365](https://github.com/element-hq/synapse/issues/19365))
+
+## Improved Documentation
+
+- Fix reference to the `experimental_features` section of the configuration manual documentation. ([\#19435](https://github.com/element-hq/synapse/issues/19435))
+
+## Deprecations and Removals
+
+- Remove support for [MSC3244: Room version capabilities](https://github.com/matrix-org/matrix-spec-proposals/pull/3244) as the MSC was rejected. ([\#19429](https://github.com/element-hq/synapse/issues/19429))
+
+## Internal Changes
+
+- Add in-repo Complement tests so we can test Synapse specific behavior at an end-to-end level. ([\#19406](https://github.com/element-hq/synapse/issues/19406))
+- Push Synapse docker images to Element OCI Registry. ([\#19420](https://github.com/element-hq/synapse/issues/19420))
+- Allow configuring the Rust HTTP client to use HTTP/2 only. ([\#19457](https://github.com/element-hq/synapse/issues/19457))
+- Correctly refuse to start if the Rust workspace config has changed and the Rust library has not been rebuilt. ([\#19470](https://github.com/element-hq/synapse/issues/19470))
+
+
+
+
 # Synapse 1.147.1 (2026-02-12)
 
 ## Internal Changes
