@@ -447,11 +447,13 @@ async def start(
             False otherwise the homeserver cannot be garbage collected after `shutdown`.
     """
 
-    await _base.start(hs, freeze=freeze)
+    raise Exception("asdf Is this code even being used?")
 
-    # TODO: Feels like this should be moved somewhere else.
-    for db in hs.get_datastores().databases:
-        db.updates.start_doing_background_updates()
+    # await _base.start(hs, freeze=freeze)
+
+    # # TODO: Feels like this should be moved somewhere else.
+    # for db in hs.get_datastores().databases:
+    #     db.updates.start_doing_background_updates()
 
 
 def start_reactor(
