@@ -6,7 +6,7 @@
 
 ## Improved Documentation
 
-- Fix reference to the `experimental_features` section of config. ([\#19435](https://github.com/element-hq/synapse/issues/19435))
+- Fix reference to the `experimental_features` section of the configuration manual documentation. ([\#19435](https://github.com/element-hq/synapse/issues/19435))
 
 ## Deprecations and Removals
 
