@@ -19,15 +19,21 @@
 #
 #
 
+import itertools
 from typing import Collection
+from unittest.mock import patch
 
 from twisted.internet.testing import MemoryReactor
 
 import synapse.api.errors
 from synapse.api.constants import EduTypes
 from synapse.server import HomeServer
+from synapse.storage.databases.main.devices import (
+    PRUNE_DEVICE_LISTS_CHANGES_IN_ROOM_AGE,
+)
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests.unittest import HomeserverTestCase
 
@@ -351,3 +357,85 @@ class DeviceStoreTestCase(HomeserverTestCase):
             synapse.api.errors.StoreError,
         )
         self.assertEqual(404, exc.value.code)
+
+    @patch("synapse.storage.databases.main.devices.PRUNE_DEVICE_LISTS_BATCH_SIZE", 5)
+    def test_prune_old_device_lists_changes_in_room(self) -> None:
+        """Test that old entries in the `device_lists_changes_in_room` table are pruned properly."""
+
+        # Pretend the user is in a few rooms.
+        room_ids = [f"!room{i}:test" for i in range(20)]
+
+        # Create a generator for device IDs so we can easily create many unique
+        # device IDs without having to keep track of the count ourselves.
+        device_id_gen = (f"device_id{i}" for i in itertools.count())
+
+        def get_devices_in_room_status() -> tuple[int, str]:
+            """Helper function to get the count of entries in
+            `device_lists_changes_in_room` and the minimum device_id."""
+            return self.get_success(
+                self.store.db_pool.simple_select_one(
+                    table="device_lists_changes_in_room",
+                    keyvalues={},
+                    retcols=("COUNT(*)", "MIN(device_id)"),
+                )
+            )
+
+        # First we add some initial entries to the `device_lists_changes_in_room`.
+        self.get_success(
+            self.store.add_device_change_to_streams(
+                user_id="@user_id:test",
+                device_ids=[next(device_id_gen) for _ in range(10)],
+                room_ids=room_ids,
+            )
+        )
+
+        # Advance the reactor a while, but not long enough to trigger pruning.
+        self.reactor.advance(Duration(hours=1).as_secs())
+
+        # The `device_lists_changes_in_room` table should now have 10 *
+        # len(room_ids) entries, and the minimum device_id should be
+        # `device_id0`.
+        count, min_device_id = get_devices_in_room_status()
+        self.assertEqual(count, 10 * len(room_ids))
+        self.assertEqual(min_device_id, "device_id0")
+
+        # Record the minimum stream ID before pruning, so we can check that this
+        # correctly updates after pruning (as it is cached).
+        starting_min_device_lists_id = self.get_success(
+            self.store._get_min_device_lists_changes_in_room()
+        )
+
+        # Now we add some more entries.
+        self.get_success(
+            self.store.add_device_change_to_streams(
+                user_id="@user_id:test",
+                device_ids=[next(device_id_gen) for _ in range(10)],
+                room_ids=room_ids,
+            )
+        )
+
+        # Advance the reactor a while more, so that the first batch of entries is
+        # now old enough to be pruned.
+        self.reactor.advance(
+            (PRUNE_DEVICE_LISTS_CHANGES_IN_ROOM_AGE - Duration(minutes=30)).as_secs()
+        )
+
+        # Check that the old entries have been pruned, and the new entries are still there.
+        count, min_device_id = get_devices_in_room_status()
+        self.assertEqual(count, 10 * len(room_ids))
+        self.assertEqual(min_device_id, "device_id10")
+
+        # We should always keep the most recent entries, even if they are old enough to be pruned.
+        self.reactor.advance(
+            (PRUNE_DEVICE_LISTS_CHANGES_IN_ROOM_AGE + Duration(minutes=30)).as_secs()
+        )
+
+        count, min_device_id = get_devices_in_room_status()
+        self.assertEqual(count, len(room_ids))
+        self.assertEqual(min_device_id, "device_id19")
+
+        # Check that the minimum stream ID cache has been advanced after pruning.
+        min_device_lists_id = self.get_success(
+            self.store._get_min_device_lists_changes_in_room()
+        )
+        self.assertGreater(min_device_lists_id, starting_min_device_lists_id)
