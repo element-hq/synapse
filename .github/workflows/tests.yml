@@ -693,6 +693,9 @@ jobs:
         with:
           path: synapse
 
+      - run: docker system info
+        shell: bash
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
