@@ -443,9 +443,7 @@ async def start(
             False otherwise the homeserver cannot be garbage collected after `shutdown`.
     """
 
-    raise Exception("asdf Is this code even being used? (worker)")
-
-    # await _base.start(hs, freeze=freeze)
+    await _base.start(hs, freeze=freeze)
 
 
 def main() -> None:
