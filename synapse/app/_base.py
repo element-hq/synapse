@@ -100,6 +100,8 @@ reactor = cast(ISynapseReactor, _reactor)
 
 logger = logging.getLogger(__name__)
 
+logger.error("asdf _base")
+
 _instance_id_to_sighup_callbacks_map: dict[
     str, list[tuple[Callable[..., None], tuple[object, ...], dict[str, object]]]
 ] = {}
