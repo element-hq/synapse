@@ -199,11 +199,14 @@ main() {
       --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
       --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
       -f "docker/Dockerfile" .
+
+      $CONTAINER_RUNTIME image inspect matrixdotorg/synapse
       echo_if_github "::endgroup::"
 
       # Build the workers docker image (from the base Synapse image we just built).
       echo_if_github "::group::Build Docker image: matrixdotorg/synapse-workers"
       $CONTAINER_RUNTIME build -t matrixdotorg/synapse-workers -f "docker/Dockerfile-workers" .
+      $CONTAINER_RUNTIME image inspect matrixdotorg/synapse-workers
       echo_if_github "::endgroup::"
 
       # Build the unified Complement image (from the worker Synapse image we just built).
@@ -214,6 +217,8 @@ main() {
         `# so people can reference it by the same name locally.` \
         -t ghcr.io/element-hq/synapse/complement-synapse \
         -f "docker/complement/Dockerfile" "docker/complement"
+
+      $CONTAINER_RUNTIME image inspect complement-synapse
       echo_if_github "::endgroup::"
 
     fi
