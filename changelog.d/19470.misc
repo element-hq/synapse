@@ -1,1 +1,0 @@
-Correctly refuse to start if the Rust workspace config has changed and the Rust library has not been rebuilt.
