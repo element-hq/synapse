@@ -1,3 +1,12 @@
+# Synapse 1.147.1 (2026-02-12)
+
+## Internal Changes
+
+- Block federation requests and events authenticated using a known insecure signing key. See [CVE-2026-24044](https://www.cve.org/CVERecord?id=CVE-2026-24044) / [ELEMENTSEC-2025-1670](https://github.com/element-hq/ess-helm/security/advisories/GHSA-qwcj-h6m8-vp6q). ([\#19459](https://github.com/element-hq/synapse/issues/19459))
+
+
+
+
 # Synapse 1.147.0 (2026-02-10)
 
 No significant changes since 1.147.0rc1.
