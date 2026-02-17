@@ -1,3 +1,36 @@
+# Synapse 1.147.1 (2026-02-12)
+
+## Internal Changes
+
+- Block federation requests and events authenticated using a known insecure signing key. See [CVE-2026-24044](https://www.cve.org/CVERecord?id=CVE-2026-24044) / [ELEMENTSEC-2025-1670](https://github.com/element-hq/ess-helm/security/advisories/GHSA-qwcj-h6m8-vp6q). ([\#19459](https://github.com/element-hq/synapse/issues/19459))
+
+
+
+
+# Synapse 1.147.0 (2026-02-10)
+
+No significant changes since 1.147.0rc1.
+
+# Synapse 1.147.0rc1 (2026-02-03)
+
+## Bugfixes
+
+- Fix memory leak caused by not cleaning up stopped looping calls. Introduced in v1.140.0. ([\#19416](https://github.com/element-hq/synapse/issues/19416))
+- Fix a typo that incorrectly made `setuptools_rust` a runtime dependency. ([\#19417](https://github.com/element-hq/synapse/issues/19417))
+
+## Internal Changes
+
+- Prune stale entries from `sliding_sync_connection_required_state` table. ([\#19306](https://github.com/element-hq/synapse/issues/19306))
+- Update "Event Send Time Quantiles" graph to only use dots for the event persistence rate (Grafana dashboard). ([\#19399](https://github.com/element-hq/synapse/issues/19399))
+- Update and align Grafana dashboard to use regex matching for `job` selectors (`job=~"$job"`) so the "all" value works correctly across all panels. ([\#19400](https://github.com/element-hq/synapse/issues/19400))
+- Don't retry joining partial state rooms all at once on startup. ([\#19402](https://github.com/element-hq/synapse/issues/19402))
+- Disallow requests to the health endpoint from containing trailing path characters. ([\#19405](https://github.com/element-hq/synapse/issues/19405))
+- Add notes that new experimental features should have associated tracking issues. ([\#19410](https://github.com/element-hq/synapse/issues/19410))
+- Bump `pyo3` from 0.26.0 to 0.27.2 and `pythonize` from 0.26.0 to 0.27.0. Contributed by @razvp @ ERCOM. ([\#19412](https://github.com/element-hq/synapse/issues/19412))
+
+
+
+
 # Synapse 1.146.0 (2026-01-27)
 
 No significant changes since 1.146.0rc1.

@@ -1,1 +1,0 @@
-Fix memory leak caused by not cleaning up stopped looping calls. Introduced in v1.140.0.

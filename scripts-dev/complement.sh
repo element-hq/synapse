@@ -47,6 +47,9 @@ usage() {
     cat >&2 <<EOF
 Usage: $0 [-f] <go test arguments>...
 Run the complement test suite on Synapse.
+  --in-repo
+        Whether to run the in-repo suite of Complement tests (see `./complement` in this project)
+        vs the Complement tests from the Complement repo.
 
   -f, --fast
         Skip rebuilding the docker images, and just use the most recent
@@ -82,12 +85,16 @@ main() {
   # parse our arguments
   skip_docker_build=""
   skip_complement_run=""
+  use_in_repo_tests=""
   while [ $# -ge 1 ]; do
     arg=$1
     case "$arg" in
       "-h")
         usage
         return 1
+        ;;
+      "--in-repo")
+        use_in_repo_tests=1
         ;;
       "-f"|"--fast")
         skip_docker_build=1
@@ -216,7 +223,10 @@ main() {
     echo "Skipping Docker image build as requested."
   fi
 
-  test_packages=(
+  # Default set of Complement tests to run from the Complement repo
+  #
+  # We pick and choose the specific MSC's that Synapse supports.
+  default_complement_test_packages=(
     ./tests/csapi
     ./tests
     ./tests/msc3874
@@ -233,7 +243,15 @@ main() {
 
   # Export the list of test packages as a space-separated environment variable, so other
   # scripts can use it.
-  export SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES="${test_packages[@]}"
+  export SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES="${default_complement_test_packages[@]}"
+
+  # Default set of Complement tests to run when using the in-repo test suite. Most
+  # likely, this should be all tests.
+  #
+  # Relative to the `./complement` repo in this project
+  default_in_repo_complement_test_packages=(
+    ./tests/...
+  )
 
   export COMPLEMENT_BASE_IMAGE=complement-synapse
   if [ -n "$use_editable_synapse" ]; then
@@ -316,11 +334,26 @@ main() {
     echo "Skipping Complement run as requested."
     return 0
   fi
+
+  # Print out the executed commands so it's more obvious what's happening at the end here.
+  # Things are slightly ambiguous with the in-repo vs Complement tests.
+  set -x
   
-  # Run the tests!
-  echo "Running Complement with ${test_args[@]} $@ ${test_packages[@]}"
-  cd "$COMPLEMENT_DIR"
-  go test "${test_args[@]}" "$@" "${test_packages[@]}"
+  if [ -n "$use_in_repo_tests" ]; then
+    # Run the suite of Complement tests in the `./complement` directory in this repo
+    cd "./complement"
+    go test "${test_args[@]}" "$@" "${default_in_repo_complement_test_packages[@]}"
+  else
+    # Run the tests (from the Complement repo)!
+    cd "$COMPLEMENT_DIR"
+    go test "${test_args[@]}" "$@" "${default_complement_test_packages[@]}"
+  fi
+
+  # We don't need to print out executed commands anymore
+  #
+  # This is just `set +x` without printing `+ set +x` to the console (via
+  # https://stackoverflow.com/questions/13195655/bash-set-x-without-it-being-printed/19226038#19226038)
+  { set +x; } 2>/dev/null
 }
 
 main "$@"

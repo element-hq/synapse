@@ -238,7 +238,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
-          toolchain: nightly-2025-04-23
+          toolchain: nightly-2026-02-01
           components: clippy
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
@@ -702,25 +702,24 @@ jobs:
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
 
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
           cache-dependency-path: complement/go.sum
           go-version-file: complement/go.mod
 
-        # use p=1 concurrency as GHA boxes are underpowered and don't like running tons of synapses at once.
       - name: Run Complement Tests
         id: run_complement_tests
         # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
         #     are underpowered and don't like running tons of Synapse instances at once.
         # -json: Output JSON format so that gotestfmt can parse it.
         #
-        # tee /tmp/gotest.log: We tee the output to a file so that we can re-process it
+        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
         # later on for better formatting with gotestfmt. But we still want the command
         # to output to the terminal as it runs so we can see what's happening in
         # real-time.
         run: |
           set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest.log
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log
         shell: bash
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
@@ -729,7 +728,30 @@ jobs:
       - name: Formatted Complement test logs
         # Always run this step if we attempted to run the Complement tests.
         if: always() && steps.run_complement_tests.outcome != 'skipped'
-        run: cat /tmp/gotest.log | gotestfmt -hide "successful-downloads,empty-packages"
+        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
+
+      - name: Run in-repo Complement Tests
+        id: run_in_repo_complement_tests
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest-in-repo-complement.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
+          set -o pipefail
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 | tee /tmp/gotest-in-repo-complement.log
+        shell: bash
+        env:
+          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+
+      - name: Formatted in-repo Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_in_repo_complement_tests.outcome != 'skipped'
+        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
 
   cargo-test:
     if: ${{ needs.changes.outputs.rust == 'true' }}

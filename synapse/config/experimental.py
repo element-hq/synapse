@@ -366,7 +366,11 @@ class MSC3866Config:
 
 
 class ExperimentalConfig(Config):
-    """Config section for enabling experimental features"""
+    """Config section for enabling experimental features
+
+    All new experimental features should have a tracking issue with the
+    `T-ExperimentalFeatures` label, kept open as long as the experimental
+    feature is present in Synapse."""
 
     section = "experimental"
 
@@ -380,9 +384,6 @@ class ExperimentalConfig(Config):
 
         # MSC3814 (dehydrated devices with SSSS)
         self.msc3814_enabled: bool = experimental.get("msc3814_enabled", False)
-
-        # MSC3244 (room version capabilities)
-        self.msc3244_enabled: bool = experimental.get("msc3244_enabled", True)
 
         # MSC3266 (room summary api)
         self.msc3266_enabled: bool = experimental.get("msc3266_enabled", False)
@@ -578,6 +579,12 @@ class ExperimentalConfig(Config):
         # MSC4306: Thread Subscriptions
         # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
+
+        # MSC4354: Sticky Events
+        # Tracked in: https://github.com/element-hq/synapse/issues/19409
+        # Note that sticky events persisted before this feature is enabled will not be
+        # considered sticky by the local homeserver.
+        self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
 
         # MSC4380: Invite blocking
         self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
