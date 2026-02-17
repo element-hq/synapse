@@ -1026,6 +1026,11 @@ class SyncHandler:
                 sync_config.filter_collection.include_redundant_members()
             )
 
+            logger.info(
+                "asdf lazy_load_members=%s sync_config.use_state_after=%s",
+                lazy_load_members,
+                sync_config.use_state_after,
+            )
             if lazy_load_members:
                 # We only request state for the members needed to display the
                 # timeline:
@@ -1041,11 +1046,20 @@ class SyncHandler:
                     if event.sender not in first_event_by_sender_map:
                         first_event_by_sender_map[event.sender] = event
 
+                    logger.info(
+                        "asdf event=(%s, %s) %s %s",
+                        event.type,
+                        event.state_key if event.is_state() else None,
+                        event.sender,
+                        event,
+                    )
+
                     # When using `state_after`, there is no special treatment with
                     # regards to state also being in the `timeline`. Always fetch
                     # relevant membership regardless of whether the state event is in
                     # the `timeline`.
                     if sync_config.use_state_after:
+                        logger.info("asdf add=%s", event.sender)
                         members_to_fetch.add(event.sender)
                     # For `state`, the client is supposed to do a flawed re-construction
                     # of state over time by starting with the given `state` and layering
@@ -1065,6 +1079,8 @@ class SyncHandler:
                     for event in batch.events
                     if event.is_state()
                 }
+
+            logger.info("asdf members_to_fetch=%s", members_to_fetch)
 
             # Now calculate the state to return in the sync response for the room.
             # This is more or less the change in state between the end of the previous
