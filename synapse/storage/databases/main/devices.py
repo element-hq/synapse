@@ -79,6 +79,10 @@ DROP_DEVICE_LIST_STREAMS_NON_UNIQUE_INDEXES = (
 
 BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES = "remove_dup_outbound_pokes"
 
+# Background update name for adding an index on
+# `device_lists_changes_in_room.inserted_ts`.
+BG_UPDATE_ADD_INSERTED_TS_INDEX = "device_lists_changes_in_room_inserted_ts_idx"
+
 
 class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     _device_list_id_gen: MultiWriterIdGenerator
@@ -2492,6 +2496,14 @@ class DeviceBackgroundUpdateStore(SQLBaseStore):
             index_name="device_lists_changes_in_room_by_room_idx",
             table="device_lists_changes_in_room",
             columns=["room_id", "stream_id"],
+        )
+
+        # Add indexes to speed up pruning of device_lists_changes_in_room
+        self.db_pool.updates.register_background_index_update(
+            BG_UPDATE_ADD_INSERTED_TS_INDEX,
+            index_name="device_lists_changes_in_room_inserted_ts_idx",
+            table="device_lists_changes_in_room",
+            columns=["inserted_ts"],
         )
 
     async def _drop_device_list_streams_non_unique_indexes(
