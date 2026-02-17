@@ -375,6 +375,7 @@ def setup_logging(
 
     # Log immediately so we can grep backwards.
     logger.warning("***** STARTING SERVER *****")
+    logger.warning("***** asdf *****")
     logger.warning(
         "Server %s version %s",
         sys.argv[0],
