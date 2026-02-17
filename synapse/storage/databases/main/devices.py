@@ -2199,6 +2199,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         encoded_context = json_encoder.encode(context)
 
+        now = self.clock.time_msec()
+
         # The `device_lists_changes_in_room.stream_id` column matches the
         # corresponding `stream_id` of the update in the `device_lists_stream`
         # table, i.e. all rows persisted for the same device update will have
@@ -2214,6 +2216,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 "instance_name",
                 "converted_to_destinations",
                 "opentracing_context",
+                "inserted_ts",
             ),
             values=[
                 (
@@ -2225,6 +2228,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                     # We only need to calculate outbound pokes for local users
                     not self.hs.is_mine_id(user_id),
                     encoded_context,
+                    now,
                 )
                 for room_id in room_ids
                 for device_id, stream_id in zip(device_ids, stream_ids)
