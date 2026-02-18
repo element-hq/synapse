@@ -412,7 +412,7 @@ class SerializeEventConfig:
     # Function to convert from federation format to client format
     event_format: Callable[[JsonDict], JsonDict] = format_event_for_client_v1
     # The entity that requested the event. This is used to determine whether to include
-    # the transaction_id in the unsigned section of the event.
+    # the transaction_id and delay_id in the unsigned section of the event.
     requester: Requester | None = None
     # List of event fields to include. If empty, all fields will be returned.
     only_event_fields: list[str] | None = None
@@ -475,12 +475,13 @@ def serialize_event(
             config=config,
         )
 
-    # If we have a txn_id saved in the internal_metadata, we should include it in the
-    # unsigned section of the event if it was sent by the same session as the one
+    # If we have applicable fields saved in the internal_metadata, include them in the
+    # unsigned section of the event if the event was sent by the same session as the one
     # requesting the event.
     txn_id: str | None = getattr(e.internal_metadata, "txn_id", None)
+    delay_id: str | None = getattr(e.internal_metadata, "delay_id", None)
     if (
-        txn_id is not None
+        (txn_id is not None or delay_id is not None)
         and config.requester is not None
         and config.requester.user.to_string() == e.sender
     ):
@@ -491,7 +492,10 @@ def serialize_event(
         event_device_id: str | None = getattr(e.internal_metadata, "device_id", None)
         if event_device_id is not None:
             if event_device_id == config.requester.device_id:
-                d["unsigned"]["transaction_id"] = txn_id
+                if txn_id is not None:
+                    d["unsigned"]["transaction_id"] = txn_id
+                if delay_id is not None:
+                    d["unsigned"]["delay_id"] = delay_id
 
         else:
             # Fallback behaviour: only include the transaction ID if the event
@@ -512,7 +516,10 @@ def serialize_event(
                 or config.requester.is_guest
                 or config.requester.app_service
             ):
-                d["unsigned"]["transaction_id"] = txn_id
+                if txn_id is not None:
+                    d["unsigned"]["transaction_id"] = txn_id
+                if delay_id is not None:
+                    d["unsigned"]["delay_id"] = delay_id
 
     # invite_room_state and knock_room_state are a list of stripped room state events
     # that are meant to provide metadata about a room to an invitee/knocker. They are

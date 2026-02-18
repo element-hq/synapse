@@ -22,7 +22,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import Codes
 from synapse.rest import admin
-from synapse.rest.client import delayed_events, login, room, versions
+from synapse.rest.client import delayed_events, login, room, sync, versions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -59,6 +59,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         delayed_events.register_servlets,
         login.register_servlets,
         room.register_servlets,
+        sync.register_servlets,
     ]
 
     def default_config(self) -> JsonDict:
@@ -106,6 +107,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
             self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        assert delay_id is not None
+
         events = self._get_delayed_events()
         self.assertEqual(1, len(events), events)
         content = self._get_delayed_event_content(events[0])
@@ -127,6 +131,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
             state_key=state_key,
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
+
+        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
 
     def test_get_delayed_events_auth(self) -> None:
         channel = self.make_request("GET", PATH_PREFIX)
@@ -254,6 +261,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
+        self._find_sent_delayed_event(self.user1_access_token, delay_id, False)
+        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
     @parameterized.expand((True, False))
     @unittest.override_config(
         {"rc_delayed_event_mgmt": {"per_second": 0.5, "burst_count": 1}}
@@ -326,6 +336,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
             state_key=state_key,
         )
         self.assertEqual(content_value, content.get(content_property_name), content)
+
+        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
 
     @parameterized.expand((True, False))
     @unittest.override_config({"rc_message": {"per_second": 2.5, "burst_count": 3}})
@@ -406,6 +419,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
+        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
     @parameterized.expand((True, False))
     @unittest.override_config(
         {"rc_delayed_event_mgmt": {"per_second": 0.5, "burst_count": 1}}
@@ -450,6 +466,8 @@ class DelayedEventsTestCase(HomeserverTestCase):
             self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        assert delay_id is not None
         events = self._get_delayed_events()
         self.assertEqual(1, len(events), events)
 
@@ -474,6 +492,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
+        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
     def test_delayed_state_is_cancelled_by_new_state_from_other_user(
         self,
     ) -> None:
@@ -489,6 +510,8 @@ class DelayedEventsTestCase(HomeserverTestCase):
             self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        assert delay_id is not None
         events = self._get_delayed_events()
         self.assertEqual(1, len(events), events)
 
@@ -512,6 +535,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
             state_key=state_key,
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
+
+        self._find_sent_delayed_event(self.user1_access_token, delay_id, False)
+        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
 
     def _get_delayed_events(self) -> list[JsonDict]:
         channel = self.make_request(
@@ -548,6 +574,26 @@ class DelayedEventsTestCase(HomeserverTestCase):
         else:
             body["action"] = action
         return self.make_request("POST", path, body)
+
+    def _find_sent_delayed_event(
+        self, access_token: str, delay_id: str, should_find: bool
+    ) -> None:
+        channel = self.make_request("GET", "/sync", b"", access_token)
+        self.assertEqual(HTTPStatus.OK, channel.code)
+
+        found = False
+        events = channel.json_body["rooms"]["join"][self.room_id]["timeline"]["events"]
+        for event in events:
+            if event["unsigned"].get("delay_id") == delay_id:
+                if not should_find:
+                    self.fail(
+                        "Found event with matching delay_id, but expected to not find one"
+                    )
+                if found:
+                    self.fail("Found multiple events with matching delay_id")
+                found = True
+        if should_find and not found:
+            self.fail("Did not find event with matching delay_id")
 
 
 def _get_path_for_delayed_state(

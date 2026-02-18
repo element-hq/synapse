@@ -585,6 +585,7 @@ class DelayedEventsHandler:
                     requester,
                     event_dict,
                     txn_id=txn_id,
+                    delay_id=event.delay_id,
                 )
                 event_id = sent_event.event_id
         except ShadowBanError:

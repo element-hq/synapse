@@ -38,6 +38,8 @@ class EventInternalMetadata:
 
     txn_id: str
     """The transaction ID, if it was set when the event was created."""
+    delay_id: str
+    """The delay ID, set only if the event was a delayed event."""
     token_id: int
     """The access token ID of the user who sent this event, if any."""
     device_id: str
