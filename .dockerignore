@@ -2,6 +2,10 @@
 *
 
 # things to include
+!.git
+# !.git/refs/heads
+# !.git/config
+# !.git/HEAD
 !docker
 !synapse
 !rust
