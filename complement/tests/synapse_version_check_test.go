@@ -15,8 +15,10 @@ package synapse_tests
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -44,8 +46,8 @@ func TestSynapseVersion(t *testing.T) {
 	// loudly and point out what's wrong instead of silently letting your PR's pass
 	// without actually being tested.
 	t.Run("Synapse version matches current git checkout", func(t *testing.T) {
-		// TODO: Pull the `version` from `pyproject.toml`.
-		checkoutVersion := "TODO"
+		// Pull the `version` from `pyproject.toml`.
+		pyprojectVersion := getVersionFromPyproject(t)
 
 		// Get the details of the current git checkout
 		//
@@ -60,7 +62,7 @@ func TestSynapseVersion(t *testing.T) {
 
 		// Assemble our checkout details into a `SynapseVersion` we can easily compare with
 		checkoutSynapseVersion := SynapseVersion {
-			Version: checkoutVersion,
+			Version: pyprojectVersion,
 			Branch: gitBranch,
 			Tag: gitTag,
 			Commit: gitCommit,
@@ -92,25 +94,49 @@ func TestSynapseVersion(t *testing.T) {
 	})
 }
 
+
+// Helper function to get `version` from pyproject.toml
+func getVersionFromPyproject(t *testing.T) string {
+	// Read pyproject.toml file
+	//
+	// Log the current working directory so it's easier to understand what's going on here
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getVersionFromPyproject: failed to get current working directory: %v", err)
+	}
+	t.Logf("getVersionFromPyproject: currenty working directory is %s", cwd)
+	// This path is relative to this file
+	fileContents, err := os.ReadFile("../../pyproject.toml")
+	if err != nil {
+		t.Fatalf("getVersionFromPyproject: failed to read `pyproject.toml`: %v", err)
+	}
+
+	// Instead of parsing toml, we just do a dirty find of the first `version = "1.147.1"`
+	re := regexp.MustCompile(
+		`(?m)^version = "(?P<Version>.*?)"\s?$`,
+	)
+	match := re.FindStringSubmatch(string(fileContents))
+	if len(match) == 0 {
+		t.Fatalf("getVersionFromPyproject: Unable to find `version` in `pyproject.toml`")
+	}
+
+	return match[re.SubexpIndex("Version")]
+}
+
 // runGitCommand will run the given git command and return the stdout (whitespace
 // trimmed).
 //
-// If it's not a git repo, will just return a blank string (for ease-of-use in the
-// tests)
+// Errors will be logged but this function will just return a blank string (for
+// ease-of-use in the tests)
 func runGitCommand(t *testing.T, commandPieces []string) string {
 	t.Helper()
 
-	// Check if this is even a git repo
-	cmd := exec.Command("git", "status")
-	if cmd.ProcessState.ExitCode() != 0 {
-		return ""
-	}
-
 	// Then run our actual command
-	cmd = exec.Command(commandPieces[0], commandPieces[1:]...)
+	cmd := exec.Command(commandPieces[0], commandPieces[1:]...)
 	output, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("runGitCommand: failed to run command (%s): %v", strings.Join(commandPieces, " "), err)
+		t.Logf("runGitCommand: failed to run command (%s) (this may be expected depending on the command): %v", strings.Join(commandPieces, " "), err)
+		return ""
 	}
 
 	return strings.TrimSpace(string(output))
