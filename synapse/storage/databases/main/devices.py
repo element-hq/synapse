@@ -2545,6 +2545,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             txn.execute(
                 delete_sql, (prune_before_stream_id, PRUNE_DEVICE_LISTS_BATCH_SIZE)
             )
+            num_deleted = txn.rowcount
 
             # Make sure to invalidate the cache of the minimum stream ID after
             # deleting.
@@ -2552,7 +2553,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 txn, self._get_min_device_lists_changes_in_room, keys=()
             )
 
-            return txn.rowcount
+            return num_deleted
 
         num_rows_deleted = 0
         while True:
