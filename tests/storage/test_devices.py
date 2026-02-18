@@ -291,11 +291,6 @@ class DeviceStoreTestCase(HomeserverTestCase):
         self.assertEqual(
             device_updates[0][0], EduTypes.SIGNING_KEY_UPDATE, device_updates[0]
         )
-        self.assertEqual(
-            device_updates[1][0],
-            EduTypes.UNSTABLE_SIGNING_KEY_UPDATE,
-            device_updates[1],
-        )
 
         # Check there are no more device updates left.
         _, device_updates = self.get_success(

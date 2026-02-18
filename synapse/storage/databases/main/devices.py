@@ -737,10 +737,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         for user_id, result in cross_signing_keys_by_user.items():
             result["user_id"] = user_id
             results.append((EduTypes.SIGNING_KEY_UPDATE, result))
-            # also send the unstable version
-            # FIXME: remove this when enough servers have upgraded
-            #        and remove the length budgeting above.
-            results.append(("org.matrix.signing_key_update", result))
 
         if issue_8631_logger.isEnabledFor(logging.DEBUG):
             for user_id, edu in results:
