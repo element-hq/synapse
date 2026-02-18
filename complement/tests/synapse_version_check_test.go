@@ -13,6 +13,8 @@
 package synapse_tests
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/matrix-org/complement"
@@ -24,7 +26,7 @@ func TestSynapseVersion(t *testing.T) {
 	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
 
-	unauthedClient := deployment.UnauthenticatedClient();
+	unauthedClient := deployment.UnauthenticatedClient(t, "hs1");
 
 	// Sanity check that the version of Synapse used in the `COMPLEMENT_BASE_IMAGE`
 	// matches the same git commit we have checked out. This ensures that the image being
@@ -38,14 +40,21 @@ func TestSynapseVersion(t *testing.T) {
 	// loudly and point out what's wrong instead of silently letting your PR's pass
 	// without actually being tested.
 	t.Run("Synapse version matches current git checkout", func(t *testing.T) {
-		res := unauthedClient.MustDo(t, "GET", []string{"_matrix", "federation", "v1", "version"})
-		// Cheeky way to get the response body
-		responseBody := must.MatchResponse(t, res, match.HTTPResponse{})
-		synapseVersion := parseSynapseVersionString(string(responseBody))
+		// TODO: Pull the `version` from `pyproject.toml`.
 
 		// TODO: Get the details of the current git checkout
 
+		// Find the version details of the Synapse instance deployed from the Docker image
+		res := unauthedClient.MustDo(t, "GET", []string{"_matrix", "federation", "v1", "version"})
+		// Cheeky way to get the response body
+		responseBody := must.MatchResponse(t, res, match.HTTPResponse{})
+		synapseVersion, err := parseSynapseVersionString(string(responseBody))
+		if err != nil {
+			t.Fatalf("Failed to parse Synapse version string: %v", err)
+		}
+
 		// TODO: Compare
+		_ = synapseVersion
 	})
 }
 
@@ -76,5 +85,92 @@ type SynapseVersion struct {
 func parseSynapseVersionString(
 	synapseVersionString string,
 ) (*SynapseVersion, error) {
-	// TODO
+	// We're trying to separate "1.147.1" and "(...)"
+	parts := strings.SplitN(synapseVersionString, " ", 2)
+
+	version := parts[0]
+	gitString := ""
+	if len(parts) == 2 {
+		gitString = parts[1]
+		// Remove the surrounding parenthesis (...)
+		gitString = strings.TrimPrefix(gitString, "(")
+		gitString = strings.TrimSuffix(gitString, "(")
+	}
+
+	branch := ""
+	tag := ""
+	commit := ""
+	dirty := false
+	gitParts := strings.Split(gitString, ",", 4)
+
+	return &SynapseVersion{
+		Version:      version,
+		Branch: branch,
+		Tag: tag,
+		Commit: commit,
+		Dirty: dirty,
+	}, nil
+}
+
+
+func TestParseSynapseVersionString(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected *SynapseVersion
+		wantErr  bool
+	}{
+		{
+			name:  "simple version",
+			input: "1.147.1",
+			expected: &SynapseVersion{
+				Version: "1.147.1",
+				Dirty:   false,
+			},
+		},
+		{
+			name:  "version with branch and commit",
+			input: "1.147.1 (b=develop,b80774efb2)",
+			expected: &SynapseVersion{
+				Version: "1.147.1",
+				Branch:  "develop",
+				Commit:  "b80774efb2",
+				Dirty:   false,
+			},
+		},
+		{
+			name:  "version with branch, commit, and dirty",
+			input: "1.147.1 (b=develop,b80774efb2,dirty)",
+			expected: &SynapseVersion{
+				Version: "1.147.1",
+				Branch:  "develop",
+				Commit:  "b80774efb2",
+				Dirty:   true,
+			},
+		},
+		{
+			name:  "version with HEAD branch, tag, and commit",
+			input: "1.147.1 (b=HEAD,t=v1.147.1,7ff8687653)",
+			expected: &SynapseVersion{
+				Version: "1.147.1",
+				Branch:  "HEAD",
+				Tag:     "v1.147.1",
+				Commit:  "7ff8687653",
+				Dirty:   false,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got, err := parseSynapseVersionString(testCase.input)
+			if err != nil {
+				t.Errorf("parseSynapseVersionString(%s) failed to parse input, error: %v", testCase.input, err)
+			}
+
+			if !reflect.DeepEqual(got, testCase.expected) {
+				t.Errorf("parseSynapseVersionString(%s) got %v, want %v", testCase.input, got, testCase.expected)
+			}
+		})
+	}
 }
