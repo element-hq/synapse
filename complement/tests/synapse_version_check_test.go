@@ -13,6 +13,7 @@
 package synapse_tests
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -94,14 +95,37 @@ func parseSynapseVersionString(
 		gitString = parts[1]
 		// Remove the surrounding parenthesis (...)
 		gitString = strings.TrimPrefix(gitString, "(")
-		gitString = strings.TrimSuffix(gitString, "(")
+		gitString = strings.TrimSuffix(gitString, ")")
 	}
 
 	branch := ""
 	tag := ""
 	commit := ""
 	dirty := false
-	gitParts := strings.Split(gitString, ",", 4)
+	gitParts := strings.Split(gitString, ",")
+
+	// Go through piece by piece and try to match it up as best as possible. The pieces
+	// should always be in order (branch, tag, commit, dirty) according to the source code
+	// that generates them.
+	for _, gitPart := range gitParts {
+		// Match the most specific key=value pairs first
+		if branch == "" && strings.HasPrefix(gitPart, "b=") {
+			branch = strings.TrimPrefix(gitPart, "b=")
+		} else if tag == "" && strings.HasPrefix(gitPart, "t=") {
+			tag = strings.TrimPrefix(gitPart, "t=")
+		} else {
+			// Otherwise, we have to match remaining the bare pieces.
+			//
+			// The first bare piece should be the commit
+			if commit == "" {
+				commit = gitPart
+			} else if gitPart == "dirty" {
+				dirty = true
+			} else {
+				return nil, fmt.Errorf("parseSynapseVersionString: Unexpected format of git details (%s)", synapseVersionString)
+			}
+		}
+	}
 
 	return &SynapseVersion{
 		Version:      version,
@@ -165,11 +189,11 @@ func TestParseSynapseVersionString(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			got, err := parseSynapseVersionString(testCase.input)
 			if err != nil {
-				t.Errorf("parseSynapseVersionString(%s) failed to parse input, error: %v", testCase.input, err)
+				t.Errorf("parseSynapseVersionString(\"%s\") failed to parse input, error: %v", testCase.input, err)
 			}
 
 			if !reflect.DeepEqual(got, testCase.expected) {
-				t.Errorf("parseSynapseVersionString(%s) got %v, want %v", testCase.input, got, testCase.expected)
+				t.Errorf("parseSynapseVersionString(\"%s\") got %v, want %v", testCase.input, got, testCase.expected)
 			}
 		})
 	}
