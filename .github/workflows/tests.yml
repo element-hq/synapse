@@ -693,6 +693,9 @@ jobs:
         with:
           path: synapse
 
+      # Log Docker system info for debugging (compare with your local environment) and
+      # tracking GitHub runner changes over time (can easily compare a run from last
+      # week with the current one in question).
       - run: docker system info
         shell: bash
 
