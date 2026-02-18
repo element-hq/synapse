@@ -51,6 +51,10 @@ SYNAPSE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse"
 SYNAPSE_WORKERS_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-workers"
 COMPLEMENT_SYNAPSE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/complement-synapse"
 
+SYNAPSE_EDITABLE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-editable"
+SYNAPSE_WORKERS_EDITABLE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-workers-editable"
+COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/complement-synapse-editable"
+
 # Helper to emit annotations that collapse portions of the log in GitHub Actions
 echo_if_github() {
   if [[ -n "$GITHUB_WORKFLOW" ]]; then
@@ -69,7 +73,7 @@ Run the complement test suite on Synapse.
 
   -f, --fast
         Skip rebuilding the docker images, and just use the most recent
-        'complement-synapse:latest' image.
+        'localhost/complement-synapse:latest' image.
         Conflicts with --build-only.
 
   --build-only
@@ -170,16 +174,16 @@ main() {
     editable_mount="$(realpath .):/editable-src:z"
     if [ -n "$rebuild_editable_synapse" ]; then
       unset skip_docker_build
-    elif $CONTAINER_RUNTIME inspect complement-synapse-editable &>/dev/null; then
+    elif $CONTAINER_RUNTIME inspect "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" &>/dev/null; then
       # complement-synapse-editable already exists: see if we can still use it:
       # - The Rust module must still be importable; it will fail to import if the Rust source has changed.
       # - The Poetry lock file must be the same (otherwise we assume dependencies have changed)
 
       # First set up the module in the right place for an editable installation.
-      $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' complement-synapse-editable -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
+      $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
 
-      if ($CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'python' complement-synapse-editable -c 'import synapse.synapse_rust' \
-        && $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'diff' complement-synapse-editable --brief /editable-src/poetry.lock /poetry.lock.bak); then
+      if ($CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'python' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -c 'import synapse.synapse_rust' \
+        && $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'diff' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" --brief /editable-src/poetry.lock /poetry.lock.bak); then
         skip_docker_build=1
       else
         echo "Editable Synapse image is stale. Will rebuild."
@@ -193,19 +197,22 @@ main() {
 
       # Build a special image designed for use in development with editable
       # installs.
-      $CONTAINER_RUNTIME build -t synapse-editable \
+      $CONTAINER_RUNTIME build \
+        -t "$SYNAPSE_EDITABLE_IMAGE_PATH" \
         -f "docker/editable.Dockerfile" .
 
-      $CONTAINER_RUNTIME build -t synapse-workers-editable \
-        --build-arg FROM=synapse-editable \
+      $CONTAINER_RUNTIME build \
+        -t "$SYNAPSE_WORKERS_EDITABLE_IMAGE_PATH" \
+        --build-arg FROM="$SYNAPSE_EDITABLE_IMAGE_PATH" \
         -f "docker/Dockerfile-workers" .
 
-      $CONTAINER_RUNTIME build -t complement-synapse-editable \
-        --build-arg FROM=synapse-workers-editable \
+      $CONTAINER_RUNTIME build \
+        -t "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" \
+        --build-arg FROM="$SYNAPSE_WORKERS_EDITABLE_IMAGE_PATH" \
         -f "docker/complement/Dockerfile" "docker/complement"
 
       # Prepare the Rust module
-      $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' complement-synapse-editable -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
+      $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
 
     else
 
@@ -273,7 +280,7 @@ main() {
 
   export COMPLEMENT_BASE_IMAGE="$COMPLEMENT_SYNAPSE_IMAGE_PATH"
   if [ -n "$use_editable_synapse" ]; then
-    export COMPLEMENT_BASE_IMAGE=complement-synapse-editable
+    export COMPLEMENT_BASE_IMAGE="$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH"
     export COMPLEMENT_HOST_MOUNTS="$editable_mount"
   fi
 
