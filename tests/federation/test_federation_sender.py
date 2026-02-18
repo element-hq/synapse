@@ -642,7 +642,7 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
         self.reactor.advance(1)
 
         # expect signing key update edu
-        self.assertEqual(len(self.edus), 2)
+        self.assertEqual(len(self.edus), 1)
         self.assertEqual(self.edus.pop(0)["edu_type"], EduTypes.SIGNING_KEY_UPDATE)
 
         # sign the devices
