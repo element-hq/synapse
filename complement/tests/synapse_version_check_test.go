@@ -56,7 +56,7 @@ func TestSynapseVersion(t *testing.T) {
 		gitTag := runGitCommand(t, []string{"git", "describe", "--exact-match"})
 		gitCommit := runGitCommand(t, []string{"git", "rev-parse", "--short", "HEAD"})
 		gitDirty := strings.HasSuffix(
-			runGitCommand(t, []string{"git", "describe", "--dirty='-this_is_a_dirty_checkout'"}),
+			runGitCommand(t, []string{"git", "describe", "--dirty=-this_is_a_dirty_checkout"}),
 			"-this_is_a_dirty_checkout",
 		)
 
