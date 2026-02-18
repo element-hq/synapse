@@ -36,7 +36,7 @@
 set -e
 
 # Tag local builds with a dummy registry namespace so that later builds may reference
-# them instead of accidentally pulling from a remote registry.
+# them exactly instead of accidentally pulling from a remote registry.
 #
 # This is important as some storage drivers/types prefer remote images over local
 # (`containerd`) which causes problems as we're testing against some remote image that
@@ -44,12 +44,12 @@ set -e
 # in CI). This is spawning from a real-world problem where the GitHub runners were
 # updated to use Docker Engine 29.0.0+ which uses `containerd` by default for new
 # installations.
-LOCAL_IMAGE_NAMESPACE=dummy-synapse-namespace.localhost
+LOCAL_IMAGE_NAMESPACE=localhost
 
-# The base image paths for how these images will be stored in the registries
-SYNAPSE_IMAGE_PATH=matrixdotorg/synapse
-SYNAPSE_WORKERS_IMAGE_PATH=matrixdotorg/synapse-workers
-COMPLEMENT_SYNAPSE_IMAGE_PATH=complement-synapse
+# The image tags for how these images will be stored in the registry
+SYNAPSE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse"
+SYNAPSE_WORKERS_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-workers"
+COMPLEMENT_SYNAPSE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/complement-synapse"
 
 # Helper to emit annotations that collapse portions of the log in GitHub Actions
 echo_if_github() {
@@ -213,7 +213,6 @@ main() {
       echo_if_github "::group::Build Docker image: matrixdotorg/synapse"
       $CONTAINER_RUNTIME build \
         -t "$SYNAPSE_IMAGE_PATH" \
-        -t "$LOCAL_IMAGE_NAMESPACE/$SYNAPSE_IMAGE_PATH" \
         --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
         --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
         -f "docker/Dockerfile" .
@@ -222,20 +221,16 @@ main() {
       # Build the workers docker image (from the base Synapse image we just built).
       echo_if_github "::group::Build Docker image: matrixdotorg/synapse-workers"
       $CONTAINER_RUNTIME build \
-        -t "$LOCAL_IMAGE_NAMESPACE/$SYNAPSE_WORKERS_IMAGE_PATH" \
-        --build-arg FROM="$LOCAL_IMAGE_NAMESPACE/$SYNAPSE_IMAGE_PATH" \
+        -t "$SYNAPSE_WORKERS_IMAGE_PATH" \
+        --build-arg FROM="$SYNAPSE_IMAGE_PATH" \
         -f "docker/Dockerfile-workers" .
       echo_if_github "::endgroup::"
 
       # Build the unified Complement image (from the worker Synapse image we just built).
       echo_if_github "::group::Build Docker image: complement/Dockerfile"
       $CONTAINER_RUNTIME build \
-        -t "$LOCAL_IMAGE_NAMESPACE/$COMPLEMENT_SYNAPSE_IMAGE_PATH" \
-        `# This is the tag we end up pushing to the registry (see` \
-        `# .github/workflows/push_complement_image.yml) so let's just label it now` \
-        `# so people can reference it by the same name locally.` \
-        -t "ghcr.io/element-hq/synapse/$COMPLEMENT_SYNAPSE_IMAGE_PATH" \
-        --build-arg FROM="$LOCAL_IMAGE_NAMESPACE/$SYNAPSE_WORKERS_IMAGE_PATH" \
+        -t "$COMPLEMENT_SYNAPSE_IMAGE_PATH" \
+        --build-arg FROM="$SYNAPSE_WORKERS_IMAGE_PATH" \
         -f "docker/complement/Dockerfile" "docker/complement"
       echo_if_github "::endgroup::"
 
@@ -276,7 +271,7 @@ main() {
     ./tests/...
   )
 
-  export COMPLEMENT_BASE_IMAGE="$LOCAL_IMAGE_NAMESPACE/$COMPLEMENT_SYNAPSE_IMAGE_PATH"
+  export COMPLEMENT_BASE_IMAGE="$COMPLEMENT_SYNAPSE_IMAGE_PATH"
   if [ -n "$use_editable_synapse" ]; then
     export COMPLEMENT_BASE_IMAGE=complement-synapse-editable
     export COMPLEMENT_HOST_MOUNTS="$editable_mount"
