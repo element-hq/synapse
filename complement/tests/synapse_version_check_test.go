@@ -16,6 +16,8 @@ import (
 	"testing"
 
 	"github.com/matrix-org/complement"
+	"github.com/matrix-org/complement/match"
+	"github.com/matrix-org/complement/must"
 )
 
 func TestSynapseVersion(t *testing.T) {
@@ -25,16 +27,23 @@ func TestSynapseVersion(t *testing.T) {
 	unauthedClient := deployment.UnauthenticatedClient();
 
 	// Sanity check that the version of Synapse used in the `COMPLEMENT_BASE_IMAGE`
-	// matches the same commit we have checked out. This ensures that the image being used
-	// in Complement is the one that we just built locally with `complement.sh` instead of
-	// accidentally pulling some remote one.
+	// matches the same git commit we have checked out. This ensures that the image being
+	// used in Complement is the one that we just built locally with `complement.sh`
+	// instead of accidentally pulling in some remote one.
+	//
+	// This test is expected to pass if you use `complement.sh`.
+	//
+	// If this test fails, it probably means that Complement is using an image that
+	// doesn't encompass the changes you have checked out (unexpected). We want to yell
+	// loudly and point out what's wrong instead of silently letting your PR's pass
+	// without actually being tested.
 	t.Run("Synapse version matches current git checkout", func(t *testing.T) {
 		res := unauthedClient.MustDo(t, "GET", []string{"_matrix", "federation", "v1", "version"})
 		// Cheeky way to get the response body
 		responseBody := must.MatchResponse(t, res, match.HTTPResponse{})
 		synapseVersion := parseSynapseVersionString(string(responseBody))
 
-		// TODO: Get the details of the current checkout
+		// TODO: Get the details of the current git checkout
 
 		// TODO: Compare
 	})
@@ -53,7 +62,8 @@ type SynapseVersion struct {
 	Dirty bool
 }
 
-// parseSynapseVersionString parses Synapse version strings in the format:
+// parseSynapseVersionString parses Synapse version strings (from
+// `GET /_matrix/federation/v1/version`) in the format:
 //
 // - "1.147.1"
 // - "1.147.1 (b=develop,b80774efb2)"
@@ -64,7 +74,7 @@ type SynapseVersion struct {
 // https://github.com/matrix-org/matrix-python-common/blob/4084b21af839c50f775447d02ca4f1854e2e6191/src/matrix_common/versionstring.py
 // for how Synapse generates these version strings.
 func parseSynapseVersionString(
-	synapseVersionString string
+	synapseVersionString string,
 ) (*SynapseVersion, error) {
 	// TODO
 }
