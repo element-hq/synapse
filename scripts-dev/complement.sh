@@ -213,7 +213,7 @@ main() {
         `# .github/workflows/push_complement_image.yml) so let's just label it now` \
         `# so people can reference it by the same name locally.` \
         -t ghcr.io/element-hq/synapse/complement-synapse \
-        -f "docker/complement/Dockerfile" .
+        -f "docker/complement/Dockerfile" "docker/complement"
       echo_if_github "::endgroup::"
 
     fi

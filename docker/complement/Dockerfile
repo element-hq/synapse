@@ -42,17 +42,14 @@ RUN echo "CREATE DATABASE synapse" | gosu postgres postgres --single
 # To do this, we copy the old template out of the way and then include it
 # with Jinja2.
 RUN mv /conf/shared.yaml.j2 /conf/shared-orig.yaml.j2
-COPY docker/complement/conf/workers-shared-extra.yaml.j2 /conf/shared.yaml.j2
+COPY conf/workers-shared-extra.yaml.j2 /conf/shared.yaml.j2
 
 WORKDIR /data
 
-# TODO: Copies but not to the right spot for for `SYNAPSE_VERSION` to pick it up
-COPY .git /data/.git/
-
-COPY docker/complement/conf/postgres.supervisord.conf /etc/supervisor/conf.d/postgres.conf
+COPY conf/postgres.supervisord.conf /etc/supervisor/conf.d/postgres.conf
 
 # Copy the entrypoint
-COPY docker/complement/conf/start_for_complement.sh /
+COPY conf/start_for_complement.sh /
 
 # Expose nginx's listener ports
 EXPOSE 8008 8448
