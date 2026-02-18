@@ -19,7 +19,7 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from canonicaljson import encode_canonical_json
 
@@ -32,7 +32,12 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.databases.main.roommember import ProfileInfo
-from synapse.storage.engines import PostgresEngine, Sqlite3Engine
+from synapse.storage.engines import (
+    PostgresEngine,
+    Psycopg2Engine,
+    PsycopgEngine,
+    Sqlite3Engine,
+)
 from synapse.types import JsonDict, JsonValue, UserID
 
 if TYPE_CHECKING:
@@ -455,12 +460,23 @@ class ProfileWorkerStore(SQLBaseStore):
             self._check_profile_size(txn, user_id, field_name, new_value)
 
             if isinstance(self.database_engine, PostgresEngine):
-                from psycopg2.extras import Json
+                # The type differs between psycopg2 and psycopg, but gets used
+                # identically.
+                Json: Any
+                if isinstance(self.database_engine, Psycopg2Engine):
+                    from psycopg2.extras import Json
+                elif isinstance(self.database_engine, PsycopgEngine):
+                    from psycopg.types.json import Json
+                else:
+                    # This should never happen.
+                    raise ValueError(
+                        f"Invalid database engine type: {self.database_engine.__class__.__name__}"
+                    )
 
                 # Note that the || jsonb operator is not recursive, any duplicate
                 # keys will be taken from the second value.
                 sql = """
-                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
+                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?::text, ?::jsonb))
                 ON CONFLICT (user_id)
                 DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
                 """

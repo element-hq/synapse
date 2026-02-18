@@ -45,9 +45,12 @@ class IncorrectDatabaseSetup(RuntimeError):
 
 ConnectionType = TypeVar("ConnectionType", bound=Connection)
 CursorType = TypeVar("CursorType", bound=Cursor)
+IsolationLevelType = TypeVar("IsolationLevelType")
 
 
-class BaseDatabaseEngine(Generic[ConnectionType, CursorType], metaclass=abc.ABCMeta):
+class BaseDatabaseEngine(
+    Generic[ConnectionType, CursorType, IsolationLevelType], metaclass=abc.ABCMeta
+):
     def __init__(self, module: DBAPI2Module, config: Mapping[str, Any]):
         self.module = module
 
@@ -123,7 +126,7 @@ class BaseDatabaseEngine(Generic[ConnectionType, CursorType], metaclass=abc.ABCM
 
     @abc.abstractmethod
     def attempt_to_set_isolation_level(
-        self, conn: ConnectionType, isolation_level: int | None
+        self, conn: ConnectionType, isolation_level: IsolationLevel | None = None
     ) -> None:
         """Attempt to set the connections isolation level.
 

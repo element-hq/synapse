@@ -23,6 +23,18 @@ export SYNAPSE_REPORT_STATS=no
 case "$SYNAPSE_COMPLEMENT_DATABASE" in
   postgres)
     # Set postgres authentication details which will be placed in the homeserver config file
+    export POSTGRES_DRIVER=psycopg2
+    export POSTGRES_PASSWORD=somesecret
+    export POSTGRES_USER=postgres
+    export POSTGRES_HOST=localhost
+
+    # configure supervisord to start postgres
+    export START_POSTGRES=true
+    ;;
+
+  psycopg)
+    # Set postgres authentication details which will be placed in the homeserver config file
+    export POSTGRES_DRIVER=psycopg
     export POSTGRES_PASSWORD=somesecret
     export POSTGRES_USER=postgres
     export POSTGRES_HOST=localhost

@@ -1466,7 +1466,7 @@ For more information on using Synapse with Postgres, see [here](../../postgres.m
 
 This setting has the following sub-options:
 
-* `name` (string): This option specifies the database engine to use: either `sqlite3` (for SQLite) or `psycopg2` (for PostgreSQL). If no name is specified Synapse will default to SQLite. Defaults to `"sqlite3"`.
+* `name` (string): This option specifies the database engine to use: either `sqlite3` (for SQLite) or `psycopg2` (for PostgreSQL). `psycopg` references the experimental psycopg3 driver, which may be used as a drop in replacement  for `psycopg2`. If no name is specified Synapse will default to SQLite. Defaults to `"sqlite3"`.
 
 * `txn_limit` (integer): Gives the maximum number of transactions to run per connection before reconnecting. 0 means no limit. Defaults to `0`.
 
