@@ -86,9 +86,13 @@ func TestSynapseVersion(t *testing.T) {
 
 		// Compare
 		if !reflect.DeepEqual(synapseVersion, checkoutSynapseVersion) {
-			t.Errorf(
+			t.Fatalf(
 				"Synapse version in the checkout doesn't match the Synapse version that Complement is running. " +
-				"From the Checkout: %v, From the Complement image: %v", checkoutSynapseVersion, synapseVersion,
+				"From the Checkout: %v, From the Complement image: %v\n\n" +
+				"If this test fails, it probably means that Complement is using an image that " +
+				"doesn't encompass the changes you have checked out (unexpected). We want to yell " +
+				"loudly and point out what's wrong instead of silently letting your PR's pass " +
+				"without actually being tested.", checkoutSynapseVersion, synapseVersion,
 			)
 		}
 	})
