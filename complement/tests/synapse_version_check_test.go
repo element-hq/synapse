@@ -14,6 +14,8 @@ package synapse_tests
 
 import (
 	"fmt"
+	"net/http"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,6 +23,7 @@ import (
 	"github.com/matrix-org/complement"
 	"github.com/matrix-org/complement/match"
 	"github.com/matrix-org/complement/must"
+	"github.com/tidwall/gjson"
 )
 
 func TestSynapseVersion(t *testing.T) {
@@ -42,33 +45,87 @@ func TestSynapseVersion(t *testing.T) {
 	// without actually being tested.
 	t.Run("Synapse version matches current git checkout", func(t *testing.T) {
 		// TODO: Pull the `version` from `pyproject.toml`.
+		checkoutVersion := "TODO"
 
-		// TODO: Get the details of the current git checkout
+		// Get the details of the current git checkout
+		//
+		// Commands match https://github.com/matrix-org/matrix-python-common/blob/4084b21af839c50f775447d02ca4f1854e2e6191/src/matrix_common/versionstring.py#L87C45-L95
+		gitBranch := runGitCommand(t, []string{"git", "rev-parse", "--abbrev-ref", "HEAD"})
+		gitTag := runGitCommand(t, []string{"git", "describe", "--exact-match"})
+		gitCommit := runGitCommand(t, []string{"git", "rev-parse", "--short", "HEAD"})
+		gitDirty := strings.HasSuffix(
+			runGitCommand(t, []string{"git", "describe", "--dirty='-this_is_a_dirty_checkout'"}),
+			"-this_is_a_dirty_checkout",
+		)
+
+		// Assemble our checkout details into a `SynapseVersion` we can easily compare with
+		checkoutSynapseVersion := SynapseVersion {
+			Version: checkoutVersion,
+			Branch: gitBranch,
+			Tag: gitTag,
+			Commit: gitCommit,
+			Dirty: gitDirty,
+		}
 
 		// Find the version details of the Synapse instance deployed from the Docker image
 		res := unauthedClient.MustDo(t, "GET", []string{"_matrix", "federation", "v1", "version"})
-		// Cheeky way to get the response body
-		responseBody := must.MatchResponse(t, res, match.HTTPResponse{})
-		synapseVersion, err := parseSynapseVersionString(string(responseBody))
+		body := must.MatchResponse(t, res, match.HTTPResponse{
+			StatusCode: http.StatusOK,
+			JSON: []match.JSON{
+				match.JSONKeyPresent("server"),
+			},
+		})
+		rawSynapseVersionString := gjson.GetBytes(body, "server.version").Str
+		t.Logf("Synapse version string from federation version endpoint: %s", rawSynapseVersionString)
+		synapseVersion, err := parseSynapseVersionString(rawSynapseVersionString)
 		if err != nil {
 			t.Fatalf("Failed to parse Synapse version string: %v", err)
 		}
 
-		// TODO: Compare
-		_ = synapseVersion
+		// Compare
+		if !reflect.DeepEqual(synapseVersion, checkoutSynapseVersion) {
+			t.Errorf(
+				"Synapse version in the checkout doesn't match the Synapse version that Complement is running. " +
+				"From the Checkout: %v, From the Complement image: %v", checkoutSynapseVersion, synapseVersion,
+			)
+		}
 	})
 }
 
+// runGitCommand will run the given git command and return the stdout (whitespace
+// trimmed).
+//
+// If it's not a git repo, will just return a blank string (for ease-of-use in the
+// tests)
+func runGitCommand(t *testing.T, commandPieces []string) string {
+	t.Helper()
+
+	// Check if this is even a git repo
+	cmd := exec.Command("git", "status")
+	if cmd.ProcessState.ExitCode() != 0 {
+		return ""
+	}
+
+	// Then run our actual command
+	cmd = exec.Command(commandPieces[0], commandPieces[1:]...)
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("runGitCommand: failed to run command (%s): %v", strings.Join(commandPieces, " "), err)
+	}
+
+	return strings.TrimSpace(string(output))
+}
+
 type SynapseVersion struct {
-	// TODO
+	// Synapse version
 	Version string
-	// TODO
+	// git branch
 	Branch string
-	// TODO
+	// git tag
 	Tag string
-	// TODO
+	// git commit
 	Commit string
-	// TODO
+	// Whether the git repo has uncommitted changes in it
 	Dirty bool
 }
 
@@ -136,7 +193,7 @@ func parseSynapseVersionString(
 	}, nil
 }
 
-
+// Sanity check that our `parseSynapseVersionString` utility works as expected
 func TestParseSynapseVersionString(t *testing.T) {
 	testCases := []struct {
 		name     string
