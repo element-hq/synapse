@@ -12,18 +12,23 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 #
-from typing import Optional
 from unittest import mock
 
-from twisted.test.proto_helpers import MemoryReactor
+import signedjson
+from signedjson.key import encode_verify_key_base64, get_verify_key
 
+from twisted.internet.testing import MemoryReactor
+
+from synapse.api.errors import SynapseError
+from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase, make_event_from_dict
+from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import filter, login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import event_injection
@@ -36,14 +41,22 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         admin.register_servlets,
         login.register_servlets,
         room.register_servlets,
+        filter.register_servlets,
+        sync.register_servlets,
     ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         # mock out the federation transport client
         self.mock_federation_transport_client = mock.Mock(
-            spec=["get_policy_recommendation_for_pdu"]
+            spec=[
+                "get_policy_recommendation_for_pdu",
+                "ask_policy_server_to_sign_event",
+            ]
         )
         self.mock_federation_transport_client.get_policy_recommendation_for_pdu = (
+            mock.AsyncMock()
+        )
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event = (
             mock.AsyncMock()
         )
         return super().setup_test_homeserver(
@@ -62,6 +75,8 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             room_creator=self.creator, tok=self.creator_token
         )
         room_version = self.get_success(main_store.get_room_version(self.room_id))
+        self.room_version = room_version
+        self.signing_key = signedjson.key.generate_signing_key("policy_server")
 
         # Create some sample events
         self.spammy_event = make_event_from_dict(
@@ -97,7 +112,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         async def get_policy_recommendation_for_pdu(
             destination: str,
             pdu: EventBase,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
         ) -> JsonDict:
             self.call_count += 1
             self.assertEqual(destination, self.OTHER_SERVER_NAME)
@@ -110,7 +125,48 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         self.mock_federation_transport_client.get_policy_recommendation_for_pdu.side_effect = get_policy_recommendation_for_pdu
 
-    def _add_policy_server_to_room(self) -> None:
+        # Mock policy server actions on signing events
+        async def policy_server_signs_event(
+            destination: str, pdu: EventBase, timeout: int | None = None
+        ) -> JsonDict | None:
+            sigs = compute_event_signature(
+                pdu.room_version,
+                pdu.get_dict(),
+                self.OTHER_SERVER_NAME,
+                self.signing_key,
+            )
+            return sigs
+
+        async def policy_server_signs_event_with_wrong_key(
+            destination: str, pdu: EventBase, timeout: int | None = None
+        ) -> JsonDict | None:
+            sk = signedjson.key.generate_signing_key("policy_server")
+            sigs = compute_event_signature(
+                pdu.room_version,
+                pdu.get_dict(),
+                self.OTHER_SERVER_NAME,
+                sk,
+            )
+            return sigs
+
+        async def policy_server_refuses_to_sign_event(
+            destination: str, pdu: EventBase, timeout: int | None = None
+        ) -> JsonDict | None:
+            return {}
+
+        async def policy_server_event_sign_error(
+            destination: str, pdu: EventBase, timeout: int | None = None
+        ) -> JsonDict | None:
+            return None
+
+        self.policy_server_signs_event = policy_server_signs_event
+        self.policy_server_refuses_to_sign_event = policy_server_refuses_to_sign_event
+        self.policy_server_event_sign_error = policy_server_event_sign_error
+        self.policy_server_signs_event_with_wrong_key = (
+            policy_server_signs_event_with_wrong_key
+        )
+
+    def _add_policy_server_to_room(self, public_key: str | None = None) -> None:
         # Inject a member event into the room
         policy_user_id = f"@policy:{self.OTHER_SERVER_NAME}"
         self.get_success(
@@ -118,12 +174,15 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 self.hs, self.room_id, policy_user_id, "join"
             )
         )
+        content = {
+            "via": self.OTHER_SERVER_NAME,
+        }
+        if public_key is not None:
+            content["public_key"] = public_key
         self.helper.send_state(
             self.room_id,
             "org.matrix.msc4284.policy",
-            {
-                "via": self.OTHER_SERVER_NAME,
-            },
+            content,
             tok=self.creator_token,
             state_key="",
         )
@@ -218,9 +277,192 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(ok, False)
         self.assertEqual(self.call_count, 1)
 
-    def test_not_spammy_event_is_not_spam(self) -> None:
-        self._add_policy_server_to_room()
+    def test_signed_event_is_not_spam(self) -> None:
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+        event = make_event_from_dict(
+            room_version=self.room_version,
+            internal_metadata_dict={},
+            event_dict={
+                "room_id": self.room_id,
+                "type": "m.room.message",
+                "sender": "@spammy:example.org",
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "This is a signed event.",
+                },
+            },
+        )
 
-        ok = self.get_success(self.handler.is_event_allowed(self.not_spammy_event))
+        # We're going to sign the event and check it marks the event as not-spam, without hitting the
+        # policy server
+        sigs = compute_event_signature(
+            event.room_version,
+            event.get_dict(),
+            self.OTHER_SERVER_NAME,
+            self.signing_key,
+        )
+        event.signatures.update(sigs)
+
+        ok = self.get_success(self.handler.is_event_allowed(event))
         self.assertEqual(ok, True)
-        self.assertEqual(self.call_count, 1)
+        # Make sure we did not make an HTTP hit to get_policy_recommendation_for_pdu
+        self.assertEqual(self.call_count, 0)
+
+    def test_ask_policy_server_to_sign_event_ok(self) -> None:
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+        event = make_event_from_dict(
+            room_version=self.room_version,
+            internal_metadata_dict={},
+            event_dict={
+                "room_id": self.room_id,
+                "type": "m.room.message",
+                "sender": "@spammy:example.org",
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "This is another signed event.",
+                },
+            },
+        )
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
+        self.get_success(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        )
+        self.assertEqual(len(event.signatures), 1)
+
+    def test_ask_policy_server_to_sign_event_refuses(self) -> None:
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+        event = make_event_from_dict(
+            room_version=self.room_version,
+            internal_metadata_dict={},
+            event_dict={
+                "room_id": self.room_id,
+                "type": "m.room.message",
+                "sender": "@spammy:example.org",
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "This is spam and is refused.",
+                },
+            },
+        )
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_refuses_to_sign_event
+        self.get_success(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        )
+        self.assertEqual(len(event.signatures), 0)
+
+    def test_ask_policy_server_to_sign_event_cannot_reach(self) -> None:
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+        event = make_event_from_dict(
+            room_version=self.room_version,
+            internal_metadata_dict={},
+            event_dict={
+                "room_id": self.room_id,
+                "type": "m.room.message",
+                "sender": "@spammy:example.org",
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "This is spam and is refused.",
+                },
+            },
+        )
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_event_sign_error
+        self.get_success(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        )
+        self.assertEqual(len(event.signatures), 0)
+
+    def test_ask_policy_server_to_sign_event_wrong_sig(self) -> None:
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event_with_wrong_key
+        unverified_event = make_event_from_dict(
+            room_version=self.room_version,
+            internal_metadata_dict={},
+            event_dict={
+                "room_id": self.room_id,
+                "type": "m.room.message",
+                "sender": "@spammy:example.org",
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "This is signed but with the wrong key.",
+                },
+            },
+        )
+        # verify=False so it passes
+        self.get_success(
+            self.handler.ask_policy_server_to_sign_event(unverified_event, verify=False)
+        )
+        self.assertEqual(len(unverified_event.signatures), 1)
+
+        verified_event = make_event_from_dict(
+            room_version=self.room_version,
+            internal_metadata_dict={},
+            event_dict={
+                "room_id": self.room_id,
+                "type": "m.room.message",
+                "sender": "@spammy:example.org",
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "This is signed but with the wrong key.",
+                },
+            },
+        )
+        # verify=True so it fails
+        self.get_failure(
+            self.handler.ask_policy_server_to_sign_event(verified_event, verify=True),
+            SynapseError,
+        )
+
+    def test_policy_server_signatures_end_to_end(self) -> None:
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
+        # Send an event and ensure we get a policy server signature on it.
+        resp = self.helper.send_event(
+            self.room_id,
+            "m.room.message",
+            {"body": "honk", "msgtype": "m.text"},
+            tok=self.creator_token,
+        )
+        ev = self._fetch_federation_event(resp["event_id"])
+        assert ev is not None
+        sig = (
+            ev.get("signatures", {})
+            .get(self.OTHER_SERVER_NAME, {})
+            .get(POLICY_SERVER_KEY_ID, None)
+        )
+        self.assertNotEquals(
+            sig,
+            None,
+            f"event did not include policy server signature, signature block = {ev.get('signatures', None)}",
+        )
+
+    def _fetch_federation_event(self, event_id: str) -> JsonDict | None:
+        # Request federation events to see the signatures
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/user/%s/filter" % (self.creator),
+            {"event_format": "federation"},
+            self.creator_token,
+        )
+        self.assertEqual(channel.code, 200)
+        filter_id = channel.json_body["filter_id"]
+        # Note: we could use `/context`, but given we don't test that neutral events are
+        # delivered over `/sync` anywhere else, might as well implicitly test it here.
+        channel = self.make_request(
+            "GET",
+            "/sync?filter=%s" % filter_id,
+            access_token=self.creator_token,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        for ev in channel.json_body["rooms"]["join"][self.room_id]["timeline"][
+            "events"
+        ]:
+            if ev["event_id"] == event_id:
+                return ev
+        return None

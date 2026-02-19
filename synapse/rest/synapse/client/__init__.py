@@ -30,6 +30,7 @@ from synapse.rest.synapse.client.pick_username import pick_username_resource
 from synapse.rest.synapse.client.rendezvous import MSC4108RendezvousSessionResource
 from synapse.rest.synapse.client.sso_register import SsoRegisterResource
 from synapse.rest.synapse.client.unsubscribe import UnsubscribeResource
+from synapse.rest.synapse.mas import MasResource
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -55,11 +56,13 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
         "/_synapse/client/unsubscribe": UnsubscribeResource(hs),
     }
 
-    # Expose the JWKS endpoint if OAuth2 delegation is enabled
-    if hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled:
+        resources["/_synapse/mas"] = MasResource(hs)
+    elif hs.config.experimental.msc3861.enabled:
         from synapse.rest.synapse.client.jwks import JwksResource
 
         resources["/_synapse/jwks"] = JwksResource(hs)
+        resources["/_synapse/mas"] = MasResource(hs)
 
     # provider-specific SSO bits. Only load these if they are enabled, since they
     # rely on optional dependencies.

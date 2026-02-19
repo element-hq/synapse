@@ -24,7 +24,7 @@ import functools
 import os
 import re
 import string
-from typing import Any, Callable, List, TypeVar, Union, cast
+from typing import Any, Callable, TypeVar, cast
 
 NEW_FORMAT_ID_RE = re.compile(r"^\d\d\d\d-\d\d-\d\d")
 
@@ -46,7 +46,7 @@ def _wrap_in_base_path(func: F) -> F:
 
 
 GetPathMethod = TypeVar(
-    "GetPathMethod", bound=Union[Callable[..., str], Callable[..., List[str]]]
+    "GetPathMethod", bound=Callable[..., str] | Callable[..., list[str]]
 )
 
 
@@ -73,7 +73,7 @@ def _wrap_with_jail_check(relative: bool) -> Callable[[GetPathMethod], GetPathMe
         @functools.wraps(func)
         def _wrapped(
             self: "MediaFilePaths", *args: Any, **kwargs: Any
-        ) -> Union[str, List[str]]:
+        ) -> str | list[str]:
             path_or_paths = func(self, *args, **kwargs)
 
             if isinstance(path_or_paths, list):
@@ -303,7 +303,7 @@ class MediaFilePaths:
     url_cache_filepath = _wrap_in_base_path(url_cache_filepath_rel)
 
     @_wrap_with_jail_check(relative=False)
-    def url_cache_filepath_dirs_to_delete(self, media_id: str) -> List[str]:
+    def url_cache_filepath_dirs_to_delete(self, media_id: str) -> list[str]:
         "The dirs to try and remove if we delete the media_id file"
         if NEW_FORMAT_ID_RE.match(media_id):
             return [
@@ -376,7 +376,7 @@ class MediaFilePaths:
     )
 
     @_wrap_with_jail_check(relative=False)
-    def url_cache_thumbnail_dirs_to_delete(self, media_id: str) -> List[str]:
+    def url_cache_thumbnail_dirs_to_delete(self, media_id: str) -> list[str]:
         "The dirs to try and remove if we delete the media_id thumbnails"
         # Media id is of the form <DATE><RANDOM_STRING>
         # E.g.: 2017-09-28-fsdRDt24DS234dsf

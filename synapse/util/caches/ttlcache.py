@@ -21,7 +21,7 @@
 
 import logging
 import time
-from typing import Any, Callable, Dict, Generic, Tuple, TypeVar, Union
+from typing import Any, Callable, Generic, TypeVar
 
 import attr
 from sortedcontainers import SortedList
@@ -40,16 +40,36 @@ VT = TypeVar("VT")
 class TTLCache(Generic[KT, VT]):
     """A key/value cache implementation where each entry has its own TTL"""
 
-    def __init__(self, cache_name: str, timer: Callable[[], float] = time.time):
+    def __init__(
+        self,
+        *,
+        cache_name: str,
+        server_name: str,
+        timer: Callable[[], float] = time.time,
+    ):
+        """
+        Args:
+            cache_name
+            server_name: The homeserver name that this cache is associated with
+                (used to label the metric) (`hs.hostname`).
+            timer: Function used to get the current time in seconds since the epoch.
+        """
+
         # map from key to _CacheEntry
-        self._data: Dict[KT, _CacheEntry[KT, VT]] = {}
+        self._data: dict[KT, _CacheEntry[KT, VT]] = {}
 
         # the _CacheEntries, sorted by expiry time
         self._expiry_list: SortedList[_CacheEntry[KT, VT]] = SortedList()
 
         self._timer = timer
 
-        self._metrics = register_cache("ttl", cache_name, self, resizable=False)
+        self._metrics = register_cache(
+            cache_type="ttl",
+            cache_name=cache_name,
+            cache=self,
+            server_name=server_name,
+            resizable=False,
+        )
 
     def set(self, key: KT, value: VT, ttl: float) -> None:
         """Add/update an entry in the cache
@@ -71,7 +91,7 @@ class TTLCache(Generic[KT, VT]):
         self._data[key] = entry
         self._expiry_list.add(entry)
 
-    def get(self, key: KT, default: T = SENTINEL) -> Union[VT, T]:
+    def get(self, key: KT, default: T = SENTINEL) -> VT | T:
         """Get a value from the cache
 
         Args:
@@ -93,7 +113,7 @@ class TTLCache(Generic[KT, VT]):
         self._metrics.inc_hits()
         return e.value
 
-    def get_with_expiry(self, key: KT) -> Tuple[VT, float, float]:
+    def get_with_expiry(self, key: KT) -> tuple[VT, float, float]:
         """Get a value, and its expiry time, from the cache
 
         Args:
@@ -114,7 +134,7 @@ class TTLCache(Generic[KT, VT]):
         self._metrics.inc_hits()
         return e.value, e.expiry_time, e.ttl
 
-    def pop(self, key: KT, default: T = SENTINEL) -> Union[VT, T]:
+    def pop(self, key: KT, default: T = SENTINEL) -> VT | T:
         """Remove a value from the cache
 
         If key is in the cache, remove it and return its value, else return default.

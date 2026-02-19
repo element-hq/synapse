@@ -24,13 +24,9 @@ import re
 from typing import (
     TYPE_CHECKING,
     Callable,
-    Dict,
     Generator,
     Iterable,
-    List,
     Optional,
-    Set,
-    Union,
     cast,
 )
 
@@ -51,7 +47,7 @@ _content_type_match = re.compile(r'.*; *charset="?(.*?)"?(;|$)', flags=re.I)
 ARIA_ROLES_TO_IGNORE = {"directory", "menu", "menubar", "toolbar"}
 
 
-def _normalise_encoding(encoding: str) -> Optional[str]:
+def _normalise_encoding(encoding: str) -> str | None:
     """Use the Python codec's name as the normalised entry."""
     try:
         return codecs.lookup(encoding).name
@@ -59,9 +55,7 @@ def _normalise_encoding(encoding: str) -> Optional[str]:
         return None
 
 
-def _get_html_media_encodings(
-    body: bytes, content_type: Optional[str]
-) -> Iterable[str]:
+def _get_html_media_encodings(body: bytes, content_type: str | None) -> Iterable[str]:
     """
     Get potential encoding of the body based on the (presumably) HTML body or the content-type header.
 
@@ -83,7 +77,7 @@ def _get_html_media_encodings(
         The character encoding of the body, as a string.
     """
     # There's no point in returning an encoding more than once.
-    attempted_encodings: Set[str] = set()
+    attempted_encodings: set[str] = set()
 
     # Limit searches to the first 1kb, since it ought to be at the top.
     body_start = body[:1024]
@@ -122,7 +116,7 @@ def _get_html_media_encodings(
 
 
 def decode_body(
-    body: bytes, uri: str, content_type: Optional[str] = None
+    body: bytes, uri: str, content_type: str | None = None
 ) -> Optional["etree._Element"]:
     """
     This uses lxml to parse the HTML document.
@@ -133,7 +127,7 @@ def decode_body(
         content_type: The Content-Type header.
 
     Returns:
-        The parsed HTML body, or None if an error occurred during processed.
+        The parsed HTML body, or None if an error occurred during processing.
     """
     # If there's no body, nothing useful is going to be found.
     if not body:
@@ -158,17 +152,39 @@ def decode_body(
     # Create an HTML parser.
     parser = etree.HTMLParser(recover=True, encoding=encoding)
 
-    # Attempt to parse the body. Returns None if the body was successfully
-    # parsed, but no tree was found.
-    return etree.fromstring(body, parser)
+    # Attempt to parse the body. With `lxml` 6.0.0+, this will be an empty HTML
+    # tree if the body was successfully parsed, but no tree was found. In
+    # previous `lxml` versions, `etree.fromstring` would return `None` in that
+    # case.
+    html_tree = etree.fromstring(body, parser)
+
+    # Account for the above referenced case where `html_tree` is an HTML tree
+    # with an empty body. If so, return None.
+    if html_tree is not None and html_tree.tag == "html":
+        # If the tree has only a single <body> element and it's empty, then
+        # return None.
+        body_el = html_tree.find("body")
+        if body_el is not None and len(html_tree) == 1:
+            # Extract the content of the body tag as text.
+            body_text = "".join(cast(Iterable[str], body_el.itertext()))
+
+            # Strip any undecodable Unicode characters and whitespace.
+            body_text = body_text.strip("\ufffd").strip()
+
+            # If there's no text left, and there were no child tags,
+            # then we consider the <body> tag empty.
+            if not body_text and len(body_el) == 0:
+                return None
+
+    return html_tree
 
 
 def _get_meta_tags(
     tree: "etree._Element",
     property: str,
     prefix: str,
-    property_mapper: Optional[Callable[[str], Optional[str]]] = None,
-) -> Dict[str, Optional[str]]:
+    property_mapper: Callable[[str], str | None] | None = None,
+) -> dict[str, str | None]:
     """
     Search for meta tags prefixed with a particular string.
 
@@ -183,12 +199,12 @@ def _get_meta_tags(
     Returns:
         A map of tag name to value.
     """
-    # This actually returns Dict[str, str], but the caller sets this as a variable
-    # which is Dict[str, Optional[str]].
-    results: Dict[str, Optional[str]] = {}
+    # This actually returns dict[str, str], but the caller sets this as a variable
+    # which is dict[str, str | None].
+    results: dict[str, str | None] = {}
     # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
     for tag in cast(
-        List["etree._Element"],
+        list["etree._Element"],
         tree.xpath(
             f"//*/meta[starts-with(@{property}, '{prefix}:')][@content][not(@content='')]"
         ),
@@ -214,7 +230,7 @@ def _get_meta_tags(
     return results
 
 
-def _map_twitter_to_open_graph(key: str) -> Optional[str]:
+def _map_twitter_to_open_graph(key: str) -> str | None:
     """
     Map a Twitter card property to the analogous Open Graph property.
 
@@ -234,7 +250,7 @@ def _map_twitter_to_open_graph(key: str) -> Optional[str]:
     return "og" + key[7:]
 
 
-def parse_html_to_open_graph(tree: "etree._Element") -> Dict[str, Optional[str]]:
+def parse_html_to_open_graph(tree: "etree._Element") -> dict[str, str | None]:
     """
     Parse the HTML document into an Open Graph response.
 
@@ -293,7 +309,7 @@ def parse_html_to_open_graph(tree: "etree._Element") -> Dict[str, Optional[str]]
         # Attempt to find a title from the title tag, or the biggest header on the page.
         # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
         title = cast(
-            List["etree._ElementUnicodeResult"],
+            list["etree._ElementUnicodeResult"],
             tree.xpath("((//title)[1] | (//h1)[1] | (//h2)[1] | (//h3)[1])/text()"),
         )
         if title:
@@ -304,7 +320,7 @@ def parse_html_to_open_graph(tree: "etree._Element") -> Dict[str, Optional[str]]
     if "og:image" not in og:
         # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
         meta_image = cast(
-            List["etree._ElementUnicodeResult"],
+            list["etree._ElementUnicodeResult"],
             tree.xpath(
                 "//*/meta[translate(@itemprop, 'IMAGE', 'image')='image'][not(@content='')]/@content[1]"
             ),
@@ -318,7 +334,7 @@ def parse_html_to_open_graph(tree: "etree._Element") -> Dict[str, Optional[str]]
             #
             # TODO: consider inlined CSS styles as well as width & height attribs
             images = cast(
-                List["etree._Element"],
+                list["etree._Element"],
                 tree.xpath("//img[@src][number(@width)>10][number(@height)>10]"),
             )
             images = sorted(
@@ -330,7 +346,7 @@ def parse_html_to_open_graph(tree: "etree._Element") -> Dict[str, Optional[str]]
             # If no images were found, try to find *any* images.
             if not images:
                 # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-                images = cast(List["etree._Element"], tree.xpath("//img[@src][1]"))
+                images = cast(list["etree._Element"], tree.xpath("//img[@src][1]"))
             if images:
                 og["og:image"] = cast(str, images[0].attrib["src"])
 
@@ -338,7 +354,7 @@ def parse_html_to_open_graph(tree: "etree._Element") -> Dict[str, Optional[str]]
             else:
                 # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
                 favicons = cast(
-                    List["etree._ElementUnicodeResult"],
+                    list["etree._ElementUnicodeResult"],
                     tree.xpath("//link[@href][contains(@rel, 'icon')]/@href[1]"),
                 )
                 if favicons:
@@ -348,7 +364,7 @@ def parse_html_to_open_graph(tree: "etree._Element") -> Dict[str, Optional[str]]
         # Check the first meta description tag for content.
         # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
         meta_description = cast(
-            List["etree._ElementUnicodeResult"],
+            list["etree._ElementUnicodeResult"],
             tree.xpath(
                 "//*/meta[translate(@name, 'DESCRIPTION', 'description')='description'][not(@content='')]/@content[1]"
             ),
@@ -368,7 +384,7 @@ def parse_html_to_open_graph(tree: "etree._Element") -> Dict[str, Optional[str]]
     return og
 
 
-def parse_html_description(tree: "etree._Element") -> Optional[str]:
+def parse_html_description(tree: "etree._Element") -> str | None:
     """
     Calculate a text description based on an HTML document.
 
@@ -421,7 +437,7 @@ def parse_html_description(tree: "etree._Element") -> Optional[str]:
 
 def _iterate_over_text(
     tree: Optional["etree._Element"],
-    tags_to_ignore: Set[object],
+    tags_to_ignore: set[object],
     stack_limit: int = 1024,
 ) -> Generator[str, None, None]:
     """Iterate over the tree returning text nodes in a depth first fashion,
@@ -441,7 +457,7 @@ def _iterate_over_text(
 
     # This is a stack whose items are elements to iterate over *or* strings
     # to be returned.
-    elements: List[Union[str, "etree._Element"]] = [tree]
+    elements: list[str | "etree._Element"] = [tree]
     while elements:
         el = elements.pop()
 
@@ -477,7 +493,7 @@ def _iterate_over_text(
 
 def summarize_paragraphs(
     text_nodes: Iterable[str], min_size: int = 200, max_size: int = 500
-) -> Optional[str]:
+) -> str | None:
     """
     Try to get a summary respecting first paragraph and then word boundaries.
 

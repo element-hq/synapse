@@ -20,22 +20,22 @@
 #
 #
 import time
-from typing import Dict, Iterable
+from typing import Iterable
 from unittest import mock
 
 from parameterized import parameterized
 from signedjson import key as key, sign as sign
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import RoomEncryptionAlgorithms
 from synapse.api.errors import Codes, SynapseError
 from synapse.appservice import ApplicationService
-from synapse.handlers.device import DeviceHandler
+from synapse.handlers.device import DeviceWriterHandler
 from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -291,7 +291,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             (chris, "chris_dev_2", "alg2"): 1,
         }
         # Convert to the format the handler wants.
-        query: Dict[str, Dict[str, Dict[str, int]]] = {}
+        query: dict[str, dict[str, dict[str, int]]] = {}
         for (user_id, device_id, algorithm), count in claims_to_make.items():
             query.setdefault(user_id, {}).setdefault(device_id, {})[algorithm] = count
         claim_res = self.get_success(
@@ -410,7 +410,6 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         device_id = "xyz"
         fallback_key = {"alg1:k1": "fallback_key1"}
         fallback_key2 = {"alg1:k2": "fallback_key2"}
-        fallback_key3 = {"alg1:k2": "fallback_key3"}
         otk = {"alg1:k2": "key2"}
 
         # we shouldn't have any unused fallback keys yet
@@ -529,28 +528,6 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             claim_res,
             {"failures": {}, "one_time_keys": {local_user: {device_id: fallback_key2}}},
-        )
-
-        # using the unstable prefix should also set the fallback key
-        self.get_success(
-            self.handler.upload_keys_for_user(
-                local_user,
-                device_id,
-                {"org.matrix.msc2732.fallback_keys": fallback_key3},
-            )
-        )
-
-        claim_res = self.get_success(
-            self.handler.claim_one_time_keys(
-                {local_user: {device_id: {"alg1": 1}}},
-                self.requester,
-                timeout=None,
-                always_include_fallback_keys=False,
-            )
-        )
-        self.assertEqual(
-            claim_res,
-            {"failures": {}, "one_time_keys": {local_user: {device_id: fallback_key3}}},
         )
 
     def test_fallback_key_bulk(self) -> None:
@@ -856,7 +833,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         self.get_success(self.handler.upload_signing_keys_for_user(local_user, keys1))
 
         device_handler = self.hs.get_device_handler()
-        assert isinstance(device_handler, DeviceHandler)
+        assert isinstance(device_handler, DeviceWriterHandler)
         e = self.get_failure(
             device_handler.check_device_registered(
                 user_id=local_user,
@@ -1457,7 +1434,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@boris:.+", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
         self.hs.get_datastores().main.services_cache = [appservice]
         self.hs.get_datastores().main.exclusive_user_regex = _make_exclusive_regex(
@@ -1525,7 +1502,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@boris:.+", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
         self.hs.get_datastores().main.services_cache = [appservice]
         self.hs.get_datastores().main.exclusive_user_regex = _make_exclusive_regex(
@@ -1533,7 +1510,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         )
 
         # Setup a response.
-        response: Dict[str, Dict[str, Dict[str, JsonDict]]] = {
+        response: dict[str, dict[str, dict[str, JsonDict]]] = {
             local_user: {device_id_1: {**as_otk, **as_fallback_key}}
         }
         self.appservice_api.claim_client_keys.return_value = (response, [])
@@ -1751,7 +1728,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@boris:.+", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
         self.hs.get_datastores().main.services_cache = [appservice]
         self.hs.get_datastores().main.exclusive_user_regex = _make_exclusive_regex(

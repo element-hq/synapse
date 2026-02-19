@@ -22,7 +22,7 @@
 
 import logging
 import re
-from typing import IO, TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import IO, TYPE_CHECKING
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import respond_with_json
@@ -56,7 +56,7 @@ class BaseUploadServlet(RestServlet):
 
     async def _get_file_metadata(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, Optional[str], str]:
+    ) -> tuple[int, str | None, str]:
         raw_content_length = request.getHeader("Content-Length")
         if raw_content_length is None:
             raise SynapseError(msg="Request must specify a Content-Length", code=400)
@@ -78,11 +78,11 @@ class BaseUploadServlet(RestServlet):
                 code=413,
                 errcode=Codes.TOO_LARGE,
             )
-        args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+        args: dict[bytes, list[bytes]] = request.args  # type: ignore
         upload_name_bytes = parse_bytes_from_args(args, "filename")
         if upload_name_bytes:
             try:
-                upload_name: Optional[str] = upload_name_bytes.decode("utf8")
+                upload_name: str | None = upload_name_bytes.decode("utf8")
             except UnicodeDecodeError:
                 raise SynapseError(
                     msg="Invalid UTF-8 filename parameter: %r" % (upload_name_bytes,),
@@ -120,7 +120,7 @@ class UploadServlet(BaseUploadServlet):
 
         try:
             content: IO = request.content  # type: ignore
-            content_uri = await self.media_repo.create_content(
+            content_uri = await self.media_repo.create_or_update_content(
                 media_type, upload_name, content, content_length, requester.user
             )
         except SpamMediaException:
@@ -170,13 +170,13 @@ class AsyncUploadServlet(BaseUploadServlet):
 
             try:
                 content: IO = request.content  # type: ignore
-                await self.media_repo.update_content(
-                    media_id,
+                await self.media_repo.create_or_update_content(
                     media_type,
                     upload_name,
                     content,
                     content_length,
                     requester.user,
+                    media_id=media_id,
                 )
             except SpamMediaException:
                 # For uploading of media we want to respond with a 400, instead of

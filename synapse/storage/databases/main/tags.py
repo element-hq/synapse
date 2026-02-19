@@ -21,7 +21,7 @@
 #
 
 import logging
-from typing import Any, Dict, Iterable, List, Mapping, Tuple, cast
+from typing import Any, Iterable, Mapping, cast
 
 from synapse.api.constants import AccountDataTypes
 from synapse.replication.tcp.streams import AccountDataStream
@@ -30,8 +30,8 @@ from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main.account_data import AccountDataWorkerStore
 from synapse.storage.util.id_generators import AbstractStreamIdGenerator
 from synapse.types import JsonDict, JsonMapping
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
+from synapse.util.json import json_encoder
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +52,13 @@ class TagsWorkerStore(AccountDataWorkerStore):
         """
 
         rows = cast(
-            List[Tuple[str, str, str]],
+            list[tuple[str, str, str]],
             await self.db_pool.simple_select_list(
                 "room_tags", {"user_id": user_id}, ["room_id", "tag", "content"]
             ),
         )
 
-        tags_by_room: Dict[str, Dict[str, JsonDict]] = {}
+        tags_by_room: dict[str, dict[str, JsonDict]] = {}
         for room_id, tag, content in rows:
             room_tags = tags_by_room.setdefault(room_id, {})
             room_tags[tag] = db_to_json(content)
@@ -66,7 +66,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
 
     async def get_all_updated_tags(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, str, str]], int, bool]:
+    ) -> tuple[list[tuple[int, str, str]], int, bool]:
         """Get updates for tags replication stream.
 
         Args:
@@ -93,7 +93,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
 
         def get_all_updated_tags_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[int, str, str]]:
+        ) -> list[tuple[int, str, str]]:
             sql = (
                 "SELECT stream_id, user_id, room_id"
                 " FROM room_tags_revisions as r"
@@ -102,7 +102,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
             )
             txn.execute(sql, (last_id, current_id, limit))
             # mypy doesn't understand what the query is selecting.
-            return cast(List[Tuple[int, str, str]], txn.fetchall())
+            return cast(list[tuple[int, str, str]], txn.fetchall())
 
         tag_ids = await self.db_pool.runInteraction(
             "get_all_updated_tags", get_all_updated_tags_txn
@@ -131,7 +131,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
             rooms that changed since the stream_id token.
         """
 
-        def get_updated_tags_txn(txn: LoggingTransaction) -> List[str]:
+        def get_updated_tags_txn(txn: LoggingTransaction) -> list[str]:
             sql = (
                 "SELECT room_id from room_tags_revisions"
                 " WHERE user_id = ? AND stream_id > ?"
@@ -218,7 +218,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
             A mapping of tags to tag content.
         """
         rows = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="room_tags",
                 keyvalues={"user_id": user_id, "room_id": room_id},
@@ -338,8 +338,8 @@ class TagsWorkerStore(AccountDataWorkerStore):
         if stream_name == AccountDataStream.NAME:
             # Cast is safe because the `AccountDataStream` should only be giving us
             # `AccountDataStreamRow`
-            account_data_stream_rows: List[AccountDataStream.AccountDataStreamRow] = (
-                cast(List[AccountDataStream.AccountDataStreamRow], rows)
+            account_data_stream_rows: list[AccountDataStream.AccountDataStreamRow] = (
+                cast(list[AccountDataStream.AccountDataStreamRow], rows)
             )
 
             for row in account_data_stream_rows:

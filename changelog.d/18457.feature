@@ -1,1 +1,0 @@
-Add new module API callbacks that allows overriding of media repository maximum upload size.

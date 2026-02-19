@@ -20,17 +20,17 @@
 #
 import logging
 from http import HTTPStatus
-from typing import Optional, Union
 from unittest.mock import Mock
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import FederationError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
+from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import EventBase, make_event_from_dict
 from synapse.federation.federation_base import event_from_pdu_json
 from synapse.http.types import QueryParams
@@ -40,10 +40,12 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
+
+logger = logging.getLogger(__name__)
 
 
 class FederationServerTests(unittest.FederatingHomeserverTestCase):
@@ -190,12 +192,12 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
         async def post_json(
             destination: str,
             path: str,
-            data: Optional[JsonDict] = None,
+            data: JsonDict | None = None,
             long_retries: bool = False,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
             ignore_backoff: bool = False,
-            args: Optional[QueryParams] = None,
-        ) -> Union[JsonDict, list]:
+            args: QueryParams | None = None,
+        ) -> JsonDict | list:
             # If it asks us for new missing events, give them NOTHING
             if path.startswith("/_matrix/federation/v1/get_missing_events/"):
                 return {"events": []}
@@ -227,7 +229,10 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
             room_version=RoomVersions.V10,
         )
 
-        with LoggingContext("test-context"):
+        with LoggingContext(
+            name="test-context",
+            server_name=self.hs.hostname,
+        ):
             failure = self.get_failure(
                 self.federation_event_handler.on_receive_pdu(
                     self.OTHER_SERVER_NAME, lying_event
@@ -252,7 +257,7 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
 class ServerACLsTestCase(unittest.TestCase):
     def test_blocked_server(self) -> None:
         e = _create_acl_event({"allow": ["*"], "deny": ["evil.com"]})
-        logging.info("ACL event: %s", e.content)
+        logger.info("ACL event: %s", e.content)
 
         server_acl_evalutor = server_acl_evaluator_from_event(e)
 
@@ -266,7 +271,7 @@ class ServerACLsTestCase(unittest.TestCase):
 
     def test_block_ip_literals(self) -> None:
         e = _create_acl_event({"allow_ip_literals": False, "allow": ["*"]})
-        logging.info("ACL event: %s", e.content)
+        logger.info("ACL event: %s", e.content)
 
         server_acl_evalutor = server_acl_evaluator_from_event(e)
 
@@ -352,19 +357,44 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         return channel.json_body
 
-    def test_send_join(self) -> None:
+    def _test_send_join_common(self, room_version: str) -> None:
         """happy-path test of send_join"""
-        joining_user = "@misspiggy:" + self.OTHER_SERVER_NAME
-        join_result = self._make_join(joining_user)
+        creator_user_id = self.register_user(f"kermit_v{room_version}", "test")
+        tok = self.login(f"kermit_v{room_version}", "test")
+        room_id = self.helper.create_room_as(
+            room_creator=creator_user_id, tok=tok, room_version=room_version
+        )
 
+        # Second member joins
+        second_member_user_id = self.register_user(f"fozzie_v{room_version}", "bear")
+        tok2 = self.login(f"fozzie_v{room_version}", "bear")
+        self.helper.join(room_id, second_member_user_id, tok=tok2)
+
+        # Make join for remote user
+        joining_user = "@misspiggy:" + self.OTHER_SERVER_NAME
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/make_join/{room_id}/{joining_user}?ver={room_version}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        join_result = channel.json_body
+
+        # Sign and send the join
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            KNOWN_ROOM_VERSIONS[DEFAULT_ROOM_VERSION],
+            KNOWN_ROOM_VERSIONS[room_version],
         )
+        if room_version in ["1", "2"]:
+            add_hashes_and_signatures(
+                KNOWN_ROOM_VERSIONS[room_version],
+                join_event_dict,
+                signature_name=self.hs.hostname,
+                signing_key=self.hs.signing_key,
+            )
         channel = self.make_signed_federation_request(
             "PUT",
-            f"/_matrix/federation/v2/send_join/{self._room_id}/x",
+            f"/_matrix/federation/v2/send_join/{room_id}/x",
             content=join_event_dict,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
@@ -380,8 +410,8 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
                 ("m.room.power_levels", ""),
                 ("m.room.join_rules", ""),
                 ("m.room.history_visibility", ""),
-                ("m.room.member", "@kermit:test"),
-                ("m.room.member", "@fozzie:test"),
+                ("m.room.member", f"@kermit_v{room_version}:test"),
+                ("m.room.member", f"@fozzie_v{room_version}:test"),
                 # nb: *not* the joining user
             ],
         )
@@ -394,17 +424,27 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
             returned_auth_chain_events,
             [
                 ("m.room.create", ""),
-                ("m.room.member", "@kermit:test"),
+                ("m.room.member", f"@kermit_v{room_version}:test"),
                 ("m.room.power_levels", ""),
                 ("m.room.join_rules", ""),
             ],
         )
 
         # the room should show that the new user is a member
-        r = self.get_success(
-            self._storage_controllers.state.get_current_state(self._room_id)
-        )
+        r = self.get_success(self._storage_controllers.state.get_current_state(room_id))
         self.assertEqual(r[("m.room.member", joining_user)].membership, "join")
+
+    @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys()])
+    @override_config({"use_frozen_dicts": True})
+    def test_send_join_with_frozen_dicts(self, room_version: str) -> None:
+        """Test send_join with USE_FROZEN_DICTS=True"""
+        self._test_send_join_common(room_version)
+
+    @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys()])
+    @override_config({"use_frozen_dicts": False})
+    def test_send_join_without_frozen_dicts(self, room_version: str) -> None:
+        """Test send_join with USE_FROZEN_DICTS=False"""
+        self._test_send_join_common(room_version)
 
     def test_send_join_partial_state(self) -> None:
         """/send_join should return partial state, if requested"""
@@ -457,7 +497,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(r[("m.room.member", joining_user)].membership, "join")
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 3}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 3}})
     def test_make_join_respects_room_join_rate_limit(self) -> None:
         # In the test setup, two users join the room. Since the rate limiter burst
         # count is 3, a new make_join request to the room should be accepted.
@@ -479,7 +519,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.TOO_MANY_REQUESTS, channel.json_body)
 
-    @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 3}})
+    @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 3}})
     def test_send_join_contributes_to_room_join_rate_limit_and_is_limited(self) -> None:
         # Make two make_join requests up front. (These are rate limited, but do not
         # contribute to the rate limit.)
@@ -533,7 +573,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.member",
-            "origin": "test.servx",
             "content": {"membership": "join"},
             "auth_events": [],
             "unsigned": {"malicious garbage": "hackz", "more warez": "more hackz"},
@@ -550,7 +589,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.member",
-            "origin": "test.servx",
             "auth_events": [],
             "content": {"membership": "join"},
             "unsigned": {
@@ -577,7 +615,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.power_levels",
-            "origin": "test.servx",
             "content": {},
             "auth_events": [],
             "unsigned": {

@@ -22,7 +22,7 @@ from typing import Collection
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes
@@ -30,7 +30,8 @@ from synapse.rest.client import login
 from synapse.server import HomeServer
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 
@@ -105,7 +106,7 @@ class BackgroundUpdatesTestCase(unittest.HomeserverTestCase):
         "Adds a bg update but doesn't start it"
 
         async def _fake_update(progress: JsonDict, batch_size: int) -> int:
-            await self.clock.sleep(0.2)
+            await self.clock.sleep(Duration(milliseconds=200))
             return batch_size
 
         self.store.db_pool.updates.register_background_update_handler(

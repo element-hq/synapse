@@ -14,7 +14,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import UnrecognizedRequestError
 from synapse.http.server import DirectServeJsonResource
@@ -30,11 +30,11 @@ class MSC4108RendezvousSessionResource(DirectServeJsonResource):
     isLeaf = True
 
     def __init__(self, hs: "HomeServer") -> None:
-        super().__init__()
+        super().__init__(clock=hs.get_clock())
         self._handler = hs.get_rendezvous_handler()
 
     async def _async_render_GET(self, request: SynapseRequest) -> None:
-        postpath: List[bytes] = request.postpath  # type: ignore
+        postpath: list[bytes] = request.postpath  # type: ignore
         if len(postpath) != 1:
             raise UnrecognizedRequestError()
         session_id = postpath[0].decode("ascii")
@@ -42,7 +42,7 @@ class MSC4108RendezvousSessionResource(DirectServeJsonResource):
         self._handler.handle_get(request, session_id)
 
     def _async_render_PUT(self, request: SynapseRequest) -> None:
-        postpath: List[bytes] = request.postpath  # type: ignore
+        postpath: list[bytes] = request.postpath  # type: ignore
         if len(postpath) != 1:
             raise UnrecognizedRequestError()
         session_id = postpath[0].decode("ascii")
@@ -50,7 +50,7 @@ class MSC4108RendezvousSessionResource(DirectServeJsonResource):
         self._handler.handle_put(request, session_id)
 
     def _async_render_DELETE(self, request: SynapseRequest) -> None:
-        postpath: List[bytes] = request.postpath  # type: ignore
+        postpath: list[bytes] = request.postpath  # type: ignore
         if len(postpath) != 1:
             raise UnrecognizedRequestError()
         session_id = postpath[0].decode("ascii")

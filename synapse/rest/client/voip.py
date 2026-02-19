@@ -22,7 +22,7 @@
 import base64
 import hashlib
 import hmac
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet
@@ -43,7 +43,7 @@ class VoipRestServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(
             request, self.hs.config.voip.turn_allow_guests
         )

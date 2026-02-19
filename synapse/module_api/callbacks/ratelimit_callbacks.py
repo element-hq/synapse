@@ -13,9 +13,10 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable
 
-from synapse.storage.databases.main.room import RatelimitOverride
+import attr
+
 from synapse.util.async_helpers import delay_cancellation
 from synapse.util.metrics import Measure
 
@@ -24,23 +25,34 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+@attr.s(auto_attribs=True)
+class RatelimitOverride:
+    """Represents a ratelimit being overridden."""
+
+    per_second: float
+    """The number of actions that can be performed in a second. `0.0` means that ratelimiting is disabled."""
+    burst_count: int
+    """How many actions that can be performed before being limited."""
+
+
 GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK = Callable[
-    [str, str], Awaitable[Optional[RatelimitOverride]]
+    [str, str], Awaitable[RatelimitOverride | None]
 ]
 
 
 class RatelimitModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
-        self._get_ratelimit_override_for_user_callbacks: List[
+        self._get_ratelimit_override_for_user_callbacks: list[
             GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
         ] = []
 
     def register_callbacks(
         self,
-        get_ratelimit_override_for_user: Optional[
-            GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
-        ] = None,
+        get_ratelimit_override_for_user: GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
+        | None = None,
     ) -> None:
         """Register callbacks from module for each hook."""
         if get_ratelimit_override_for_user is not None:
@@ -50,10 +62,14 @@ class RatelimitModuleApiCallbacks:
 
     async def get_ratelimit_override_for_user(
         self, user_id: str, limiter_name: str
-    ) -> Optional[RatelimitOverride]:
+    ) -> RatelimitOverride | None:
         for callback in self._get_ratelimit_override_for_user_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
-                res: Optional[RatelimitOverride] = await delay_cancellation(
+            with Measure(
+                self.clock,
+                name=f"{callback.__module__}.{callback.__qualname__}",
+                server_name=self.server_name,
+            ):
+                res: RatelimitOverride | None = await delay_cancellation(
                     callback(user_id, limiter_name)
                 )
             if res:

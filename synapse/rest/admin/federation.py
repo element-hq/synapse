@@ -20,7 +20,7 @@
 #
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import Direction
 from synapse.api.errors import NotFoundError, SynapseError
@@ -58,7 +58,7 @@ class ListDestinationsRestServlet(RestServlet):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         start = parse_integer(request, "from", default=0)
@@ -115,7 +115,7 @@ class DestinationRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, destination: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         if not await self._store.is_destination_known(destination):
@@ -175,7 +175,7 @@ class DestinationMembershipRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, destination: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         if not await self._store.is_destination_known(destination):
@@ -224,7 +224,7 @@ class DestinationResetConnectionRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, destination: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         if not await self._store.is_destination_known(destination):

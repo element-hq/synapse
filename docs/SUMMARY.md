@@ -5,6 +5,7 @@
 
 # Setup
   - [Installation](setup/installation.md)
+  - [Security](setup/security.md)
   - [Using Postgres](postgres.md)
   - [Configuring a Reverse Proxy](reverse_proxy.md)
   - [Configuring a Forward/Outbound Proxy](setup/forward_proxy.md)
@@ -60,6 +61,7 @@
     - [Admin API](usage/administration/admin_api/README.md)
       - [Account Validity](admin_api/account_validity.md)
       - [Background Updates](usage/administration/admin_api/background_updates.md)
+      - [Fetch Event](admin_api/fetch_event.md)
       - [Event Reports](admin_api/event_reports.md)
       - [Experimental Features](admin_api/experimental_features.md)
       - [Media](admin_api/media_admin_api.md)
@@ -68,11 +70,13 @@
       - [Registration Tokens](usage/administration/admin_api/registration_tokens.md)
       - [Manipulate Room Membership](admin_api/room_membership.md)
       - [Rooms](admin_api/rooms.md)
+      - [Scheduled tasks](admin_api/scheduled_tasks.md)
       - [Server Notices](admin_api/server_notices.md)
       - [Statistics](admin_api/statistics.md)
       - [Users](admin_api/user_admin_api.md)
       - [Server Version](admin_api/version_api.md)
       - [Federation](usage/administration/admin_api/federation.md)
+      - [Client-Server API Extensions](admin_api/client_server_api_extensions.md)
     - [Manhole](manhole.md)
     - [Monitoring](metrics-howto.md)
       - [Reporting Homeserver Usage Statistics](usage/administration/monitoring/reporting_homeserver_usage_statistics.md)
@@ -113,6 +117,8 @@
       - [The Auth Chain Difference Algorithm](auth_chain_difference_algorithm.md)
     - [Media Repository](media_repository.md)
     - [Room and User Statistics](room_and_user_statistics.md)
+    - [Releasing]()
+      - [Release Notes Review Checklist](development/internal_documentation/release_notes_review_checklist.md)
   - [Scripts]()
 
 # Other

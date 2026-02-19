@@ -27,12 +27,11 @@ import time
 import urllib.parse
 from binascii import unhexlify
 from http import HTTPStatus
-from typing import Dict, List, Optional
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
@@ -61,7 +60,7 @@ from synapse.rest.client import (
 from synapse.server import HomeServer
 from synapse.storage.databases.main.client_ips import LAST_SEEN_GRANULARITY
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -643,10 +642,10 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         """Test that searching for a users works correctly"""
 
         def _search_test(
-            expected_user_id: Optional[str],
+            expected_user_id: str | None,
             search_term: str,
-            search_field: Optional[str] = "name",
-            expected_http_code: Optional[int] = 200,
+            search_field: str | None = "name",
+            expected_http_code: int | None = 200,
         ) -> None:
             """Search for a user and check that the returned user's id is a match
 
@@ -1185,7 +1184,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         )
 
         def test_user_type(
-            expected_user_ids: List[str], not_user_types: Optional[List[str]] = None
+            expected_user_ids: list[str], not_user_types: list[str] | None = None
         ) -> None:
             """Runs a test for the not_user_types param
             Args:
@@ -1262,7 +1261,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         )
 
         def test_user_type(
-            expected_user_ids: List[str], not_user_types: Optional[List[str]] = None
+            expected_user_ids: list[str], not_user_types: list[str] | None = None
         ) -> None:
             """Runs a test for the not_user_types param
             Args:
@@ -1373,9 +1372,9 @@ class UsersListTestCase(unittest.HomeserverTestCase):
 
     def _order_test(
         self,
-        expected_user_list: List[str],
-        order_by: Optional[str],
-        dir: Optional[str] = None,
+        expected_user_list: list[str],
+        order_by: str | None,
+        dir: str | None = None,
     ) -> None:
         """Request the list of users in a certain order. Assert that order is what
         we expect
@@ -1403,7 +1402,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         self.assertEqual(expected_user_list, returned_order)
         self._check_fields(channel.json_body["users"])
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that the expected user attributes are present in content
         Args:
             content: List that is checked for content
@@ -2846,6 +2845,16 @@ class UserRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(Codes.USER_LOCKED, channel.json_body["errcode"])
         self.assertTrue(channel.json_body["soft_logout"])
 
+        # User is not authorized to log in anymore
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/r0/login",
+            {"type": "m.login.password", "user": "user", "password": "pass"},
+        )
+        self.assertEqual(401, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.USER_LOCKED, channel.json_body["errcode"])
+        self.assertTrue(channel.json_body["soft_logout"])
+
     @override_config({"user_directory": {"enabled": True, "search_all_users": True}})
     def test_locked_user_not_in_user_dir(self) -> None:
         # User is available in the user dir
@@ -3106,7 +3115,7 @@ class UserRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual("@user:test", channel.json_body["name"])
         self.assertTrue(channel.json_body["admin"])
 
-    def set_user_type(self, user_type: Optional[str]) -> None:
+    def set_user_type(self, user_type: str | None) -> None:
         # Set to user_type
         channel = self.make_request(
             "PUT",
@@ -3680,7 +3689,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
             self.other_user
         )
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -4128,7 +4137,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
             [media2] + sorted([media1, media3]), "safe_from_quarantine", "b"
         )
 
-    def _create_media_for_user(self, user_token: str, number_media: int) -> List[str]:
+    def _create_media_for_user(self, user_token: str, number_media: int) -> list[str]:
         """
         Create a number of media for a specific user
         Args:
@@ -4185,7 +4194,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
 
         return media_id
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that the expected user attributes are present in content
         Args:
             content: List that is checked for content
@@ -4202,9 +4211,9 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
 
     def _order_test(
         self,
-        expected_media_list: List[str],
-        order_by: Optional[str],
-        dir: Optional[str] = None,
+        expected_media_list: list[str],
+        order_by: str | None,
+        dir: str | None = None,
     ) -> None:
         """Request the list of media in a certain order. Assert that order is what
         we expect
@@ -5667,6 +5676,54 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                 if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
                     matched.append(event_id)
         self.assertEqual(len(matched), len(originals))
+
+    def test_use_admin_param_for_redactions(self) -> None:
+        """
+        Test that if the `use_admin` param is set to true, the admin user is used to issue
+        the redactions and that they succeed in a room where the admin user has sufficient
+        power to issue redactions
+        """
+
+        originals = []
+        join = self.helper.join(self.rm1, self.bad_user, tok=self.bad_user_tok)
+        originals.append(join["event_id"])
+        for i in range(15):
+            event = {"body": f"hello{i}", "msgtype": "m.text"}
+            res = self.helper.send_event(
+                self.rm1, "m.room.message", event, tok=self.bad_user_tok
+            )
+            originals.append(res["event_id"])
+
+        # redact messages
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": [self.rm1], "use_admin": True},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # messages are redacted, and redactions are issued by the admin user
+        filter = json.dumps({"types": [EventTypes.Redaction]})
+        channel = self.make_request(
+            "GET",
+            f"rooms/{self.rm1}/messages?filter={filter}&limit=50",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        matches = []
+        for event in channel.json_body["chunk"]:
+            for event_id in originals:
+                if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
+                    matches.append((event_id, event))
+        # we redacted 16 messages
+        self.assertEqual(len(matches), 16)
+
+        for redaction_tuple in matches:
+            redaction = redaction_tuple[1]
+            if redaction["sender"] != self.admin:
+                self.fail("Redaction was not issued by admin account")
 
 
 class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):

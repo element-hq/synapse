@@ -610,6 +610,61 @@ manhole_settings:
   ssh_pub_key_path: CONFDIR/id_rsa.pub
 ```
 ---
+### `http_proxy`
+
+*(string|null)* Proxy server to use for HTTP requests.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
+```
+---
+### `https_proxy`
+
+*(string|null)* Proxy server to use for HTTPS requests.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
+```
+---
+### `no_proxy_hosts`
+
+*(array)* List of hosts, IP addresses, or IP ranges in CIDR format which should not use the proxy. Synapse will directly connect to these hosts.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+no_proxy_hosts:
+- master.hostname.example.com
+- 10.1.0.0/16
+- 172.30.0.0/16
+```
+---
+### `matrix_authentication_service`
+
+*(object)* The `matrix_authentication_service` setting configures integration with [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service).
+
+This setting has the following sub-options:
+
+* `enabled` (boolean): Whether or not to enable the MAS integration. If this is set to `false`, Synapse will use its legacy internal authentication API. Defaults to `false`.
+
+* `endpoint` (string): The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted. Defaults to `"http://localhost:8080"`.
+
+* `secret` (string|null): A shared secret that will be used to authenticate requests from and to MAS.
+
+* `secret_path` (string|null): Alternative to `secret`, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
+
+Example configuration:
+```yaml
+matrix_authentication_service:
+  enabled: true
+  secret: someverysecuresecret
+  endpoint: http://localhost:8080
+```
+---
 ### `dummy_events_threshold`
 
 *(integer)* Forward extremities can build up in a room due to networking delays between homeservers. Once this happens in a large room, calculation of the state of that room can become quite expensive. To mitigate this, once the number of forward extremities reaches a given threshold, Synapse will send an `org.matrix.dummy_event` event, which will reduce the forward extremities in the room.
@@ -764,22 +819,23 @@ max_event_delay_duration: 24h
 ---
 ### `user_types`
 
-Configuration settings related to the user types feature.
+*(object)* Configuration settings related to the user types feature.
 
 This setting has the following sub-options:
-* `default_user_type`: The default user type to use for registering new users when no value has been specified.
-  Defaults to none.
-* `extra_user_types`: Array of additional user types to allow. These are treated as real users. Defaults to [].
+
+* `default_user_type` (string|null): The default user type to use for registering new users when no value has been specified. Defaults to none. Defaults to `null`.
+
+* `extra_user_types` (array): Array of additional user types to allow. These are treated as real users. Defaults to `[]`.
 
 Example configuration:
 ```yaml
 user_types:
-    default_user_type: "custom"
-    extra_user_types:
-      - "custom"
-      - "custom2"
+  default_user_type: custom
+  extra_user_types:
+  - custom
+  - custom2
 ```
-
+---
 ## Homeserver blocking
 
 Useful options for Synapse admins.
@@ -900,7 +956,7 @@ server_context: context
 ---
 ### `limit_remote_rooms`
 
-*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. Room complexity is an arbitrary measure based on factors such as the number of users in the room.
+*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. In Synapse, the complexity of a room is measured by the number of current state events in a room, divided by 500. "Current" here means the latest state, i.e. if a user joins, then leaves, then joins, that will count as 1 current `m.room.member` state event.
 
 This setting has the following sub-options:
 
@@ -1924,9 +1980,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_delayed_event_mgmt:
-  per_user:
-    per_second: 1.0
-    burst_count: 5.0
+  per_second: 1.0
+  burst_count: 5.0
 ```
 
 Example configuration:
@@ -1934,6 +1989,75 @@ Example configuration:
 rc_delayed_event_mgmt:
   per_second: 2.0
   burst_count: 20.0
+```
+---
+### `rc_reports`
+
+*(object)* Ratelimiting settings for reporting content.
+This is a ratelimiting option that ratelimits reports made by users about content they see.
+Setting this to a high value allows users to report content quickly, possibly in duplicate. This can result in higher database usage.
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_reports:
+  per_second: 1.0
+  burst_count: 5.0
+```
+
+Example configuration:
+```yaml
+rc_reports:
+  per_second: 2.0
+  burst_count: 20.0
+```
+---
+### `rc_room_creation`
+
+*(object)* Sets rate limits for how often users are able to create rooms.
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_room_creation:
+  per_second: 0.016
+  burst_count: 10.0
+```
+
+Example configuration:
+```yaml
+rc_room_creation:
+  per_second: 1.0
+  burst_count: 5.0
+```
+---
+### `rc_user_directory`
+
+*(object)* This option allows admins to ratelimit searches in the user directory.
+
+_Added in Synapse 1.145.0._
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_user_directory:
+  per_second: 0.016
+  burst_count: 200.0
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
@@ -1985,6 +2109,16 @@ enable_authenticated_media: false
 Example configuration:
 ```yaml
 enable_media_repo: false
+```
+---
+### `enable_local_media_storage`
+
+*(boolean)* Enable the local on-disk media storage provider. When disabled, media is stored only in configured `media_storage_providers` and temporary files are used for processing.
+**Warning:** If this option is set to `false` and no `media_storage_providers` are configured, all media requests will return 404 errors as there will be no storage backend available. Defaults to `true`.
+
+Example configuration:
+```yaml
+enable_local_media_storage: false
 ```
 ---
 ### `media_store_path`
@@ -2056,6 +2190,26 @@ Defaults to `"50M"`.
 Example configuration:
 ```yaml
 max_upload_size: 60M
+```
+---
+### `media_upload_limits`
+
+*(array)* A list of media upload limits defining how much data a given user can upload in a given time period.
+These limits are applied in addition to the `max_upload_size` limit above (which applies to individual uploads).
+
+An empty list means no limits are applied.
+
+These settings can be overridden using the `get_media_upload_limits_for_user` module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
+
+Defaults to `[]`.
+
+Example configuration:
+```yaml
+media_upload_limits:
+- time_period: 1h
+  max_size: 100M
+- time_period: 1w
+  max_size: 500M
 ```
 ---
 ### `max_image_pixels`
@@ -2312,6 +2466,21 @@ Example configuration:
 recaptcha_public_key: YOUR_PUBLIC_KEY
 ```
 ---
+### `recaptcha_public_key_path`
+
+*(string|null)* An alternative to [`recaptcha_public_key`](#recaptcha_public_key): allows the public key to be specified in an external file.
+
+The file should be a plain text file, containing only the public key. Synapse reads the public key from the given file once at startup.
+
+_Added in Synapse 1.135.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+recaptcha_public_key_path: /path/to/key/file
+```
+---
 ### `recaptcha_private_key`
 
 *(string|null)* This homeserver's ReCAPTCHA private key. Must be specified if [`enable_registration_captcha`](#enable_registration_captcha) is enabled. Defaults to `null`.
@@ -2319,6 +2488,21 @@ recaptcha_public_key: YOUR_PUBLIC_KEY
 Example configuration:
 ```yaml
 recaptcha_private_key: YOUR_PRIVATE_KEY
+```
+---
+### `recaptcha_private_key_path`
+
+*(string|null)* An alternative to [`recaptcha_private_key`](#recaptcha_private_key): allows the private key to be specified in an external file.
+
+The file should be a plain text file, containing only the private key. Synapse reads the private key from the given file once at startup.
+
+_Added in Synapse 1.135.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+recaptcha_private_key_path: /path/to/key/file
 ```
 ---
 ### `enable_registration_captcha`
@@ -2416,6 +2600,28 @@ turn_user_lifetime: 2h
 Example configuration:
 ```yaml
 turn_allow_guests: false
+```
+---
+### `matrix_rtc`
+
+*(object)* Options related to MatrixRTC. Defaults to `{}`.
+
+This setting has the following sub-options:
+
+* `transports` (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to `[]`.
+
+  Options for each entry include:
+
+  * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
+
+  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+
+Example configuration:
+```yaml
+matrix_rtc:
+  transports:
+  - type: livekit
+    livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```
 ---
 ## Registration
@@ -3638,7 +3844,7 @@ This setting has the following sub-options:
 
 * `localdb_enabled` (boolean): Set to false to disable authentication against the local password database. This is ignored if `enabled` is false, and is only useful if you have other `password_providers`. Defaults to `true`.
 
-* `pepper` (string|null): Set the value here to a secret random string for extra security. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
+* `pepper` (string|null): A secret random string that will be appended to user's passwords before they are hashed. This improves the security of short passwords. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
 
 * `policy` (object): Define and enforce a password policy, such as minimum lengths for passwords, etc. This is an implementation of MSC2000.
 
@@ -3733,7 +3939,11 @@ encryption_enabled_by_default_for_room_type: invite
 
 This setting has the following sub-options:
 
-* `enabled` (boolean): Defines whether users can search the user directory. If false then empty responses are returned to all queries. Defaults to `true`.
+* `enabled` (boolean): Defines whether users can search the user directory. If `false` then empty responses are returned to all queries.
+
+  *Warning: While the homeserver may determine which subset of users are searched, the Matrix specification requires homeservers to include (at minimum) users visible in public rooms and users sharing a room with the requester. Using `false` improves performance but violates this requirement.*
+
+  Defaults to `true`.
 
 * `search_all_users` (boolean): Defines whether to search all users visible to your homeserver at the time the search is performed. If set to true, will return all users known to the homeserver matching the search query. If false, search results will only contain users visible in public rooms and users sharing a room with the requester.
 
@@ -4016,7 +4226,7 @@ The default power levels for each preset are:
 "m.room.history_visibility": 100
 "m.room.canonical_alias": 50
 "m.room.avatar": 50
-"m.room.tombstone": 100
+"m.room.tombstone": 100 (150 if MSC4289 is used)
 "m.room.server_acl": 100
 "m.room.encryption": 100
 ```
@@ -4262,6 +4472,8 @@ This setting has the following sub-options:
 * `presence` (string): Name of a worker assigned to the `presence` stream.
 
 * `push_rules` (string): Name of a worker assigned to the `push_rules` stream.
+
+* `device_lists` (string): Name of a worker assigned to the `device_lists` stream.
 
 Example configuration:
 ```yaml
