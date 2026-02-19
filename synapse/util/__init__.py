@@ -76,6 +76,8 @@ def log_failure(
 
 # Version string with git info. Computed here once so that we don't invoke git multiple
 # times.
+#
+# TODO: Read from SYNAPSE_VERSION file if it exists
 SYNAPSE_VERSION = get_distribution_version_string("matrix-synapse", __file__)
 
 

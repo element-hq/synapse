@@ -192,10 +192,12 @@ main() {
       $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' complement-synapse-editable -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
 
     else
+      synapse_version_string="$(poetry run python -c 'from synapse.util import SYNAPSE_VERSION; print(SYNAPSE_VERSION)')"
 
       # Build the base Synapse image from the local checkout
       echo_if_github "::group::Build Docker image: matrixdotorg/synapse"
       $CONTAINER_RUNTIME build -t matrixdotorg/synapse \
+      --build-arg SYNAPSE_VERSION_STRING="$synapse_version_string" \
       --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
       --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
       -f "docker/Dockerfile" .

@@ -67,6 +67,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ###
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS builder
 
+# If specified, Synapse will use this as the version string in the app.
+#
+# This can be useful to capture the git info of the build as `.git/` won't be be
+# available in the Docker image for Synapse to generate from.
+ARG SYNAPSE_VERSION_STRING
+
 # This silences a warning as uv isn't able to do hardlinks between its cache
 # (mounted as --mount=type=cache) and the target directory.
 ENV UV_LINK_MODE=copy
@@ -98,6 +104,10 @@ COPY synapse /synapse/synapse/
 COPY rust /synapse/rust/
 # ... and what we need to `pip install`.
 COPY pyproject.toml README.rst build_rust.py Cargo.toml Cargo.lock /synapse/
+# Create a `SYNAPSE_VERSION` file if `SYNAPSE_VERSION_STRING` was specified
+RUN if [ -n "${SYNAPSE_VERSION_STRING}" ]; then \
+  echo ${SYNAPSE_VERSION_STRING} > /synapse/SYNAPSE_VERSION; \
+  fi
 
 # Repeat of earlier build argument declaration, as this is a new build stage.
 ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
