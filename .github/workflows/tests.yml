@@ -692,6 +692,9 @@ jobs:
           - arrangement: monolith
             database: Psycopg
 
+          - arrangement: workers
+            database: Psycopg
+
     steps:
       - name: Checkout synapse codebase
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

@@ -271,8 +271,12 @@ main() {
     export PASS_SYNAPSE_WORKER_TYPES="$WORKER_TYPES"
 
     # Workers can only use Postgres as a database.
-    export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
-
+    # A handy pattern for lower-casing all letters in a variable, `${variable,,}`
+    if [[ "${POSTGRES,,}" = "psycopg" ]]; then
+      export PASS_SYNAPSE_COMPLEMENT_DATABASE=psycopg
+    else
+      export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
+    fi
     # And provide some more configuration to complement.
 
     # It can take quite a while to spin up a worker-mode Synapse for the first
