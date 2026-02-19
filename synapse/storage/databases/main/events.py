@@ -3028,7 +3028,7 @@ class PersistEventsStore:
                     event.event_id,
                     event.internal_metadata.stream_ordering,
                     event.state_key,
-                    event.user_id,
+                    event.sender,
                     event.room_id,
                     event.membership,
                     non_null_str_or_none(event.content.get("displayname")),

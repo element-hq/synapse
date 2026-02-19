@@ -456,9 +456,7 @@ class InitialSyncHandler:
             if not self.hs.config.server.presence_enabled:
                 return []
 
-            states = await presence_handler.get_states(
-                [m.user_id for m in room_members]
-            )
+            states = await presence_handler.get_states([m.sender for m in room_members])
 
             return [
                 {

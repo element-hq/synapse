@@ -152,7 +152,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {"body": "t", "msgtype": "message"},
             },
             event,
@@ -173,7 +173,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {},
             },
             event,
@@ -191,7 +191,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Member,
-                "user_id": self.u_bob.to_string(),
+                "sender": self.u_bob.to_string(),
                 "content": {"membership": Membership.JOIN, "blue": "red"},
             },
             event,
@@ -212,7 +212,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Member,
-                "user_id": self.u_bob.to_string(),
+                "sender": self.u_bob.to_string(),
                 "content": {"membership": Membership.JOIN},
             },
             event,
@@ -328,7 +328,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {"body": "t", "msgtype": "message"},
             },
             event,
@@ -347,7 +347,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {},
             },
             event,
