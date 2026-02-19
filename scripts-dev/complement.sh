@@ -210,7 +210,7 @@ main() {
       echo_if_github "::endgroup::"
 
     fi
-  
+
     echo "Docker images built."
   else
     echo "Skipping Docker image build as requested."
@@ -271,8 +271,12 @@ main() {
     export PASS_SYNAPSE_WORKER_TYPES="$WORKER_TYPES"
 
     # Workers can only use Postgres as a database.
-    export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
-
+    # A handy pattern for lower-casing all letters in a variable, `${variable,,}`
+    if [[ "${POSTGRES,,}" = "psycopg" ]]; then
+      export PASS_SYNAPSE_COMPLEMENT_DATABASE=psycopg
+    else
+      export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
+    fi
     # And provide some more configuration to complement.
 
     # It can take quite a while to spin up a worker-mode Synapse for the first
@@ -281,7 +285,8 @@ main() {
     export COMPLEMENT_SPAWN_HS_TIMEOUT_SECS=120
   else
     export PASS_SYNAPSE_COMPLEMENT_USE_WORKERS=
-    if [[ "$POSTGRES" = "psycopg" ]]; then
+    # A handy pattern for lower-casing all letters in a variable, `${variable,,}`
+    if [[ "${POSTGRES,,}" = "psycopg" ]]; then
       export PASS_SYNAPSE_COMPLEMENT_DATABASE=psycopg
     elif [[ -n "$POSTGRES" ]]; then
       export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
@@ -319,7 +324,7 @@ main() {
     echo "Skipping Complement run as requested."
     return 0
   fi
-  
+
   # Run the tests!
   echo "Running Complement with ${test_args[@]} $@ ${test_packages[@]}"
   cd "$COMPLEMENT_DIR"

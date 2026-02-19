@@ -689,6 +689,9 @@ jobs:
           - arrangement: workers
             database: Postgres
 
+          - arrangement: monolith
+            database: Psycopg
+
           - arrangement: workers
             database: Psycopg
 
