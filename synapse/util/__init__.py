@@ -75,13 +75,15 @@ def log_failure(
     return None
 
 
-# Version string with git info. Computed here once so that we don't invoke git multiple
-# times.
-#
-# TODO: Read from SYNAPSE_VERSION file if it exists
 SYNAPSE_VERSION = os.getenv(
     "SYNAPSE_VERSION_STRING"
 ) or get_distribution_version_string("matrix-synapse", __file__)
+"""
+Version string with git info.
+
+This can be overriden via `SYNAPSE_VERSION_STRING` or is computed here once so that we
+don't invoke git multiple times.
+"""
 
 
 class ExceptionBundle(Exception):
