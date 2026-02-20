@@ -106,7 +106,7 @@ COPY rust /synapse/rust/
 COPY pyproject.toml README.rst build_rust.py Cargo.toml Cargo.lock /synapse/
 # Create a `SYNAPSE_VERSION` file if `SYNAPSE_VERSION_STRING` was specified
 RUN if [ -n "${SYNAPSE_VERSION_STRING}" ]; then \
-  echo ${SYNAPSE_VERSION_STRING} > /synapse/SYNAPSE_VERSION; \
+  echo ${SYNAPSE_VERSION_STRING} > /synapse/synapse/SYNAPSE_VERSION; \
   fi
 
 # Repeat of earlier build argument declaration, as this is a new build stage.

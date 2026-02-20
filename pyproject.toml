@@ -416,7 +416,7 @@ manifest-path = "rust/Cargo.toml"
 module-name = "synapse.synapse_rust"
 python-source = "."
 include = [
-    { path = "SYNAPSE_VERSION", format = [
+    { path = "synapse/SYNAPSE_VERSION", format = [
         "sdist",
         "wheel",
     ] },
