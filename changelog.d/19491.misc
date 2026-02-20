@@ -1,0 +1,1 @@
+Remove the optional `systemd-python` dependency and the `systemd` extra on the `synapse` package.

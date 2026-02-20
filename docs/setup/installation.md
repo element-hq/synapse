@@ -229,6 +229,11 @@ pip install --upgrade setuptools
 pip install matrix-synapse
 ```
 
+If you want to use a logging configuration that references
+`systemd.journal.JournalHandler` (for example `contrib/systemd/log_config.yaml`),
+you must install `systemd-python` separately in the same environment.
+Synapse no longer provides a `matrix-synapse[systemd]` extra.
+
 This will download Synapse from [PyPI](https://pypi.org/project/matrix-synapse)
 and install it, along with the python libraries it uses, into a virtual environment
 under `~/synapse/env`.  Feel free to pick a different directory if you
