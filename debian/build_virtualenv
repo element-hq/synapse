@@ -42,7 +42,7 @@ poetry export \
     -o exported_requirements.txt
 # Keep journald logging support in the packaged virtualenv when using
 # systemd.journal.JournalHandler in /etc/matrix-synapse/log.yaml.
-echo "systemd-python>=231" >> exported_requirements.txt
+echo "systemd-python==235 --hash=sha256:4e57f39797fd5d9e2d22b8806a252d7c0106c936039d1e71c8c6b8008e695c0a" >> exported_requirements.txt
 deactivate
 rm -rf "$TEMP_VENV"
 
