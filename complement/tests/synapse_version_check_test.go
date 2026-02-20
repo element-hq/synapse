@@ -32,7 +32,7 @@ func TestSynapseVersion(t *testing.T) {
 	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
 
-	unauthedClient := deployment.UnauthenticatedClient(t, "hs1");
+	unauthedClient := deployment.UnauthenticatedClient(t, "hs1")
 
 	// Sanity check that the version of Synapse used in the `COMPLEMENT_BASE_IMAGE`
 	// matches the same git commit we have checked out. This ensures that the image being
@@ -61,12 +61,12 @@ func TestSynapseVersion(t *testing.T) {
 		)
 
 		// Assemble our checkout details into a `SynapseVersion` we can easily compare with
-		checkoutSynapseVersion := SynapseVersion {
+		checkoutSynapseVersion := SynapseVersion{
 			Version: pyprojectVersion,
-			Branch: gitBranch,
-			Tag: gitTag,
-			Commit: gitCommit,
-			Dirty: gitDirty,
+			Branch:  gitBranch,
+			Tag:     gitTag,
+			Commit:  gitCommit,
+			Dirty:   gitDirty,
 		}
 
 		// Find the version details of the Synapse instance deployed from the Docker image
@@ -78,7 +78,10 @@ func TestSynapseVersion(t *testing.T) {
 			},
 		})
 		rawSynapseVersionString := gjson.GetBytes(body, "server.version").Str
-		t.Logf("Synapse version string from federation version endpoint: %s", rawSynapseVersionString)
+		t.Logf(
+			"Synapse version string from federation version endpoint: %s",
+			rawSynapseVersionString,
+		)
 		synapseVersion, err := parseSynapseVersionString(rawSynapseVersionString)
 		if err != nil {
 			t.Fatalf("Failed to parse Synapse version string: %v", err)
@@ -87,17 +90,18 @@ func TestSynapseVersion(t *testing.T) {
 		// Compare
 		if !reflect.DeepEqual(synapseVersion, checkoutSynapseVersion) {
 			t.Fatalf(
-				"Synapse version in the checkout doesn't match the Synapse version that Complement is running. " +
-				"From the Checkout: %+v, From the Complement image: %+v\n\n" +
-				"If this test fails, it probably means that Complement is using an image that " +
-				"doesn't encompass the changes you have checked out (unexpected). We want to yell " +
-				"loudly and point out what's wrong instead of silently letting your PR's pass " +
-				"without actually being tested.", checkoutSynapseVersion, synapseVersion,
+				"Synapse version in the checkout doesn't match the Synapse version that Complement is running. "+
+					"From the Checkout: %+v, From the Complement image: %+v\n\n"+
+					"If this test fails, it probably means that Complement is using an image that "+
+					"doesn't encompass the changes you have checked out (unexpected). We want to yell "+
+					"loudly and point out what's wrong instead of silently letting your PR's pass "+
+					"without actually being tested.",
+				checkoutSynapseVersion,
+				synapseVersion,
 			)
 		}
 	})
 }
-
 
 // Helper function to get `version` from pyproject.toml
 func getVersionFromPyproject(t *testing.T) string {
@@ -139,7 +143,11 @@ func runGitCommand(t *testing.T, commandPieces []string) string {
 	cmd := exec.Command(commandPieces[0], commandPieces[1:]...)
 	output, err := cmd.Output()
 	if err != nil {
-		t.Logf("runGitCommand: failed to run command (%s) (this may be expected depending on the command): %v", strings.Join(commandPieces, " "), err)
+		t.Logf(
+			"runGitCommand: failed to run command (%s) (this may be expected depending on the command): %v",
+			strings.Join(commandPieces, " "),
+			err,
+		)
 		return ""
 	}
 
@@ -215,11 +223,11 @@ func parseSynapseVersionString(
 	}
 
 	return &SynapseVersion{
-		Version:      version,
-		Branch: branch,
-		Tag: tag,
-		Commit: commit,
-		Dirty: dirty,
+		Version: version,
+		Branch:  branch,
+		Tag:     tag,
+		Commit:  commit,
+		Dirty:   dirty,
 	}, nil
 }
 
@@ -276,11 +284,20 @@ func TestParseSynapseVersionString(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			got, err := parseSynapseVersionString(testCase.input)
 			if err != nil {
-				t.Errorf("parseSynapseVersionString(\"%s\") failed to parse input, error: %v", testCase.input, err)
+				t.Errorf(
+					"parseSynapseVersionString(\"%s\") failed to parse input, error: %v",
+					testCase.input,
+					err,
+				)
 			}
 
 			if !reflect.DeepEqual(got, testCase.expected) {
-				t.Errorf("parseSynapseVersionString(\"%s\") got %v, want %v", testCase.input, got, testCase.expected)
+				t.Errorf(
+					"parseSynapseVersionString(\"%s\") got %v, want %v",
+					testCase.input,
+					got,
+					testCase.expected,
+				)
 			}
 		})
 	}
