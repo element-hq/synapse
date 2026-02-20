@@ -104,10 +104,6 @@ COPY synapse /synapse/synapse/
 COPY rust /synapse/rust/
 # ... and what we need to `pip install`.
 COPY pyproject.toml README.rst build_rust.py Cargo.toml Cargo.lock /synapse/
-# Create a `SYNAPSE_VERSION` file if `SYNAPSE_VERSION_STRING` was specified
-RUN if [ -n "${SYNAPSE_VERSION_STRING}" ]; then \
-  echo ${SYNAPSE_VERSION_STRING} > /synapse/synapse/SYNAPSE_VERSION; \
-  fi
 
 # Repeat of earlier build argument declaration, as this is a new build stage.
 ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
