@@ -80,6 +80,14 @@ def log_failure(
 # TODO: Read from SYNAPSE_VERSION file if it exists
 SYNAPSE_VERSION = get_distribution_version_string("matrix-synapse", __file__)
 
+import importlib.resources as importlib_resources
+
+try:
+    version_text = importlib_resources.read_text("synapse", "SYNAPSE_VERSION")
+    print(f"asdf {version_text}")
+except FileNotFoundError:
+    pass
+
 
 class ExceptionBundle(Exception):
     # A poor stand-in for something like Python 3.11's ExceptionGroup.
