@@ -1,1 +1,0 @@
-Remove `systemd-python` from the package dependencies, but keep it installed in the debian package.
