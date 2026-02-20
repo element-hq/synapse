@@ -19,6 +19,7 @@
 #
 #
 
+import os
 import collections.abc
 import logging
 import typing
@@ -78,7 +79,9 @@ def log_failure(
 # times.
 #
 # TODO: Read from SYNAPSE_VERSION file if it exists
-SYNAPSE_VERSION = get_distribution_version_string("matrix-synapse", __file__)
+SYNAPSE_VERSION = os.getenv(
+    "SYNAPSE_VERSION_STRING"
+) or get_distribution_version_string("matrix-synapse", __file__)
 
 
 class ExceptionBundle(Exception):

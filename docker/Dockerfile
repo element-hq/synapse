@@ -67,12 +67,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ###
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS builder
 
-# If specified, Synapse will use this as the version string in the app.
-#
-# This can be useful to capture the git info of the build as `.git/` won't be be
-# available in the Docker image for Synapse to generate from.
-ARG SYNAPSE_VERSION_STRING
-
 # This silences a warning as uv isn't able to do hardlinks between its cache
 # (mounted as --mount=type=cache) and the target directory.
 ENV UV_LINK_MODE=copy
@@ -176,6 +170,14 @@ RUN \
 FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
 
 ARG TARGETARCH
+
+# If specified, Synapse will use this as the version string in the app.
+#
+# This can be useful to capture the git info of the build as `.git/` won't be be
+# available in the Docker image for Synapse to generate from.
+ARG SYNAPSE_VERSION_STRING
+# Pass it through to Synapse as an environment variable.
+ENV SYNAPSE_VERSION_STRING=${SYNAPSE_VERSION_STRING}
 
 LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
 LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'
