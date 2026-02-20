@@ -256,55 +256,55 @@ generate-setup-file = true
 
 # Dependencies used for developing Synapse itself.
 #
-# Hold off on migrating these to `dev-dependencies` (PEP 735) for now until
-# Poetry 2.2.0+, pip 25.1+ are more widely available.
-[tool.poetry.group.dev.dependencies]
 # We pin development dependencies in poetry.lock so that our tests don't start
 # failing on new releases. Keeping lower bounds loose here means that dependabot
 # can bump versions without having to update the content-hash in the lockfile.
 # This helps prevents merge conflicts when running a batch of dependabot updates.
-ruff = "0.14.6"
+[dependency-groups]
+dev = [
+    "ruff==0.14.6",
 
-# Typechecking
-lxml-stubs = ">=0.4.0"
-mypy = "*"
-mypy-zope = "*"
-types-bleach = ">=4.1.0"
-types-jsonschema = ">=3.2.0"
-types-netaddr = ">=0.8.0.6"
-types-opentracing = ">=2.4.2"
-types-Pillow = ">=8.3.4"
-types-psycopg2 = ">=2.9.9"
-types-pyOpenSSL = ">=20.0.7"
-types-PyYAML = ">=5.4.10"
-types-requests = ">=2.26.0"
-types-setuptools = ">=57.4.0"
+    # Typechecking
+    "lxml-stubs>=0.4.0",
+    "mypy",
+    "mypy-zope",
+    "types-bleach>=4.1.0",
+    "types-jsonschema>=3.2.0",
+    "types-netaddr>=0.8.0.6",
+    "types-opentracing>=2.4.2",
+    "types-Pillow>=8.3.4",
+    "types-psycopg2>=2.9.9",
+    "types-pyOpenSSL>=20.0.7",
+    "types-PyYAML>=5.4.10",
+    "types-requests>=2.26.0",
+    "types-setuptools>=57.4.0",
 
-# Dependencies which are exclusively required by unit test code. This is
-# NOT a list of all modules that are necessary to run the unit tests.
-# Tests assume that all optional dependencies are installed.
-#
-# If this is updated, don't forget to update the equivalent lines in
-# project.optional-dependencies.test.
-parameterized = ">=0.9.0"
-idna = ">=3.3"
+    # Dependencies which are exclusively required by unit test code. This is
+    # NOT a list of all modules that are necessary to run the unit tests.
+    # Tests assume that all optional dependencies are installed.
+    #
+    # If this is updated, don't forget to update the equivalent lines in
+    # project.optional-dependencies.test.
+    "parameterized>=0.9.0",
+    "idna>=3.3",
 
-# The following are used by the release script
-click = ">=8.1.3"
-# GitPython was == 3.1.14; bumped to 3.1.20, the first release with type hints.
-GitPython = ">=3.1.20"
-markdown-it-py = ">=3.0.0"
-pygithub = ">=1.59"
-# The following are executed as commands by the release script.
-twine = "*"
-# Towncrier min version comes from https://github.com/matrix-org/synapse/pull/3425. Rationale unclear.
-towncrier = ">=18.6.0rc1"
+    # The following are used by the release script
+    "click>=8.1.3",
+    # GitPython was == 3.1.14; bumped to 3.1.20, the first release with type hints.
+    "GitPython>=3.1.20",
+    "markdown-it-py>=3.0.0",
+    "pygithub>=1.59",
+    # The following are executed as commands by the release script.
+    "twine",
+    # Towncrier min version comes from https://github.com/matrix-org/synapse/pull/3425. Rationale unclear.
+    "towncrier>=18.6.0rc1",
 
-# Used for checking the Poetry lockfile
-tomli = ">=1.2.3"
+    # Used for checking the Poetry lockfile
+    "tomli>=1.2.3",
 
-# Used for checking the schema delta files
-sqlglot = ">=28.0.0"
+    # Used for checking the schema delta files
+    "sqlglot>=28.0.0",
+]
 
 [tool.towncrier]
     package = "synapse"
