@@ -49,6 +49,8 @@ from pymacaroons.exceptions import (
     MacaroonInvalidSignatureException,
 )
 
+from twisted.internet import defer
+from twisted.internet.defer import Deferred
 from twisted.web.client import readBody
 from twisted.web.http_headers import Headers
 
@@ -60,6 +62,7 @@ from synapse.http.server import finish_request
 from synapse.http.servlet import parse_string
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.module_api import ModuleApi
 from synapse.types import JsonDict, UserID, map_username_to_mxid_localpart
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
@@ -123,6 +126,8 @@ class OidcHandler:
 
     def __init__(self, hs: "HomeServer"):
         self._sso_handler = hs.get_sso_handler()
+        # Needed for wrap_as_background_process
+        self.hs = hs
 
         provider_confs = hs.config.oidc.oidc_providers
         # we should not have been instantiated if there is no configured provider.
@@ -134,20 +139,44 @@ class OidcHandler:
             for p in provider_confs
         }
 
-    async def load_metadata(self) -> None:
-        """Validate the config and load the metadata from the remote endpoint.
+    @wrap_as_background_process("preload_oidc_metadata")
+    async def _preload_metadata_one_provider(
+        self, idp_id: str, p: "OidcProvider"
+    ) -> None:
+        """Attempt to preload the metadata from a single OIDC provider's remote endpoint
+        in the background.
 
-        Called at startup to ensure we have everything we need.
+        Will not raise exceptions, but will log at CRITICAL if an OIDC provider is broken.
         """
+
+        logger.info("Preloading OIDC provider %r", idp_id)
+        try:
+            await p.load_metadata()
+            if not p._uses_userinfo:
+                await p.load_jwks()
+        except Exception:
+            logger.critical(
+                "Error while preloading OIDC provider %r", idp_id, exc_info=True
+            )
+
+    def preload_metadata(self) -> "Deferred[list[tuple[bool, None]]]":
+        """Attempt to preload the metadata from all the OIDC providers' remote endpoints
+        in the background.
+
+        Will not raise exceptions, but will log at CRITICAL if an OIDC provider is broken.
+
+        Can be **optionally** awaited in which case it will resolve when all
+        preloads are finished.
+        """
+
+        to_wait = []
         for idp_id, p in self._providers.items():
-            try:
-                await p.load_metadata()
-                if not p._uses_userinfo:
-                    await p.load_jwks()
-            except Exception as e:
-                raise Exception(
-                    "Error while initialising OIDC provider %r" % (idp_id,)
-                ) from e
+            to_wait.append(self._preload_metadata_one_provider(idp_id, p))
+
+        return defer.DeferredList(
+            to_wait,
+            consumeErrors=True,
+        )
 
     async def handle_oidc_callback(self, request: SynapseRequest) -> None:
         """Handle an incoming request to /_synapse/client/oidc/callback
