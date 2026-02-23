@@ -425,7 +425,8 @@ class TransportLayerClient:
         path = _create_v2_path("/send_join/%s/%s", room_id, event_id)
         query_params: dict[str, str] = {}
         # lazy-load state on join
-        query_params["omit_members"] = "true" if omit_members else "false"
+        # NOTE: fast joins are busted so we'll just ignore them here
+        #query_params["omit_members"] = "true" if omit_members else "false"
 
         return await self.client.put_json(
             destination=destination,
