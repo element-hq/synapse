@@ -250,7 +250,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             sticky_duration = ev.sticky_duration()
             if sticky_duration is None:
                 continue
-            # Calculate the end time as start_time + effecitve sticky duration
+            # Calculate the end time as start_time + effective sticky duration
             expires_at = min(ev.origin_server_ts, now_ms) + sticky_duration.as_millis()
             # Filter out already expired sticky events
             if expires_at <= now_ms:
