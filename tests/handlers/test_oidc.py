@@ -29,6 +29,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.handlers.sso import MappingException
 from synapse.http.site import SynapseRequest
+from synapse.logging.context import make_deferred_yieldable
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
@@ -44,7 +45,7 @@ try:
     from authlib.oidc.core import UserInfo
     from authlib.oidc.discovery import OpenIDProviderMetadata
 
-    from synapse.handlers.oidc import Token, UserAttributeDict
+    from synapse.handlers.oidc import OidcMetadataError, Token, UserAttributeDict
 
     HAS_OIDC = True
 except ImportError:
@@ -263,6 +264,29 @@ class OidcHandlerTestCase(HomeserverTestCase):
         self.reset_mocks()
         self.get_success(self.provider.load_metadata())
         self.fake_server.get_metadata_handler.assert_not_called()
+
+    @override_config({"oidc_config": {**DEFAULT_CONFIG, "discover": True}})
+    def test_startup_metadata_preload_failure_is_logged(self) -> None:
+        """
+        The metadata preload on startup causes logs to be emitted, but no
+        exceptions.
+        """
+        with self.fake_server.buggy_endpoint(metadata=True):
+            with self.assertLogs("synapse.handlers.oidc", level="CRITICAL") as logs:
+                self.get_success(
+                    make_deferred_yieldable(self.handler.preload_metadata())
+                )
+
+        self.assertIn(
+            "CRITICAL:synapse.handlers.oidc:Error while preloading OIDC provider 'oidc'. Login may be broken!",
+            [line for record in logs.output for line in record.split("\n")],
+        )
+
+        # Even though the preload failed, if we try to load the metadata later,
+        # the attempt still goes through.
+        self.fake_server.get_metadata_handler.assert_not_called()
+        self.get_success(self.provider.load_metadata())
+        self.fake_server.get_metadata_handler.assert_called_once()
 
     @override_config({"oidc_config": {**EXPLICIT_ENDPOINT_CONFIG, "discover": True}})
     def test_discovery_with_explicit_config(self) -> None:
