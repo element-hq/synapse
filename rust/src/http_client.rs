@@ -16,6 +16,7 @@ use std::{collections::HashMap, future::Future, sync::OnceLock};
 
 use anyhow::Context;
 use futures::TryStreamExt;
+use http::header;
 use once_cell::sync::OnceCell;
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 use reqwest::RequestBuilder;
@@ -235,8 +236,37 @@ impl HttpClient {
 
             let status = response.status();
 
+            // Find the expected `Content-Length` so we can pre-allocate the buffer
+            // necessary to read the response.
+            let content_length = {
+                let content_length = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_LENGTH)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|s| s.parse::<usize>().ok());
+
+                // Sanity check that the request isn't too large from the information
+                // they told us (may be inaccurate so we also check below as we actually
+                // read the bytes)
+                if let Some(content_length_bytes) = content_length {
+                    if content_length_bytes > response_limit {
+                        Err(anyhow::anyhow!(
+                            "Response size (defined by `Content-Length`) too large"
+                        ))?;
+                    }
+                }
+
+                content_length
+            };
+
             let mut stream = response.bytes_stream();
-            let mut buffer = Vec::new();
+            // Pre-allocate the buffer based on the expected `Content-Length`
+            let mut buffer = Vec::with_capacity(
+                content_length
+                    // Default to pre-allocating nothing when the request doesn't have a
+                    // `Content-Length` header
+                    .unwrap_or(0),
+            );
             while let Some(chunk) = stream.try_next().await.context("reading body")? {
                 if buffer.len() + chunk.len() > response_limit {
                     Err(anyhow::anyhow!("Response size too large"))?;
