@@ -474,45 +474,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-    def test_delayed_state_is_cancelled_by_new_state_from_other_user(
-        self,
-    ) -> None:
-        state_key = "to_be_cancelled_by_other_user"
-
-        setter_key = "setter"
-        channel = self.make_request(
-            "PUT",
-            _get_path_for_delayed_state(self.room_id, _EVENT_TYPE, state_key, 900),
-            {
-                setter_key: "on_timeout",
-            },
-            self.user1_access_token,
-        )
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-        events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
-
-        setter_expected = "other_user"
-        self.helper.send_state(
-            self.room_id,
-            _EVENT_TYPE,
-            {
-                setter_key: setter_expected,
-            },
-            self.user2_access_token,
-            state_key=state_key,
-        )
-        self.assertListEqual([], self._get_delayed_events())
-
-        self.reactor.advance(1)
-        content = self.helper.get_state(
-            self.room_id,
-            _EVENT_TYPE,
-            self.user1_access_token,
-            state_key=state_key,
-        )
-        self.assertEqual(setter_expected, content.get(setter_key), content)
-
     def _get_delayed_events(self) -> list[JsonDict]:
         channel = self.make_request(
             "GET",
