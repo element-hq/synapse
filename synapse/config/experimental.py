@@ -385,9 +385,6 @@ class ExperimentalConfig(Config):
         # MSC3814 (dehydrated devices with SSSS)
         self.msc3814_enabled: bool = experimental.get("msc3814_enabled", False)
 
-        # MSC3244 (room version capabilities)
-        self.msc3244_enabled: bool = experimental.get("msc3244_enabled", True)
-
         # MSC3266 (room summary api)
         self.msc3266_enabled: bool = experimental.get("msc3266_enabled", False)
 
@@ -582,3 +579,9 @@ class ExperimentalConfig(Config):
         # MSC4306: Thread Subscriptions
         # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
+
+        # MSC4354: Sticky Events
+        # Tracked in: https://github.com/element-hq/synapse/issues/19409
+        # Note that sticky events persisted before this feature is enabled will not be
+        # considered sticky by the local homeserver.
+        self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
