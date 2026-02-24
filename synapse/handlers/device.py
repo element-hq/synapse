@@ -333,6 +333,8 @@ class DeviceHandler:
                 },
             )
 
+            logger.info("Deleting device %r for %r", device_id, user_id)
+
         await self._auth_handler.delete_access_tokens_for_devices(
             user_id, device_ids=device_ids
         )
