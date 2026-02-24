@@ -290,6 +290,8 @@ class DeviceHandler:
             user_id: The user to delete devices from.
             device_ids: The list of device IDs to delete
         """
+        logger.info("Deleting devices %r for %r", list(device_ids), user_id)
+
         to_device_stream_id = self._event_sources.get_current_token().to_device_key
 
         try:
@@ -332,8 +334,6 @@ class DeviceHandler:
                     "up_to_stream_id": to_device_stream_id,
                 },
             )
-
-            logger.info("Deleting device %r for %r", device_id, user_id)
 
         await self._auth_handler.delete_access_tokens_for_devices(
             user_id, device_ids=device_ids
