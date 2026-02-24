@@ -16,7 +16,6 @@ use std::{collections::HashMap, future::Future, sync::OnceLock};
 
 use anyhow::Context;
 use futures::TryStreamExt;
-use http::header;
 use once_cell::sync::OnceCell;
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 use reqwest::RequestBuilder;
