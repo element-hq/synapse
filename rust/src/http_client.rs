@@ -171,15 +171,27 @@ struct HttpClient {
 #[pymethods]
 impl HttpClient {
     #[new]
-    pub fn py_new(reactor: Bound<PyAny>, user_agent: &str) -> PyResult<HttpClient> {
+    #[pyo3(signature = (reactor, user_agent, http2_only = false))]
+    pub fn py_new(
+        reactor: Bound<PyAny>,
+        user_agent: &str,
+        http2_only: bool,
+    ) -> PyResult<HttpClient> {
         // Make sure the runtime gets installed
         let _ = runtime(&reactor)?;
 
+        let mut builder = reqwest::Client::builder().user_agent(user_agent);
+
+        if http2_only {
+            // Create the client with 'HTTP/2 prior knowledge' enabled, which
+            // means it will always use HTTP/2 for unencrypted connections
+            builder = builder.http2_prior_knowledge();
+        }
+
+        let client = builder.build().context("building reqwest client")?;
+
         Ok(HttpClient {
-            client: reqwest::Client::builder()
-                .user_agent(user_agent)
-                .build()
-                .context("building reqwest client")?,
+            client,
             reactor: reactor.unbind(),
         })
     }
