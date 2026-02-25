@@ -21,6 +21,7 @@ from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.rest import admin
 from synapse.rest.client import login, rendezvous
 from synapse.server import HomeServer
@@ -29,7 +30,6 @@ from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import checked_cast, override_config
-from tests.utils import HAS_AUTHLIB
 
 rz_endpoint = "/_matrix/client/unstable/io.element.msc4388/rendezvous"
 
@@ -53,9 +53,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         """
         This isn't a very elegant way to mock the OAuth API, but it works for our purposes.
         """
-
-        # Import this here so that we've checked that authlib is available.
-        from synapse.api.auth.mas import MasDelegatedAuth
 
         self.auth = checked_cast(MasDelegatedAuth, self.hs.get_auth())
 
@@ -137,7 +134,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         channel = self.make_request("POST", rz_endpoint, {}, access_token=None)
         self.assertEqual(channel.code, 404)
 
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
         {
             "disable_registration": True,
@@ -247,7 +243,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
 
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
         {
             "disable_registration": True,
@@ -351,7 +346,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
 
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
         {
             "disable_registration": True,
@@ -399,7 +393,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 404)
 
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
         {
             "disable_registration": True,
@@ -471,7 +464,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 404)
 
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
         {
             "disable_registration": True,
@@ -530,7 +522,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 404)
 
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
         {
             "disable_registration": True,
@@ -585,7 +576,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             self.assertEqual(channel.code, 400)
             self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
 
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
         {
             "disable_registration": True,
@@ -637,7 +627,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 413)
         self.assertEqual(channel.json_body["errcode"], "M_TOO_LARGE")
 
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @parameterized.expand(
         [
             ("Sec-Fetch-Dest", "document"),
@@ -700,7 +689,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
 
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
         {
             "disable_registration": True,
