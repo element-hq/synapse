@@ -77,6 +77,7 @@ from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+from synapse.util.cancellation import cancellable
 from synapse.util.metrics import Measure
 from synapse.visibility import filter_and_transform_events_for_client
 
@@ -367,6 +368,7 @@ class SyncHandler:
         logger.debug("Returning sync response for %s", user_id)
         return res
 
+    @cancellable
     async def _wait_for_sync_for_user(
         self,
         sync_config: SyncConfig,
