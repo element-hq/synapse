@@ -57,6 +57,7 @@ from synapse.logging.context import (
     run_coroutine_in_background,
     run_in_background,
 )
+from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -122,6 +123,11 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
             for observer in observers:
                 try:
                     observer.callback(r)
+                except defer.CancelledError:
+                    # We do not want to propagate cancellations to the original
+                    # deferred, or to other observers, so we can just ignore
+                    # this.
+                    pass
                 except Exception as e:
                     logger.exception(
                         "%r threw an exception on .callback(%r), ignoring...",
@@ -145,6 +151,11 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
                 f.value.__failure__ = f
                 try:
                     observer.errback(f)
+                except defer.CancelledError:
+                    # We do not want to propagate cancellations to the original
+                    # deferred, or to other observers, so we can just ignore
+                    # this.
+                    pass
                 except Exception as e:
                     logger.exception(
                         "%r threw an exception on .errback(%r), ignoring...",
@@ -160,6 +171,7 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
 
         deferred.addCallbacks(callback, errback)
 
+    @cancellable
     def observe(self) -> "defer.Deferred[_T]":
         """Observe the underlying deferred.
 
@@ -169,7 +181,7 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
         """
         if not self._result:
             assert isinstance(self._observers, list)
-            d: "defer.Deferred[_T]" = defer.Deferred()
+            d: "defer.Deferred[_T]" = defer.Deferred(canceller=self._remove_observer)
             self._observers.append(d)
             return d
         elif self._result[0]:
@@ -203,6 +215,28 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
             self._result,
             self._deferred,
         )
+
+    def _remove_observer(self, observer: "defer.Deferred[_T]") -> None:
+        """Removes an observer from the list of observers.
+
+        This is used to stop the observer being resolved when the underlying
+        deferred is resolved, for example when the observer is cancelled.
+        """
+        if self._result is not None:
+            # The underlying deferred has already resolved, so the observer has
+            # already been resolved. Nothing to do.
+            return
+
+        assert isinstance(self._observers, list)
+        try:
+            self._observers.remove(observer)
+        except ValueError:
+            # The observer was not in the list. This can happen if the underlying
+            # deferred resolves at around the same time as we try to remove the
+            # observer. In this case, it's possible that we tried to remove the
+            # observer just after it was added to the list, but before it was
+            # resolved and removed from the list by the callback/errback above.
+            pass
 
 
 T = TypeVar("T")
