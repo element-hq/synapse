@@ -162,7 +162,7 @@ cache-memory = ["pympler>=1.0"]
 # `dependency-groups.dev` below.
 test = ["parameterized>=0.9.0", "idna>=3.3"]
 # Webpush support
-#webpush = ["pywebpush>=2.3.0", "py-vapid>=1.9.4"]
+webpush = ["pywebpush>=2.3.0", "py-vapid>=1.9.4"]
 
 # The duplication here is awful.
 #
@@ -195,7 +195,7 @@ all = [
     # 1.0 added support for python 3.10, our current minimum supported python version
     "pympler>=1.0",
     # webpush
-    #"pywebpush>=2.3.0", "py-vapid>=1.9.4",
+    "pywebpush>=2.3.0", "py-vapid>=1.9.4",
     # omitted:
     #   - test: it's useful to have this separate from dev deps in the olddeps job
     #   - systemd: this is a system-based requirement
