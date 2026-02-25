@@ -315,16 +315,6 @@ impl MSC4388RendezvousHandler {
 
         let sequence_token: String = put_request.sequence_token;
 
-        if sequence_token.is_empty() {
-            return Err(SynapseError::new(
-                StatusCode::BAD_REQUEST,
-                "Missing 'sequence_token' field in JSON body".to_owned(),
-                "M_INVALID_PARAM",
-                None,
-                None,
-            ));
-        }
-
         let data: String = put_request.data;
 
         self.check_data_length(&data)?;
