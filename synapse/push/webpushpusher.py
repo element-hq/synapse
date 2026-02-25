@@ -111,11 +111,12 @@ class WebPushPusher(HttpPusher):
         topic = None
         room_id = content.get("room_id")
         if room_id and content.get("only_last_per_room") is True:
-            # ask for a 22 byte hash, so the base64 of it is 32,
-            # the limit webpush allows for the topic
+            # Ask for a 22-byte hash, so that when base64 the value, it ends up as 32-characters,
+            # which is the limit that webpush allows for the `topic`
             topic = urlsafe_b64encode(
                 blake2s(room_id.encode(), digest_size=22).digest()
             )
+            assert len(topic) == 32, "The max topic length that webpush allows is 32 characters"
 
         subscription_info = {
             "endpoint": self.endpoint,
@@ -199,7 +200,7 @@ class WebPushPusher(HttpPusher):
         Logs and determines the outcome of the response
 
         Returns:
-            Boolean whether the puskey should be rejected
+            Boolean whether the puskey should be rejected. True if rejected, False if allowed
         """
         ttl_response_headers = response.headers.getRawHeaders(b"TTL")
         if ttl_response_headers:

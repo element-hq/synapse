@@ -375,7 +375,7 @@ class MSC3866Config:
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)
 class MSC4174Config:
-    """Configuration for MSC4174"""
+    """Configuration for MSC4174: webpush push kind"""
 
     enabled: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool))
 

@@ -44,7 +44,7 @@ any properties set in it will be present in the push messages you receive,
 so it can be used to pass identifiers specific to your client
 (like which account the notification is for).
 
-### events_only
+### `events_only`
 
 As of the time of writing, all webpush-supporting browsers require you to set
 `userVisibleOnly: true` when calling (`pushManager.subscribe`)
@@ -58,7 +58,7 @@ to an event. With `events_only: true` in the pusher data, synapse won't forward
 any push message without a event id. This prevents your service worker being
 forced to show a notification to push messages that clear the unread count.
 
-### only_last_per_room
+### `only_last_per_room`
 
 You can opt in to only receive the last notification per room by setting
 `only_last_per_room: true` in the push data. Note that if the first notification
