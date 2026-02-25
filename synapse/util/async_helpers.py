@@ -84,6 +84,13 @@ class AbstractObservableDeferred(Generic[_T], metaclass=abc.ABCMeta):
         """
         ...
 
+    @abc.abstractmethod
+    def has_observers(self) -> bool:
+        """Returns True if there are any observers currently observing this
+        ObservableDeferred.
+        """
+        ...
+
 
 class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
     """Wraps a deferred object so that we can add observer deferreds. These
@@ -191,6 +198,12 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
 
     def observers(self) -> "Collection[defer.Deferred[_T]]":
         return self._observers
+
+    def has_observers(self) -> bool:
+        """Returns True if there are any observers currently observing this
+        ObservableDeferred.
+        """
+        return bool(self._observers)
 
     def has_called(self) -> bool:
         return self._result is not None
@@ -993,6 +1006,27 @@ def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
 
     new_deferred: "defer.Deferred[T]" = defer.Deferred(handle_cancel)
     deferred.chainDeferred(new_deferred)
+    return new_deferred
+
+
+def observe_deferred(d: "defer.Deferred[T]") -> "defer.Deferred[T]":
+    """Returns a new `Deferred` that observes the given `Deferred`.
+
+    The returned `Deferred` will resolve with the same result as the given
+    `Deferred`, but will not "chain" on the deferred so that using the returned
+    deferred does not affect the given `Deferred` in any way.
+    """
+    new_deferred: "defer.Deferred[T]" = defer.Deferred()
+
+    def callback(r: T) -> T:
+        new_deferred.callback(r)
+        return r
+
+    def errback(f: Failure) -> Failure:
+        new_deferred.errback(f)
+        return f
+
+    d.addCallbacks(callback, errback)
     return new_deferred
 
 
