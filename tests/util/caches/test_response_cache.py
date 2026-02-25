@@ -234,20 +234,6 @@ class ResponseCacheTestCase(TestCase):
                 [], cache.keys(), "cache should not have the result now"
             )
 
-    # Tests to write:
-    # 1. Test that cancellation of the deferred returned by wrap() causes the
-    #    cache entry to be removed after timeout_ms (if set)
-    # 2. Test that cancellation of the deferred returned by wrap() does not
-    #    cause the cache entry to be removed if there are other observers still
-    #    waiting on the result
-    # 3. Test that cancellation of the deferred returned by wrap() on the first
-    #    call does not cause a cancellation error to be raised when its
-    #    cancelled  and the wrapped function continues execution (unless it
-    #    times out).
-    # 4. Test that cancellation of the deferred returned by wrap() on the first
-    #    call does not cause a cancellation error to be raised, and correctly
-    #    handles the wrapped function returning.
-
     def test_cache_cancel_first_wait(self) -> None:
         """Test that cancellation of the deferred returned by wrap() on the
         first call does not immediately cause a cancellation error to be raised
