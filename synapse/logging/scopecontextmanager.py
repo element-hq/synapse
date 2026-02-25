@@ -20,12 +20,8 @@
 #
 
 import logging
-from types import TracebackType
-from typing import Optional, Type
 
 from opentracing import Scope, ScopeManager, Span
-
-import twisted
 
 from synapse.logging.context import (
     LoggingContext,
@@ -50,7 +46,7 @@ class LogContextScopeManager(ScopeManager):
         pass
 
     @property
-    def active(self) -> Optional[Scope]:
+    def active(self) -> Scope | None:
         """
         Returns the currently active Scope which can be used to access the
         currently active Scope.span.
@@ -112,9 +108,6 @@ class _LogContextScope(Scope):
     """
     A custom opentracing scope, associated with a LogContext
 
-      * filters out _DefGen_Return exceptions which arise from calling
-        `defer.returnValue` in Twisted code
-
       * When the scope is closed, the logcontext's active scope is reset to None.
         and - if enter_logcontext was set - the logcontext is finished too.
     """
@@ -145,17 +138,6 @@ class _LogContextScope(Scope):
         self.logcontext = logcontext
         self._finish_on_close = finish_on_close
         self._enter_logcontext = enter_logcontext
-
-    def __exit__(
-        self,
-        exc_type: Optional[Type[BaseException]],
-        value: Optional[BaseException],
-        traceback: Optional[TracebackType],
-    ) -> None:
-        if exc_type == twisted.internet.defer._DefGen_Return:
-            # filter out defer.returnValue() calls
-            exc_type = value = traceback = None
-        super().__exit__(exc_type, value, traceback)
 
     def __str__(self) -> str:
         return f"Scope<{self.span}>"

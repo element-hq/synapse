@@ -24,16 +24,13 @@ import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING
 
-from pkg_resources import parse_version
-
-import twisted
 from twisted.internet.defer import Deferred
 from twisted.internet.endpoints import HostnameEndpoint
-from twisted.internet.interfaces import IOpenSSLContextFactory, IProtocolFactory
+from twisted.internet.interfaces import IProtocolFactory
 from twisted.internet.ssl import optionsForClientTLS
-from twisted.mail.smtp import ESMTPSender, ESMTPSenderFactory
+from twisted.mail.smtp import ESMTPSenderFactory
 from twisted.protocols.tls import TLSMemoryBIOFactory
 
 from synapse.logging.context import make_deferred_yieldable
@@ -44,19 +41,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_is_old_twisted = parse_version(twisted.__version__) < parse_version("21")
-
-
-class _NoTLSESMTPSender(ESMTPSender):
-    """Extend ESMTPSender to disable TLS
-
-    Unfortunately, before Twisted 21.2, ESMTPSender doesn't give an easy way to disable
-    TLS, so we override its internal method which it uses to generate a context factory.
-    """
-
-    def _getContextFactory(self) -> Optional[IOpenSSLContextFactory]:
-        return None
-
 
 async def _sendmail(
     reactor: ISynapseReactor,
@@ -65,12 +49,13 @@ async def _sendmail(
     from_addr: str,
     to_addr: str,
     msg_bytes: bytes,
-    username: Optional[bytes] = None,
-    password: Optional[bytes] = None,
+    username: bytes | None = None,
+    password: bytes | None = None,
     require_auth: bool = False,
     require_tls: bool = False,
     enable_tls: bool = True,
     force_tls: bool = False,
+    tlsname: str | None = None,
 ) -> None:
     """A simple wrapper around ESMTPSenderFactory, to allow substitution in tests
 
@@ -88,39 +73,31 @@ async def _sendmail(
         enable_tls: True to enable STARTTLS. If this is False and require_tls is True,
            the request will fail.
         force_tls: True to enable Implicit TLS.
+        tlsname: the domain name expected as the TLS certificate's commonname,
+           defaults to smtphost.
     """
     msg = BytesIO(msg_bytes)
     d: "Deferred[object]" = Deferred()
+    if not enable_tls:
+        tlsname = None
+    elif tlsname is None:
+        tlsname = smtphost
 
-    def build_sender_factory(**kwargs: Any) -> ESMTPSenderFactory:
-        return ESMTPSenderFactory(
-            username,
-            password,
-            from_addr,
-            to_addr,
-            msg,
-            d,
-            heloFallback=True,
-            requireAuthentication=require_auth,
-            requireTransportSecurity=require_tls,
-            **kwargs,
-        )
-
-    factory: IProtocolFactory
-    if _is_old_twisted:
-        # before twisted 21.2, we have to override the ESMTPSender protocol to disable
-        # TLS
-        factory = build_sender_factory()
-
-        if not enable_tls:
-            factory.protocol = _NoTLSESMTPSender
-    else:
-        # for twisted 21.2 and later, there is a 'hostname' parameter which we should
-        # set to enable TLS.
-        factory = build_sender_factory(hostname=smtphost if enable_tls else None)
+    factory: IProtocolFactory = ESMTPSenderFactory(
+        username,
+        password,
+        from_addr,
+        to_addr,
+        msg,
+        d,
+        heloFallback=True,
+        requireAuthentication=require_auth,
+        requireTransportSecurity=require_tls,
+        hostname=tlsname,
+    )
 
     if force_tls:
-        factory = TLSMemoryBIOFactory(optionsForClientTLS(smtphost), True, factory)
+        factory = TLSMemoryBIOFactory(optionsForClientTLS(tlsname), True, factory)
 
     endpoint = HostnameEndpoint(
         reactor, smtphost, smtpport, timeout=30, bindAddress=None
@@ -148,6 +125,7 @@ class SendEmailHandler:
         self._require_transport_security = hs.config.email.require_transport_security
         self._enable_tls = hs.config.email.enable_smtp_tls
         self._force_tls = hs.config.email.force_tls
+        self._tlsname = hs.config.email.email_tlsname
 
         self._sendmail = _sendmail
 
@@ -158,7 +136,7 @@ class SendEmailHandler:
         app_name: str,
         html: str,
         text: str,
-        additional_headers: Optional[Dict[str, str]] = None,
+        additional_headers: dict[str, str] | None = None,
     ) -> None:
         """Send a multipart email with the given information.
 
@@ -171,7 +149,7 @@ class SendEmailHandler:
             additional_headers: A map of additional headers to include.
         """
         try:
-            from_string = self._from % {"app": app_name}
+            from_string = self._from % {"app": app_name}  # type: ignore[operator]
         except (KeyError, TypeError):
             from_string = self._from
 
@@ -212,7 +190,7 @@ class SendEmailHandler:
         multipart_msg.attach(text_part)
         multipart_msg.attach(html_part)
 
-        logger.info("Sending email to %s" % email_address)
+        logger.info("Sending email to %s", email_address)
 
         await self._sendmail(
             self._reactor,
@@ -227,4 +205,5 @@ class SendEmailHandler:
             require_tls=self._require_transport_security,
             enable_tls=self._enable_tls,
             force_tls=self._force_tls,
+            tlsname=self._tlsname,
         )

@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 from unittest.mock import Mock
 
 from immutabledict import immutabledict
@@ -35,7 +35,7 @@ class WorkerDutyConfigTestCase(TestCase):
     def _make_worker_config(
         self,
         worker_app: str,
-        worker_name: Optional[str],
+        worker_name: str | None,
         extras: Mapping[str, Any] = _EMPTY_IMMUTABLEDICT,
     ) -> WorkerConfig:
         root_config = Mock()
@@ -47,7 +47,7 @@ class WorkerDutyConfigTestCase(TestCase):
             "worker_app": worker_app,
             **extras,
         }
-        worker_config.read_config(worker_config_dict)
+        worker_config.read_config(worker_config_dict, allow_secrets_in_config=True)
         return worker_config
 
     def test_old_configs_master(self) -> None:

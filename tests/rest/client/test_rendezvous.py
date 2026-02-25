@@ -19,16 +19,15 @@
 #
 #
 
-from typing import Dict
 from urllib.parse import urlparse
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.rest.client import rendezvous
 from synapse.rest.synapse.client.rendezvous import MSC4108RendezvousSessionResource
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -46,7 +45,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.hs = self.setup_test_homeserver()
         return self.hs
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         return {
             **super().create_resource_dict(),
             "/_synapse/client/rendezvous": MSC4108RendezvousSessionResource(self.hs),
@@ -117,10 +116,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         headers = dict(channel.headers.getAllRawHeaders())
         self.assertIn(b"ETag", headers)
         self.assertIn(b"Expires", headers)
+        self.assertIn(b"Content-Length", headers)
         self.assertEqual(headers[b"Content-Type"], [b"application/json"])
         self.assertEqual(headers[b"Access-Control-Allow-Origin"], [b"*"])
         self.assertEqual(headers[b"Access-Control-Expose-Headers"], [b"etag"])
-        self.assertEqual(headers[b"Cache-Control"], [b"no-store"])
+        self.assertEqual(headers[b"Cache-Control"], [b"no-store, no-transform"])
         self.assertEqual(headers[b"Pragma"], [b"no-cache"])
         self.assertIn("url", channel.json_body)
         self.assertTrue(channel.json_body["url"].startswith("https://"))
@@ -141,9 +141,10 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(headers[b"ETag"], [etag])
         self.assertIn(b"Expires", headers)
         self.assertEqual(headers[b"Content-Type"], [b"text/plain"])
+        self.assertEqual(headers[b"Content-Length"], [b"7"])
         self.assertEqual(headers[b"Access-Control-Allow-Origin"], [b"*"])
         self.assertEqual(headers[b"Access-Control-Expose-Headers"], [b"etag"])
-        self.assertEqual(headers[b"Cache-Control"], [b"no-store"])
+        self.assertEqual(headers[b"Cache-Control"], [b"no-store, no-transform"])
         self.assertEqual(headers[b"Pragma"], [b"no-cache"])
         self.assertEqual(channel.text_body, "foo=bar")
 

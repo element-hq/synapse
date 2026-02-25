@@ -20,12 +20,14 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Generic, List, Optional, Type, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import DatabasePool, make_conn
 from synapse.storage.databases.main.events import PersistEventsStore
 from synapse.storage.databases.state import StateGroupDataStore
+from synapse.storage.databases.state.deletion import StateDeletionDataStore
 from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 
@@ -39,6 +41,13 @@ logger = logging.getLogger(__name__)
 DataStoreT = TypeVar("DataStoreT", bound=SQLBaseStore, covariant=True)
 
 
+background_update_status = LaterGauge(
+    name="synapse_background_update_status",
+    desc="Background update status",
+    labelnames=["database_name", SERVER_NAME_LABEL],
+)
+
+
 class Databases(Generic[DataStoreT]):
     """The various databases.
 
@@ -49,27 +58,37 @@ class Databases(Generic[DataStoreT]):
         main
         state
         persist_events
+        state_deletion
     """
 
-    databases: List[DatabasePool]
+    databases: list[DatabasePool]
     main: "DataStore"  # FIXME: https://github.com/matrix-org/synapse/issues/11165: actually an instance of `main_store_class`
     state: StateGroupDataStore
-    persist_events: Optional[PersistEventsStore]
+    persist_events: PersistEventsStore | None
+    state_deletion: StateDeletionDataStore
 
-    def __init__(self, main_store_class: Type[DataStoreT], hs: "HomeServer"):
+    def __init__(self, main_store_class: type[DataStoreT], hs: "HomeServer"):
         # Note we pass in the main store class here as workers use a different main
         # store.
 
         self.databases = []
-        main: Optional[DataStoreT] = None
-        state: Optional[StateGroupDataStore] = None
-        persist_events: Optional[PersistEventsStore] = None
+        main: DataStoreT | None = None
+        state: StateGroupDataStore | None = None
+        state_deletion: StateDeletionDataStore | None = None
+        persist_events: PersistEventsStore | None = None
+
+        server_name = hs.hostname
 
         for database_config in hs.config.database.databases:
             db_name = database_config.name
             engine = create_engine(database_config.config)
 
-            with make_conn(database_config, engine, "startup") as db_conn:
+            with make_conn(
+                db_config=database_config,
+                engine=engine,
+                default_txn_name="startup",
+                server_name=server_name,
+            ) as db_conn:
                 logger.info("[database config %r]: Checking database server", db_name)
                 engine.check_database(db_conn)
 
@@ -114,7 +133,8 @@ class Databases(Generic[DataStoreT]):
                     if state:
                         raise Exception("'state' data store already configured")
 
-                    state = StateGroupDataStore(database, db_conn, hs)
+                    state_deletion = StateDeletionDataStore(database, db_conn, hs)
+                    state = StateGroupDataStore(database, db_conn, hs, state_deletion)
 
                 db_conn.commit()
 
@@ -131,11 +151,20 @@ class Databases(Generic[DataStoreT]):
 
             db_conn.close()
 
+        # Track the background update status for each database
+        background_update_status.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (database.name(), server_name): database.updates.get_status()
+                for database in self.databases
+            },
+        )
+
         # Sanity check that we have actually configured all the required stores.
         if not main:
             raise Exception("No 'main' database configured")
 
-        if not state:
+        if not state or not state_deletion:
             raise Exception("No 'state' database configured")
 
         # We use local variables here to ensure that the databases do not have
@@ -143,3 +172,4 @@ class Databases(Generic[DataStoreT]):
         self.main = main  # type: ignore[assignment]
         self.state = state
         self.persist_events = persist_events
+        self.state_deletion = state_deletion

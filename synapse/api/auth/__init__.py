@@ -18,14 +18,15 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Protocol
 
-from typing_extensions import Protocol
+from prometheus_client import Histogram
 
 from twisted.web.server import Request
 
 from synapse.appservice import ApplicationService
 from synapse.http.site import SynapseRequest
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import Requester
 
 if TYPE_CHECKING:
@@ -33,6 +34,13 @@ if TYPE_CHECKING:
 
 # guests always get this device id.
 GUEST_DEVICE_ID = "guest_device"
+
+
+introspection_response_timer = Histogram(
+    "synapse_api_auth_delegated_introspection_response",
+    "Time taken to get a response for an introspection request",
+    labelnames=["code", SERVER_NAME_LABEL],
+)
 
 
 class Auth(Protocol):
@@ -43,7 +51,7 @@ class Auth(Protocol):
         room_id: str,
         requester: Requester,
         allow_departed_users: bool = False,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Check if the user is in the room, or was at some point.
         Args:
             room_id: The room to check.
@@ -182,7 +190,7 @@ class Auth(Protocol):
 
     async def check_user_in_room_or_world_readable(
         self, room_id: str, requester: Requester, allow_departed_users: bool = False
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Checks that the user is or was in the room or the room is world
         readable. If it isn't then an exception is raised.
 

@@ -28,7 +28,7 @@ import json
 import sys
 import warnings
 from binascii import unhexlify
-from typing import TYPE_CHECKING, Awaitable, Callable, Tuple, TypeVar
+from typing import TYPE_CHECKING, Awaitable, Callable, TypeVar
 
 import attr
 import zope.interface
@@ -102,7 +102,7 @@ class FakeResponse:  # type: ignore[misc]
     attribute, and didn't support deliverBody until recently.
     """
 
-    version: Tuple[bytes, int, int] = (b"HTTP", 1, 1)
+    version: tuple[bytes, int, int] = (b"HTTP", 1, 1)
 
     # HTTP response code
     code: int = 200
@@ -139,6 +139,8 @@ SMALL_PNG = unhexlify(
     b"0000001f15c4890000000a49444154789c63000100000500010d"
     b"0a2db40000000049454e44ae426082"
 )
+# The SHA256 hexdigest for the above bytes.
+SMALL_PNG_SHA256 = "ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a"
 
 # A small CMYK-encoded JPEG image used in some tests.
 #

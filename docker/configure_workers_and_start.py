@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/local/bin/python
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
@@ -49,11 +49,16 @@
 #         regardless of the SYNAPSE_LOG_LEVEL setting.
 #   * SYNAPSE_LOG_TESTING: if set, Synapse will log additional information useful
 #     for testing.
+#   * SYNAPSE_USE_UNIX_SOCKET: TODO
+#   * `SYNAPSE_ENABLE_METRICS`: if set to `1`, the metrics listener will be enabled on the
+#      main and worker processes. Defaults to `0` (disabled). The main process will listen on
+#      port `19090` and workers on port `19091 + <worker index>`.
 #
 # NOTE: According to Complement's ENTRYPOINT expectations for a homeserver image (as defined
 # in the project's README), this script may be run multiple times, and functionality should
 # continue to work if so.
 
+import json
 import os
 import platform
 import re
@@ -65,16 +70,13 @@ from itertools import chain
 from pathlib import Path
 from typing import (
     Any,
-    Dict,
-    List,
     Mapping,
     MutableMapping,
     NoReturn,
-    Optional,
-    Set,
     SupportsIndex,
 )
 
+import attr
 import yaml
 from jinja2 import Environment, FileSystemLoader
 
@@ -96,7 +98,7 @@ WORKER_PLACEHOLDER_NAME = "placeholder_name"
 # Watching /_matrix/media and related needs a "media" listener
 # Stream Writers require "client" and "replication" listeners because they
 #   have to attach by instance_map to the master process and have client endpoints.
-WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
+WORKERS_CONFIG: dict[str, dict[str, Any]] = {
     "pusher": {
         "app": "synapse.app.generic_worker",
         "listener_resources": [],
@@ -178,6 +180,9 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/login$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/account/3pid$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/account/whoami$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/account/deactivate$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)",
+            "^/_matrix/client/(r0|v3)/delete_devices$",
             "^/_matrix/client/versions$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/voip/turnServer$",
             "^/_matrix/client/(r0|v3|unstable)/register$",
@@ -194,6 +199,10 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$",
             "^/_matrix/client/(r0|v3|unstable)/capabilities$",
             "^/_matrix/client/(r0|v3|unstable)/notifications$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$",
+            "^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/.*/restart)?$",
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
@@ -202,6 +211,7 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["federation"],
         "endpoint_patterns": [
+            "^/_matrix/federation/v1/version$",
             "^/_matrix/federation/(v1|v2)/event/",
             "^/_matrix/federation/(v1|v2)/state/",
             "^/_matrix/federation/(v1|v2)/state_ids/",
@@ -264,13 +274,6 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
-    "frontend_proxy": {
-        "app": "synapse.app.generic_worker",
-        "listener_resources": ["client", "replication"],
-        "endpoint_patterns": ["^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload"],
-        "shared_extra_conf": {},
-        "worker_extra_conf": "",
-    },
     "account_data": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -305,6 +308,13 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
+    "device_lists": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
     "typing": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -321,10 +331,19 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
+    "thread_subscriptions": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [
+            "^/_matrix/client/unstable/io.element.msc4306/.*",
+        ],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
 }
 
 # Templates for sections that may be inserted multiple times in config files
-NGINX_LOCATION_CONFIG_BLOCK = """
+NGINX_LOCATION_REGEX_CONFIG_BLOCK = """
     location ~* {endpoint} {{
         proxy_pass {upstream};
         proxy_set_header X-Forwarded-For $remote_addr;
@@ -333,10 +352,86 @@ NGINX_LOCATION_CONFIG_BLOCK = """
     }}
 """
 
+# Having both **regex** (`NGINX_LOCATION_REGEX_CONFIG_BLOCK`) match vs **exact**
+# (`NGINX_LOCATION_EXACT_CONFIG_BLOCK`) match is necessary because we can't use a URI
+# path in `proxy_pass http://localhost:19090/_synapse/metrics` with the regex version.
+#
+# Example of what happens if you try to use `proxy_pass http://localhost:19090/_synapse/metrics`
+# with `NGINX_LOCATION_REGEX_CONFIG_BLOCK`:
+# ```
+# nginx | 2025/12/31 22:58:34 [emerg] 21#21: "proxy_pass" cannot have URI part in location given by regular expression, or inside named location, or inside "if" statement, or inside "limit_except" block in /etc/nginx/conf.d/matrix-synapse.conf:732
+# ```
+NGINX_LOCATION_EXACT_CONFIG_BLOCK = """
+    location = {endpoint} {{
+        proxy_pass {upstream};
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $host;
+    }}
+"""
+
+
 NGINX_UPSTREAM_CONFIG_BLOCK = """
 upstream {upstream_worker_base_name} {{
 {body}
 }}
+"""
+
+
+PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH = (
+    "/data/prometheus_service_discovery.json"
+)
+"""
+We serve this file with nginx so people can use it with `http_sd_config` in their
+Prometheus config.
+"""
+
+NGINX_HOST_PLACEHOLDER = "<HOST_PLACEHOLDER>"
+"""Will be replaced with the whatever hostname:port used to access the nginx metrics endpoint."""
+
+NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY = """
+server {{
+    listen 9469;
+    location = /metrics/service_discovery {{
+        alias {service_discovery_file_path};
+        default_type application/json;
+
+        # Find/replace the host placeholder in the response body with the actual
+        # host used to access this endpoint.
+        #
+        # We want to reflect back whatever host the client used to access this file.
+        # For example, if they accessed it via `localhost:9469`, then they
+        # can also reach all of the proxied metrics endpoints at the same address.
+        # Or if it's Prometheus in another container, it will access this via
+        # `host.docker.internal:9469`, etc. Or perhaps it's even some randomly assigned
+        # port mapping.
+        sub_filter '{host_placeholder}' '$http_host';
+        # By default, `ngx_http_sub_module` only works on `text/html` responses. We want
+        # to find/replace in `application/JSON`.
+        sub_filter_types application/json;
+        # Replace all occurences
+        sub_filter_once off;
+    }}
+
+    # Make the service discovery endpoint easy to find; redirect to the correct spot.
+    location = / {{
+        return 302 /metrics/service_discovery;
+    }}
+
+    {metrics_proxy_locations}
+}}
+"""
+"""
+Setup the nginx config necessary to serve the JSON file for Prometheus HTTP service discovery
+(`http_sd_config`). Served at `/metrics/service_discovery`.
+
+Reference:
+ - https://prometheus.io/docs/prometheus/latest/http_sd/
+ - https://prometheus.io/docs/prometheus/latest/configuration/configuration/#http_sd_config
+
+We also proxy all of the Synapse metrics endpoints through a central place so that
+people only need to expose the single 9469 port and service discovery can take care of
+the rest: `/metrics/worker/<worker_name>` -> http://localhost:19090/_synapse/metrics
 """
 
 
@@ -351,6 +446,11 @@ def error(txt: str) -> NoReturn:
 
 
 def flush_buffers() -> None:
+    """
+    Python's `print()` buffers output by default, typically waiting until ~8KB
+    accumulates. This method can be used to flush the buffers so we can see the output
+    of any print statements so far.
+    """
     sys.stdout.flush()
     sys.stderr.flush()
 
@@ -376,16 +476,18 @@ def convert(src: str, dst: str, **template_vars: object) -> None:
     #
     # We use append mode in case the files have already been written to by something else
     # (for instance, as part of the instructions in a dockerfile).
+    exists = os.path.isfile(dst)
     with open(dst, "a") as outfile:
         # In case the existing file doesn't end with a newline
-        outfile.write("\n")
+        if exists:
+            outfile.write("\n")
 
         outfile.write(rendered)
 
 
 def add_worker_roles_to_shared_config(
     shared_config: dict,
-    worker_types_set: Set[str],
+    worker_types_set: set[str],
     worker_name: str,
     worker_port: int,
 ) -> None:
@@ -404,16 +506,18 @@ def add_worker_roles_to_shared_config(
     # streams
     instance_map = shared_config.setdefault("instance_map", {})
 
-    # This is a list of the stream_writers that there can be only one of. Events can be
-    # sharded, and therefore doesn't belong here.
-    singular_stream_writers = [
+    # This is a list of the stream_writers.
+    stream_writers = {
         "account_data",
+        "events",
+        "device_lists",
         "presence",
         "receipts",
         "to_device",
         "typing",
         "push_rules",
-    ]
+        "thread_subscriptions",
+    }
 
     # Worker-type specific sharding config. Now a single worker can fulfill multiple
     # roles, check each.
@@ -423,28 +527,11 @@ def add_worker_roles_to_shared_config(
     if "federation_sender" in worker_types_set:
         shared_config.setdefault("federation_sender_instances", []).append(worker_name)
 
-    if "event_persister" in worker_types_set:
-        # Event persisters write to the events stream, so we need to update
-        # the list of event stream writers
-        shared_config.setdefault("stream_writers", {}).setdefault("events", []).append(
-            worker_name
-        )
-
-        # Map of stream writer instance names to host/ports combos
-        if os.environ.get("SYNAPSE_USE_UNIX_SOCKET", False):
-            instance_map[worker_name] = {
-                "path": f"/run/worker.{worker_port}",
-            }
-        else:
-            instance_map[worker_name] = {
-                "host": "localhost",
-                "port": worker_port,
-            }
     # Update the list of stream writers. It's convenient that the name of the worker
     # type is the same as the stream to write. Iterate over the whole list in case there
     # is more than one.
     for worker in worker_types_set:
-        if worker in singular_stream_writers:
+        if worker in stream_writers:
             shared_config.setdefault("stream_writers", {}).setdefault(
                 worker, []
             ).append(worker_name)
@@ -463,9 +550,9 @@ def add_worker_roles_to_shared_config(
 
 
 def merge_worker_template_configs(
-    existing_dict: Optional[Dict[str, Any]],
-    to_be_merged_dict: Dict[str, Any],
-) -> Dict[str, Any]:
+    existing_dict: dict[str, Any] | None,
+    to_be_merged_dict: dict[str, Any],
+) -> dict[str, Any]:
     """When given an existing dict of worker template configuration consisting with both
         dicts and lists, merge new template data from WORKERS_CONFIG(or create) and
         return new dict.
@@ -476,7 +563,7 @@ def merge_worker_template_configs(
             existing_dict.
     Returns: The newly merged together dict values.
     """
-    new_dict: Dict[str, Any] = {}
+    new_dict: dict[str, Any] = {}
     if not existing_dict:
         # It doesn't exist yet, just use the new dict(but take a copy not a reference)
         new_dict = to_be_merged_dict.copy()
@@ -501,8 +588,8 @@ def merge_worker_template_configs(
 
 
 def insert_worker_name_for_worker_config(
-    existing_dict: Dict[str, Any], worker_name: str
-) -> Dict[str, Any]:
+    existing_dict: dict[str, Any], worker_name: str
+) -> dict[str, Any]:
     """Insert a given worker name into the worker's configuration dict.
 
     Args:
@@ -518,7 +605,7 @@ def insert_worker_name_for_worker_config(
     return dict_to_edit
 
 
-def apply_requested_multiplier_for_worker(worker_types: List[str]) -> List[str]:
+def apply_requested_multiplier_for_worker(worker_types: list[str]) -> list[str]:
     """
     Apply multiplier(if found) by returning a new expanded list with some basic error
     checking.
@@ -579,7 +666,7 @@ def is_sharding_allowed_for_worker_type(worker_type: str) -> bool:
 
 def split_and_strip_string(
     given_string: str, split_char: str, max_split: SupportsIndex = -1
-) -> List[str]:
+) -> list[str]:
     """
     Helper to split a string on split_char and strip whitespace from each end of each
         element.
@@ -604,12 +691,45 @@ def generate_base_homeserver_config() -> None:
     # start.py already does this for us, so just call that.
     # note that this script is copied in in the official, monolith dockerfile
     os.environ["SYNAPSE_HTTP_PORT"] = str(MAIN_PROCESS_HTTP_LISTENER_PORT)
-    subprocess.run(["/usr/local/bin/python", "/start.py", "migrate_config"], check=True)
+    subprocess.run([sys.executable, "/start.py", "migrate_config"], check=True)
+
+
+@attr.s(auto_attribs=True)
+class Worker:
+    worker_name: str
+    """
+    ex.
+    `event_persister:2` -> `event_persister1` and `event_persister2`
+    `stream_writers=account_data+presence+receipts+to_device+typing"` -> `stream_writers`
+    """
+
+    worker_base_name: str
+    """
+    ex.
+    `event_persister:2` -> `event_persister`
+    `stream_writers=account_data+presence+receipts+to_device+typing"` -> `stream_writers`
+    """
+
+    worker_index: int
+    """
+    The index of the worker starting from 1 for each worker type requested.
+
+    ex.
+    `event_persister:2` -> `1` and `2`
+    `stream_writers=account_data+presence+receipts+to_device+typing"` -> `1`
+    """
+
+    worker_types: set[str]
+    """
+    ex.
+    `event_persister:2` -> `{"event_persister"}`
+    `stream_writers=account_data+presence+receipts+to_device+typing"` -> `{"account_data", "presence", "receipts","to_device", "typing"}
+    """
 
 
 def parse_worker_types(
-    requested_worker_types: List[str],
-) -> Dict[str, Set[str]]:
+    requested_worker_types: list[str],
+) -> list[Worker]:
     """Read the desired list of requested workers and prepare the data for use in
         generating worker config files while also checking for potential gotchas.
 
@@ -617,22 +737,19 @@ def parse_worker_types(
         requested_worker_types: The list formed from the split environment variable
             containing the unprocessed requests for workers.
 
-    Returns: A dict of worker names to set of worker types. Format:
-        {'worker_name':
-            {'worker_type', 'worker_type2'}
-        }
+    Returns: A list of requested workers
     """
     # A counter of worker_base_name -> int. Used for determining the name for a given
     # worker when generating its config file, as each worker's name is just
     # worker_base_name followed by instance number
-    worker_base_name_counter: Dict[str, int] = defaultdict(int)
+    worker_base_name_counter: dict[str, int] = defaultdict(int)
 
     # Similar to above, but more finely grained. This is used to determine we don't have
     # more than a single worker for cases where multiples would be bad(e.g. presence).
-    worker_type_shard_counter: Dict[str, int] = defaultdict(int)
+    worker_type_shard_counter: dict[str, int] = defaultdict(int)
 
-    # The final result of all this processing
-    dict_to_return: Dict[str, Set[str]] = {}
+    # Map from worker name to `Worker`
+    worker_dict: dict[str, Worker] = {}
 
     # Handle any multipliers requested for given workers.
     multiple_processed_worker_types = apply_requested_multiplier_for_worker(
@@ -676,7 +793,7 @@ def parse_worker_types(
 
         # Split the worker_type_string on "+", remove whitespace from ends then make
         # the list a set so it's deduplicated.
-        worker_types_set: Set[str] = set(
+        worker_types_set: set[str] = set(
             split_and_strip_string(worker_type_string, "+")
         )
 
@@ -718,24 +835,29 @@ def parse_worker_types(
         if worker_number > 1:
             # If this isn't the first worker, check that we don't have a confusing
             # mixture of worker types with the same base name.
-            first_worker_with_base_name = dict_to_return[f"{worker_base_name}1"]
-            if first_worker_with_base_name != worker_types_set:
+            first_worker_with_base_name = worker_dict[f"{worker_base_name}1"]
+            if first_worker_with_base_name.worker_types != worker_types_set:
                 error(
                     f"Can not use worker_name: '{worker_name}' for worker_type(s): "
                     f"{worker_types_set!r}. It is already in use by "
-                    f"worker_type(s): {first_worker_with_base_name!r}"
+                    f"worker_type(s): {first_worker_with_base_name.worker_types!r}"
                 )
 
-        dict_to_return[worker_name] = worker_types_set
+        worker_dict[worker_name] = Worker(
+            worker_name=worker_name,
+            worker_base_name=worker_base_name,
+            worker_index=worker_number,
+            worker_types=worker_types_set,
+        )
 
-    return dict_to_return
+    return list(worker_dict.values())
 
 
 def generate_worker_files(
     environ: Mapping[str, str],
     config_path: str,
     data_dir: str,
-    requested_worker_types: Dict[str, Set[str]],
+    requested_workers: list[Worker],
 ) -> None:
     """Read the desired workers(if any) that is passed in and generate shared
         homeserver, nginx and supervisord configs.
@@ -745,18 +867,20 @@ def generate_worker_files(
         config_path: The location of the generated Synapse main worker config file.
         data_dir: The location of the synapse data directory. Where log and
             user-facing config files live.
-        requested_worker_types: A Dict containing requested workers in the format of
-            {'worker_name1': {'worker_type', ...}}
+        requested_workers: A list of requested workers
     """
     # Note that yaml cares about indentation, so care should be taken to insert lines
     # into files at the correct indentation below.
 
     # Convenience helper for if using unix sockets instead of host:port
     using_unix_sockets = environ.get("SYNAPSE_USE_UNIX_SOCKET", False)
+
+    enable_metrics = environ.get("SYNAPSE_ENABLE_METRICS", "0") == "1"
+
     # First read the original config file and extract the listeners block. Then we'll
     # add another listener for replication. Later we'll write out the result to the
     # shared config file.
-    listeners: List[Any]
+    listeners: list[Any]
     if using_unix_sockets:
         listeners = [
             {
@@ -784,12 +908,16 @@ def generate_worker_files(
     # base shared worker jinja2 template. This config file will be passed to all
     # workers, included Synapse's main process. It is intended mainly for disabling
     # functionality when certain workers are spun up, and adding a replication listener.
-    shared_config: Dict[str, Any] = {"listeners": listeners}
+    shared_config: dict[str, Any] = {
+        "listeners": listeners,
+        # Controls `enable_metrics: true`
+        "enable_metrics": enable_metrics,
+    }
 
     # List of dicts that describe workers.
     # We pass this to the Supervisor template later to generate the appropriate
     # program blocks.
-    worker_descriptors: List[Dict[str, Any]] = []
+    worker_descriptors: list[dict[str, Any]] = []
 
     # Upstreams for load-balancing purposes. This dict takes the form of the worker
     # type to the ports of each worker. For example:
@@ -797,20 +925,22 @@ def generate_worker_files(
     #   worker_type: {1234, 1235, ...}}
     # }
     # and will be used to construct 'upstream' nginx directives.
-    nginx_upstreams: Dict[str, Set[int]] = {}
+    nginx_upstreams: dict[str, set[int]] = {}
 
     # A map of: {"endpoint": "upstream"}, where "upstream" is a str representing what
     # will be placed after the proxy_pass directive. The main benefit to representing
     # this data as a dict over a str is that we can easily deduplicate endpoints
     # across multiple instances of the same worker. The final rendering will be combined
     # with nginx_upstreams and placed in /etc/nginx/conf.d.
-    nginx_locations: Dict[str, str] = {}
+    nginx_locations: dict[str, str] = {}
 
     # Create the worker configuration directory if it doesn't already exist
     os.makedirs("/conf/workers", exist_ok=True)
 
     # Start worker ports from this arbitrary port
     worker_port = 18009
+    # The main process metrics port is 19090, so start workers from 19091
+    worker_metrics_port = 19091
 
     # A list of internal endpoints to healthcheck, starting with the main process
     # which exists even if no workers do.
@@ -827,7 +957,9 @@ def generate_worker_files(
         healthcheck_urls = ["http://localhost:8080/health"]
 
     # Get the set of all worker types that we have configured
-    all_worker_types_in_use = set(chain(*requested_worker_types.values()))
+    all_worker_types_in_use = set(
+        chain(*[worker.worker_types for worker in requested_workers])
+    )
     # Map locations to upstreams (corresponding to worker types) in Nginx
     # but only if we use the appropriate worker type
     for worker_type in all_worker_types_in_use:
@@ -836,12 +968,13 @@ def generate_worker_files(
 
     # For each worker type specified by the user, create config values and write it's
     # yaml config file
-    for worker_name, worker_types_set in requested_worker_types.items():
+    worker_name_to_metrics_port_map: dict[str, int] = {}
+    for worker in requested_workers:
         # The collected and processed data will live here.
-        worker_config: Dict[str, Any] = {}
+        worker_config: dict[str, Any] = {}
 
         # Merge all worker config templates for this worker into a single config
-        for worker_type in worker_types_set:
+        for worker_type in worker.worker_types:
             copy_of_template_config = WORKERS_CONFIG[worker_type].copy()
 
             # Merge worker type template configuration data. It's a combination of lists
@@ -851,16 +984,27 @@ def generate_worker_files(
             )
 
         # Replace placeholder names in the config template with the actual worker name.
-        worker_config = insert_worker_name_for_worker_config(worker_config, worker_name)
-
-        worker_config.update(
-            {"name": worker_name, "port": str(worker_port), "config_path": config_path}
+        worker_config = insert_worker_name_for_worker_config(
+            worker_config, worker.worker_name
         )
 
-        # Update the shared config with any worker_type specific options. The first of a
-        # given worker_type needs to stay assigned and not be replaced.
-        worker_config["shared_extra_conf"].update(shared_config)
-        shared_config = worker_config["shared_extra_conf"]
+        worker_config.update(
+            {
+                "name": worker.worker_name,
+                "port": str(worker_port),
+                "config_path": config_path,
+            }
+        )
+
+        # Keep the `shared_config` up to date with the `shared_extra_conf` from each
+        # worker.
+        shared_config = {
+            **worker_config["shared_extra_conf"],
+            # We combine `shared_config` second to avoid overwriting existing keys just
+            # for sanity sake (always use the first worker).
+            **shared_config,
+        }
+
         if using_unix_sockets:
             healthcheck_urls.append(
                 f"--unix-socket /run/worker.{worker_port} http://localhost/health"
@@ -868,36 +1012,55 @@ def generate_worker_files(
         else:
             healthcheck_urls.append("http://localhost:%d/health" % (worker_port,))
 
+        # Special case for event_persister: those are just workers that write to
+        # the `events` stream. For other workers, the worker name is the same
+        # name of the stream they write to, but for some reason it is not the
+        # case for event_persister.
+        if "event_persister" in worker.worker_types:
+            worker.worker_types.add("events")
+
         # Update the shared config with sharding-related options if necessary
         add_worker_roles_to_shared_config(
-            shared_config, worker_types_set, worker_name, worker_port
+            shared_config, worker.worker_types, worker.worker_name, worker_port
         )
 
         # Enable the worker in supervisord
         worker_descriptors.append(worker_config)
 
         # Write out the worker's logging config file
-        log_config_filepath = generate_worker_log_config(environ, worker_name, data_dir)
+        log_config_filepath = generate_worker_log_config(
+            environ, worker.worker_name, data_dir
+        )
+
+        worker_name_to_metrics_port_map[worker.worker_name] = worker_metrics_port
+        if enable_metrics:
+            # Enable prometheus metrics endpoint on this worker
+            worker_config["metrics_port"] = worker_metrics_port
+
+        if enable_metrics:
+            # Enable prometheus metrics endpoint on this worker
+            worker_config["metrics_port"] = worker_metrics_port
 
         # Then a worker config file
         convert(
             "/conf/worker.yaml.j2",
-            f"/conf/workers/{worker_name}.yaml",
+            f"/conf/workers/{worker.worker_name}.yaml",
             **worker_config,
             worker_log_config_filepath=log_config_filepath,
             using_unix_sockets=using_unix_sockets,
         )
 
         # Save this worker's port number to the correct nginx upstreams
-        for worker_type in worker_types_set:
+        for worker_type in worker.worker_types:
             nginx_upstreams.setdefault(worker_type, set()).add(worker_port)
 
         worker_port += 1
+        worker_metrics_port += 1
 
     # Build the nginx location config blocks
     nginx_location_config = ""
     for endpoint, upstream in nginx_locations.items():
-        nginx_location_config += NGINX_LOCATION_CONFIG_BLOCK.format(
+        nginx_location_config += NGINX_LOCATION_REGEX_CONFIG_BLOCK.format(
             endpoint=endpoint,
             upstream=upstream,
         )
@@ -920,6 +1083,111 @@ def generate_worker_files(
             body=body,
         )
 
+    # Provide a Prometheus metrics service discovery endpoint to easily be able to pick
+    # up all of the workers
+    nginx_prometheus_metrics_service_discovery = ""
+    if enable_metrics:
+        # Write JSON file for Prometheus service discovery pointing to all of the
+        # workers. We serve this file with nginx so people can use it with
+        # `http_sd_config` in their Prometheus config.
+        #
+        # > It fetches targets from an HTTP endpoint containing a list of zero or more
+        # > `<static_config>`s. The target must reply with an HTTP 200 response. The HTTP
+        # > header `Content-Type` must be `application/json`, and the body must be valid
+        # > JSON.
+        # >
+        # > *-- https://prometheus.io/docs/prometheus/latest/configuration/configuration/#http_sd_config*
+        #
+        # Another reference: https://prometheus.io/docs/prometheus/latest/http_sd/
+        prometheus_http_service_discovery_content = [
+            {
+                "targets": [NGINX_HOST_PLACEHOLDER],
+                "labels": {
+                    # The downstream user should also configure `honor_labels: true` in
+                    # their Prometheus config to prevent Prometheus from overwriting the
+                    # `job` labels.
+                    #
+                    # > honor_labels controls how Prometheus handles conflicts between labels that are
+                    # > already present in scraped data and labels that Prometheus would attach
+                    # > server-side ("job" and "instance" labels, manually configured target
+                    # > labels, and labels generated by service discovery implementations).
+                    # >
+                    # > *-- https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config*
+                    #
+                    # Reference:
+                    # - https://prometheus.io/docs/concepts/jobs_instances/
+                    # - https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config
+                    "job": worker.worker_base_name,
+                    "index": f"{worker.worker_index}",
+                    # This allows us to change the `metrics_path` on a per-target basis.
+                    # We want to grab the metrics from our nginx proxied location (setup
+                    # below).
+                    #
+                    # While there doesn't seem to be official docs on these special
+                    # labels (`__metrics_path__`, `__scheme__`, `__scrape_interval__`,
+                    # `__scrape_timeout__`), this discussion best summarizes how this
+                    # works: https://github.com/prometheus/prometheus/discussions/13217
+                    "__metrics_path__": f"/metrics/worker/{worker.worker_name}",
+                },
+            }
+            for worker in requested_workers
+        ]
+        # Add the main Synapse process as well
+        prometheus_http_service_discovery_content.append(
+            {
+                "targets": [NGINX_HOST_PLACEHOLDER],
+                "labels": {
+                    # We use `"synapse"` as the job name for the main process because it
+                    # matches what we expect people to use from a monolith setup with
+                    # their static scrape config. It's `job` name used in our Grafana
+                    # dashboard for the main process.
+                    "job": "synapse",
+                    "index": "1",
+                    "__metrics_path__": "/metrics/worker/main",
+                },
+            }
+        )
+
+        # Check to make sure the file doesn't already exist
+        if os.path.isfile(PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH):
+            error(
+                f"Prometheus service discovery file "
+                f"'{PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH}' already exists (unexpected)! "
+                f"This is a problem because the existing file probably doesn't match the "
+                "Synapse workers we're setting up now."
+            )
+
+        # Write the file
+        with open(PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH, "w") as outfile:
+            outfile.write(
+                json.dumps(prometheus_http_service_discovery_content, indent=4)
+            )
+
+        # Proxy all of the Synapse metrics endpoints through a central place so that
+        # people only need to expose the single 9469 port and service discovery can take
+        # care of the rest: `/metrics/worker/<worker_name>` ->
+        # http://localhost:19090/_synapse/metrics
+        #
+        # Build the nginx location config blocks
+        metrics_proxy_locations = ""
+        for worker in requested_workers:
+            metrics_proxy_locations += NGINX_LOCATION_EXACT_CONFIG_BLOCK.format(
+                endpoint=f"/metrics/worker/{worker.worker_name}",
+                upstream=f"http://localhost:{worker_name_to_metrics_port_map[worker.worker_name]}/_synapse/metrics",
+            )
+        # Add the main Synapse process as well
+        metrics_proxy_locations += NGINX_LOCATION_EXACT_CONFIG_BLOCK.format(
+            endpoint="/metrics/worker/main",
+            upstream="http://localhost:19090/_synapse/metrics",
+        )
+
+        # Add a nginx server/location to serve the JSON file
+        nginx_prometheus_metrics_service_discovery = NGINX_PROMETHEUS_METRICS_SERVICE_DISCOVERY.format(
+            service_discovery_file_path=PROMETHEUS_METRICS_SERVICE_DISCOVERY_FILE_PATH,
+            host_placeholder=NGINX_HOST_PLACEHOLDER,
+            metrics_proxy_locations=metrics_proxy_locations,
+        )
+
     # Finally, we'll write out the config files.
 
     # log config for the master process
@@ -937,7 +1205,7 @@ def generate_worker_files(
             if reg_path.suffix.lower() in (".yaml", ".yml")
         ]
 
-    workers_in_use = len(requested_worker_types) > 0
+    workers_in_use = len(requested_workers) > 0
 
     # If there are workers, add the main process to the instance_map too.
     if workers_in_use:
@@ -972,6 +1240,7 @@ def generate_worker_files(
         tls_cert_path=os.environ.get("SYNAPSE_TLS_CERT"),
         tls_key_path=os.environ.get("SYNAPSE_TLS_KEY"),
         using_unix_sockets=using_unix_sockets,
+        nginx_prometheus_metrics_service_discovery=nginx_prometheus_metrics_service_discovery,
     )
 
     # Supervisord config
@@ -998,6 +1267,7 @@ def generate_worker_files(
         "/healthcheck.sh",
         healthcheck_urls=healthcheck_urls,
     )
+    os.chmod("/healthcheck.sh", 0o755)
 
     # Ensure the logging directory exists
     log_dir = data_dir + "/logs"
@@ -1013,7 +1283,7 @@ def generate_worker_log_config(
     Returns: the path to the generated file
     """
     # Check whether we should write worker logs to disk, in addition to the console
-    extra_log_template_args: Dict[str, Optional[str]] = {}
+    extra_log_template_args: dict[str, str | None] = {}
     if environ.get("SYNAPSE_WORKERS_WRITE_LOGS_TO_DISK"):
         extra_log_template_args["LOG_FILE_PATH"] = f"{data_dir}/logs/{worker_name}.log"
 
@@ -1037,7 +1307,7 @@ def generate_worker_log_config(
     return log_config_filepath
 
 
-def main(args: List[str], environ: MutableMapping[str, str]) -> None:
+def main(args: list[str], environ: MutableMapping[str, str]) -> None:
     parser = ArgumentParser()
     parser.add_argument(
         "--generate-only",
@@ -1071,15 +1341,20 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
         if not worker_types_env:
             # No workers, just the main process
             worker_types = []
-            requested_worker_types: Dict[str, Any] = {}
+            requested_workers: list[Worker] = []
         else:
             # Split type names by comma, ignoring whitespace.
             worker_types = split_and_strip_string(worker_types_env, ",")
-            requested_worker_types = parse_worker_types(worker_types)
+            requested_workers = parse_worker_types(worker_types)
 
         # Always regenerate all other config files
         log("Generating worker config files")
-        generate_worker_files(environ, config_path, data_dir, requested_worker_types)
+        generate_worker_files(
+            environ=environ,
+            config_path=config_path,
+            data_dir=data_dir,
+            requested_workers=requested_workers,
+        )
 
         # Mark workers as being configured
         with open(mark_filepath, "w") as f:
@@ -1098,6 +1373,13 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
         environ["LD_PRELOAD"] = jemallocpath
     else:
         log("Could not find %s, will not use" % (jemallocpath,))
+
+    # Empty strings are falsy in Python so this default is fine. We just can't have these
+    # be undefined because supervisord will complain about our
+    # `%(ENV_SYNAPSE_HTTP_PROXY)s` usage.
+    environ.setdefault("SYNAPSE_HTTP_PROXY", "")
+    environ.setdefault("SYNAPSE_HTTPS_PROXY", "")
+    environ.setdefault("SYNAPSE_NO_PROXY", "")
 
     # Start supervisord, which will start Synapse, all of the configured worker
     # processes, redis, nginx etc. according to the config we created above.

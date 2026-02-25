@@ -18,9 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional
-
-from typing_extensions import TypedDict
+from typing import TypedDict
 
 
 class EmailReason(TypedDict, total=False):
@@ -42,7 +40,7 @@ class EmailReason(TypedDict, total=False):
 
     room_id: str
     now: int
-    room_name: Optional[str]
+    room_name: str | None
     received_at: int
     delay_before_mail_ms: int
     last_sent_ts: int
@@ -73,9 +71,9 @@ class MessageVars(TypedDict, total=False):
     id: str
     ts: int
     sender_name: str
-    sender_avatar_url: Optional[str]
+    sender_avatar_url: str | None
     sender_hash: int
-    msgtype: Optional[str]
+    msgtype: str | None
     body_text_html: str
     body_text_plain: str
     image_url: str
@@ -92,8 +90,8 @@ class NotifVars(TypedDict):
     """
 
     link: str
-    ts: Optional[int]
-    messages: List[MessageVars]
+    ts: int | None
+    messages: list[MessageVars]
 
 
 class RoomVars(TypedDict):
@@ -109,12 +107,12 @@ class RoomVars(TypedDict):
     avator_url: url to the room's avator
     """
 
-    title: Optional[str]
+    title: str | None
     hash: int
     invite: bool
-    notifs: List[NotifVars]
+    notifs: list[NotifVars]
     link: str
-    avatar_url: Optional[str]
+    avatar_url: str | None
 
 
 class TemplateVars(TypedDict, total=False):
@@ -139,5 +137,5 @@ class TemplateVars(TypedDict, total=False):
     user_display_name: str
     unsubscribe_link: str
     summary_text: str
-    rooms: List[RoomVars]
+    rooms: list[RoomVars]
     reason: EmailReason

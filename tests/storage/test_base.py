@@ -86,7 +86,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
 
         conn_pool.runWithConnection = runWithConnection
 
-        config = default_config(name="test", parse=True)
+        config = default_config(server_name="test", parse=True)
         hs = TestHomeServer("test", config=config)
 
         if USE_POSTGRES_FOR_TESTS:
@@ -349,7 +349,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         )
 
         self.mock_txn.execute.assert_called_once_with(
-            "UPDATE tablename SET colC = ?, colD = ? WHERE" " colA = ? AND colB = ?",
+            "UPDATE tablename SET colC = ?, colD = ? WHERE colA = ? AND colB = ?",
             [3, 4, 1, 2],
         )
 

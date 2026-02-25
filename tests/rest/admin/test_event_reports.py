@@ -18,16 +18,15 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes
 from synapse.rest.client import login, reporting, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -378,6 +377,41 @@ class EventReportsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(channel.json_body["event_reports"]), 1)
         self.assertNotIn("next_token", channel.json_body)
 
+    def test_filter_against_event_sender(self) -> None:
+        """
+        Tests filtering by the sender of the reported event
+        """
+        # first grab all the reports
+        channel = self.make_request(
+            "GET",
+            self.url,
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # filter out set of report ids of events sent by one of the users
+        locally_filtered_report_ids = set()
+        for event_report in channel.json_body["event_reports"]:
+            if event_report["sender"] == self.other_user:
+                locally_filtered_report_ids.add(event_report["id"])
+
+        # grab the report ids by sender and compare to filtered report ids
+        channel = self.make_request(
+            "GET",
+            f"{self.url}?event_sender_user_id={self.other_user}",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        self.assertEqual(channel.json_body["total"], len(locally_filtered_report_ids))
+
+        event_reports = channel.json_body["event_reports"]
+        server_filtered_report_ids = set()
+        for event_report in event_reports:
+            server_filtered_report_ids.add(event_report["id"])
+        self.assertIncludes(
+            locally_filtered_report_ids, server_filtered_report_ids, exact=True
+        )
+
     def _create_event_and_report(self, room_id: str, user_tok: str) -> None:
         """Create and report events"""
         resp = self.helper.send(room_id, tok=user_tok)
@@ -406,7 +440,7 @@ class EventReportsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that all attributes are present in an event report"""
         for c in content:
             self.assertIn("id", c)

@@ -24,7 +24,7 @@
 
 import logging
 import urllib.parse
-from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 import attr
 
@@ -39,8 +39,8 @@ from synapse.http import RequestTimedOutError
 from synapse.http.client import SimpleHttpClient
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict, Requester
-from synapse.util import json_decoder
 from synapse.util.hash import sha256_and_url_safe_base64
+from synapse.util.json import json_decoder
 from synapse.util.stringutils import (
     assert_valid_client_secret,
     random_string,
@@ -105,8 +105,8 @@ class IdentityHandler:
         )
 
     async def threepid_from_creds(
-        self, id_server: str, creds: Dict[str, str]
-    ) -> Optional[JsonDict]:
+        self, id_server: str, creds: dict[str, str]
+    ) -> JsonDict | None:
         """
         Retrieve and validate a threepid identifier from a "credentials" dictionary against a
         given identity server
@@ -218,7 +218,7 @@ class IdentityHandler:
 
             return data
         except HttpResponseException as e:
-            logger.error("3PID bind failed with Matrix error: %r", e)
+            logger.exception("3PID bind failed with Matrix error: %r", e)
             raise e.to_synapse_error()
         except RequestTimedOutError:
             raise SynapseError(500, "Timed out contacting identity server")
@@ -227,7 +227,7 @@ class IdentityHandler:
             return data
 
     async def try_unbind_threepid(
-        self, mxid: str, medium: str, address: str, id_server: Optional[str]
+        self, mxid: str, medium: str, address: str, id_server: str | None
     ) -> bool:
         """Attempt to remove a 3PID from one or more identity servers.
 
@@ -323,7 +323,7 @@ class IdentityHandler:
                 # The remote server probably doesn't support unbinding (yet)
                 logger.warning("Received %d response while unbinding threepid", e.code)
             else:
-                logger.error("Failed to unbind threepid on identity server: %s", e)
+                logger.exception("Failed to unbind threepid on identity server: %s", e)
                 raise SynapseError(500, "Failed to contact identity server")
         except RequestTimedOutError:
             raise SynapseError(500, "Timed out contacting identity server")
@@ -338,7 +338,7 @@ class IdentityHandler:
         client_secret: str,
         send_attempt: int,
         send_email_func: Callable[[str, str, str, str], Awaitable],
-        next_link: Optional[str] = None,
+        next_link: str | None = None,
     ) -> str:
         """Send a threepid validation email for password reset or
         registration purposes
@@ -426,7 +426,7 @@ class IdentityHandler:
         phone_number: str,
         client_secret: str,
         send_attempt: int,
-        next_link: Optional[str] = None,
+        next_link: str | None = None,
     ) -> JsonDict:
         """
         Request an external server send an SMS message on our behalf for the purposes of
@@ -473,7 +473,7 @@ class IdentityHandler:
 
     async def validate_threepid_session(
         self, client_secret: str, sid: str
-    ) -> Optional[JsonDict]:
+    ) -> JsonDict | None:
         """Validates a threepid session with only the client secret and session ID
         Tries validating against any configured account_threepid_delegates as well as locally.
 
@@ -541,7 +541,7 @@ class IdentityHandler:
 
     async def lookup_3pid(
         self, id_server: str, medium: str, address: str, id_access_token: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Looks up a 3pid in the passed identity server.
 
         Args:
@@ -567,7 +567,7 @@ class IdentityHandler:
 
     async def _lookup_3pid_v2(
         self, id_server: str, id_access_token: str, medium: str, address: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Looks up a 3pid in the passed identity server using v2 lookup.
 
         Args:
@@ -689,11 +689,11 @@ class IdentityHandler:
         room_avatar_url: str,
         room_join_rules: str,
         room_name: str,
-        room_type: Optional[str],
+        room_type: str | None,
         inviter_display_name: str,
         inviter_avatar_url: str,
         id_access_token: str,
-    ) -> Tuple[str, List[Dict[str, str]], Dict[str, str], str]:
+    ) -> tuple[str, list[dict[str, str]], dict[str, str], str]:
         """
         Asks an identity server for a third party invite.
 
@@ -779,7 +779,7 @@ class IdentityHandler:
         return token, public_keys, fallback_public_key, display_name
 
 
-def create_id_access_token_header(id_access_token: str) -> List[str]:
+def create_id_access_token_header(id_access_token: str) -> list[str]:
     """Create an Authorization header for passing to SimpleHttpClient as the header value
     of an HTTP request.
 

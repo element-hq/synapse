@@ -20,22 +20,21 @@
 #
 #
 
-from typing import Optional
 from unittest import mock
 
 from twisted.internet.defer import ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import RoomEncryptionAlgorithms
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.appservice import ApplicationService
-from synapse.handlers.device import MAX_DEVICE_DISPLAY_NAME_LEN, DeviceHandler
+from synapse.handlers.device import MAX_DEVICE_DISPLAY_NAME_LEN, DeviceWriterHandler
 from synapse.rest import admin
 from synapse.rest.client import devices, login, register
 from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
-from synapse.types import JsonDict, create_requester
-from synapse.util import Clock
+from synapse.types import JsonDict, UserID, create_requester
+from synapse.util.clock import Clock
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests import unittest
@@ -53,7 +52,7 @@ class DeviceTestCase(unittest.HomeserverTestCase):
             application_service_api=self.appservice_api,
         )
         handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
+        assert isinstance(handler, DeviceWriterHandler)
         self.handler = handler
         self.store = hs.get_datastores().main
         self.device_message_handler = hs.get_device_message_handler()
@@ -229,7 +228,7 @@ class DeviceTestCase(unittest.HomeserverTestCase):
 
         # queue a bunch of messages in the inbox
         requester = create_requester(sender, device_id=DEVICE_ID)
-        for i in range(DeviceHandler.DEVICE_MSGS_DELETE_BATCH_LIMIT + 10):
+        for i in range(DeviceWriterHandler.DEVICE_MSGS_DELETE_BATCH_LIMIT + 10):
             self.get_success(
                 self.device_message_handler.send_device_message(
                     requester, "message_type", {receiver: {"*": {"val": i}}}
@@ -251,7 +250,7 @@ class DeviceTestCase(unittest.HomeserverTestCase):
         self.assertEqual(10, len(res))
 
         # wait for the task scheduler to do a second delete pass
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS / 1000)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         # remaining messages should now be deleted
         res = self.get_success(
@@ -312,8 +311,8 @@ class DeviceTestCase(unittest.HomeserverTestCase):
         user_id: str,
         device_id: str,
         display_name: str,
-        access_token: Optional[str] = None,
-        ip: Optional[str] = None,
+        access_token: str | None = None,
+        ip: str | None = None,
     ) -> None:
         device_id = self.get_success(
             self.handler.check_device_registered(
@@ -419,7 +418,7 @@ class DeviceTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@boris:.+", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
         self.hs.get_datastores().main.services_cache = [appservice]
         self.hs.get_datastores().main.exclusive_user_regex = _make_exclusive_regex(
@@ -450,6 +449,33 @@ class DeviceTestCase(unittest.HomeserverTestCase):
             ],
         )
 
+    def test_delete_device_removes_refresh_tokens(self) -> None:
+        """Deleting a device should also purge any refresh tokens for it."""
+        self._record_users()
+
+        self.get_success(
+            self.store.add_refresh_token_to_user(
+                user_id=user1,
+                token="refresh_token",
+                device_id="abc",
+                expiry_ts=None,
+                ultimate_session_expiry_ts=None,
+            )
+        )
+
+        self.get_success(self.handler.delete_devices(user1, ["abc"]))
+
+        remaining_refresh_token = self.get_success(
+            self.store.db_pool.simple_select_one(
+                table="refresh_tokens",
+                keyvalues={"user_id": user1, "device_id": "abc"},
+                retcols=("id",),
+                desc="get_refresh_token_for_device",
+                allow_none=True,
+            )
+        )
+        self.assertIsNone(remaining_refresh_token)
+
 
 class DehydrationTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -462,7 +488,7 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         hs = self.setup_test_homeserver("server")
         handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
+        assert isinstance(handler, DeviceWriterHandler)
         self.handler = handler
         self.message_handler = hs.get_device_message_handler()
         self.registration = hs.get_registration_handler()
@@ -471,90 +497,7 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
         self.store = hs.get_datastores().main
         return hs
 
-    def test_dehydrate_and_rehydrate_device(self) -> None:
-        user_id = "@boris:dehydration"
-
-        self.get_success(self.store.register_user(user_id, "foobar"))
-
-        # First check if we can store and fetch a dehydrated device
-        stored_dehydrated_device_id = self.get_success(
-            self.handler.store_dehydrated_device(
-                user_id=user_id,
-                device_id=None,
-                device_data={"device_data": {"foo": "bar"}},
-                initial_device_display_name="dehydrated device",
-            )
-        )
-
-        result = self.get_success(self.handler.get_dehydrated_device(user_id=user_id))
-        assert result is not None
-        retrieved_device_id, device_data = result
-
-        self.assertEqual(retrieved_device_id, stored_dehydrated_device_id)
-        self.assertEqual(device_data, {"device_data": {"foo": "bar"}})
-
-        # Create a new login for the user and dehydrated the device
-        device_id, access_token, _expiration_time, refresh_token = self.get_success(
-            self.registration.register_device(
-                user_id=user_id,
-                device_id=None,
-                initial_display_name="new device",
-                should_issue_refresh_token=True,
-            )
-        )
-
-        # Trying to claim a nonexistent device should throw an error
-        self.get_failure(
-            self.handler.rehydrate_device(
-                user_id=user_id,
-                access_token=access_token,
-                device_id="not the right device ID",
-            ),
-            NotFoundError,
-        )
-
-        # dehydrating the right devices should succeed and change our device ID
-        # to the dehydrated device's ID
-        res = self.get_success(
-            self.handler.rehydrate_device(
-                user_id=user_id,
-                access_token=access_token,
-                device_id=retrieved_device_id,
-            )
-        )
-
-        self.assertEqual(res, {"success": True})
-
-        # make sure that our device ID has changed
-        user_info = self.get_success(self.auth.get_user_by_access_token(access_token))
-
-        self.assertEqual(user_info.device_id, retrieved_device_id)
-
-        # make sure the user device has the refresh token
-        assert refresh_token is not None
-        self.get_success(
-            self.auth_handler.refresh_token(refresh_token, 5 * 60 * 1000, 5 * 60 * 1000)
-        )
-
-        # make sure the device has the display name that was set from the login
-        res = self.get_success(self.handler.get_device(user_id, retrieved_device_id))
-
-        self.assertEqual(res["display_name"], "new device")
-
-        # make sure that the device ID that we were initially assigned no longer exists
-        self.get_failure(
-            self.handler.get_device(user_id, device_id),
-            NotFoundError,
-        )
-
-        # make sure that there's no device available for dehydrating now
-        ret = self.get_success(self.handler.get_dehydrated_device(user_id=user_id))
-
-        self.assertIsNone(ret)
-
-    @unittest.override_config(
-        {"experimental_features": {"msc2697_enabled": False, "msc3814_enabled": True}}
-    )
+    @unittest.override_config({"experimental_features": {"msc3814_enabled": True}})
     def test_dehydrate_v2_and_fetch_events(self) -> None:
         user_id = "@boris:server"
 
@@ -567,6 +510,7 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
                 device_id=None,
                 device_data={"device_data": {"foo": "bar"}},
                 initial_device_display_name="dehydrated device",
+                keys_for_device={},
             )
         )
 

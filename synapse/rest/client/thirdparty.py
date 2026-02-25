@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import ThirdPartyEntityKind
 from synapse.http.server import HttpServer
@@ -45,7 +45,7 @@ class ThirdPartyProtocolsServlet(RestServlet):
         self.auth = hs.get_auth()
         self.appservice_handler = hs.get_application_service_handler()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await self.auth.get_user_by_req(request, allow_guest=True)
 
         protocols = await self.appservice_handler.get_3pe_protocols()
@@ -63,7 +63,7 @@ class ThirdPartyProtocolServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, protocol: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self.auth.get_user_by_req(request, allow_guest=True)
 
         protocols = await self.appservice_handler.get_3pe_protocols(
@@ -86,10 +86,10 @@ class ThirdPartyUserServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, protocol: str
-    ) -> Tuple[int, List[JsonDict]]:
+    ) -> tuple[int, list[JsonDict]]:
         await self.auth.get_user_by_req(request, allow_guest=True)
 
-        fields: Dict[bytes, List[bytes]] = request.args  # type: ignore[assignment]
+        fields: dict[bytes, list[bytes]] = request.args  # type: ignore[assignment]
         fields.pop(b"access_token", None)
 
         results = await self.appservice_handler.query_3pe(
@@ -110,10 +110,10 @@ class ThirdPartyLocationServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, protocol: str
-    ) -> Tuple[int, List[JsonDict]]:
+    ) -> tuple[int, list[JsonDict]]:
         await self.auth.get_user_by_req(request, allow_guest=True)
 
-        fields: Dict[bytes, List[bytes]] = request.args  # type: ignore[assignment]
+        fields: dict[bytes, list[bytes]] = request.args  # type: ignore[assignment]
         fields.pop(b"access_token", None)
 
         results = await self.appservice_handler.query_3pe(

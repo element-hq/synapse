@@ -36,13 +36,14 @@ class AuthConfig(Config):
         if password_config is None:
             password_config = {}
 
-        # The default value of password_config.enabled is True, unless msc3861 is enabled.
-        msc3861_enabled = (
-            (config.get("experimental_features") or {})
-            .get("msc3861", {})
-            .get("enabled", False)
-        )
-        passwords_enabled = password_config.get("enabled", not msc3861_enabled)
+        auth_delegated = (config.get("experimental_features") or {}).get(
+            "msc3861", {}
+        ).get("enabled", False) or (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False)
+
+        # The default value of password_config.enabled is True, unless auth is delegated
+        passwords_enabled = password_config.get("enabled", not auth_delegated)
 
         # 'only_for_reauth' allows users who have previously set a password to use it,
         # even though passwords would otherwise be disabled.

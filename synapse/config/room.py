@@ -27,7 +27,7 @@ from synapse.types import JsonDict
 
 from ._base import Config, ConfigError
 
-logger = logging.Logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class RoomDefaultEncryptionTypes:
@@ -85,4 +85,4 @@ class RoomConfig(Config):
 
         # When enabled, users will forget rooms when they leave them, either via a
         # leave, kick or ban.
-        self.forget_on_leave = config.get("forget_rooms_on_leave", False)
+        self.forget_on_leave: bool = config.get("forget_rooms_on_leave", False)

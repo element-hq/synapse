@@ -19,14 +19,15 @@
 #
 import yaml
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.rest.client.login
 import synapse.rest.client.room
+from synapse.config._base import RootConfig
 from synapse.config.room_directory import RoomDirectoryConfig
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -63,7 +64,7 @@ class RoomDirectoryConfigTestCase(unittest.HomeserverTestCase):
         """
         )
 
-        rd_config = RoomDirectoryConfig()
+        rd_config = RoomDirectoryConfig(RootConfig())
         rd_config.read_config(config)
 
         self.assertFalse(
@@ -123,7 +124,7 @@ class RoomDirectoryConfigTestCase(unittest.HomeserverTestCase):
         """
         )
 
-        rd_config = RoomDirectoryConfig()
+        rd_config = RoomDirectoryConfig(RootConfig())
         rd_config.read_config(config)
 
         self.assertFalse(

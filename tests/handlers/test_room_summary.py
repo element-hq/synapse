@@ -18,11 +18,11 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Iterable
 from unittest import mock
 
 from twisted.internet.defer import ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
     EventContentFields,
@@ -42,13 +42,14 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 def _create_event(
-    room_id: str, order: Optional[Any] = None, origin_server_ts: int = 0
+    room_id: str, order: Any | None = None, origin_server_ts: int = 0
 ) -> mock.Mock:
     result = mock.Mock(name=room_id)
     result.room_id = room_id
@@ -59,7 +60,7 @@ def _create_event(
     return result
 
 
-def _order(*events: mock.Mock) -> List[mock.Mock]:
+def _order(*events: mock.Mock) -> list[mock.Mock]:
     return sorted(events, key=_child_events_comparison_key)
 
 
@@ -150,8 +151,8 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         space_id: str,
         room_id: str,
         token: str,
-        order: Optional[str] = None,
-        via: Optional[List[str]] = None,
+        order: str | None = None,
+        via: list[str] | None = None,
     ) -> None:
         """Add a child room to a space."""
         if via is None:
@@ -169,7 +170,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
 
     def _assert_hierarchy(
-        self, result: JsonDict, rooms_and_children: Iterable[Tuple[str, Iterable[str]]]
+        self, result: JsonDict, rooms_and_children: Iterable[tuple[str, Iterable[str]]]
     ) -> None:
         """
         Assert that the expected room IDs are in the response.
@@ -245,6 +246,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
         self._assert_hierarchy(result, expected)
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_large_space(self) -> None:
         """Test a space with a large number of rooms."""
         rooms = [self.room]
@@ -391,7 +393,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         self._assert_hierarchy(result2, [(self.space, [self.room])])
 
     def _create_room_with_join_rule(
-        self, join_rule: str, room_version: Optional[str] = None, **extra_content: Any
+        self, join_rule: str, room_version: str | None = None, **extra_content: Any
     ) -> str:
         """Create a room with the given join rule and add it to the space."""
         room_id = self.helper.create_room_as(
@@ -527,6 +529,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
         self._assert_hierarchy(result, expected)
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_pagination(self) -> None:
         """Test simple pagination works."""
         room_ids = []
@@ -544,7 +547,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
         # The result should have the space and all of the links, plus some of the
         # rooms and a pagination token.
-        expected: List[Tuple[str, Iterable[str]]] = [(self.space, room_ids)]
+        expected: list[tuple[str, Iterable[str]]] = [(self.space, room_ids)]
         expected += [(room_id, ()) for room_id in room_ids[:6]]
         self._assert_hierarchy(result, expected)
         self.assertIn("next_batch", result)
@@ -564,6 +567,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         self._assert_hierarchy(result, expected)
         self.assertNotIn("next_batch", result)
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_invalid_pagination_token(self) -> None:
         """An invalid pagination token, or changing other parameters, shoudl be rejected."""
         room_ids = []
@@ -615,6 +619,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             SynapseError,
         )
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_max_depth(self) -> None:
         """Create a deep tree to test the max depth against."""
         spaces = [self.space]
@@ -641,7 +646,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
                 create_requester(self.user), self.space, max_depth=0
             )
         )
-        expected: List[Tuple[str, Iterable[str]]] = [(spaces[0], [rooms[0], spaces[1]])]
+        expected: list[tuple[str, Iterable[str]]] = [(spaces[0], [rooms[0], spaces[1]])]
         self._assert_hierarchy(result, expected)
 
         # A single additional layer.
@@ -735,7 +740,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> Tuple[Optional[_RoomEntry], Dict[str, JsonDict], Set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return requested_room_entry, {subroom: child_room}, set()
 
         # Add a room to the space which is on another server.
@@ -788,7 +793,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> Tuple[Optional[_RoomEntry], Dict[str, JsonDict], Set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return requested_room_entry, {fed_subroom: child_room}, set()
 
         expected = [
@@ -916,7 +921,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> Tuple[Optional[_RoomEntry], Dict[str, JsonDict], Set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return subspace_room_entry, dict(children_rooms), set()
 
         # Add a room to the space which is on another server.
@@ -980,7 +985,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> Tuple[Optional[_RoomEntry], Dict[str, JsonDict], Set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return fed_room_entry, {}, set()
 
         # Add a room to the space which is on another server.
@@ -1080,6 +1085,62 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             self.assertEqual(federation_requests, 2)
             self._assert_hierarchy(result, expected)
 
+    def test_fed_remote_room_hosts(self) -> None:
+        """
+        Test if requested room is available over federation using via's.
+        """
+        fed_hostname = self.hs.hostname + "2"
+        fed_space = "#fed_space:" + fed_hostname
+        fed_subroom = "#fed_sub_room:" + fed_hostname
+
+        remote_room_hosts = tuple(fed_hostname)
+
+        requested_room_entry = _RoomEntry(
+            fed_space,
+            {
+                "room_id": fed_space,
+                "world_readable": True,
+                "join_rule": "public",
+                "room_type": RoomTypes.SPACE,
+            },
+            [
+                {
+                    "type": EventTypes.SpaceChild,
+                    "room_id": fed_space,
+                    "state_key": fed_subroom,
+                    "content": {"via": [fed_hostname]},
+                }
+            ],
+        )
+        child_room = {
+            "room_id": fed_subroom,
+            "world_readable": True,
+            "join_rule": "public",
+        }
+
+        async def summarize_remote_room_hierarchy(
+            _self: Any, room: Any, suggested_only: bool
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
+            return requested_room_entry, {fed_subroom: child_room}, set()
+
+        expected = [
+            (fed_space, [fed_subroom]),
+            (fed_subroom, ()),
+        ]
+
+        with mock.patch(
+            "synapse.handlers.room_summary.RoomSummaryHandler._summarize_remote_room_hierarchy",
+            new=summarize_remote_room_hierarchy,
+        ):
+            result = self.get_success(
+                self.handler.get_room_hierarchy(
+                    create_requester(self.user),
+                    fed_space,
+                    remote_room_hosts=remote_room_hosts,
+                )
+            )
+        self._assert_hierarchy(result, expected)
+
 
 class RoomSummaryTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -1172,7 +1233,7 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> Tuple[Optional[_RoomEntry], Dict[str, JsonDict], Set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
             return requested_room_entry, {}, set()
 
         with mock.patch(

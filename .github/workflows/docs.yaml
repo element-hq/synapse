@@ -50,7 +50,7 @@ jobs:
     needs:
       - pre
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # Fetch all history so that the schema_versions script works.
           fetch-depth: 0
@@ -58,13 +58,13 @@ jobs:
       - name: Setup mdbook
         uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
         with:
-          mdbook-version: '0.4.17'
+          mdbook-version: '0.5.2'
 
       - name: Set version of docs
         run: echo 'window.SYNAPSE_VERSION = "${{ needs.pre.outputs.branch-version }}";' > ./docs/website_files/version.js
 
       - name: Setup python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.x"
 
@@ -77,6 +77,18 @@ jobs:
         run: |
           mdbook build
           cp book/welcome_and_overview.html book/index.html
+
+      - name: Prepare and publish schema files
+        run: |
+          sudo apt-get update && sudo apt-get install -y yq
+          mkdir -p book/schema
+          # Remove developer notice before publishing.
+          rm schema/v*/Do\ not\ edit\ files\ in\ this\ folder
+          # Copy schema files that are independent from current Synapse version.
+          cp -r -t book/schema schema/v*/
+          # Convert config schema from YAML source file to JSON.
+          yq < schema/synapse-config.schema.yaml \
+            > book/schema/synapse-config.schema.json
 
       # Deploy to the target directory.
       - name: Deploy to gh pages

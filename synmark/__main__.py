@@ -22,7 +22,7 @@ import sys
 from argparse import REMAINDER, Namespace
 from contextlib import redirect_stderr
 from io import StringIO
-from typing import Any, Callable, Coroutine, List, TypeVar
+from typing import Any, Callable, Coroutine, TypeVar
 
 import pyperf
 
@@ -62,7 +62,10 @@ def make_test(
                 return res
 
             d.addBoth(on_done)
-            reactor.callWhenRunning(lambda: d.callback(True))
+            # type-ignore: This is outside of Synapse (just a utility benchmark script)
+            # so we don't need to worry about  which server the logs are coming from
+            # (`Clock.call_when_running` manages the logcontext for us).
+            reactor.callWhenRunning(lambda: d.callback(True))  # type: ignore[prefer-synapse-clock-call-when-running]
             reactor.run()
 
         # mypy thinks this is an object for some reason.
@@ -73,7 +76,7 @@ def make_test(
 
 if __name__ == "__main__":
 
-    def add_cmdline_args(cmd: List[str], args: Namespace) -> None:
+    def add_cmdline_args(cmd: list[str], args: Namespace) -> None:
         if args.log:
             cmd.extend(["--log"])
         cmd.extend(args.tests)

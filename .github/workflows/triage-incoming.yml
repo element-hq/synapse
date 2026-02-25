@@ -6,7 +6,7 @@ on:
 
 jobs:
   triage:
-    uses: matrix-org/backend-meta/.github/workflows/triage-incoming.yml@v2
+    uses: matrix-org/backend-meta/.github/workflows/triage-incoming.yml@18beaf3c8e536108bd04d18e6c3dc40ba3931e28 # v2.0.3
     with:
       project_id: 'PVT_kwDOAIB0Bs4AFDdZ'
       content_id: ${{ github.event.issue.node_id }}

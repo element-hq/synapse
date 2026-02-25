@@ -60,10 +60,11 @@ paginate through.
   anything other than the return value of `next_token` from a previous call. Defaults to `0`.
 * `dir`: string - Direction of event report order. Whether to fetch the most recent
   first (`b`) or the oldest first (`f`). Defaults to `b`.
-* `user_id`: string - Is optional and filters to only return users with user IDs that
-  contain this value. This is the user who reported the event and wrote the reason.
-* `room_id`: string - Is optional and filters to only return rooms with room IDs that
-  contain this value.
+* `user_id`: optional string - Filter by the user ID of the reporter. This is the user who reported the event
+   and wrote the reason.
+* `room_id`: optional string - Filter by room id.
+* `event_sender_user_id`: optional string - Filter by the sender of the reported event. This is the user who 
+   the report was made against.
 
 **Response**
 
@@ -116,7 +117,6 @@ It returns a JSON body like the following:
         "hashes": {
             "sha256": "xK1//xnmvHJIOvbgXlkI8eEqdvoMmihVDJ9J4SNlsAw"
         },
-        "origin": "matrix.org",
         "origin_server_ts": 1592291711430,
         "prev_events": [
             "$YK4arsKKcc0LRoe700pS8DSjOvUT4NDv0HfInlMFw2M"

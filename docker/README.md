@@ -75,6 +75,9 @@ The following environment variables are supported in `generate` mode:
   particularly tricky.
 * `SYNAPSE_LOG_TESTING`: if set, Synapse will log additional information useful
   for testing.
+* `SYNAPSE_ENABLE_METRICS`: if set to `1`, the metrics listener will be enabled on the
+  main and worker processes. Defaults to `0` (disabled). The main process will listen on
+  port `19090` and workers on port `19091 + <worker index>`.
 
 ## Postgres
 
@@ -114,6 +117,9 @@ The following environment variables are supported in `run` mode:
   is set via `docker run --user`, defaults to `991`, `991`. Note that this user
   must have permission to read the config files, and write to the data directories.
 * `TZ`: the [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) the container will run with. Defaults to `UTC`.
+* `SYNAPSE_HTTP_PROXY`: Passed through to the Synapse process as the `http_proxy` environment variable.
+* `SYNAPSE_HTTPS_PROXY`: Passed through to the Synapse process as the `https_proxy` environment variable.
+* `SYNAPSE_NO_PROXY`: Passed through to the Synapse process as `no_proxy` environment variable.
 
 For more complex setups (e.g. for workers) you can also pass your args directly to synapse using `run` mode. For example like this:
 

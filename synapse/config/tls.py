@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Any, List, Optional, Pattern
+from typing import Any, Pattern
 
 from matrix_common.regex import glob_to_regex
 
@@ -84,7 +84,7 @@ class TlsConfig(Config):
             fed_whitelist_entries = []
 
         # Support globs (*) in whitelist values
-        self.federation_certificate_verification_whitelist: List[Pattern] = []
+        self.federation_certificate_verification_whitelist: list[Pattern] = []
         for entry in fed_whitelist_entries:
             try:
                 entry_regex = glob_to_regex(entry.encode("ascii").decode("ascii"))
@@ -108,8 +108,7 @@ class TlsConfig(Config):
                 # Raise an error if this option has been specified without any
                 # corresponding certificates.
                 raise ConfigError(
-                    "federation_custom_ca_list specified without "
-                    "any certificate files"
+                    "federation_custom_ca_list specified without any certificate files"
                 )
 
             certs = []
@@ -136,8 +135,8 @@ class TlsConfig(Config):
             "use_insecure_ssl_client_just_for_testing_do_not_use"
         )
 
-        self.tls_certificate: Optional[crypto.X509] = None
-        self.tls_private_key: Optional[crypto.PKey] = None
+        self.tls_certificate: crypto.X509 | None = None
+        self.tls_private_key: crypto.PKey | None = None
 
     def read_certificate_from_disk(self) -> None:
         """
@@ -148,8 +147,8 @@ class TlsConfig(Config):
 
     def generate_config_section(
         self,
-        tls_certificate_path: Optional[str],
-        tls_private_key_path: Optional[str],
+        tls_certificate_path: str | None,
+        tls_private_key_path: str | None,
         **kwargs: Any,
     ) -> str:
         """If the TLS paths are not specified the default will be certs in the

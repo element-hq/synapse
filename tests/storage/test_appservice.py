@@ -21,13 +21,13 @@
 import json
 import os
 import tempfile
-from typing import List, cast
+from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import yaml
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.appservice import ApplicationService, ApplicationServiceState
 from synapse.config._base import ConfigError
@@ -39,7 +39,7 @@ from synapse.storage.databases.main.appservice import (
     ApplicationServiceTransactionStore,
 )
 from synapse.types import DeviceListUpdates
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -48,7 +48,7 @@ class ApplicationServiceStoreTestCase(unittest.HomeserverTestCase):
     def setUp(self) -> None:
         super().setUp()
 
-        self.as_yaml_files: List[str] = []
+        self.as_yaml_files: list[str] = []
 
         self.hs.config.appservice.app_service_config_files = self.as_yaml_files
         self.hs.config.caches.event_cache_size = 1
@@ -63,9 +63,15 @@ class ApplicationServiceStoreTestCase(unittest.HomeserverTestCase):
         self._add_appservice("token3", "as3", "some_url", "some_hs_token", "bob")
         # must be done after inserts
         database = self.hs.get_datastores().databases[0]
+        self.server_name = self.hs.hostname
         self.store = ApplicationServiceStore(
             database,
-            make_conn(database._database_config, database.engine, "test"),
+            make_conn(
+                db_config=database._database_config,
+                engine=database.engine,
+                default_txn_name="test",
+                server_name=self.server_name,
+            ),
             self.hs,
         )
 
@@ -117,7 +123,7 @@ class ApplicationServiceStoreTestCase(unittest.HomeserverTestCase):
 class ApplicationServiceTransactionStoreTestCase(unittest.HomeserverTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.as_yaml_files: List[str] = []
+        self.as_yaml_files: list[str] = []
 
         self.hs.config.appservice.app_service_config_files = self.as_yaml_files
         self.hs.config.caches.event_cache_size = 1
@@ -138,9 +144,17 @@ class ApplicationServiceTransactionStoreTestCase(unittest.HomeserverTestCase):
         self.db_pool = database._db_pool
         self.engine = database.engine
 
+        server_name = self.hs.hostname
         db_config = self.hs.config.database.get_single_database()
         self.store = TestTransactionStore(
-            database, make_conn(db_config, self.engine, "test"), self.hs
+            database,
+            make_conn(
+                db_config=db_config,
+                engine=self.engine,
+                default_txn_name="test",
+                server_name=server_name,
+            ),
+            self.hs,
         )
 
     def _add_service(self, url: str, as_token: str, id: str) -> None:
@@ -166,7 +180,7 @@ class ApplicationServiceTransactionStoreTestCase(unittest.HomeserverTestCase):
         )
 
     def _insert_txn(
-        self, as_id: str, txn_id: int, events: List[Mock]
+        self, as_id: str, txn_id: int, events: list[Mock]
     ) -> "defer.Deferred[None]":
         return self.db_pool.runOperation(
             self.engine.convert_param_style(
@@ -263,7 +277,7 @@ class ApplicationServiceTransactionStoreTestCase(unittest.HomeserverTestCase):
         self,
     ) -> None:
         service = Mock(id=self.as_list[0]["id"])
-        events = cast(List[EventBase], [Mock(event_id="e1"), Mock(event_id="e2")])
+        events = cast(list[EventBase], [Mock(event_id="e1"), Mock(event_id="e2")])
         txn = self.get_success(
             defer.ensureDeferred(
                 self.store.create_appservice_txn(
@@ -488,10 +502,16 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
         self.hs.config.appservice.app_service_config_files = [f1, f2]
         self.hs.config.caches.event_cache_size = 1
 
+        server_name = self.hs.hostname
         database = self.hs.get_datastores().databases[0]
         ApplicationServiceStore(
             database,
-            make_conn(database._database_config, database.engine, "test"),
+            make_conn(
+                db_config=database._database_config,
+                engine=database.engine,
+                default_txn_name="test",
+                server_name=server_name,
+            ),
             self.hs,
         )
 
@@ -503,10 +523,16 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
         self.hs.config.caches.event_cache_size = 1
 
         with self.assertRaises(ConfigError) as cm:
+            server_name = self.hs.hostname
             database = self.hs.get_datastores().databases[0]
             ApplicationServiceStore(
                 database,
-                make_conn(database._database_config, database.engine, "test"),
+                make_conn(
+                    db_config=database._database_config,
+                    engine=database.engine,
+                    default_txn_name="test",
+                    server_name=server_name,
+                ),
                 self.hs,
             )
 
@@ -523,10 +549,16 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
         self.hs.config.caches.event_cache_size = 1
 
         with self.assertRaises(ConfigError) as cm:
+            server_name = self.hs.hostname
             database = self.hs.get_datastores().databases[0]
             ApplicationServiceStore(
                 database,
-                make_conn(database._database_config, database.engine, "test"),
+                make_conn(
+                    db_config=database._database_config,
+                    engine=database.engine,
+                    default_txn_name="test",
+                    server_name=server_name,
+                ),
                 self.hs,
             )
 

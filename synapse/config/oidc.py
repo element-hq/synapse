@@ -21,7 +21,7 @@
 #
 
 from collections import Counter
-from typing import Any, Collection, Iterable, List, Mapping, Optional, Tuple, Type
+from typing import Any, Collection, Iterable, Mapping
 
 import attr
 
@@ -125,6 +125,10 @@ OIDC_PROVIDER_CONFIG_SCHEMA = {
             "enum": ["client_secret_basic", "client_secret_post", "none"],
         },
         "pkce_method": {"type": "string", "enum": ["auto", "always", "never"]},
+        "id_token_signing_alg_values_supported": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
         "scopes": {"type": "array", "items": {"type": "string"}},
         "authorization_endpoint": {"type": "string"},
         "token_endpoint": {"type": "string"},
@@ -136,6 +140,9 @@ OIDC_PROVIDER_CONFIG_SCHEMA = {
         "user_profile_method": {
             "type": "string",
             "enum": ["auto", "userinfo_endpoint"],
+        },
+        "redirect_uri": {
+            "type": ["string", "null"],
         },
         "allow_existing_users": {"type": "boolean"},
         "user_mapping_provider": {"type": ["object", "null"]},
@@ -206,7 +213,7 @@ def _parse_oidc_provider_configs(config: JsonDict) -> Iterable["OidcProviderConf
 
 
 def _parse_oidc_config_dict(
-    oidc_config: JsonDict, config_path: Tuple[str, ...]
+    oidc_config: JsonDict, config_path: tuple[str, ...]
 ) -> "OidcProviderConfig":
     """Take the configuration dict and parse it into an OidcProviderConfig
 
@@ -269,7 +276,7 @@ def _parse_oidc_config_dict(
             ) from e
 
     client_secret_jwt_key_config = oidc_config.get("client_secret_jwt_key")
-    client_secret_jwt_key: Optional[OidcProviderClientSecretJwtKey] = None
+    client_secret_jwt_key: OidcProviderClientSecretJwtKey | None = None
     if client_secret_jwt_key_config is not None:
         keyfile = client_secret_jwt_key_config.get("key_file")
         if keyfile:
@@ -326,6 +333,9 @@ def _parse_oidc_config_dict(
         client_secret_jwt_key=client_secret_jwt_key,
         client_auth_method=client_auth_method,
         pkce_method=oidc_config.get("pkce_method", "auto"),
+        id_token_signing_alg_values_supported=oidc_config.get(
+            "id_token_signing_alg_values_supported"
+        ),
         scopes=oidc_config.get("scopes", ["openid"]),
         authorization_endpoint=oidc_config.get("authorization_endpoint"),
         token_endpoint=oidc_config.get("token_endpoint"),
@@ -337,6 +347,7 @@ def _parse_oidc_config_dict(
         ),
         skip_verification=oidc_config.get("skip_verification", False),
         user_profile_method=oidc_config.get("user_profile_method", "auto"),
+        redirect_uri=oidc_config.get("redirect_uri"),
         allow_existing_users=oidc_config.get("allow_existing_users", False),
         user_mapping_provider_class=user_mapping_provider_class,
         user_mapping_provider_config=user_mapping_provider_config,
@@ -344,6 +355,9 @@ def _parse_oidc_config_dict(
         enable_registration=oidc_config.get("enable_registration", True),
         additional_authorization_parameters=oidc_config.get(
             "additional_authorization_parameters", {}
+        ),
+        passthrough_authorization_parameters=oidc_config.get(
+            "passthrough_authorization_parameters", []
         ),
     )
 
@@ -370,10 +384,10 @@ class OidcProviderConfig:
     idp_name: str
 
     # Optional MXC URI for icon for this IdP.
-    idp_icon: Optional[str]
+    idp_icon: str | None
 
     # Optional brand identifier for this IdP.
-    idp_brand: Optional[str]
+    idp_brand: str | None
 
     # whether the OIDC discovery mechanism is used to discover endpoints
     discover: bool
@@ -387,11 +401,11 @@ class OidcProviderConfig:
 
     # oauth2 client secret to use. if `None`, use client_secret_jwt_key to generate
     # a secret.
-    client_secret: Optional[str]
+    client_secret: str | None
 
     # key to use to construct a JWT to use as a client secret. May be `None` if
     # `client_secret` is set.
-    client_secret_jwt_key: Optional[OidcProviderClientSecretJwtKey]
+    client_secret_jwt_key: OidcProviderClientSecretJwtKey | None
 
     # auth method to use when exchanging the token.
     # Valid values are 'client_secret_basic', 'client_secret_post' and
@@ -402,22 +416,50 @@ class OidcProviderConfig:
     # Valid values are 'auto', 'always', and 'never'.
     pkce_method: str
 
+    id_token_signing_alg_values_supported: list[str] | None
+    """
+    List of the JWS signing algorithms (`alg` values) that are supported for signing the
+    `id_token`.
+
+    This is *not* required if `discovery` is disabled. We default to supporting `RS256`
+    in the downstream usage if no algorithms are configured here or in the discovery
+    document.
+
+    According to the spec, the algorithm `"RS256"` MUST be included. The absolute rigid
+    approach would be to reject this provider as non-compliant if it's not included but
+    we can just allow whatever and see what happens (they're the ones that configured
+    the value and cooperating with the identity provider). It wouldn't be wise to add it
+    ourselves because absence of `RS256` might indicate that the provider actually
+    doesn't support it, despite the spec requirement. Adding it silently could lead to
+    failed authentication attempts or strange mismatch attacks.
+
+    The `alg` value `"none"` MAY be supported but can only be used if the Authorization
+    Endpoint does not include `id_token` in the `response_type` (ex.
+    `/authorize?response_type=code` where `none` can apply,
+    `/authorize?response_type=code%20id_token` where `none` can't apply) (such as when
+    using the Authorization Code Flow).
+
+    Spec:
+     - https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata
+     - https://openid.net/specs/openid-connect-core-1_0.html#AuthorizationExamples
+    """
+
     # list of scopes to request
     scopes: Collection[str]
 
     # the oauth2 authorization endpoint. Required if discovery is disabled.
-    authorization_endpoint: Optional[str]
+    authorization_endpoint: str | None
 
     # the oauth2 token endpoint. Required if discovery is disabled.
-    token_endpoint: Optional[str]
+    token_endpoint: str | None
 
     # the OIDC userinfo endpoint. Required if discovery is disabled and the
     # "openid" scope is not requested.
-    userinfo_endpoint: Optional[str]
+    userinfo_endpoint: str | None
 
     # URI where to fetch the JWKS. Required if discovery is disabled and the
     # "openid" scope is used.
-    jwks_uri: Optional[str]
+    jwks_uri: str | None
 
     # Whether Synapse should react to backchannel logouts
     backchannel_logout_enabled: bool
@@ -432,21 +474,36 @@ class OidcProviderConfig:
     # values are: "auto" or "userinfo_endpoint".
     user_profile_method: str
 
+    redirect_uri: str | None
+    """
+    An optional replacement for Synapse's hardcoded `redirect_uri` URL
+    (`<public_baseurl>/_synapse/client/oidc/callback`). This can be used to send
+    the client to a different URL after it receives a response from the
+    `authorization_endpoint`.
+
+    If this is set, the client is expected to call Synapse's OIDC callback URL
+    reproduced above itself with the necessary parameters and session cookie, in
+    order to complete OIDC login.
+    """
+
     # whether to allow a user logging in via OIDC to match a pre-existing account
     # instead of failing
     allow_existing_users: bool
 
     # the class of the user mapping provider
-    user_mapping_provider_class: Type
+    user_mapping_provider_class: type
 
     # the config of the user mapping provider
     user_mapping_provider_config: Any
 
     # required attributes to require in userinfo to allow login/registration
-    attribute_requirements: List[SsoAttributeRequirement]
+    attribute_requirements: list[SsoAttributeRequirement]
 
     # Whether automatic registrations are enabled in the ODIC flow. Defaults to True
     enable_registration: bool
 
     # Additional parameters that will be passed to the authorization grant URL
     additional_authorization_parameters: Mapping[str, str]
+
+    # Allow query parameters to the redirect endpoint that will be passed to the authorization grant URL
+    passthrough_authorization_parameters: Collection[str]

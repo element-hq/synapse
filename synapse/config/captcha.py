@@ -23,14 +23,38 @@ from typing import Any
 
 from synapse.types import JsonDict
 
-from ._base import Config, ConfigError
+from ._base import Config, ConfigError, read_file
+
+CONFLICTING_RECAPTCHA_PRIVATE_KEY_OPTS_ERROR = """\
+You have configured both `recaptcha_private_key` and
+`recaptcha_private_key_path`. These are mutually incompatible.
+"""
+
+CONFLICTING_RECAPTCHA_PUBLIC_KEY_OPTS_ERROR = """\
+You have configured both `recaptcha_public_key` and `recaptcha_public_key_path`.
+These are mutually incompatible.
+"""
 
 
 class CaptchaConfig(Config):
     section = "captcha"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         recaptcha_private_key = config.get("recaptcha_private_key")
+        if recaptcha_private_key and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("recaptcha_private_key",),
+            )
+        recaptcha_private_key_path = config.get("recaptcha_private_key_path")
+        if recaptcha_private_key_path:
+            if recaptcha_private_key:
+                raise ConfigError(CONFLICTING_RECAPTCHA_PRIVATE_KEY_OPTS_ERROR)
+            recaptcha_private_key = read_file(
+                recaptcha_private_key_path, ("recaptcha_private_key_path",)
+            ).strip()
         if recaptcha_private_key is not None and not isinstance(
             recaptcha_private_key, str
         ):
@@ -38,6 +62,18 @@ class CaptchaConfig(Config):
         self.recaptcha_private_key = recaptcha_private_key
 
         recaptcha_public_key = config.get("recaptcha_public_key")
+        if recaptcha_public_key and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("recaptcha_public_key",),
+            )
+        recaptcha_public_key_path = config.get("recaptcha_public_key_path")
+        if recaptcha_public_key_path:
+            if recaptcha_public_key:
+                raise ConfigError(CONFLICTING_RECAPTCHA_PUBLIC_KEY_OPTS_ERROR)
+            recaptcha_public_key = read_file(
+                recaptcha_public_key_path, ("recaptcha_public_key_path",)
+            ).strip()
         if recaptcha_public_key is not None and not isinstance(
             recaptcha_public_key, str
         ):

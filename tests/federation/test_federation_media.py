@@ -22,7 +22,7 @@ import os
 import shutil
 import tempfile
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import MediaStorage
@@ -32,7 +32,7 @@ from synapse.media.storage_provider import (
 )
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.media.test_media_storage import small_png
@@ -49,6 +49,7 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
         hs.config.media.media_store_path = self.primary_base_path
 
+        local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
         storage_providers = [
             StorageProviderWrapper(
                 FileStorageProviderBackend(hs, self.secondary_base_path),
@@ -60,14 +61,14 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
         self.filepaths = MediaFilePaths(self.primary_base_path)
         self.media_storage = MediaStorage(
-            hs, self.primary_base_path, self.filepaths, storage_providers
+            hs, self.filepaths, storage_providers, local_provider
         )
         self.media_repo = hs.get_media_repository()
 
     def test_file_download(self) -> None:
         content = io.BytesIO(b"file_to_stream")
         content_uri = self.get_success(
-            self.media_repo.create_content(
+            self.media_repo.create_or_update_content(
                 "text/plain",
                 "test_upload",
                 content,
@@ -110,7 +111,7 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
         content = io.BytesIO(SMALL_PNG)
         content_uri = self.get_success(
-            self.media_repo.create_content(
+            self.media_repo.create_or_update_content(
                 "image/png",
                 "test_png_upload",
                 content,
@@ -147,8 +148,47 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
         found_file = any(SMALL_PNG in field for field in stripped_bytes)
         self.assertTrue(found_file)
 
+    def test_federation_etag(self) -> None:
+        """Test that federation ETags work"""
 
-class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
+        content = io.BytesIO(b"file_to_stream")
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "text/plain",
+                "test_upload",
+                content,
+                46,
+                UserID.from_string("@user_id:whatever.org"),
+            )
+        )
+
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
+        )
+        self.pump()
+        self.assertEqual(200, channel.code)
+
+        # We expect exactly one ETag header.
+        etags = channel.headers.getRawHeaders("ETag")
+        self.assertIsNotNone(etags)
+        assert etags is not None  # For mypy
+        self.assertEqual(len(etags), 1)
+        etag = etags[0]
+
+        # Refetching with the etag should result in 304 and empty body.
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
+            custom_headers=[("If-None-Match", etag)],
+        )
+        self.pump()
+        self.assertEqual(channel.code, 304)
+        self.assertEqual(channel.is_finished(), True)
+        self.assertNotIn("body", channel.result)
+
+
+class FederationMediaTest(unittest.FederatingHomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
         self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
@@ -158,6 +198,7 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
 
         hs.config.media.media_store_path = self.primary_base_path
 
+        local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
         storage_providers = [
             StorageProviderWrapper(
                 FileStorageProviderBackend(hs, self.secondary_base_path),
@@ -169,14 +210,14 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
 
         self.filepaths = MediaFilePaths(self.primary_base_path)
         self.media_storage = MediaStorage(
-            hs, self.primary_base_path, self.filepaths, storage_providers
+            hs, self.filepaths, storage_providers, local_provider
         )
         self.media_repo = hs.get_media_repository()
 
     def test_thumbnail_download_scaled(self) -> None:
         content = io.BytesIO(small_png.data)
         content_uri = self.get_success(
-            self.media_repo.create_content(
+            self.media_repo.create_or_update_content(
                 "image/png",
                 "test_png_thumbnail",
                 content,
@@ -216,7 +257,116 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
     def test_thumbnail_download_cropped(self) -> None:
         content = io.BytesIO(small_png.data)
         content_uri = self.get_success(
-            self.media_repo.create_content(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_thumbnail",
+                content,
+                67,
+                UserID.from_string("@user_id:whatever.org"),
+            )
+        )
+        # test with an image file
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/thumbnail/{content_uri.media_id}?width=32&height=32&method=crop",
+        )
+        self.pump()
+        self.assertEqual(200, channel.code)
+
+        content_type = channel.headers.getRawHeaders("content-type")
+        assert content_type is not None
+        assert "multipart/mixed" in content_type[0]
+        assert "boundary" in content_type[0]
+
+        # extract boundary
+        boundary = content_type[0].split("boundary=")[1]
+        # split on boundary and check that json field and expected value exist
+        body = channel.result.get("body")
+        assert body is not None
+        stripped_bytes = body.split(b"\r\n" + b"--" + boundary.encode("utf-8"))
+        found_json = any(
+            b"\r\nContent-Type: application/json\r\n\r\n{}" in field
+            for field in stripped_bytes
+        )
+        self.assertTrue(found_json)
+
+        # check that the png file exists and matches the expected cropped bytes
+        found_file = any(
+            small_png.expected_cropped in field for field in stripped_bytes
+        )
+        self.assertTrue(found_file)
+
+
+class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
+        self.addCleanup(shutil.rmtree, self.test_dir)
+        self.primary_base_path = os.path.join(self.test_dir, "primary")
+        self.secondary_base_path = os.path.join(self.test_dir, "secondary")
+
+        hs.config.media.media_store_path = self.primary_base_path
+
+        local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
+        storage_providers = [
+            StorageProviderWrapper(
+                FileStorageProviderBackend(hs, self.secondary_base_path),
+                store_local=True,
+                store_remote=False,
+                store_synchronous=True,
+            )
+        ]
+
+        self.filepaths = MediaFilePaths(self.primary_base_path)
+        self.media_storage = MediaStorage(
+            hs, self.filepaths, storage_providers, local_provider
+        )
+        self.media_repo = hs.get_media_repository()
+
+    def test_thumbnail_download_scaled(self) -> None:
+        content = io.BytesIO(small_png.data)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_thumbnail",
+                content,
+                67,
+                UserID.from_string("@user_id:whatever.org"),
+            )
+        )
+        # test with an image file
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/thumbnail/{content_uri.media_id}?width=32&height=32&method=scale",
+        )
+        self.pump()
+        self.assertEqual(200, channel.code)
+
+        content_type = channel.headers.getRawHeaders("content-type")
+        assert content_type is not None
+        assert "multipart/mixed" in content_type[0]
+        assert "boundary" in content_type[0]
+
+        # extract boundary
+        boundary = content_type[0].split("boundary=")[1]
+        # split on boundary and check that json field and expected value exist
+        body = channel.result.get("body")
+        assert body is not None
+        stripped_bytes = body.split(b"\r\n" + b"--" + boundary.encode("utf-8"))
+        found_json = any(
+            b"\r\nContent-Type: application/json\r\n\r\n{}" in field
+            for field in stripped_bytes
+        )
+        self.assertTrue(found_json)
+
+        # check that the png file exists and matches the expected scaled bytes
+        found_file = any(small_png.expected_scaled in field for field in stripped_bytes)
+        self.assertTrue(found_file)
+
+    def test_thumbnail_download_cropped(self) -> None:
+        content = io.BytesIO(small_png.data)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
                 "image/png",
                 "test_png_thumbnail",
                 content,

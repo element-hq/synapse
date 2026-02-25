@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 import attr
 import msgpack
@@ -61,24 +61,34 @@ MAX_PUBLIC_ROOMS_IN_RESPONSE = 100
 
 class RoomListHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname  # nb must be called this for @cached
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.hs = hs
         self.enable_room_list_search = hs.config.roomdirectory.enable_room_list_search
         self.response_cache: ResponseCache[
-            Tuple[Optional[int], Optional[str], Optional[ThirdPartyInstanceID]]
-        ] = ResponseCache(hs.get_clock(), "room_list")
+            tuple[int | None, str | None, ThirdPartyInstanceID | None]
+        ] = ResponseCache(
+            clock=hs.get_clock(),
+            name="room_list",
+            server_name=self.server_name,
+        )
         self.remote_response_cache: ResponseCache[
-            Tuple[str, Optional[int], Optional[str], bool, Optional[str]]
-        ] = ResponseCache(hs.get_clock(), "remote_room_list", timeout_ms=30 * 1000)
+            tuple[str, int | None, str | None, bool, str | None]
+        ] = ResponseCache(
+            clock=hs.get_clock(),
+            name="remote_room_list",
+            server_name=self.server_name,
+            timeout_ms=30 * 1000,
+        )
 
     async def get_local_public_room_list(
         self,
-        limit: Optional[int] = None,
-        since_token: Optional[str] = None,
-        search_filter: Optional[dict] = None,
-        network_tuple: Optional[ThirdPartyInstanceID] = EMPTY_THIRD_PARTY_ID,
-        from_federation_origin: Optional[str] = None,
+        limit: int | None = None,
+        since_token: str | None = None,
+        search_filter: dict | None = None,
+        network_tuple: ThirdPartyInstanceID | None = EMPTY_THIRD_PARTY_ID,
+        from_federation_origin: str | None = None,
     ) -> JsonDict:
         """Generate a local public room list.
 
@@ -140,10 +150,10 @@ class RoomListHandler:
     async def _get_public_room_list(
         self,
         limit: int,
-        since_token: Optional[str] = None,
-        search_filter: Optional[dict] = None,
-        network_tuple: Optional[ThirdPartyInstanceID] = EMPTY_THIRD_PARTY_ID,
-        from_federation_origin: Optional[str] = None,
+        since_token: str | None = None,
+        search_filter: dict | None = None,
+        network_tuple: ThirdPartyInstanceID | None = EMPTY_THIRD_PARTY_ID,
+        from_federation_origin: str | None = None,
     ) -> JsonDict:
         """Generate a public room list.
         Args:
@@ -165,7 +175,7 @@ class RoomListHandler:
         if since_token:
             batch_token = RoomListNextBatch.from_token(since_token)
 
-            bounds: Optional[Tuple[int, str]] = (
+            bounds: tuple[int, str] | None = (
                 batch_token.last_joined_members,
                 batch_token.last_room_id,
             )
@@ -216,7 +226,7 @@ class RoomListHandler:
             return {k: v for k, v in entry.items() if v is not None}
 
         # Build a list of up to `limit` entries.
-        room_entries: List[JsonDict] = []
+        room_entries: list[JsonDict] = []
         rooms_iterator = results if forwards else reversed(results)
 
         # Track the first and last 'considered' rooms so that we can provide correct
@@ -225,8 +235,8 @@ class RoomListHandler:
         # `len(room_entries) >= limit` and we might be left with rooms we didn't
         # 'consider' (iterate over) and we should save those rooms for the next
         # batch.
-        first_considered_room: Optional[LargestRoomStats] = None
-        last_considered_room: Optional[LargestRoomStats] = None
+        first_considered_room: LargestRoomStats | None = None
+        last_considered_room: LargestRoomStats | None = None
         cut_off_due_to_limit: bool = False
 
         for room_result in rooms_iterator:
@@ -339,7 +349,7 @@ class RoomListHandler:
         cache_context: _CacheContext,
         with_alias: bool = True,
         allow_private: bool = False,
-    ) -> Optional[JsonMapping]:
+    ) -> JsonMapping | None:
         """Returns the entry for a room
 
         Args:
@@ -445,11 +455,11 @@ class RoomListHandler:
     async def get_remote_public_room_list(
         self,
         server_name: str,
-        limit: Optional[int] = None,
-        since_token: Optional[str] = None,
-        search_filter: Optional[dict] = None,
+        limit: int | None = None,
+        since_token: str | None = None,
+        search_filter: dict | None = None,
         include_all_networks: bool = False,
-        third_party_instance_id: Optional[str] = None,
+        third_party_instance_id: str | None = None,
     ) -> JsonDict:
         """Get the public room list from remote server
 
@@ -521,11 +531,11 @@ class RoomListHandler:
     async def _get_remote_list_cached(
         self,
         server_name: str,
-        limit: Optional[int] = None,
-        since_token: Optional[str] = None,
-        search_filter: Optional[dict] = None,
+        limit: int | None = None,
+        since_token: str | None = None,
+        search_filter: dict | None = None,
         include_all_networks: bool = False,
-        third_party_instance_id: Optional[str] = None,
+        third_party_instance_id: str | None = None,
     ) -> JsonDict:
         """Wrapper around FederationClient.get_public_rooms that caches the
         result.

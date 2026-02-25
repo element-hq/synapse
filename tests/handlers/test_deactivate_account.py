@@ -19,7 +19,7 @@
 #
 #
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
 from synapse.push.rulekinds import PRIORITY_CLASS_MAP
@@ -28,7 +28,7 @@ from synapse.rest.client import account, login, room
 from synapse.server import HomeServer
 from synapse.synapse_rust.push import PushRule
 from synapse.types import UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

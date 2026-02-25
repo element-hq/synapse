@@ -63,7 +63,7 @@ class ExampleSpamChecker:
     async def user_may_invite(self, inviter_userid, invitee_userid, room_id):
         return True  # allow all invites
 
-    async def user_may_create_room(self, userid):
+    async def user_may_create_room(self, userid, room_config):
         return True  # allow all room creations
 
     async def user_may_create_room_alias(self, userid, room_alias):
@@ -72,8 +72,8 @@ class ExampleSpamChecker:
     async def user_may_publish_room(self, userid, room_id):
         return True  # allow publishing of all rooms
 
-    async def check_username_for_spam(self, user_profile):
-        return False  # allow all usernames
+    async def check_username_for_spam(self, user_profile, requester_id):
+        return False  # allow all usernames regardless of requester
 
     async def check_registration_for_spam(
         self,

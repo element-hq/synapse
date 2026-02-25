@@ -27,7 +27,13 @@ import os
 import signal
 import sys
 from types import FrameType, TracebackType
-from typing import NoReturn, Optional, Type
+from typing import NoReturn
+
+from synapse.logging.context import (
+    LoggingContext,
+    PreserveLoggingContext,
+    current_context,
+)
 
 
 def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -> None:
@@ -64,8 +70,14 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
             pid_fh.write(old_pid)
         sys.exit(1)
 
-    # Fork, creating a new process for the child.
-    process_id = os.fork()
+    # Stop the existing context *before* we fork the process. Otherwise the cputime
+    # metrics get confused about the per-thread resource usage appearing to go backwards
+    # because we're comparing the resource usage from the original process to the forked
+    # process. `PreserveLoggingContext` already takes care of restarting the original
+    # context *after* the block.
+    with PreserveLoggingContext():
+        # Fork, creating a new process for the child.
+        process_id = os.fork()
 
     if process_id != 0:
         # parent process: exit.
@@ -107,9 +119,9 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
     # also catch any other uncaught exceptions before we get that far.)
 
     def excepthook(
-        type_: Type[BaseException],
+        type_: type[BaseException],
         value: BaseException,
-        traceback: Optional[TracebackType],
+        traceback: TracebackType | None,
     ) -> None:
         logger.critical("Unhanded exception", exc_info=(type_, value, traceback))
 
@@ -132,17 +144,21 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
         sys.exit(1)
 
     # write a log line on SIGTERM.
-    def sigterm(signum: int, frame: Optional[FrameType]) -> NoReturn:
-        logger.warning("Caught signal %s. Stopping daemon." % signum)
+    def sigterm(signum: int, frame: FrameType | None) -> NoReturn:
+        logger.warning("Caught signal %s. Stopping daemon.", signum)
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, sigterm)
 
+    # Copy the `server_name` from the current logcontext
+    server_name = current_context().server_name
+
     # Cleanup pid file at exit.
     def exit() -> None:
-        logger.warning("Stopping daemon.")
-        os.remove(pid_file)
-        sys.exit(0)
+        with LoggingContext(name="atexit", server_name=server_name):
+            logger.warning("Stopping daemon.")
+            os.remove(pid_file)
+            sys.exit(0)
 
     atexit.register(exit)
 

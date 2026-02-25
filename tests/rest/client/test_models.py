@@ -19,10 +19,10 @@
 #
 #
 import unittest as stdlib_unittest
+from typing import Literal
 
-from typing_extensions import Literal
+from pydantic import BaseModel, ValidationError
 
-from synapse._pydantic_compat import BaseModel, ValidationError
 from synapse.types.rest.client import EmailRequestTokenBody
 
 
@@ -36,16 +36,16 @@ class ThreepidMediumEnumTestCase(stdlib_unittest.TestCase):
         This is arguably more of a test of a class that inherits from str and Enum
         simultaneously.
         """
-        model = self.Model.parse_obj({"medium": "email"})
+        model = self.Model.model_validate({"medium": "email"})
         self.assertEqual(model.medium, "email")
 
     def test_rejects_invalid_medium_value(self) -> None:
         with self.assertRaises(ValidationError):
-            self.Model.parse_obj({"medium": "interpretive_dance"})
+            self.Model.model_validate({"medium": "interpretive_dance"})
 
     def test_rejects_invalid_medium_type(self) -> None:
         with self.assertRaises(ValidationError):
-            self.Model.parse_obj({"medium": 123})
+            self.Model.model_validate({"medium": 123})
 
 
 class EmailRequestTokenBodyTestCase(stdlib_unittest.TestCase):
@@ -57,14 +57,14 @@ class EmailRequestTokenBodyTestCase(stdlib_unittest.TestCase):
 
     def test_token_required_if_id_server_provided(self) -> None:
         with self.assertRaises(ValidationError):
-            EmailRequestTokenBody.parse_obj(
+            EmailRequestTokenBody.model_validate(
                 {
                     **self.base_request,
                     "id_server": "identity.wonderland.com",
                 }
             )
         with self.assertRaises(ValidationError):
-            EmailRequestTokenBody.parse_obj(
+            EmailRequestTokenBody.model_validate(
                 {
                     **self.base_request,
                     "id_server": "identity.wonderland.com",
@@ -74,7 +74,7 @@ class EmailRequestTokenBodyTestCase(stdlib_unittest.TestCase):
 
     def test_token_typechecked_when_id_server_provided(self) -> None:
         with self.assertRaises(ValidationError):
-            EmailRequestTokenBody.parse_obj(
+            EmailRequestTokenBody.model_validate(
                 {
                     **self.base_request,
                     "id_server": "identity.wonderland.com",

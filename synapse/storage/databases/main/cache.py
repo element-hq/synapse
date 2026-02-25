@@ -21,8 +21,9 @@
 
 
 import itertools
+import json
 import logging
-from typing import TYPE_CHECKING, Any, Collection, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Collection, Iterable
 
 from synapse.api.constants import EventTypes
 from synapse.config._base import Config
@@ -41,10 +42,10 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
-from synapse.storage.databases.main.events import SLIDING_SYNC_RELEVANT_STATE_SET
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.util.caches.descriptors import CachedFunction
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
@@ -63,13 +64,19 @@ PURGE_HISTORY_CACHE_NAME = "ph_cache_fake"
 # As above, but for invalidating room caches on room deletion
 DELETE_ROOM_CACHE_NAME = "dr_cache_fake"
 
+# This cache takes a list of tuples as its first argument, which requires
+# special handling.
+GET_E2E_CROSS_SIGNING_SIGNATURES_FOR_DEVICE_CACHE_NAME = (
+    "_get_e2e_cross_signing_signatures_for_device"
+)
+
 # How long between cache invalidation table cleanups, once we have caught up
 # with the backlog.
-REGULAR_CLEANUP_INTERVAL_MS = Config.parse_duration("1h")
+REGULAR_CLEANUP_INTERVAL = Duration(hours=1)
 
 # How long between cache invalidation table cleanups, before we have caught
 # up with the backlog.
-CATCH_UP_CLEANUP_INTERVAL_MS = Config.parse_duration("1m")
+CATCH_UP_CLEANUP_INTERVAL = Duration(minutes=1)
 
 # Maximum number of cache invalidation rows to delete at once.
 CLEAN_UP_MAX_BATCH_SIZE = 20_000
@@ -98,17 +105,18 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             psql_only=True,  # The table is only on postgres DBs.
         )
 
-        self._cache_id_gen: Optional[MultiWriterIdGenerator]
+        self._cache_id_gen: MultiWriterIdGenerator | None
         if isinstance(self.database_engine, PostgresEngine):
             # We set the `writers` to an empty list here as we don't care about
             # missing updates over restarts, as we'll not have anything in our
             # caches to invalidate. (This reduces the amount of writes to the DB
             # that happen).
             self._cache_id_gen = MultiWriterIdGenerator(
-                db_conn,
-                database,
+                db_conn=db_conn,
+                db=database,
                 notifier=hs.get_replication_notifier(),
                 stream_name="caches",
+                server_name=self.server_name,
                 instance_name=hs.get_instance_name(),
                 tables=[
                     (
@@ -132,13 +140,13 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self.database_engine, PostgresEngine
         ):
             self.hs.get_clock().call_later(
-                CATCH_UP_CLEANUP_INTERVAL_MS / 1000,
+                CATCH_UP_CLEANUP_INTERVAL,
                 self._clean_up_cache_invalidation_wrapper,
             )
 
     async def get_all_updated_caches(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple]], int, bool]:
         """Get updates for caches replication stream.
 
         Args:
@@ -165,7 +173,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
 
         def get_all_updated_caches_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+        ) -> tuple[list[tuple[int, tuple]], int, bool]:
             # We purposefully don't bound by the current token, as we want to
             # send across cache invalidations as quickly as possible. Cache
             # invalidations are idempotent, so duplicates are fine.
@@ -219,6 +227,11 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     room_id = row.keys[0]
                     members_changed = set(row.keys[1:])
                     self._invalidate_state_caches(room_id, members_changed)
+                    self._curr_state_delta_stream_cache.entity_has_changed(  # type: ignore[attr-defined]
+                        room_id, token
+                    )
+                    for user_id in members_changed:
+                        self._membership_stream_cache.entity_has_changed(user_id, token)  # type: ignore[attr-defined]
                 elif row.cache_func == PURGE_HISTORY_CACHE_NAME:
                     if row.keys is None:
                         raise Exception(
@@ -236,6 +249,62 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     room_id = row.keys[0]
                     self._invalidate_caches_for_room_events(room_id)
                     self._invalidate_caches_for_room(room_id)
+                    self._curr_state_delta_stream_cache.entity_has_changed(  # type: ignore[attr-defined]
+                        room_id, token
+                    )
+                    # Note: This code is commented out to improve cache performance.
+                    # While uncommenting would provide complete correctness, our
+                    # automatic forgotten room purge logic (see
+                    # `forgotten_room_retention_period`) means this would frequently
+                    # clear the entire cache (effectively) and probably have a noticable
+                    # impact on the cache hit ratio.
+                    #
+                    # Not updating the cache here is safe because:
+                    #
+                    #  1. `_membership_stream_cache` is only used to indicate the
+                    #     *absence* of changes, i.e. "nothing has changed between tokens
+                    #     X and Y and so return early and don't query the database".
+                    #  2. `_membership_stream_cache` is used when we query data from
+                    #     `current_state_delta_stream` and `room_memberships` but since
+                    #     nothing new is written to the database for those tables when
+                    #     purging/deleting a room (only deleting rows), there is nothing
+                    #     changed to care about.
+                    #
+                    # At worst, the cache might indicate a change at token X, at which
+                    # point, we will query the database and discover nothing is there.
+                    #
+                    # Ideally, we would make it so that we could clear the cache on a
+                    # more granular level but that's a bit complex and fiddly to do with
+                    # room membership.
+                    #
+                    # self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
+                elif (
+                    row.cache_func
+                    == GET_E2E_CROSS_SIGNING_SIGNATURES_FOR_DEVICE_CACHE_NAME
+                ):
+                    # "keys" is a list of strings, where each string is a
+                    # JSON-encoded representation of the tuple keys, i.e.
+                    # keys: ['["@userid:domain", "DEVICEID"]','["@userid2:domain", "DEVICEID2"]']
+                    #
+                    # This is a side-effect of not being able to send nested
+                    # information over replication.
+                    for json_str in row.keys:
+                        try:
+                            user_id, device_id = json.loads(json_str)
+                        except (json.JSONDecodeError, TypeError):
+                            logger.error(
+                                "Failed to deserialise cache key as valid JSON: %s",
+                                json_str,
+                            )
+                            continue
+
+                        # Invalidate each key.
+                        #
+                        # Note: .invalidate takes a tuple of arguments, hence the need
+                        # to nest our tuple in another tuple.
+                        self._get_e2e_cross_signing_signatures_for_device.invalidate(  # type: ignore[attr-defined]
+                            ((user_id, device_id),)
+                        )
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)
 
@@ -250,6 +319,11 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         super().process_replication_position(stream_name, instance_name, token)
 
     def _process_event_stream_row(self, token: int, row: EventsStreamRow) -> None:
+        # This is needed to avoid a circular import.
+        from synapse.storage.databases.main.events import (
+            SLIDING_SYNC_RELEVANT_STATE_SET,
+        )
+
         data = row.data
 
         if row.type == EventsStreamEventRow.TypeId:
@@ -273,8 +347,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     "get_rooms_for_user", (data.state_key,)
                 )
                 self._attempt_to_invalidate_cache(
-                    "get_sliding_sync_rooms_for_user", None
+                    "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
                 )
+                self._membership_stream_cache.entity_has_changed(data.state_key, token)  # type: ignore[attr-defined]
             elif data.type == EventTypes.RoomEncryption:
                 self._attempt_to_invalidate_cache(
                     "get_room_encryption", (data.room_id,)
@@ -284,17 +359,20 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
 
             if (data.type, data.state_key) in SLIDING_SYNC_RELEVANT_STATE_SET:
                 self._attempt_to_invalidate_cache(
-                    "get_sliding_sync_rooms_for_user", None
+                    "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
                 )
         elif row.type == EventsStreamAllStateRow.TypeId:
             assert isinstance(data, EventsStreamAllStateRow)
             # Similar to the above, but the entire caches are invalidated. This is
             # unfortunate for the membership caches, but should recover quickly.
             self._curr_state_delta_stream_cache.entity_has_changed(data.room_id, token)  # type: ignore[attr-defined]
+            self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
             self._attempt_to_invalidate_cache("get_rooms_for_user", None)
             self._attempt_to_invalidate_cache("get_room_type", (data.room_id,))
             self._attempt_to_invalidate_cache("get_room_encryption", (data.room_id,))
-            self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+            self._attempt_to_invalidate_cache(
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+            )
         else:
             raise Exception("Unknown events stream row type %s" % (row.type,))
 
@@ -304,11 +382,16 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         event_id: str,
         room_id: str,
         etype: str,
-        state_key: Optional[str],
-        redacts: Optional[str],
-        relates_to: Optional[str],
+        state_key: str | None,
+        redacts: str | None,
+        relates_to: str | None,
         backfilled: bool,
     ) -> None:
+        # This is needed to avoid a circular import.
+        from synapse.storage.databases.main.events import (
+            SLIDING_SYNC_RELEVANT_STATE_SET,
+        )
+
         # XXX: If you add something to this function make sure you add it to
         # `_invalidate_caches_for_room_events` as well.
 
@@ -358,7 +441,8 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                 "_get_rooms_for_local_user_where_membership_is_inner", (state_key,)
             )
             self._attempt_to_invalidate_cache(
-                "get_sliding_sync_rooms_for_user", (state_key,)
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots",
+                (state_key,),
             )
 
             self._attempt_to_invalidate_cache(
@@ -377,7 +461,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
 
         if (etype, state_key) in SLIDING_SYNC_RELEVANT_STATE_SET:
-            self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+            self._attempt_to_invalidate_cache(
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+            )
 
         if relates_to:
             self._attempt_to_invalidate_cache(
@@ -434,7 +520,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache(
             "_get_rooms_for_local_user_where_membership_is_inner", None
         )
-        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+        self._attempt_to_invalidate_cache(
+            "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+        )
         self._attempt_to_invalidate_cache("did_forget", None)
         self._attempt_to_invalidate_cache("get_forgotten_rooms_for_user", None)
         self._attempt_to_invalidate_cache("get_references_for_event", None)
@@ -493,7 +581,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache(
             "get_current_hosts_in_room_ordered", (room_id,)
         )
-        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+        self._attempt_to_invalidate_cache(
+            "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+        )
         self._attempt_to_invalidate_cache("did_forget", None)
         self._attempt_to_invalidate_cache("get_forgotten_rooms_for_user", None)
         self._attempt_to_invalidate_cache("_get_membership_from_event_id", None)
@@ -508,7 +598,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._invalidate_state_caches_all(room_id)
 
     async def invalidate_cache_and_stream(
-        self, cache_name: str, keys: Tuple[Any, ...]
+        self, cache_name: str, keys: tuple[Any, ...]
     ) -> None:
         """Invalidates the cache and adds it to the cache stream so other workers
         will know to invalidate their caches.
@@ -531,7 +621,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         cache_func: CachedFunction,
-        keys: Tuple[Any, ...],
+        keys: tuple[Any, ...],
     ) -> None:
         """Invalidates the cache and adds it to the cache stream so other workers
         will know to invalidate their caches.
@@ -547,7 +637,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         cache_func: CachedFunction,
-        key_tuples: Collection[Tuple[Any, ...]],
+        key_tuples: Collection[tuple[Any, ...]],
     ) -> None:
         """A bulk version of _invalidate_cache_and_stream.
 
@@ -610,7 +700,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             )
 
     async def send_invalidation_to_replication(
-        self, cache_name: str, keys: Optional[Collection[Any]]
+        self, cache_name: str, keys: Collection[Any] | None
     ) -> None:
         await self.db_pool.runInteraction(
             "send_invalidation_to_replication",
@@ -620,7 +710,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         )
 
     def _send_invalidation_to_replication(
-        self, txn: LoggingTransaction, cache_name: str, keys: Optional[Iterable[Any]]
+        self, txn: LoggingTransaction, cache_name: str, keys: Iterable[Any] | None
     ) -> None:
         """Notifies replication that given cache has been invalidated.
 
@@ -662,7 +752,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     "instance_name": self._instance_name,
                     "cache_func": cache_name,
                     "keys": keys,
-                    "invalidation_ts": self._clock.time_msec(),
+                    "invalidation_ts": self.clock.time_msec(),
                 },
             )
 
@@ -670,7 +760,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         cache_name: str,
-        key_tuples: Collection[Tuple[Any, ...]],
+        key_tuples: Collection[tuple[Any, ...]],
     ) -> None:
         """Announce the invalidation of multiple (but not all) cache entries.
 
@@ -689,7 +779,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             assert self._cache_id_gen is not None
 
             stream_ids = self._cache_id_gen.get_next_mult_txn(txn, len(key_tuples))
-            ts = self._clock.time_msec()
+            ts = self.clock.time_msec()
             txn.call_after(self.hs.get_notifier().on_new_replication_data)
             self.db_pool.simple_insert_many_txn(
                 txn,
@@ -736,12 +826,13 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         # Vary how long we wait before calling again depending on whether we
         # are still sifting through backlog or we have caught up.
         if in_backlog:
-            next_interval = CATCH_UP_CLEANUP_INTERVAL_MS
+            next_interval = CATCH_UP_CLEANUP_INTERVAL
         else:
-            next_interval = REGULAR_CLEANUP_INTERVAL_MS
+            next_interval = REGULAR_CLEANUP_INTERVAL
 
         self.hs.get_clock().call_later(
-            next_interval / 1000, self._clean_up_cache_invalidation_wrapper
+            next_interval,
+            self._clean_up_cache_invalidation_wrapper,
         )
 
     async def _clean_up_batch_of_old_cache_invalidations(

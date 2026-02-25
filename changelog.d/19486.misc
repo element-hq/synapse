@@ -1,0 +1,1 @@
+Rename the `test_disconnect` test helper so that pytest doesn't see it as a test.

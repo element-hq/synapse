@@ -22,14 +22,14 @@
 
 """Utilities for manipulating macaroons"""
 
-from typing import Callable, Optional
+from typing import Callable, Literal
 
 import attr
 import pymacaroons
 from pymacaroons.exceptions import MacaroonVerificationFailedException
-from typing_extensions import Literal
 
-from synapse.util import Clock, stringutils
+from synapse.util import stringutils
+from synapse.util.clock import Clock
 
 MacaroonType = Literal["access", "delete_pusher", "session"]
 
@@ -52,7 +52,7 @@ def get_value_from_macaroon(macaroon: pymacaroons.Macaroon, key: str) -> str:
              caveat in the macaroon, or if the caveat was not found in the macaroon.
     """
     prefix = key + " = "
-    result: Optional[str] = None
+    result: str | None = None
     for caveat in macaroon.caveats:
         if not caveat.caveat_id.startswith(prefix):
             continue

@@ -20,7 +20,8 @@
 
 import functools
 import sys
-from typing import Any, Callable, Generator, List, TypeVar, cast
+from types import GeneratorType
+from typing import Any, Callable, Generator, TypeVar, cast
 
 from typing_extensions import ParamSpec
 
@@ -55,7 +56,7 @@ def do_patch() -> None:
         @functools.wraps(f)
         def wrapped(*args: P.args, **kwargs: P.kwargs) -> "Deferred[T]":
             start_context = current_context()
-            changes: List[str] = []
+            changes: list[str] = []
             orig: Callable[P, "Deferred[T]"] = orig_inline_callbacks(
                 _check_yield_points(f, changes)
             )
@@ -125,7 +126,7 @@ def do_patch() -> None:
 
 def _check_yield_points(
     f: Callable[P, Generator["Deferred[object]", object, T]],
-    changes: List[str],
+    changes: list[str],
 ) -> Callable:
     """Wraps a generator that is about to be passed to defer.inlineCallbacks
     checking that after every yield the log contexts are correct.
@@ -151,6 +152,12 @@ def _check_yield_points(
     ) -> Generator["Deferred[object]", object, T]:
         gen = f(*args, **kwargs)
 
+        # We only patch if we have a native generator function, as we rely on
+        # `gen.gi_frame`.
+        if not isinstance(gen, GeneratorType):
+            ret = yield from gen
+            return ret
+
         last_yield_line_no = gen.gi_frame.f_lineno
         result: Any = None
         while True:
@@ -162,7 +169,7 @@ def _check_yield_points(
                     d = result.throwExceptionIntoGenerator(gen)
                 else:
                     d = gen.send(result)
-            except (StopIteration, defer._DefGen_Return) as e:
+            except StopIteration as e:
                 if current_context() != expected_context:
                     # This happens when the context is lost sometime *after* the
                     # final yield and returning. E.g. we forgot to yield on a
@@ -183,7 +190,7 @@ def _check_yield_points(
                         )
                     )
                     changes.append(err)
-                # The `StopIteration` or `_DefGen_Return` contains the return value from the
+                # The `StopIteration` contains the return value from the
                 # generator.
                 return cast(T, e.value)
 

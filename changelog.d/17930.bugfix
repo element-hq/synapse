@@ -1,1 +1,0 @@
-Fix bug when rejecting withdrew invite with a third_party_rules module, where the invite would be stuck for the client.

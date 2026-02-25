@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2015, 2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023, 2025 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -61,13 +61,8 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Iterable,
-    List,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 from synapse.appservice import (
@@ -79,10 +74,10 @@ from synapse.appservice import (
 from synapse.appservice.api import ApplicationServiceApi
 from synapse.events import EventBase
 from synapse.logging.context import run_in_background
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main import DataStore
 from synapse.types import DeviceListUpdates, JsonMapping
-from synapse.util import Clock
+from synapse.util.clock import Clock, DelayedCallWrapper
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -101,18 +96,16 @@ MAX_TO_DEVICE_MESSAGES_PER_TRANSACTION = 100
 
 
 class ApplicationServiceScheduler:
-    """Public facing API for this module. Does the required DI to tie the
-    components together. This also serves as the "event_pool", which in this
+    """
+    Public facing API for this module. Does the required dependency injection (DI) to
+    tie the components together. This also serves as the "event_pool", which in this
     case is a simple array.
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.clock = hs.get_clock()
+        self.txn_ctrl = _TransactionController(hs)
         self.store = hs.get_datastores().main
-        self.as_api = hs.get_application_service_api()
-
-        self.txn_ctrl = _TransactionController(self.clock, self.store, self.as_api)
-        self.queuer = _ServiceQueuer(self.txn_ctrl, self.clock, hs)
+        self.queuer = _ServiceQueuer(self.txn_ctrl, hs)
 
     async def start(self) -> None:
         logger.info("Starting appservice scheduler")
@@ -128,10 +121,10 @@ class ApplicationServiceScheduler:
     def enqueue_for_appservice(
         self,
         appservice: ApplicationService,
-        events: Optional[Collection[EventBase]] = None,
-        ephemeral: Optional[Collection[JsonMapping]] = None,
-        to_device_messages: Optional[Collection[JsonMapping]] = None,
-        device_list_summary: Optional[DeviceListUpdates] = None,
+        events: Collection[EventBase] | None = None,
+        ephemeral: Collection[JsonMapping] | None = None,
+        to_device_messages: Collection[JsonMapping] | None = None,
+        device_list_summary: DeviceListUpdates | None = None,
     ) -> None:
         """
         Enqueue some data to be sent off to an application service.
@@ -182,25 +175,25 @@ class _ServiceQueuer:
     appservice at a given time.
     """
 
-    def __init__(
-        self, txn_ctrl: "_TransactionController", clock: Clock, hs: "HomeServer"
-    ):
+    def __init__(self, txn_ctrl: "_TransactionController", hs: "HomeServer"):
         # dict of {service_id: [events]}
-        self.queued_events: Dict[str, List[EventBase]] = {}
+        self.queued_events: dict[str, list[EventBase]] = {}
         # dict of {service_id: [events]}
-        self.queued_ephemeral: Dict[str, List[JsonMapping]] = {}
+        self.queued_ephemeral: dict[str, list[JsonMapping]] = {}
         # dict of {service_id: [to_device_message_json]}
-        self.queued_to_device_messages: Dict[str, List[JsonMapping]] = {}
+        self.queued_to_device_messages: dict[str, list[JsonMapping]] = {}
         # dict of {service_id: [device_list_summary]}
-        self.queued_device_list_summaries: Dict[str, List[DeviceListUpdates]] = {}
+        self.queued_device_list_summaries: dict[str, list[DeviceListUpdates]] = {}
 
         # the appservices which currently have a transaction in flight
-        self.requests_in_flight: Set[str] = set()
+        self.requests_in_flight: set[str] = set()
         self.txn_ctrl = txn_ctrl
-        self.clock = clock
         self._msc3202_transaction_extensions_enabled: bool = (
             hs.config.experimental.msc3202_transaction_extensions
         )
+        self.server_name = hs.hostname
+        self.clock = hs.get_clock()
+        self.hs = hs
         self._store = hs.get_datastores().main
 
     def start_background_request(self, service: ApplicationService) -> None:
@@ -208,7 +201,7 @@ class _ServiceQueuer:
         if service.id in self.requests_in_flight:
             return
 
-        run_as_background_process("as-sender", self._send_request, service)
+        self.hs.run_as_background_process("as-sender", self._send_request, service)
 
     async def _send_request(self, service: ApplicationService) -> None:
         # sanity-check: we shouldn't get here if this service already has a sender
@@ -265,8 +258,8 @@ class _ServiceQueuer:
                 ):
                     return
 
-                one_time_keys_count: Optional[TransactionOneTimeKeysCount] = None
-                unused_fallback_keys: Optional[TransactionUnusedFallbackKeys] = None
+                one_time_keys_count: TransactionOneTimeKeysCount | None = None
+                unused_fallback_keys: TransactionUnusedFallbackKeys | None = None
 
                 if (
                     self._msc3202_transaction_extensions_enabled
@@ -303,7 +296,7 @@ class _ServiceQueuer:
         events: Iterable[EventBase],
         ephemerals: Iterable[JsonMapping],
         to_device_messages: Iterable[JsonMapping],
-    ) -> Tuple[TransactionOneTimeKeysCount, TransactionUnusedFallbackKeys]:
+    ) -> tuple[TransactionOneTimeKeysCount, TransactionUnusedFallbackKeys]:
         """
         Given a list of the events, ephemeral messages and to-device messages,
         - first computes a list of application services users that may have
@@ -314,14 +307,14 @@ class _ServiceQueuer:
         """
 
         # Set of 'interesting' users who may have updates
-        users: Set[str] = set()
+        users: set[str] = set()
 
         # The sender is always included
-        users.add(service.sender)
+        users.add(service.sender.to_string())
 
         # All AS users that would receive the PDUs or EDUs sent to these rooms
         # are classed as 'interesting'.
-        rooms_of_interesting_users: Set[str] = set()
+        rooms_of_interesting_users: set[str] = set()
         # PDUs
         rooms_of_interesting_users.update(event.room_id for event in events)
         # EDUs
@@ -357,13 +350,15 @@ class _TransactionController:
     (Note we have only have one of these in the homeserver.)
     """
 
-    def __init__(self, clock: Clock, store: DataStore, as_api: ApplicationServiceApi):
-        self.clock = clock
-        self.store = store
-        self.as_api = as_api
+    def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
+        self.clock = hs.get_clock()
+        self.hs = hs
+        self.store = hs.get_datastores().main
+        self.as_api = hs.get_application_service_api()
 
         # map from service id to recoverer instance
-        self.recoverers: Dict[str, "_Recoverer"] = {}
+        self.recoverers: dict[str, "_Recoverer"] = {}
 
         # for UTs
         self.RECOVERER_CLASS = _Recoverer
@@ -372,11 +367,11 @@ class _TransactionController:
         self,
         service: ApplicationService,
         events: Sequence[EventBase],
-        ephemeral: Optional[List[JsonMapping]] = None,
-        to_device_messages: Optional[List[JsonMapping]] = None,
-        one_time_keys_count: Optional[TransactionOneTimeKeysCount] = None,
-        unused_fallback_keys: Optional[TransactionUnusedFallbackKeys] = None,
-        device_list_summary: Optional[DeviceListUpdates] = None,
+        ephemeral: list[JsonMapping] | None = None,
+        to_device_messages: list[JsonMapping] | None = None,
+        one_time_keys_count: TransactionOneTimeKeysCount | None = None,
+        unused_fallback_keys: TransactionUnusedFallbackKeys | None = None,
+        device_list_summary: DeviceListUpdates | None = None,
     ) -> None:
         """
         Create a transaction with the given data and send to the provided
@@ -444,11 +439,31 @@ class _TransactionController:
         logger.info("Starting recoverer for AS ID %s", service.id)
         assert service.id not in self.recoverers
         recoverer = self.RECOVERER_CLASS(
-            self.clock, self.store, self.as_api, service, self.on_recovered
+            self.server_name,
+            self.clock,
+            self.hs,
+            self.store,
+            self.as_api,
+            service,
+            self.on_recovered,
         )
         self.recoverers[service.id] = recoverer
         recoverer.recover()
         logger.info("Now %i active recoverers", len(self.recoverers))
+
+    def force_retry(self, service: ApplicationService) -> None:
+        """Forces a Recoverer to attempt delivery of transations immediately.
+
+        Args:
+            service:
+        """
+        recoverer = self.recoverers.get(service.id)
+        if not recoverer:
+            # No need to force a retry on a happy AS.
+            logger.info("%s is not in recovery, not forcing retry", service.id)
+            return
+
+        recoverer.force_retry()
 
     async def _is_service_up(self, service: ApplicationService) -> bool:
         state = await self.store.get_appservice_state(service)
@@ -461,33 +476,42 @@ class _Recoverer:
     We have one of these for each appservice which is currently considered DOWN.
 
     Args:
-        clock (synapse.util.Clock):
-        store (synapse.storage.DataStore):
-        as_api (synapse.appservice.api.ApplicationServiceApi):
-        service (synapse.appservice.ApplicationService): the service we are managing
-        callback (callable[_Recoverer]): called once the service recovers.
+        server_name: the homeserver name (used to label metrics) (this should be `hs.hostname`).
+        clock:
+        store:
+        as_api:
+        service: the service we are managing
+        callback: called once the service recovers.
     """
 
     def __init__(
         self,
+        server_name: str,
         clock: Clock,
+        hs: "HomeServer",
         store: DataStore,
         as_api: ApplicationServiceApi,
         service: ApplicationService,
         callback: Callable[["_Recoverer"], Awaitable[None]],
     ):
+        self.server_name = server_name
         self.clock = clock
+        self.hs = hs
         self.store = store
         self.as_api = as_api
         self.service = service
         self.callback = callback
         self.backoff_counter = 1
+        self.scheduled_recovery: DelayedCallWrapper | None = None
 
     def recover(self) -> None:
-        delay = 2**self.backoff_counter
-        logger.info("Scheduling retries on %s in %fs", self.service.id, delay)
-        self.clock.call_later(
-            delay, run_as_background_process, "as-recoverer", self.retry
+        delay = Duration(seconds=2**self.backoff_counter)
+        logger.info("Scheduling retries on %s in %fs", self.service.id, delay.as_secs())
+        self.scheduled_recovery = self.clock.call_later(
+            delay,
+            self.hs.run_as_background_process,
+            "as-recoverer",
+            self.retry,
         )
 
     def _backoff(self) -> None:
@@ -495,6 +519,21 @@ class _Recoverer:
         if self.backoff_counter < 9:
             self.backoff_counter += 1
         self.recover()
+
+    def force_retry(self) -> None:
+        """Cancels the existing timer and forces an immediate retry in the background.
+
+        Args:
+            service:
+        """
+        # Prevent the existing backoff from occuring
+        if self.scheduled_recovery:
+            self.clock.cancel_call_later(self.scheduled_recovery)
+        # Run a retry, which will resechedule a recovery if it fails.
+        self.hs.run_as_background_process(
+            "retry",
+            self.retry,
+        )
 
     async def retry(self) -> None:
         logger.info("Starting retries on %s", self.service.id)

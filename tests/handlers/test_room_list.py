@@ -1,11 +1,11 @@
 from http import HTTPStatus
-from typing import Optional, Set
 
 from synapse.rest import admin
 from synapse.rest.client import directory, login, room
 from synapse.types import JsonDict
 
 from tests import unittest
+from tests.utils import default_config
 
 
 class RoomListHandlerTestCase(unittest.HomeserverTestCase):
@@ -17,7 +17,7 @@ class RoomListHandlerTestCase(unittest.HomeserverTestCase):
     ]
 
     def _create_published_room(
-        self, tok: str, extra_content: Optional[JsonDict] = None
+        self, tok: str, extra_content: JsonDict | None = None
     ) -> str:
         room_id = self.helper.create_room_as(tok=tok, extra_content=extra_content)
         channel = self.make_request(
@@ -29,6 +29,11 @@ class RoomListHandlerTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == HTTPStatus.OK, f"couldn't publish room: {channel.result}"
         return room_id
+
+    def default_config(self) -> JsonDict:
+        config = default_config("test")
+        config["room_list_publication_rules"] = [{"action": "allow"}]
+        return config
 
     def test_acls_applied_to_room_directory_results(self) -> None:
         """
@@ -63,7 +68,7 @@ class RoomListHandlerTestCase(unittest.HomeserverTestCase):
                 limit=50, from_federation_origin="test2"
             )
         )
-        room_ids_in_test2_list: Set[str] = {
+        room_ids_in_test2_list: set[str] = {
             entry["room_id"] for entry in room_list["chunk"]
         }
 
@@ -72,7 +77,7 @@ class RoomListHandlerTestCase(unittest.HomeserverTestCase):
                 limit=50, from_federation_origin="test3"
             )
         )
-        room_ids_in_test3_list: Set[str] = {
+        room_ids_in_test3_list: set[str] = {
             entry["room_id"] for entry in room_list["chunk"]
         }
 

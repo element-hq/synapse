@@ -19,18 +19,18 @@
 #
 #
 
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import attr
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import RedirectException
 from synapse.module_api import ModuleApi
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase, override_config
 
@@ -61,7 +61,7 @@ BASE_URL = "https://synapse/"
 class FakeAuthnResponse:
     ava = attr.ib(type=dict)
     assertions = attr.ib(type=list, factory=list)
-    in_response_to = attr.ib(type=Optional[str], default=None)
+    in_response_to = attr.ib(type=(str | None), default=None)
 
 
 class TestMappingProvider:
@@ -73,7 +73,7 @@ class TestMappingProvider:
         return None
 
     @staticmethod
-    def get_saml_attributes(config: None) -> Tuple[Set[str], Set[str]]:
+    def get_saml_attributes(config: None) -> tuple[set[str], set[str]]:
         return {"uid"}, {"displayName"}
 
     def get_remote_user_id(
@@ -102,10 +102,10 @@ class TestRedirectMappingProvider(TestMappingProvider):
 
 
 class SamlHandlerTestCase(HomeserverTestCase):
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
-        saml_config: Dict[str, Any] = {
+        saml_config: dict[str, Any] = {
             "sp_config": {"metadata": {}},
             # Disable grandfathering.
             "grandfathered_mxid_source_attribute": None,
@@ -346,6 +346,52 @@ class SamlHandlerTestCase(HomeserverTestCase):
                 "userGroup": ["staff", "admin"],
                 "department": ["sales"],
             }
+        )
+        request.reset_mock()
+        self.get_success(
+            self.handler._handle_authn_response(request, saml_response, "redirect_uri")
+        )
+
+        # check that the auth handler got called as expected
+        auth_handler.complete_sso_login.assert_called_once_with(
+            "@test_user:test",
+            "saml",
+            request,
+            "redirect_uri",
+            None,
+            new_user=True,
+            auth_provider_session_id=None,
+        )
+
+    @override_config(
+        {
+            "saml2_config": {
+                "attribute_requirements": [
+                    {"attribute": "userGroup", "one_of": ["staff", "admin"]},
+                ],
+            },
+        }
+    )
+    def test_attribute_requirements_one_of(self) -> None:
+        """The required attributes can be comma-separated."""
+
+        # stub out the auth handler
+        auth_handler = self.hs.get_auth_handler()
+        auth_handler.complete_sso_login = AsyncMock()  # type: ignore[method-assign]
+
+        # The response doesn't have the proper department.
+        saml_response = FakeAuthnResponse(
+            {"uid": "test_user", "username": "test_user", "userGroup": ["nogroup"]}
+        )
+        request = _mock_request()
+        self.get_success(
+            self.handler._handle_authn_response(request, saml_response, "redirect_uri")
+        )
+        auth_handler.complete_sso_login.assert_not_called()
+
+        # Add the proper attributes and it should succeed.
+        saml_response = FakeAuthnResponse(
+            {"uid": "test_user", "username": "test_user", "userGroup": ["admin"]}
         )
         request.reset_mock()
         self.get_success(

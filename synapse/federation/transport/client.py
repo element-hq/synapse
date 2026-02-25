@@ -28,14 +28,9 @@ from typing import (
     BinaryIO,
     Callable,
     Collection,
-    Dict,
     Generator,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Tuple,
-    Union,
 )
 
 import attr
@@ -69,6 +64,9 @@ class TransportLayerClient:
     def __init__(self, hs: "HomeServer"):
         self.client = hs.get_federation_http_client()
         self._is_mine_server_name = hs.is_mine_server_name
+
+    def shutdown(self) -> None:
+        self.client.shutdown()
 
     async def get_room_state_ids(
         self, destination: str, room_id: str, event_id: str
@@ -122,7 +120,7 @@ class TransportLayerClient:
         )
 
     async def get_event(
-        self, destination: str, event_id: str, timeout: Optional[int] = None
+        self, destination: str, event_id: str, timeout: int | None = None
     ) -> JsonDict:
         """Requests the pdu with give id and origin from the given server.
 
@@ -143,9 +141,62 @@ class TransportLayerClient:
             destination, path=path, timeout=timeout, try_trailing_slash_on_400=True
         )
 
+    async def get_policy_recommendation_for_pdu(
+        self, destination: str, event: EventBase, timeout: int | None = None
+    ) -> JsonDict:
+        """Requests the policy recommendation for the given pdu from the given policy server.
+
+        Args:
+            destination: The host name of the remote homeserver checking the event.
+            event: The event to check.
+            timeout: How long to try (in ms) the destination for before giving up.
+                None indicates no timeout.
+
+        Returns:
+            The full recommendation object from the remote server.
+        """
+        logger.debug(
+            "get_policy_recommendation_for_pdu dest=%s, event_id=%s",
+            destination,
+            event.event_id,
+        )
+        return await self.client.post_json(
+            destination=destination,
+            path=f"/_matrix/policy/unstable/org.matrix.msc4284/event/{event.event_id}/check",
+            data=event.get_pdu_json(),
+            ignore_backoff=True,
+            timeout=timeout,
+        )
+
+    async def ask_policy_server_to_sign_event(
+        self, destination: str, event: EventBase, timeout: int | None = None
+    ) -> JsonDict:
+        """Requests that the destination server (typically a policy server)
+        sign the event as not spam.
+
+        If the policy server could not be contacted or the policy server
+        returned an error, this raises that error.
+
+        Args:
+            destination: The host name of the policy server / homeserver.
+            event: The event to sign.
+            timeout: How long to try (in ms) the destination for before giving up.
+                None indicates no timeout.
+        Returns:
+            The signature from the policy server, structured in the same was as the 'signatures'
+            JSON in the event e.g { "$policy_server_via_domain" : { "ed25519:policy_server": "signature_base64" }}
+        """
+        return await self.client.post_json(
+            destination=destination,
+            path="/_matrix/policy/unstable/org.matrix.msc4284/sign",
+            data=event.get_pdu_json(),
+            ignore_backoff=True,
+            timeout=timeout,
+        )
+
     async def backfill(
         self, destination: str, room_id: str, event_tuples: Collection[str], limit: int
-    ) -> Optional[Union[JsonDict, list]]:
+    ) -> JsonDict | list | None:
         """Requests `limit` previous PDUs in a given context before list of
         PDUs.
 
@@ -182,7 +233,7 @@ class TransportLayerClient:
 
     async def timestamp_to_event(
         self, destination: str, room_id: str, timestamp: int, direction: Direction
-    ) -> Union[JsonDict, List]:
+    ) -> JsonDict | list:
         """
         Calls a remote federating server at `destination` asking for their
         closest event to the given timestamp in the given direction.
@@ -217,7 +268,7 @@ class TransportLayerClient:
     async def send_transaction(
         self,
         transaction: Transaction,
-        json_data_callback: Optional[Callable[[], JsonDict]] = None,
+        json_data_callback: Callable[[], JsonDict] | None = None,
     ) -> JsonDict:
         """Sends the given Transaction to its destination
 
@@ -290,7 +341,7 @@ class TransportLayerClient:
         room_id: str,
         user_id: str,
         membership: str,
-        params: Optional[Mapping[str, Union[str, Iterable[str]]]],
+        params: Mapping[str, str | Iterable[str]] | None,
     ) -> JsonDict:
         """Asks a remote server to build and sign us a membership event
 
@@ -372,7 +423,7 @@ class TransportLayerClient:
         omit_members: bool,
     ) -> "SendJoinResponse":
         path = _create_v2_path("/send_join/%s/%s", room_id, event_id)
-        query_params: Dict[str, str] = {}
+        query_params: dict[str, str] = {}
         # lazy-load state on join
         query_params["omit_members"] = "true" if omit_members else "false"
 
@@ -386,7 +437,7 @@ class TransportLayerClient:
 
     async def send_leave_v1(
         self, destination: str, room_id: str, event_id: str, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         path = _create_v1_path("/send_leave/%s/%s", room_id, event_id)
 
         return await self.client.put_json(
@@ -452,7 +503,7 @@ class TransportLayerClient:
 
     async def send_invite_v1(
         self, destination: str, room_id: str, event_id: str, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         path = _create_v1_path("/invite/%s/%s", room_id, event_id)
 
         return await self.client.put_json(
@@ -475,11 +526,11 @@ class TransportLayerClient:
     async def get_public_rooms(
         self,
         remote_server: str,
-        limit: Optional[int] = None,
-        since_token: Optional[str] = None,
-        search_filter: Optional[Dict] = None,
+        limit: int | None = None,
+        since_token: str | None = None,
+        search_filter: dict | None = None,
         include_all_networks: bool = False,
-        third_party_instance_id: Optional[str] = None,
+        third_party_instance_id: str | None = None,
     ) -> JsonDict:
         """Get the list of public rooms from a remote homeserver
 
@@ -490,7 +541,7 @@ class TransportLayerClient:
 
         if search_filter:
             # this uses MSC2197 (Search Filtering over Federation)
-            data: Dict[str, Any] = {"include_all_networks": include_all_networks}
+            data: dict[str, Any] = {"include_all_networks": include_all_networks}
             if third_party_instance_id:
                 data["third_party_instance_id"] = third_party_instance_id
             if limit:
@@ -514,7 +565,7 @@ class TransportLayerClient:
                     )
                 raise
         else:
-            args: Dict[str, Union[str, Iterable[str]]] = {
+            args: dict[str, str | Iterable[str]] = {
                 "include_all_networks": "true" if include_all_networks else "false"
             }
             if third_party_instance_id:
@@ -641,7 +692,7 @@ class TransportLayerClient:
         user: UserID,
         destination: str,
         query_content: JsonDict,
-        timeout: Optional[int],
+        timeout: int | None,
     ) -> JsonDict:
         """Claim one-time keys for a list of devices hosted on a remote server.
 
@@ -687,7 +738,7 @@ class TransportLayerClient:
         user: UserID,
         destination: str,
         query_content: JsonDict,
-        timeout: Optional[int],
+        timeout: int | None,
     ) -> JsonDict:
         """Claim one-time keys for a list of devices hosted on a remote server.
 
@@ -798,7 +849,7 @@ class TransportLayerClient:
         )
 
     async def get_account_status(
-        self, destination: str, user_ids: List[str]
+        self, destination: str, user_ids: list[str]
     ) -> JsonDict:
         """
         Args:
@@ -822,7 +873,7 @@ class TransportLayerClient:
         max_timeout_ms: int,
         download_ratelimiter: Ratelimiter,
         ip_address: str,
-    ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+    ) -> tuple[int, dict[bytes, list[bytes]]]:
         path = f"/_matrix/media/r0/download/{destination}/{media_id}"
         return await self.client.get_file(
             destination,
@@ -849,7 +900,7 @@ class TransportLayerClient:
         max_timeout_ms: int,
         download_ratelimiter: Ratelimiter,
         ip_address: str,
-    ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+    ) -> tuple[int, dict[bytes, list[bytes]]]:
         path = f"/_matrix/media/v3/download/{destination}/{media_id}"
         return await self.client.get_file(
             destination,
@@ -880,7 +931,7 @@ class TransportLayerClient:
         max_timeout_ms: int,
         download_ratelimiter: Ratelimiter,
         ip_address: str,
-    ) -> Tuple[int, Dict[bytes, List[bytes]], bytes]:
+    ) -> tuple[int, dict[bytes, list[bytes]], bytes]:
         path = f"/_matrix/federation/v1/media/download/{media_id}"
         return await self.client.federation_get_file(
             destination,
@@ -937,32 +988,32 @@ class SendJoinResponse:
     """The parsed response of a `/send_join` request."""
 
     # The list of auth events from the /send_join response.
-    auth_events: List[EventBase]
+    auth_events: list[EventBase]
     # The list of state from the /send_join response.
-    state: List[EventBase]
+    state: list[EventBase]
     # The raw join event from the /send_join response.
     event_dict: JsonDict
     # The parsed join event from the /send_join response. This will be None if
     # "event" is not included in the response.
-    event: Optional[EventBase] = None
+    event: EventBase | None = None
 
     # The room state is incomplete
     members_omitted: bool = False
 
     # List of servers in the room
-    servers_in_room: Optional[List[str]] = None
+    servers_in_room: list[str] | None = None
 
 
 @attr.s(slots=True, auto_attribs=True)
 class StateRequestResponse:
     """The parsed response of a `/state` request."""
 
-    auth_events: List[EventBase]
-    state: List[EventBase]
+    auth_events: list[EventBase]
+    state: list[EventBase]
 
 
 @ijson.coroutine
-def _event_parser(event_dict: JsonDict) -> Generator[None, Tuple[str, Any], None]:
+def _event_parser(event_dict: JsonDict) -> Generator[None, tuple[str, Any], None]:
     """Helper function for use with `ijson.kvitems_coro` to parse key-value pairs
     to add them to a given dictionary.
     """
@@ -974,7 +1025,7 @@ def _event_parser(event_dict: JsonDict) -> Generator[None, Tuple[str, Any], None
 
 @ijson.coroutine
 def _event_list_parser(
-    room_version: RoomVersion, events: List[EventBase]
+    room_version: RoomVersion, events: list[EventBase]
 ) -> Generator[None, JsonDict, None]:
     """Helper function for use with `ijson.items_coro` to parse an array of
     events and add them to the given list.
@@ -1030,7 +1081,7 @@ class SendJoinParser(ByteParser[SendJoinResponse]):
     def __init__(self, room_version: RoomVersion, v1_api: bool):
         self._response = SendJoinResponse([], [], event_dict={})
         self._room_version = room_version
-        self._coros: List[Generator[None, bytes, None]] = []
+        self._coros: list[Generator[None, bytes, None]] = []
 
         # The V1 API has the shape of `[200, {...}]`, which we handle by
         # prefixing with `item.*`.
@@ -1103,7 +1154,7 @@ class _StateParser(ByteParser[StateRequestResponse]):
     def __init__(self, room_version: RoomVersion):
         self._response = StateRequestResponse([], [])
         self._room_version = room_version
-        self._coros: List[Generator[None, bytes, None]] = [
+        self._coros: list[Generator[None, bytes, None]] = [
             ijson.items_coro(
                 _event_list_parser(room_version, self._response.state),
                 "pdus.item",
