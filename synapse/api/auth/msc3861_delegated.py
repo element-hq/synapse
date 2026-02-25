@@ -29,6 +29,8 @@ from authlib.oauth2.rfc7523 import ClientSecretJWT, PrivateKeyJWT, private_key_j
 from authlib.oauth2.rfc7662 import IntrospectionToken
 from authlib.oidc.discovery import OpenIDProviderMetadata, get_well_known_url
 
+from twisted.internet import defer
+
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
     AuthError,

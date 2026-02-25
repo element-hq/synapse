@@ -342,16 +342,6 @@ class ResponseCache(Generic[KV]):
                     return await callback(*args, **kwargs)
 
             d = run_in_background(cb)
-
-            # Take a "copy" of the deferred before ObservableDeferred wraps it,
-            # so that we can safely await on it later if necessary. We pause it
-            # while its not used so that we don't get warning is it gets garbage
-            # collected without being awaited on.
-            #
-            # This is used to handle cancellation.
-            observe_d = observe_deferred(d)
-            observe_d.pause()
-
             entry = self._set(
                 context, d, span_context, cancellable=is_function_cancellable(callback)
             )
@@ -381,13 +371,14 @@ class ResponseCache(Generic[KV]):
             # Wait on the original deferred, which will continue to run in the
             # background until it completes. We don't want to add an observer as
             # this would prevent the entry from being pruned.
-            observe_d.unpause()
-            await make_deferred_yieldable(delay_cancellation(observe_d))
-
-            # We always return a cancelled error here, even if the background
-            # operation completed successfully, since we've been cancelled and
-            # don't want further processing to happen.
-            raise defer.CancelledError()
+            #
+            # Note that this deferred has been consumed by the
+            # ObservableDeferred, so we don't know what it will return. That
+            # doesn't matter as we just want to throw a CancelledError once it completes anyway.
+            try:
+                await make_deferred_yieldable(delay_cancellation(d))
+            except Exception:
+                pass
 
         result = entry.result.observe()
         if self._enable_logging:

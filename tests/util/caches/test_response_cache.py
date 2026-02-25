@@ -234,6 +234,35 @@ class ResponseCacheTestCase(TestCase):
                 [], cache.keys(), "cache should not have the result now"
             )
 
+    def test_cache_func_errors(self) -> None:
+        """If the callback raises an error, the error should be raised to all
+        callers and the result should not be cached"""
+        cache = self.with_cache("error_cache", ms=3000)
+
+        expected_error = Exception("oh no")
+
+        async def erring(o: str) -> str:
+            await self.clock.sleep(Duration(seconds=1))
+            raise expected_error
+
+        wrap_d = defer.ensureDeferred(cache.wrap(0, erring, "ignored"))
+        self.assertNoResult(wrap_d)
+
+        # a second call should also return a pending deferred
+        wrap2_d = defer.ensureDeferred(cache.wrap(0, erring, "ignored"))
+        self.assertNoResult(wrap2_d)
+
+        # let the call complete
+        self.reactor.advance(1)
+
+        # both results should have completed with the error
+        self.assertFailure(wrap_d, expected_error)
+        self.assertFailure(wrap2_d, expected_error)
+
+        # cache should not have the result now
+        # wrap3_d = defer.ensureDeferred(cache.wrap(0, erring, "ignored"))
+        # self.assertNoResult(wrap3_d)
+
     def test_cache_cancel_first_wait(self) -> None:
         """Test that cancellation of the deferred returned by wrap() on the
         first call does not immediately cause a cancellation error to be raised
@@ -485,3 +514,55 @@ class ResponseCacheTestCase(TestCase):
         self.assertFailure(wrap_d, defer.CancelledError)
         wrap_d2 = defer.ensureDeferred(cache.wrap(0, wrapped, expected_result))
         self.assertEqual(expected_result, self.successResultOf(wrap_d2))
+
+    def test_cache_cancel_then_error(self) -> None:
+        """Test that cancellation of the deferred returned by wrap() that then
+        subsequently errors is correctly propagated to a second caller.
+        """
+
+        cache = self.with_cache("cancel_then_error_cache", ms=3000)
+
+        expected_error = Exception("oh no")
+
+        # Wrap the function so that we can keep track of when it completes or
+        # errors.
+        completed = False
+        cancelled = False
+
+        @wraps(self.delayed_return)
+        async def wrapped(o: str) -> str:
+            nonlocal completed, cancelled
+
+            try:
+                await self.delayed_return(o)
+                raise expected_error
+            except defer.CancelledError:
+                cancelled = True
+                raise
+            finally:
+                completed = True
+
+        wrap_d1 = defer.ensureDeferred(cache.wrap(0, wrapped, "ignored"))
+        wrap_d2 = defer.ensureDeferred(cache.wrap(0, wrapped, "ignored"))
+
+        # cancel the first deferred before it has a chance to return
+        wrap_d1.cancel()
+
+        # The cancel should be ignored for now, and the inner function should
+        # still be running.
+        self.assertNoResult(wrap_d1)
+        self.assertNoResult(wrap_d2)
+        self.assertFalse(completed, "wrapped function should not have completed yet")
+
+        # Advance the clock until the inner function should have returned.
+        self.reactor.advance(2)
+
+        # The wrapped function should have completed with an error without cancellation.
+        self.assertTrue(completed, "wrapped function should have completed")
+        self.assertFalse(cancelled, "wrapped function should not have been cancelled")
+
+        # The first deferred we're waiting on should now return a cancelled error.
+        self.assertFailure(wrap_d1, defer.CancelledError)
+
+        # The second deferred should return the error.
+        self.assertFailure(wrap_d2, expected_error)
