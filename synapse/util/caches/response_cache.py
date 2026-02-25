@@ -98,6 +98,9 @@ class ResponseCache(Generic[KV]):
     returned from the cache. This means that if the client retries the request
     while the response is still being computed, that original response will be
     used rather than trying to compute a new response.
+
+    If a timeout is specified the completed response will be kept for that long
+    after completion, otherwise it will be removed immediately after completion.
     """
 
     def __init__(
@@ -106,7 +109,7 @@ class ResponseCache(Generic[KV]):
         clock: Clock,
         name: str,
         server_name: str,
-        timeout_ms: float = 0,
+        timeout: Duration | None = None,
         enable_logging: bool = True,
     ):
         """
@@ -121,7 +124,7 @@ class ResponseCache(Generic[KV]):
         self._result_cache: dict[KV, ResponseCacheEntry] = {}
 
         self.clock = clock
-        self.timeout = Duration(milliseconds=timeout_ms)
+        self.timeout = timeout
 
         self._name = name
         self._metrics = register_cache(

@@ -307,7 +307,7 @@ class SyncHandler:
             clock=hs.get_clock(),
             name="sync",
             server_name=self.server_name,
-            timeout_ms=hs.config.caches.sync_response_cache_duration,
+            timeout=hs.config.caches.sync_response_cache_duration,
         )
 
         # ExpiringCache((User, Device)) -> LruCache(user_id => event_id)

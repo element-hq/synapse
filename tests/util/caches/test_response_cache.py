@@ -48,7 +48,10 @@ class ResponseCacheTestCase(TestCase):
 
     def with_cache(self, name: str, ms: int = 0) -> ResponseCache:
         return ResponseCache(
-            clock=self.clock, name=name, server_name="test_server", timeout_ms=ms
+            clock=self.clock,
+            name=name,
+            server_name="test_server",
+            timeout=Duration(milliseconds=ms),
         )
 
     @staticmethod
