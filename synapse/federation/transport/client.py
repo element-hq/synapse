@@ -47,6 +47,7 @@ from synapse.api.urls import (
 )
 from synapse.events import EventBase, make_event_from_dict
 from synapse.federation.units import Transaction
+from synapse.http.client import is_unknown_endpoint
 from synapse.http.matrixfederationclient import ByteParser, LegacyJsonSendParser
 from synapse.http.types import QueryParams
 from synapse.types import JsonDict, UserID
@@ -159,13 +160,28 @@ class TransportLayerClient:
             The signature from the policy server, structured in the same was as the 'signatures'
             JSON in the event e.g { "$policy_server_via_domain" : { "ed25519:policy_server": "signature_base64" }}
         """
-        return await self.client.post_json(
-            destination=destination,
-            path="/_matrix/policy/unstable/org.matrix.msc4284/sign",
-            data=event.get_pdu_json(),
-            ignore_backoff=True,
-            timeout=timeout,
-        )
+        # Try stable first, then fall back to unstable if unsupported. All other errors
+        # are just errors.
+        try:
+            return await self.client.post_json(
+                destination=destination,
+                path="/_matrix/policy/v1/sign",
+                data=event.get_pdu_json(),
+                ignore_backoff=True,
+                timeout=timeout,
+            )
+        except HttpResponseException as ex:
+            if is_unknown_endpoint(ex):
+                # TODO: Remove unstable MSC4284 support
+                # https://github.com/element-hq/synapse/issues/19502
+                return await self.client.post_json(
+                    destination=destination,
+                    path="/_matrix/policy/unstable/org.matrix.msc4284/sign",
+                    data=event.get_pdu_json(),
+                    ignore_backoff=True,
+                    timeout=timeout,
+                )
+            raise
 
     async def backfill(
         self, destination: str, room_id: str, event_tuples: Collection[str], limit: int
