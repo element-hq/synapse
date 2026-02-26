@@ -18,6 +18,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+
+# These imports are necessary for python <= 3.13 in order for the `InFlightGauge` type
+# annotations not to be evaluated at runtime.
+# Starting with python 3.14, annotations are lazily evaluated by default, which is the
+# behaviour we desire.
+# More info here: https://docs.python.org/3/reference/compound_stmts.html#annotations
+from __future__ import annotations
+
 from typing import NoReturn, Protocol
 
 from prometheus_client.core import Sample

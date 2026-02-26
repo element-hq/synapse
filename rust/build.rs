@@ -29,6 +29,13 @@ fn main() -> Result<(), std::io::Error> {
         }
     }
 
+    // Manually add Cargo.toml's, Cargo.lock and build.rs to the hash, since changes to
+    // these files should also invalidate the built module.
+    paths.push("Cargo.toml".to_string());
+    paths.push("../Cargo.lock".to_string());
+    paths.push("../Cargo.toml".to_string());
+    paths.push("build.rs".to_string());
+
     paths.sort();
 
     let mut hasher = Blake2b512::new();
@@ -40,6 +47,13 @@ fn main() -> Result<(), std::io::Error> {
 
     let hex_digest = hex::encode(hasher.finalize());
     println!("cargo:rustc-env=SYNAPSE_RUST_DIGEST={hex_digest}");
+
+    // The default rules don't pick up trivial changes to the workspace config
+    // files, but we need to rebuild if those change to pick up the changed
+    // hashes.
+    println!("cargo::rerun-if-changed=.");
+    println!("cargo::rerun-if-changed=../Cargo.lock");
+    println!("cargo::rerun-if-changed=../Cargo.toml");
 
     Ok(())
 }

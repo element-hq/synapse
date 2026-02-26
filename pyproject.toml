@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.144.0"
+version = "1.148.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -415,28 +415,32 @@ line-ending = "auto"
 manifest-path = "rust/Cargo.toml"
 module-name = "synapse.synapse_rust"
 python-source = "."
-sdist-include = [
-    "AUTHORS.rst",
-    "book.toml",
-    "changelog.d",
-    "CHANGES.md",
-    "CONTRIBUTING.md",
-    "demo",
-    "docs",
-    "INSTALL.md",
-    "mypy.ini",
-    "scripts-dev",
-    "synmark",
-    "sytest-blacklist",
-    "tests",
-    "UPGRADE.rst",
-    "Cargo.toml",
-    "Cargo.lock",
-    "rust/Cargo.toml",
-    "rust/build.rs",
-    "rust/src/**",
+include = [
+    { path = "AUTHORS.rst", format = "sdist" },
+    { path = "book.toml", format = "sdist" },
+    { path = "changelog.d/**/*", format = "sdist" },
+    { path = "CHANGES.md", format = "sdist" },
+    { path = "CONTRIBUTING.md", format = "sdist" },
+    { path = "demo/**/*", format = "sdist" },
+    { path = "docs/**/*", format = "sdist" },
+    { path = "INSTALL.md", format = "sdist" },
+    { path = "LICENSE-AGPL-3.0", format = "sdist" },
+    { path = "LICENSE-COMMERCIAL", format = "sdist" },
+    { path = "mypy.ini", format = "sdist" },
+    { path = "scripts-dev/**/*", format = "sdist" },
+    { path = "synmark/**/*", format = "sdist" },
+    { path = "sytest-blacklist", format = "sdist" },
+    { path = "tests/**/*", format = "sdist" },
+    { path = "UPGRADE.rst", format = "sdist" },
+    { path = "Cargo.toml", format = "sdist" },
+    { path = "Cargo.lock", format = "sdist" },
+    { path = "rust/Cargo.toml", format = "sdist" },
+    { path = "rust/build.rs", format = "sdist" },
+    { path = "rust/src/**", format = "sdist" },
 ]
-sdist-exclude = ["synapse/*.so"]
+exclude = [
+    { path = "synapse/*.so", format = "sdist" },
+]
 
 [build-system]
 # The upper bounds here are defensive, intended to prevent situations like

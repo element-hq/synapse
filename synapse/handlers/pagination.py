@@ -46,7 +46,7 @@ from synapse.types.handlers import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import ReadWriteLock
 from synapse.util.duration import Duration
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -684,7 +684,7 @@ class PaginationHandler:
             events = await event_filter.filter(events)
 
         if not use_admin_priviledge:
-            events = await filter_events_for_client(
+            events = await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user_id,
                 events,
