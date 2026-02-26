@@ -165,6 +165,8 @@ class ResponseCache(Generic[KV]):
 
         self._prune_timer: WheelTimer[KV] | None = None
         if self.timeout:
+            # Set up the timers for pruning inflight entries. The times here are
+            # how often we check for entries to prune.
             self._prune_timer = WheelTimer(bucket_size=self.timeout / 10)
             self.clock.looping_call(self._prune_inflight_entries, self.timeout / 10)
 
