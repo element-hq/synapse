@@ -42,7 +42,6 @@ from synapse.logging.opentracing import (
 from synapse.util.async_helpers import (
     ObservableDeferred,
     delay_cancellation,
-    observe_deferred,
 )
 from synapse.util.caches import EvictionReason, register_cache
 from synapse.util.cancellation import cancellable, is_function_cancellable
@@ -379,6 +378,7 @@ class ResponseCache(Generic[KV]):
                 await make_deferred_yieldable(delay_cancellation(d))
             except Exception:
                 pass
+            raise defer.CancelledError()
 
         result = entry.result.observe()
         if self._enable_logging:

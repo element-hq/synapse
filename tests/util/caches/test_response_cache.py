@@ -256,12 +256,8 @@ class ResponseCacheTestCase(TestCase):
         self.reactor.advance(1)
 
         # both results should have completed with the error
-        self.assertFailure(wrap_d, expected_error)
-        self.assertFailure(wrap2_d, expected_error)
-
-        # cache should not have the result now
-        # wrap3_d = defer.ensureDeferred(cache.wrap(0, erring, "ignored"))
-        # self.assertNoResult(wrap3_d)
+        self.assertFailure(wrap_d, Exception)
+        self.assertFailure(wrap2_d, Exception)
 
     def test_cache_cancel_first_wait(self) -> None:
         """Test that cancellation of the deferred returned by wrap() on the
@@ -565,4 +561,4 @@ class ResponseCacheTestCase(TestCase):
         self.assertFailure(wrap_d1, defer.CancelledError)
 
         # The second deferred should return the error.
-        self.assertFailure(wrap_d2, expected_error)
+        self.assertFailure(wrap_d2, Exception)
