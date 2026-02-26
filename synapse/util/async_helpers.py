@@ -232,8 +232,8 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
     def _remove_observer(self, observer: "defer.Deferred[_T]") -> None:
         """Removes an observer from the list of observers.
 
-        This is used to stop the observer being resolved when the underlying
-        deferred is resolved, for example when the observer is cancelled.
+        Used as a canceller for the observer deferreds, so that if an observer
+        is cancelled it is removed from the list of observers.
         """
         if self._result is not None:
             # The underlying deferred has already resolved, so the observer has
