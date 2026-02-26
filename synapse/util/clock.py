@@ -62,6 +62,16 @@ this setting won't inherit the log level from the parent logger.
 logging.setLoggerClass(original_logger_class)
 
 
+def _try_wakeup_deferred(d: Deferred) -> None:
+    """Try to wake up a deferred, but ignore any exceptions raised by the
+    callback. This is useful when we want to wake up a deferred that may have
+    already been cancelled, and we don't care about the result."""
+    try:
+        d.callback(None)
+    except Exception:
+        pass
+
+
 class Clock:
     """
     A Clock wraps a Twisted reactor and provides utilities on top of it.
@@ -114,7 +124,11 @@ class Clock:
         with context.PreserveLoggingContext():
             # We can ignore the lint here since this class is the one location callLater should
             # be called.
-            self._reactor.callLater(duration.as_secs(), d.callback, duration.as_secs())  # type: ignore[call-later-not-tracked]
+            self._reactor.callLater(
+                duration.as_secs(),
+                lambda _: _try_wakeup_deferred(d),
+                duration.as_secs(),
+            )  # type: ignore[call-later-not-tracked]
             await d
 
     def time(self) -> float:
