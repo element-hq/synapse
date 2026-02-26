@@ -128,9 +128,10 @@ class RoomPolicyHandler:
         if self._is_policy_server_state_event(event):
             return True  # always allow policy server change events
 
-        policy_server, public_key = await self.get_policy_server_name(event.room_id)
-        if policy_server is None or public_key is None:
+        tup = await self.get_policy_server_name(event.room_id)
+        if tup is None:
             return True  # no policy server configured, so allow
+        policy_server, public_key = tup
 
         # Check if the event has been signed with the public key in the policy server state event.
         # If it is, we can save an HTTP hit to get a fresh signature.
@@ -186,9 +187,10 @@ class RoomPolicyHandler:
             When the policy server refuses to sign the event, or when verify is True and the
             signature is invalid.
         """
-        policy_server, public_key = await self.get_policy_server_name(event.room_id)
-        if policy_server is None or public_key is None:
+        tup = await self.get_policy_server_name(event.room_id)
+        if tup is None:
             return
+        policy_server, public_key = tup
 
         # Ask the policy server to sign this event.
         # We set a smallish timeout here as we don't want to block event sending too long.
