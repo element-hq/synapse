@@ -609,3 +609,6 @@ class ExperimentalConfig(Config):
 
         # MSC4380: Invite blocking
         self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
+
+        # MSC4319: Room member events for invite and knock rooms in the /sync response
+        self.msc4319_enabled: bool = experimental.get("msc4319_enabled", False)

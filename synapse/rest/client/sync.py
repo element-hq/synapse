@@ -123,6 +123,7 @@ class SyncRestServlet(RestServlet):
         self._event_serializer = hs.get_event_client_serializer()
         self._msc2654_enabled = hs.config.experimental.msc2654_enabled
         self._msc3773_enabled = hs.config.experimental.msc3773_enabled
+        self._msc4319_enabled = hs.config.experimental.msc4319_enabled
 
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
@@ -457,7 +458,13 @@ class SyncRestServlet(RestServlet):
 
             invited_state = list(invited_state)
             invited_state.append(invite)
-            invited[room.room_id] = {"invite_state": {"events": invited_state}}
+            invited_room = {"invite_state": {"events": invited_state}}
+
+            if self._msc4319_enabled:
+                # Add the invite event to the `state` dictionary, using an unstable prefix.
+                invited_room["org.matrix.msc4319.state"] = {"events": [invite]}
+
+            invited[room.room_id] = invited_room
 
         return invited
 
@@ -509,7 +516,13 @@ class SyncRestServlet(RestServlet):
 
             # Build the `knock_state` dictionary, which will contain the state of the
             # room that the client has knocked on
-            knocked[room.room_id] = {"knock_state": {"events": knocked_state}}
+            knocked_room = {"knock_state": {"events": knocked_state}}
+
+            if self._msc4319_enabled:
+                # Add the knock event to the `state` dictionary, using an unstable prefix.
+                knocked_room["org.matrix.msc4319.state"] = {"events": [knock]}
+
+            knocked[room.room_id] = knocked_room
 
         return knocked
 
