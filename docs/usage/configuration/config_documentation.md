@@ -2154,7 +2154,7 @@ unused_expiration_time: 1h
 
 Options for each entry include:
 
-* `module` (string): Type of resource, e.g. `file_system`.
+* `module` (string): Import path to the Python class implementing the media storage provider. The path must be expressed as a [qualified name](https://peps.python.org/pep-3155/) in accordance with PEP 3155. The value `file_system` is treated as a special case and resolves to the built-in file system provider.
 
 * `store_local` (boolean): Whether to store newly uploaded local files.
 
@@ -2162,11 +2162,7 @@ Options for each entry include:
 
 * `store_synchronous` (boolean): Whether to wait for successful storage for local uploads.
 
-* `config` (object): Sets a path to the resource through the `directory` option.
-
-  This setting has the following sub-options:
-
-  * `directory` (string): Path to the resource.
+* `config` (object): Module-dependent configuration. Refer to the respective storage provider documentation for detailed information about supported options and usage.
 
 Example configuration:
 ```yaml
