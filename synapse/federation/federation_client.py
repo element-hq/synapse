@@ -447,7 +447,7 @@ class FederationClient(FederationBase):
         sign the event as not spam.
 
         If the policy server could not be contacted or the policy server
-        returned an error, this returns no signature.
+        returned an error, that error is raised.
 
         Args:
             destination: The remote homeserver to ask (a policy server)
@@ -463,17 +463,9 @@ class FederationClient(FederationBase):
             pdu.event_id,
             destination,
         )
-        try:
-            return await self.transport_layer.ask_policy_server_to_sign_event(
-                destination, pdu, timeout=timeout
-            )
-        except Exception as e:
-            logger.warning(
-                "ask_policy_server_to_sign_event: server %s responded with error: %s",
-                destination,
-                e,
-            )
-        return None
+        return await self.transport_layer.ask_policy_server_to_sign_event(
+            destination, pdu, timeout=timeout
+        )
 
     @trace
     @tag_args
