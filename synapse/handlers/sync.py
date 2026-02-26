@@ -368,6 +368,9 @@ class SyncHandler:
         logger.debug("Returning sync response for %s", user_id)
         return res
 
+    # TODO: We mark this as cancellable, and we have tests for it, but we
+    # haven't gone through and exhaustively checked that all the code paths in
+    # this method are actually cancellable.
     @cancellable
     async def _wait_for_sync_for_user(
         self,
