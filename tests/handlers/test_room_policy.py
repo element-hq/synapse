@@ -19,15 +19,14 @@ from signedjson.key import encode_verify_key_base64, get_verify_key
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.errors import SynapseError, HttpResponseException
+from synapse.api.errors import HttpResponseException, SynapseError
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase, make_event_from_dict
-from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID, POLICY_SERVER_EVENT_TYPE
+from synapse.handlers.room_policy import POLICY_SERVER_EVENT_TYPE, POLICY_SERVER_KEY_ID
 from synapse.rest import admin
 from synapse.rest.client import filter, login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -134,7 +133,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         async def policy_server_event_sign_error(
             destination: str, pdu: EventBase, timeout: int | None = None
         ) -> JsonDict | None:
-            raise HttpResponseException(500, "Internal Server Error", b"{\"errcode\": \"M_UNKNOWN\"}")
+            raise HttpResponseException(
+                500, "Internal Server Error", b'{"errcode": "M_UNKNOWN"}'
+            )
 
         self.policy_server_signs_event = policy_server_signs_event
         self.policy_server_refuses_to_sign_event = policy_server_refuses_to_sign_event

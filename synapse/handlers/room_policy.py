@@ -15,12 +15,12 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from signedjson.key import decode_verify_key_bytes
 from unpaddedbase64 import decode_base64
 
-from synapse.api.errors import SynapseError, Codes
+from synapse.api.errors import Codes, SynapseError
 from synapse.crypto.keyring import VerifyJsonRequest
 from synapse.events import EventBase
 from synapse.util.stringutils import parse_and_validate_server_name
@@ -50,7 +50,7 @@ class RoomPolicyHandler:
             return event.type in [POLICY_SERVER_EVENT_TYPE, "org.matrix.msc4284.policy"]
         return False
 
-    async def get_policy_server_name(self, room_id: str) -> Tuple[str, str] | None:
+    async def get_policy_server_name(self, room_id: str) -> tuple[str, str] | None:
         """Get the policy server name for a room.
 
         Args:
@@ -67,8 +67,10 @@ class RoomPolicyHandler:
         if not policy_event:
             # TODO: Remove unstable MSC4284 support
             # https://github.com/element-hq/synapse/issues/19502
-            policy_event = await self._storage_controllers.state.get_current_state_event(
-                room_id, "org.matrix.msc4284.policy", ""
+            policy_event = (
+                await self._storage_controllers.state.get_current_state_event(
+                    room_id, "org.matrix.msc4284.policy", ""
+                )
             )
             if not policy_event:
                 return None  # neither stable or unstable configured
@@ -144,9 +146,7 @@ class RoomPolicyHandler:
         except SynapseError as ex:
             # We probably caught either a refusal to sign, an invalid signature, or
             # some other transient error. These are all rejection cases.
-            logger.warning(
-                "Failed to get a signature from the policy server: %s", ex
-            )
+            logger.warning("Failed to get a signature from the policy server: %s", ex)
             return False
 
         return True  # passed all verifications and checks, so allow
