@@ -235,9 +235,6 @@ impl HttpClient {
 
             let status = response.status();
 
-            // A light-weight way to read the response up until the `response_limit`. We
-            // want to avoid allocating a giant response object on the server above our
-            // expected `response_limit` to avoid out-of-memory DOS problems.
             let body = reqwest::Body::from(response);
             let limited_body = http_body_util::Limited::new(body, response_limit);
             let collected = limited_body
@@ -256,8 +253,6 @@ impl HttpClient {
                 return Err(HttpResponseException::new(status, bytes));
             }
 
-            // Because of the `pyo3` `bytes` feature, we can pass this back to Python
-            // land efficiently
             Ok(bytes)
         })
     }
