@@ -71,7 +71,6 @@ from synapse.replication.tcp.streams._base import (
     ThreadSubscriptionsStream,
 )
 from synapse.util.background_queue import BackgroundQueue
-from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
