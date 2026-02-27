@@ -26,7 +26,7 @@ import math
 import typing
 from enum import Enum
 from http import HTTPStatus
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from twisted.web import http
 
@@ -151,6 +151,8 @@ class Codes(str, Enum):
 
     # Part of MSC4326
     UNKNOWN_DEVICE = "ORG.MATRIX.MSC4326.M_UNKNOWN_DEVICE"
+
+    MSC4335_USER_LIMIT_EXCEEDED = "ORG.MATRIX.MSC4335_USER_LIMIT_EXCEEDED"
 
 
 class CodeMessageException(RuntimeError):
@@ -510,6 +512,33 @@ class ResourceLimitError(SynapseError):
             self.errcode,
             admin_contact=self.admin_contact,
             limit_type=self.limit_type,
+        )
+
+
+class MSC4335UserLimitExceededError(SynapseError):
+    """
+    Experimental implementation of MSC4335 M_USER_LIMIT_EXCEEDED error
+    """
+
+    def __init__(
+        self,
+        code: int,
+        msg: str,
+        info_uri: str,
+        can_upgrade: bool = False,
+    ):
+        additional_fields: dict[str, Union[str, bool]] = {
+            "org.matrix.msc4335.info_uri": info_uri,
+        }
+
+        if can_upgrade:
+            additional_fields["org.matrix.msc4335.can_upgrade"] = can_upgrade
+
+        super().__init__(
+            code,
+            msg,
+            Codes.MSC4335_USER_LIMIT_EXCEEDED,
+            additional_fields=additional_fields,
         )
 
 

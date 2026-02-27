@@ -609,3 +609,6 @@ class ExperimentalConfig(Config):
 
         # MSC4380: Invite blocking
         self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
+
+        # MSC4335: M_USER_LIMIT_EXCEEDED error
+        self.msc4335_enabled: bool = experimental.get("msc4335_enabled", False)

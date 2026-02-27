@@ -44,9 +44,11 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
 
-from synapse.api.errors import HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
+from synapse.config import ConfigError
 from synapse.config._base import Config
+from synapse.config.homeserver import HomeServerConfig
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.http.client import MultipartResponse
 from synapse.http.types import QueryParams
@@ -75,6 +77,7 @@ from tests.media.test_media_storage import (
 from tests.server import FakeChannel, FakeTransport, ThreadedMemoryReactorClock
 from tests.test_utils import SMALL_PNG
 from tests.unittest import override_config
+from tests.utils import default_config
 
 try:
     import lxml
@@ -2878,11 +2881,12 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
 
         config["media_storage_providers"] = [provider_config]
 
-        # These are the limits that we are testing
-        config["media_upload_limits"] = [
-            {"time_period": "1d", "max_size": "1K"},
-            {"time_period": "1w", "max_size": "3K"},
-        ]
+        # These are the limits that we are testing unless overridden
+        if config.get("media_upload_limits") is None:
+            config["media_upload_limits"] = [
+                {"time_period": "1d", "max_size": "1K"},
+                {"time_period": "1w", "max_size": "3K"},
+            ]
 
         return self.setup_test_homeserver(config=config)
 
@@ -2967,6 +2971,133 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         channel = self.upload_media(900)
         self.assertEqual(channel.code, 200)
 
+    def test_msc4335_requires_config(self) -> None:
+        config_dict = default_config("test")
+
+        # msc4335_info_uri and msc4335_can_upgrade are required
+
+        with self.assertRaises(ConfigError):
+            HomeServerConfig().parse_config_dict(
+                {
+                    "media_upload_limits": [
+                        {
+                            "time_period": "1d",
+                            "max_size": "1K",
+                            "msc4335_info_uri": "https://example.com",
+                        }
+                    ],
+                    **config_dict,
+                },
+                "",
+                "",
+            )
+
+        with self.assertRaises(ConfigError):
+            HomeServerConfig().parse_config_dict(
+                {
+                    "media_upload_limits": [
+                        {
+                            "time_period": "1d",
+                            "max_size": "1K",
+                            "msc4335_can_upgrade": False,
+                        }
+                    ],
+                    **config_dict,
+                },
+                "",
+                "",
+            )
+
+        with self.assertRaises(ConfigError):
+            HomeServerConfig().parse_config_dict(
+                {
+                    "media_upload_limits": [
+                        {
+                            "time_period": "1d",
+                            "max_size": "1K",
+                            "msc4335_can_upgrade": True,
+                        }
+                    ],
+                    **config_dict,
+                },
+                "",
+                "",
+            )
+
+    @override_config(
+        {
+            "experimental_features": {"msc4335_enabled": True},
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "msc4335_info_uri": "https://example.com",
+                    "msc4335_can_upgrade": False,
+                }
+            ],
+        }
+    )
+    def test_msc4335_returns_hard_user_limit_exceeded(self) -> None:
+        """Test that the MSC4335 error is returned with can_upgrade False when experimental feature is enabled."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC4335_USER_LIMIT_EXCEEDED"
+        )
+        self.assertEqual(
+            channel.json_body["org.matrix.msc4335.info_uri"], "https://example.com"
+        )
+
+    @override_config(
+        {
+            "experimental_features": {"msc4335_enabled": True},
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "msc4335_info_uri": "https://example.com",
+                    "msc4335_can_upgrade": True,
+                }
+            ],
+        }
+    )
+    def test_msc4335_returns_soft_user_limit_exceeded(self) -> None:
+        """Test that the MSC4335 error is returned with can_upgrade True when experimental feature is enabled."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC4335_USER_LIMIT_EXCEEDED"
+        )
+        self.assertEqual(
+            channel.json_body["org.matrix.msc4335.info_uri"], "https://example.com"
+        )
+        self.assertEqual(channel.json_body["org.matrix.msc4335.can_upgrade"], True)
+
+    @override_config(
+        {
+            "experimental_features": {"msc4335_enabled": True},
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                }
+            ],
+        }
+    )
+    def test_msc4335_requires_info_uri(self) -> None:
+        """Test that the MSC4335 error is not used if info_uri is not provided."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 400)
+
 
 class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
     """
@@ -2999,10 +3130,11 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         config["media_storage_providers"] = [provider_config]
 
         # default limits to use
-        config["media_upload_limits"] = [
-            {"time_period": "1d", "max_size": "1K"},
-            {"time_period": "1w", "max_size": "3K"},
-        ]
+        if config.get("media_upload_limits") is None:
+            config["media_upload_limits"] = [
+                {"time_period": "1d", "max_size": "1K"},
+                {"time_period": "1w", "max_size": "3K"},
+            ]
 
         return self.setup_test_homeserver(config=config)
 
@@ -3154,3 +3286,25 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 500)
         self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 800)
+
+    @override_config(
+        {
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "msc4335_info_uri": "https://example.com",
+                    "msc4335_can_upgrade": False,
+                },
+            ]
+        }
+    )
+    def test_msc4335_defaults_disabled(self) -> None:
+        """Test that the MSC4335 is not used unless experimental feature is enabled."""
+        channel = self.upload_media(500, self.tok3)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800, self.tok3)
+        # n.b. this response is not spec compliant as described at: https://github.com/element-hq/synapse/issues/18749
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], Codes.RESOURCE_LIMIT_EXCEEDED)
