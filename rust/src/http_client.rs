@@ -242,7 +242,10 @@ impl HttpClient {
                 .await
                 .map_err(anyhow::Error::from_boxed)
                 .with_context(|| {
-                    format!("Response body exceeded response limit ({})", response_limit)
+                    format!(
+                        "Response body exceeded response limit ({} bytes)",
+                        response_limit
+                    )
                 })?;
             let bytes: bytes::Bytes = collected.to_bytes();
 
