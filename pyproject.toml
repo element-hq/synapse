@@ -415,6 +415,12 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    # Durations are immutable
+    "synapse.util.duration.Duration",
+]
+
 [tool.maturin]
 manifest-path = "rust/Cargo.toml"
 module-name = "synapse.synapse_rust"
