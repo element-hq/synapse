@@ -65,18 +65,22 @@ def _parse_mutual_rooms_batch_token_args(args: dict[bytes, list[bytes]]) -> str 
 
 class UserMutualRoomsServlet(RestServlet):
     """
-    GET /uk.half-shot.msc2666/user/mutual_rooms?user_id={user_id}&from={token} HTTP/1.1
+    GET /user/mutual_rooms?user_id={user_id}&from={token} HTTP/1.1
     """
 
-    PATTERNS = client_patterns(
-        "/uk.half-shot.msc2666/user/mutual_rooms$",
-        releases=(),  # This is an unstable feature
-    )
+    PATTERNS = [*client_patterns("/user/mutual_rooms$", releases=("v1",))]
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
+        if hs.config.experimental.msc2666_enabled:
+            self.PATTERNS.extend(
+                client_patterns(
+                    "/uk.half-shot.msc2666/user/mutual_rooms$",
+                    releases=(),
+                )
+            )
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # twisted.web.server.Request.args is incorrectly defined as Any | None
@@ -154,5 +158,4 @@ class UserMutualRoomsServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.experimental.msc2666_enabled:
-        UserMutualRoomsServlet(hs).register(http_server)
+    UserMutualRoomsServlet(hs).register(http_server)
