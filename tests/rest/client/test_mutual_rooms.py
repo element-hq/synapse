@@ -232,6 +232,12 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
             "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
         )
 
+        channel = self._get_mutual_rooms(u1_token, "@" + "a" * 255 + ":example.com")
+        self.assertEqual(400, channel.code, channel.result)
+        self.assertEqual(
+            "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
+        )
+
         channel = self._get_mutual_rooms(u1_token, "@🐈️:example.com")
         self.assertEqual(400, channel.code, channel.result)
         self.assertEqual(

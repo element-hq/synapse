@@ -378,6 +378,8 @@ class UserID(DomainSpecificString):
         This should be used with care: there are existing non-compliant user IDs in the
         wild with empty or non-ASCII localparts, which will be rejected by this method.
         """
+        if len(s.encode("utf-8")) > 255:
+            return False
         try:
             obj = cls.from_string(s)
             if not is_compliant_user_id_localpart(obj.localpart):
