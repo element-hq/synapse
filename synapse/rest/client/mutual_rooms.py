@@ -117,6 +117,7 @@ class UserMutualRoomsServlet(RestServlet):
                 frozenset((requester.user.to_string(), user_id))
             )
         )
+        total_count = len(rooms)
 
         if from_batch:
             # A from_batch token was provided, so cut off any rooms where the ID is
@@ -131,7 +132,7 @@ class UserMutualRoomsServlet(RestServlet):
 
         if len(rooms) <= MUTUAL_ROOMS_BATCH_LIMIT:
             # We've reached the end of the list, don't return a batch token
-            return 200, {"joined": rooms}
+            return 200, {"joined": rooms, "count": total_count}
 
         rooms = rooms[:MUTUAL_ROOMS_BATCH_LIMIT]
         # We use urlsafe unpadded base64 encoding for the batch token in order to
@@ -143,9 +144,13 @@ class UserMutualRoomsServlet(RestServlet):
         # in the room ID. In the event that some silly user does that, don't let
         # them paginate further.
         if next_batch == from_batch:
-            return 200, {"joined": rooms}
+            return 200, {"joined": rooms, "count": total_count}
 
-        return 200, {"joined": list(rooms), "next_batch": next_batch}
+        return 200, {
+            "joined": list(rooms),
+            "next_batch": next_batch,
+            "count": total_count,
+        }
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

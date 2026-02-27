@@ -129,6 +129,7 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 1)
+        self.assertEqual(channel.json_body["count"], 1)
         self.assertEqual(channel.json_body["joined"][0], room_id_one)
 
         # Create another room and invite user2 to it
@@ -142,6 +143,7 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 2)
+        self.assertEqual(channel.json_body["count"], 2)
         for room_id_id in channel.json_body["joined"]:
             self.assertIn(room_id_id, [room_id_one, room_id_two])
 
@@ -167,11 +169,13 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(channel.json_body["joined"], room_ids[0:10])
+        self.assertEqual(channel.json_body["count"], 15)
         self.assertIn("next_batch", channel.json_body)
 
         channel = self._get_mutual_rooms(u1_token, u2, channel.json_body["next_batch"])
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(channel.json_body["joined"], room_ids[10:20])
+        self.assertEqual(channel.json_body["count"], 15)
         self.assertNotIn("next_batch", channel.json_body)
 
     def test_shared_room_list_pagination_one_page(self) -> None:
@@ -180,6 +184,7 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(channel.json_body["joined"], room_ids)
+        self.assertEqual(channel.json_body["count"], 10)
         self.assertNotIn("next_batch", channel.json_body)
 
     def test_shared_room_list_pagination_invalid_token(self) -> None:
@@ -209,6 +214,7 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 1)
+        self.assertEqual(channel.json_body["count"], 1)
         self.assertEqual(channel.json_body["joined"][0], room)
 
         self.helper.leave(room, user=u1, tok=u1_token)
@@ -217,11 +223,13 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 0)
+        self.assertEqual(channel.json_body["count"], 0)
 
         # Check user2's view of shared rooms with user1
         channel = self._get_mutual_rooms(u2_token, u1)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 0)
+        self.assertEqual(channel.json_body["count"], 0)
 
     def test_shared_room_list_nonexistent_user(self) -> None:
         u1 = self.register_user("user1", "pass")
@@ -232,4 +240,5 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, "@meow:example.com")
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 0)
+        self.assertEqual(channel.json_body["count"], 0)
         self.assertNotIn("next_batch", channel.json_body)
