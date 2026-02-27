@@ -624,10 +624,6 @@ class ReplicationCommandHandler:
             stream_name, instance_name, token, rows
         )
 
-        # Yield to the reactor to allow other things to be processed,
-        # otherwise we can end up tight looping.
-        await self._clock.sleep(Duration(seconds=0))
-
     def on_POSITION(self, conn: IReplicationConnection, cmd: PositionCommand) -> None:
         if cmd.instance_name == self._instance_name:
             # Ignore POSITION that are just our own echoes
