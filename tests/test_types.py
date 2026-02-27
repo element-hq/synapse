@@ -18,14 +18,17 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
+import copy
 from unittest import skipUnless
 
 from immutabledict import immutabledict
 from parameterized import parameterized_class
+from pydantic import BaseModel, PydanticInvalidForJsonSchema, ValidationError
 
 from synapse.api.errors import SynapseError
 from synapse.types import (
+    Absent,
+    AbsentType,
     AbstractMultiWriterStreamToken,
     MultiWriterStreamToken,
     RoomAlias,
@@ -199,3 +202,79 @@ class MultiWriterTokenTestCase(unittest.HomeserverTestCase):
 
         parsed_token = self.get_success(self.token_type.parse(store, "m5~"))
         self.assertEqual(parsed_token, self.token_type(stream=5))
+
+
+class AbsentTestCase(unittest.TestCase):
+    """
+    Tests for the `Absent` utility, which is meant to be like `None` except
+    explicitly signalling absence rather than JSON null.
+    """
+
+    def test_cant_create_second_absent(self) -> None:
+        """
+        Tests that we aren't allowed to instantiate a second `Absent`.
+        """
+        with self.assertRaises(TypeError):
+            AbsentType()  # type: ignore[call-arg]
+
+    def test_is_falsy(self) -> None:
+        """
+        Tests `Absent` is falsy and can therefore be used a bit like `None`.
+        """
+        if Absent:
+            self.fail("Absent is truthy!")
+
+        self.assertEqual(Absent or "something", "something")
+
+    def test_pydantic_jsonschema(self) -> None:
+        """
+        Tests that `Absent` can't be used to produce JSONSchema in Pydantic models.
+
+        In the future, it may be useful to produce correct JSONSchema, but for now
+        I was mostly interested in making sure we don't produce weird/invalid JSONSchema.
+        """
+
+        class MyModel(BaseModel):
+            absent: AbsentType = Absent
+
+        with self.assertRaises(PydanticInvalidForJsonSchema):
+            MyModel.model_json_schema()
+
+    def test_pydantic_reject_null(self) -> None:
+        """
+        Tests that `Absent` rejects `None` (JSON null) when used in Pydantic models.
+        """
+
+        class MyModel(BaseModel):
+            absent: AbsentType = Absent
+
+        with self.assertRaises(ValidationError):
+            MyModel.model_validate({"absent": None})
+
+        with self.assertRaises(ValidationError):
+            MyModel.model_validate_json('{"absent": null}')
+
+    def test_pydantic_accept_absence(self) -> None:
+        """
+        Tests that `Absent` accepts the absence of a value when used in Pydantic models.
+        """
+
+        class MyModel(BaseModel):
+            absent: AbsentType = Absent
+
+        self.assertEqual(MyModel.model_validate({}), MyModel(absent=Absent))
+        self.assertEqual(MyModel.model_validate_json("{}"), MyModel(absent=Absent))
+
+    def test_copy(self) -> None:
+        """
+        Tests that the `copy` module always uses the same instance of Absent.
+        """
+
+        class MyModel(BaseModel):
+            absent: AbsentType = Absent
+
+        a = MyModel.model_validate({})
+        b = copy.deepcopy(a)
+
+        self.assertIs(copy.copy(Absent), Absent)
+        self.assertIs(a.absent, b.absent)
