@@ -236,7 +236,15 @@ impl HttpClient {
             let status = response.status();
 
             // Find the expected `Content-Length` so we can pre-allocate the buffer
-            // necessary to read the response.
+            // necessary to read the response. It's expected that not every request will
+            // have a `Content-Length` header.
+            //
+            // `response.content_length()` does exist but the "value does not directly
+            // represents the value of the `Content-Length` header, but rather the size
+            // of the response’s body"
+            // (https://docs.rs/reqwest/latest/reqwest/struct.Response.html#method.content_length)
+            // and we want to avoid reading the entire body at this point because we
+            // purposely stream it below until the `response_limit`.
             let content_length = {
                 let content_length = response
                     .headers()
@@ -258,6 +266,8 @@ impl HttpClient {
                 content_length
             };
 
+            // Stream the response to avoid allocating a giant object on the server
+            // above our expected `response_limit`.
             let mut stream = response.bytes_stream();
             // Pre-allocate the buffer based on the expected `Content-Length`
             let mut buffer = Vec::with_capacity(
