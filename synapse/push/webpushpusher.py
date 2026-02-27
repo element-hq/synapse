@@ -18,7 +18,7 @@ import os
 import time
 from base64 import urlsafe_b64encode
 from hashlib import blake2s
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, cast
 from urllib.parse import urlparse
 
 from py_vapid import Vapid
@@ -73,7 +73,7 @@ class WebPushPusher(HttpPusher):
         content: JsonDict,
         tweaks: Optional[JsonMapping] = None,
         default_payload: Optional[JsonMapping] = None,
-    ) -> Union[bool, list[str]]:
+    ) -> bool | list[str]:
         content = content.copy()
 
         if default_payload:
@@ -104,7 +104,7 @@ class WebPushPusher(HttpPusher):
 
         return await self.send_webpush(content)
 
-    async def send_webpush(self, content: JsonDict) -> Union[bool, list[str]]:
+    async def send_webpush(self, content: JsonDict) -> bool | list[str]:
         # web push only supports normal and low priority, so assume normal if absent
         low_priority = content.get("prio") == "low"
         # allow dropping earlier notifications in the same room if requested
