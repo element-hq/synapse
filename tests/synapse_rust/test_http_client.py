@@ -177,16 +177,16 @@ class HttpClientTestCase(HomeserverTestCase):
         """
 
         async def do_request() -> None:
-            self.assertFailure(
-                self._rust_http_client.get(
-                    url=self.server.endpoint,
-                    # Small limit so we hit the limit
-                    response_limit=1,
-                ),
-                RuntimeError,
+            await self._rust_http_client.get(
+                url=self.server.endpoint,
+                # Small limit so we hit the limit
+                response_limit=1,
             )
 
-        self.get_success(self.till_deferred_has_result(do_request()))
+        self.assertFailure(
+            self.till_deferred_has_result(do_request()),
+            RuntimeError,
+        )
         self.assertEqual(self.server.calls, 1)
 
     async def test_logging_context(self) -> None:
