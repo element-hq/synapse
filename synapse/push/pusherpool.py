@@ -29,7 +29,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
-from synapse.push import Pusher, PusherConfig, PusherConfigException
+from synapse.push import Pusher, PusherConfig, PusherConfigException, PusherType
 from synapse.push.pusher import PusherFactory
 from synapse.replication.http.push import (
     ReplicationDeleteAllPushersForUserRestServlet,
@@ -131,7 +131,7 @@ class PusherPool:
             The newly created pusher.
         """
 
-        if kind == "email":
+        if kind == PusherType.EMAIL:
             email_owner = await self.store.get_user_id_by_threepid(
                 "email", canonicalise_email(pushkey)
             )

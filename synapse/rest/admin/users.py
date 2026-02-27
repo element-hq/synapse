@@ -43,6 +43,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
+from synapse.push import PusherType
 from synapse.rest.admin._base import (
     admin_patterns,
     assert_requester_is_admin,
@@ -502,7 +503,7 @@ class UserRestServletV2(UserRestServletV2Get):
                     ):
                         await self.pusher_pool.add_or_update_pusher(
                             user_id=user_id,
-                            kind="email",
+                            kind=PusherType.EMAIL,
                             app_id="m.email",
                             app_display_name="Email Notifications",
                             device_display_name=address,

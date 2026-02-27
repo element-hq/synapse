@@ -94,7 +94,7 @@ The Pusher instance also calls out to various utilities for generating payloads
 """
 
 import abc
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 import attr
 
@@ -153,6 +153,12 @@ class ThrottleParams:
 
     last_sent_ts: int
     throttle_ms: int
+
+
+class PusherType:
+    EMAIL: Final = "email"
+    HTTP: Final = "http"
+    WEBPUSH: Final = "webpush"
 
 
 class Pusher(metaclass=abc.ABCMeta):

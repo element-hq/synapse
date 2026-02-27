@@ -159,7 +159,7 @@ class WebPushPusher(HttpPusher):
         ).send(
             data=json.dumps(content),
             headers=self.cached_vapid_headers,
-            ttl=self.msc4174_config.ttl,
+            ttl=self.msc4174_config.ttl_seconds,
         )
 
         response = await request.execute(self.http_client, low_priority, topic)
@@ -208,10 +208,10 @@ class WebPushPusher(HttpPusher):
         if ttl_response_headers:
             try:
                 ttl_given = int(ttl_response_headers[0])
-                if ttl_given != self.msc4174_config.ttl:
+                if ttl_given != self.msc4174_config.ttl_seconds:
                     logger.info(
                         "requested TTL of %d to endpoint %s but got %d",
-                        self.msc4174_config.ttl,
+                        self.msc4174_config.ttl_seconds,
                         endpoint_domain,
                         ttl_given,
                     )

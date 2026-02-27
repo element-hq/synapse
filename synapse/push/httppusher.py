@@ -36,7 +36,7 @@ from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.storage.databases.main.event_push_actions import HttpPushAction
 from synapse.types import JsonDict, JsonMapping
 
-from . import push_tools
+from . import PusherType, push_tools
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -144,7 +144,7 @@ class HttpPusher(Pusher):
         )
 
         self.url = ""
-        if pusher_config.kind == "http":
+        if pusher_config.kind == PusherType.HTTP:
             # Validate that there's a URL and it is of the proper form.
             if "url" not in self.data:
                 raise PusherConfigException("'url' required in data for HTTP pusher")
