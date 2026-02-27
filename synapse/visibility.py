@@ -104,6 +104,7 @@ async def filter_and_transform_events_for_client(
     Returns:
         The filtered events. The `unsigned` data is annotated with the membership state
         of `user_id` at each event.
+        The events are returned in the same order.
     """
     # Filter out events that have been soft failed so that we don't relay them
     # to clients, unless they're a server admin and want that to happen.
