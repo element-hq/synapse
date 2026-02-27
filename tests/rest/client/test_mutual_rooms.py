@@ -221,3 +221,19 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         self.assertEqual(len(channel.json_body["joined"]), 0)
         self.assertEqual(channel.json_body["count"], 0)
         self.assertNotIn("next_batch", channel.json_body)
+
+    def test_shared_room_list_invalid_user(self) -> None:
+        u1 = self.register_user("user1", "pass")
+        u1_token = self.login(u1, "pass")
+
+        channel = self._get_mutual_rooms(u1_token, "@:example.com")
+        self.assertEqual(400, channel.code, channel.result)
+        self.assertEqual(
+            "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
+        )
+
+        channel = self._get_mutual_rooms(u1_token, "@🐈️:example.com")
+        self.assertEqual(400, channel.code, channel.result)
+        self.assertEqual(
+            "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
+        )
