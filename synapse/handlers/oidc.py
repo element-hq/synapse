@@ -57,13 +57,12 @@ from twisted.web.http_headers import Headers
 from synapse.api.errors import SynapseError
 from synapse.config import ConfigError
 from synapse.config.oidc import OidcProviderClientSecretJwtKey, OidcProviderConfig
-from synapse.handlers.sso import MappingException, UserAttributes
+from synapse.handlers.sso import MappingException, SsoSetupError, UserAttributes
 from synapse.http.server import finish_request
 from synapse.http.servlet import parse_string
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
 from synapse.metrics.background_process_metrics import wrap_as_background_process
-from synapse.module_api import ModuleApi
 from synapse.types import JsonDict, UserID, map_username_to_mxid_localpart
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.clock import Clock
@@ -72,6 +71,7 @@ from synapse.util.macaroons import MacaroonGenerator, OidcSessionData
 from synapse.util.templates import _localpart_from_email_filter
 
 if TYPE_CHECKING:
+    from synapse.module_api import ModuleApi
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,10 @@ class OidcHandler:
                 await p.load_jwks()
         except Exception:
             logger.critical(
-                "Error while preloading OIDC provider %r", idp_id, exc_info=True
+                # Include 'login' keyword for searchability.
+                "Error while preloading OIDC provider %r. Login may be broken!",
+                idp_id,
+                exc_info=True,
             )
 
     def preload_metadata(self) -> "Deferred[list[tuple[bool, None]]]":
@@ -388,6 +391,18 @@ class OidcError(Exception):
         return self.error
 
 
+class OidcDiscoveryError(SsoSetupError):
+    """
+    Used to catch and mark errors when performing OIDC discovery.
+    """
+
+
+class OidcMetadataError(SsoSetupError):
+    """
+    Used to catch and mark errors in the OIDC metadata configuration.
+    """
+
+
 class OidcProvider:
     """Wraps the config for a single OIDC IdentityProvider
 
@@ -401,6 +416,9 @@ class OidcProvider:
         macaroon_generator: MacaroonGenerator,
         provider: OidcProviderConfig,
     ):
+        # Needed here to break import loops
+        from synapse.module_api import ModuleApi
+
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
 
@@ -673,9 +691,15 @@ class OidcProvider:
 
         # load any data from the discovery endpoint, if enabled
         if self._config.discover:
-            url = get_well_known_url(self._config.issuer, external=True)
-            metadata_response = await self._http_client.get_json(url)
-            metadata.update(metadata_response)
+            try:
+                url = get_well_known_url(self._config.issuer, external=True)
+                metadata_response = await self._http_client.get_json(url)
+                metadata.update(metadata_response)
+            except Exception as e:
+                # This `Exception` bound is a bit broad, but at least expecting
+                # `twisted.internet.error.ConnectionRefusedError`
+                # and likely many other network or JSON errors.
+                raise OidcDiscoveryError() from e
 
         # override any discovered data with any settings in our config
         if self._config.authorization_endpoint:
@@ -700,7 +724,12 @@ class OidcProvider:
                 self._config.id_token_signing_alg_values_supported
             )
 
-        self._validate_metadata(metadata)
+        try:
+            self._validate_metadata(metadata)
+        except ValueError as e:
+            # Wrap this error so that we can special-case it higher up
+            # Pass through `str(e)` as the message so tests can match it.
+            raise OidcMetadataError(str(e)) from e
 
         return metadata
 
@@ -1714,7 +1743,7 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
     This is the default mapping provider.
     """
 
-    def __init__(self, config: JinjaOidcMappingConfig, module_api: ModuleApi):
+    def __init__(self, config: JinjaOidcMappingConfig, module_api: "ModuleApi"):
         self._config = config
 
     @staticmethod

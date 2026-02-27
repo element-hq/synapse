@@ -19,7 +19,7 @@
 #
 #
 import os
-from typing import Any, Awaitable, ContextManager
+from typing import Any, ContextManager
 from unittest.mock import ANY, AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -27,6 +27,7 @@ import pymacaroons
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.handlers.oidc import OidcMetadataError
 from synapse.handlers.sso import MappingException
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
@@ -375,49 +376,53 @@ class OidcHandlerTestCase(HomeserverTestCase):
         """Provider metadatas are extensively validated."""
         h = self.provider
 
-        def force_load_metadata() -> Awaitable[None]:
+        def force_load_metadata() -> None:
             async def force_load() -> "OpenIDProviderMetadata":
                 return await h.load_metadata(force=True)
 
-            return get_awaitable_result(force_load())
+            get_awaitable_result(force_load())
 
         # Default test config does not throw
         force_load_metadata()
 
         with self.metadata_edit({"issuer": None}):
-            self.assertRaisesRegex(ValueError, "issuer", force_load_metadata)
+            self.assertRaisesRegex(OidcMetadataError, "issuer", force_load_metadata)
 
         with self.metadata_edit({"issuer": "http://insecure/"}):
-            self.assertRaisesRegex(ValueError, "issuer", force_load_metadata)
+            self.assertRaisesRegex(OidcMetadataError, "issuer", force_load_metadata)
 
         with self.metadata_edit({"issuer": "https://invalid/?because=query"}):
-            self.assertRaisesRegex(ValueError, "issuer", force_load_metadata)
+            self.assertRaisesRegex(OidcMetadataError, "issuer", force_load_metadata)
 
         with self.metadata_edit({"authorization_endpoint": None}):
             self.assertRaisesRegex(
-                ValueError, "authorization_endpoint", force_load_metadata
+                OidcMetadataError, "authorization_endpoint", force_load_metadata
             )
 
         with self.metadata_edit({"authorization_endpoint": "http://insecure/auth"}):
             self.assertRaisesRegex(
-                ValueError, "authorization_endpoint", force_load_metadata
+                OidcMetadataError, "authorization_endpoint", force_load_metadata
             )
 
         with self.metadata_edit({"token_endpoint": None}):
-            self.assertRaisesRegex(ValueError, "token_endpoint", force_load_metadata)
+            self.assertRaisesRegex(
+                OidcMetadataError, "token_endpoint", force_load_metadata
+            )
 
         with self.metadata_edit({"token_endpoint": "http://insecure/token"}):
-            self.assertRaisesRegex(ValueError, "token_endpoint", force_load_metadata)
+            self.assertRaisesRegex(
+                OidcMetadataError, "token_endpoint", force_load_metadata
+            )
 
         with self.metadata_edit({"jwks_uri": None}):
-            self.assertRaisesRegex(ValueError, "jwks_uri", force_load_metadata)
+            self.assertRaisesRegex(OidcMetadataError, "jwks_uri", force_load_metadata)
 
         with self.metadata_edit({"jwks_uri": "http://insecure/jwks.json"}):
-            self.assertRaisesRegex(ValueError, "jwks_uri", force_load_metadata)
+            self.assertRaisesRegex(OidcMetadataError, "jwks_uri", force_load_metadata)
 
         with self.metadata_edit({"response_types_supported": ["id_token"]}):
             self.assertRaisesRegex(
-                ValueError, "response_types_supported", force_load_metadata
+                OidcMetadataError, "response_types_supported", force_load_metadata
             )
 
         with self.metadata_edit(
@@ -430,7 +435,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
             {"token_endpoint_auth_methods_supported": ["client_secret_post"]}
         ):
             self.assertRaisesRegex(
-                ValueError,
+                OidcMetadataError,
                 "token_endpoint_auth_methods_supported",
                 force_load_metadata,
             )
@@ -447,7 +452,9 @@ class OidcHandlerTestCase(HomeserverTestCase):
         h._scopes = []
         self.assertTrue(h._uses_userinfo)
         with self.metadata_edit({"userinfo_endpoint": None}):
-            self.assertRaisesRegex(ValueError, "userinfo_endpoint", force_load_metadata)
+            self.assertRaisesRegex(
+                OidcMetadataError, "userinfo_endpoint", force_load_metadata
+            )
 
         with self.metadata_edit({"jwks_uri": None}):
             # Shouldn't raise with a valid userinfo, even without jwks
