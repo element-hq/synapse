@@ -16,6 +16,7 @@ use std::{collections::HashMap, future::Future, sync::OnceLock};
 
 use anyhow::Context;
 use futures::TryStreamExt;
+use headers::HeaderMapExt;
 use once_cell::sync::OnceCell;
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 use reqwest::RequestBuilder;
@@ -248,9 +249,9 @@ impl HttpClient {
             let content_length = {
                 let content_length = response
                     .headers()
-                    .get(reqwest::header::CONTENT_LENGTH)
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(|s| s.parse::<usize>().ok());
+                    .typed_get::<headers::ContentLength>()
+                    // We need a `usize` for the `Vec::with_capacity(...)` usage below
+                    .and_then(|content_length| content_length.0.try_into().ok());
 
                 // Sanity check that the request isn't too large from the information
                 // they told us (may be inaccurate so we also check below as we actually
