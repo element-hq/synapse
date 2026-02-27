@@ -4359,7 +4359,7 @@ docs = ["Sphinx", "repoze.sphinx.autointerface"]
 test = ["zope.i18nmessageid", "zope.testing", "zope.testrunner"]
 
 [extras]
-all = ["authlib", "defusedxml", "hiredis", "jaeger-client", "lxml", "matrix-synapse-ldap3", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "py-vapid", "pympler", "pysaml2", "pytz", "pywebpush", "sentry-sdk", "thrift", "tornado", "txredisapi"]
+all = ["aiohttp", "authlib", "defusedxml", "hiredis", "jaeger-client", "lxml", "matrix-synapse-ldap3", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "py-vapid", "pympler", "pysaml2", "pytz", "pywebpush", "sentry-sdk", "thrift", "tornado", "txredisapi"]
 cache-memory = ["pympler"]
 jwt = ["authlib"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
@@ -4372,9 +4372,9 @@ sentry = ["sentry-sdk"]
 systemd = ["systemd-python"]
 test = ["idna", "parameterized"]
 url-preview = ["lxml"]
-webpush = ["py-vapid", "pywebpush"]
+webpush = ["aiohttp", "py-vapid", "pywebpush"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "819cde45aa760db443841dc787640328999cace451d0a558fad8eaf48c15f8d2"
+content-hash = "222a84560166bf3ca8a024db32dc9cb416be820f4cf1f217eba4e119b25f2753"
