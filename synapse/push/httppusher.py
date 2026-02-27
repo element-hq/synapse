@@ -202,9 +202,13 @@ class HttpPusher(Pusher):
         if self.badge_count_last_call is None or self.badge_count_last_call != badge:
             self.badge_count_last_call = badge
             if await self.send_badge(badge):
-                http_badges_processed_counter.inc()
+                http_badges_processed_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
             else:
-                http_badges_failed_counter.inc()
+                http_badges_failed_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
 
     def on_timer(self) -> None:
         self._start_processing()
@@ -561,13 +565,9 @@ class HttpPusher(Pusher):
         }
         try:
             await self.http_client.post_json_get_json(self.url, d)
-            http_badges_processed_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
+            return True
         except Exception as e:
             logger.warning(
                 "Failed to send badge count to %s: %s %s", self.name, type(e), e
             )
-            http_badges_failed_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
+            return False
