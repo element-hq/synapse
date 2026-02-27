@@ -349,11 +349,46 @@ class DomainSpecificString(metaclass=abc.ABCMeta):
     __repr__ = to_string
 
 
+def is_compliant_user_id_localpart(localpart: str) -> bool:
+    """
+    Validates that the given user ID localpart is within the "compliant" range,
+    i.e. not empty and all characters are between U+0021 and U+007E inclusive.
+    See https://spec.matrix.org/v1.17/appendices/#historical-user-ids
+
+    This should be used with care: there are existing non-compliant user IDs in the
+    wild with empty or non-ASCII localparts, which will be rejected by this method.
+    """
+    if not localpart:
+        return False
+    return all(0x21 <= ord(c) <= 0x7E for c in localpart)
+
+
 @attr.s(slots=True, frozen=True, repr=False)
 class UserID(DomainSpecificString):
     """Structure representing a user ID."""
 
     SIGIL = "@"
+
+    @classmethod
+    def is_valid_strict(cls, s: str) -> bool:
+        """
+        Parses the input string and attempts to ensure it is a valid and compliant user
+        ID according to https://spec.matrix.org/v1.17/appendices/#historical-user-ids.
+
+        This should be used with care: there are existing non-compliant user IDs in the
+        wild with empty or non-ASCII localparts, which will be rejected by this method.
+        """
+        try:
+            obj = cls.from_string(s)
+            if not is_compliant_user_id_localpart(obj.localpart):
+                return False
+            # Apply additional validation to the domain. This is only done
+            # during  is_valid (and not part of from_string) since it is
+            # possible for invalid data to exist in room-state, etc.
+            parse_and_validate_server_name(obj.domain)
+            return True
+        except Exception:
+            return False
 
 
 @attr.s(slots=True, frozen=True, repr=False)

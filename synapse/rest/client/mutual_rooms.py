@@ -29,7 +29,7 @@ from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_strings_from_args
 from synapse.http.site import SynapseRequest
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 
 from ._base import client_patterns
 
@@ -82,7 +82,9 @@ class UserMutualRoomsServlet(RestServlet):
         # twisted.web.server.Request.args is incorrectly defined as Any | None
         args: dict[bytes, list[bytes]] = request.args  # type: ignore
 
-        user_ids = parse_strings_from_args(args, "user_id", required=True)
+        user_ids = parse_strings_from_args(
+            args, "user_id", required=True, encoding="utf-8"
+        )
         from_batch = _parse_mutual_rooms_batch_token_args(args)
 
         if len(user_ids) > 1:
@@ -93,13 +95,19 @@ class UserMutualRoomsServlet(RestServlet):
             )
 
         user_id = user_ids[0]
+        if not UserID.is_valid_strict(user_id):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Invalid user_id query parameter",
+                errcode=Codes.INVALID_PARAM,
+            )
 
         requester = await self.auth.get_user_by_req(request)
         if user_id == requester.user.to_string():
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "You cannot request a list of shared rooms with yourself",
-                errcode=Codes.UNKNOWN,
+                errcode=Codes.INVALID_PARAM,
             )
 
         # Sort here instead of the database function, so that we don't expose
