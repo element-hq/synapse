@@ -71,6 +71,7 @@ from synapse.replication.tcp.streams._base import (
     ThreadSubscriptionsStream,
 )
 from synapse.util.background_queue import BackgroundQueue
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -622,6 +623,10 @@ class ReplicationCommandHandler:
         await self._replication_data_handler.on_rdata(
             stream_name, instance_name, token, rows
         )
+
+        # Yield to the reactor to allow other things to be processed,
+        # otherwise we can end up tight looping.
+        await self._clock.sleep(Duration(seconds=0))
 
     def on_POSITION(self, conn: IReplicationConnection, cmd: PositionCommand) -> None:
         if cmd.instance_name == self._instance_name:
