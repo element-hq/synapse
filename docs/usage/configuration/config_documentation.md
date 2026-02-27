@@ -3782,7 +3782,11 @@ This setting has the following sub-options:
 
   Defaults to `null`.
 
-* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Currently only syncing the displayname is supported. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Defaults to `false`.
+* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Defaults to `false`.
+
+  Fields that will be synced:
+     * displayname
+     * picture - only if Synapse media repository is running in the main process (i.e. not workerized) and media is stored locally
 
 Example configuration:
 ```yaml
