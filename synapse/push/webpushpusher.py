@@ -65,6 +65,15 @@ class WebPushPusher(HttpPusher):
 
         self.msc4174_config = hs.config.experimental.msc4174
 
+        if os.path.isfile(self.msc4174_config.vapid_private_key):
+            self.vapid_signer = Vapid.from_file(
+                private_key_file=self.msc4174_config.vapid_private_key
+            )
+        else:
+            self.vapid_signer = Vapid.from_string(
+                private_key=self.msc4174_config.vapid_private_key
+            )
+
         self.cached_vapid_headers: Optional[JsonDict] = None
         self.cached_vapid_headers_expires: int = 0
 
@@ -142,17 +151,8 @@ class WebPushPusher(HttpPusher):
             # encryption lives for 12 hours
             vapid_claims["exp"] = int(time.time()) + (12 * 60 * 60)
 
-            if os.path.isfile(self.msc4174_config.vapid_private_key):
-                vv = Vapid.from_file(
-                    private_key_file=self.msc4174_config.vapid_private_key
-                )
-            else:
-                vv = Vapid.from_string(
-                    private_key=self.msc4174_config.vapid_private_key
-                )
-
             self.cached_vapid_headers_expires = vapid_claims["exp"]
-            self.cached_vapid_headers = vv.sign(vapid_claims)
+            self.cached_vapid_headers = self.vapid_signer.sign(vapid_claims)
 
         request = WebPusher(
             subscription_info, requests_session=HTTP_REQUEST_FACTORY
