@@ -20,11 +20,13 @@
 #
 
 import enum
+import os
 from functools import cache
 from typing import TYPE_CHECKING, Any, Optional
 
 import attr
 import attr.validators
+from py_vapid import Vapid
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
@@ -394,7 +396,9 @@ class MSC4174Config:
     vapid_contact_email: str = ""
     vapid_private_key: str = ""
     vapid_app_server_key: str = ""
-    ttl: int = 12 * 60 * 60
+    ttl_seconds: int = 12 * 60 * 60
+
+    vapid_signer: Vapid = attr.ib(init=False)
 
 
 class ExperimentalConfig(Config):
@@ -660,4 +664,13 @@ class ExperimentalConfig(Config):
                 raise ConfigError(
                     "'vapid_app_server_key' must be provided when enabling WebPush support",
                     ("experimental", "msc4174", "vapid_app_server_key"),
+                )
+
+            if os.path.isfile(self.msc4174.vapid_private_key):
+                self.vapid_signer = Vapid.from_file(
+                    private_key_file=self.msc4174.vapid_private_key
+                )
+            else:
+                self.vapid_signer = Vapid.from_string(
+                    private_key=self.msc4174.vapid_private_key
                 )

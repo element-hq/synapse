@@ -14,14 +14,12 @@
 #
 import json
 import logging
-import os
 import time
 from base64 import urlsafe_b64encode
 from hashlib import blake2s
 from typing import TYPE_CHECKING, Optional, cast
 from urllib.parse import urlparse
 
-from py_vapid import Vapid
 from pywebpush import CaseInsensitiveDict, WebPusher
 
 from twisted.internet import defer
@@ -63,16 +61,7 @@ class WebPushPusher(HttpPusher):
 
         self.http_client = hs.get_proxied_blocklisted_http_client()
 
-        self.msc4174_config = hs.config.experimental.msc4174
-
-        if os.path.isfile(self.msc4174_config.vapid_private_key):
-            self.vapid_signer = Vapid.from_file(
-                private_key_file=self.msc4174_config.vapid_private_key
-            )
-        else:
-            self.vapid_signer = Vapid.from_string(
-                private_key=self.msc4174_config.vapid_private_key
-            )
+        self.webpush_config = hs.config.experimental.msc4174
 
         self.cached_vapid_headers: Optional[JsonDict] = None
         self.cached_vapid_headers_expires: int = 0
@@ -141,7 +130,7 @@ class WebPushPusher(HttpPusher):
             or time.time() > self.cached_vapid_headers_expires - 60
         ):
             vapid_claims: JsonDict = {
-                "sub": "mailto:{}".format(self.msc4174_config.vapid_contact_email),
+                "sub": "mailto:{}".format(self.webpush_config.vapid_contact_email),
             }
 
             url = urlparse(cast(str, subscription_info.get("endpoint")))
@@ -152,14 +141,16 @@ class WebPushPusher(HttpPusher):
             vapid_claims["exp"] = int(time.time()) + (12 * 60 * 60)
 
             self.cached_vapid_headers_expires = vapid_claims["exp"]
-            self.cached_vapid_headers = self.vapid_signer.sign(vapid_claims)
+            self.cached_vapid_headers = self.webpush_config.vapid_signer.sign(
+                vapid_claims
+            )
 
         request = WebPusher(
             subscription_info, requests_session=HTTP_REQUEST_FACTORY
         ).send(
             data=json.dumps(content),
             headers=self.cached_vapid_headers,
-            ttl=self.msc4174_config.ttl_seconds,
+            ttl=self.webpush_config.ttl_seconds,
         )
 
         response = await request.execute(self.http_client, low_priority, topic)
@@ -208,10 +199,10 @@ class WebPushPusher(HttpPusher):
         if ttl_response_headers:
             try:
                 ttl_given = int(ttl_response_headers[0])
-                if ttl_given != self.msc4174_config.ttl_seconds:
+                if ttl_given != self.webpush_config.ttl_seconds:
                     logger.info(
                         "requested TTL of %d to endpoint %s but got %d",
-                        self.msc4174_config.ttl_seconds,
+                        self.webpush_config.ttl_seconds,
                         endpoint_domain,
                         ttl_given,
                     )
