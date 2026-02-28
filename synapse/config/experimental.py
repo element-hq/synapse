@@ -41,6 +41,8 @@ except ImportError:
 
 # Determine whether pywebpush is installed.
 try:
+    # This module is imported simply to detect whether the `pywebpush` is installed and
+    # is not used here; flake8 needn't warn that it's unused.
     import pywebpush  # noqa: F401
 
     HAS_PYWEBPUSH = True
