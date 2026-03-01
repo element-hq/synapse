@@ -1253,6 +1253,17 @@ class RoomCreationHandler:
                 | set(invitees)
             )
 
+        if (
+            power_level_content_override
+            and room_version.msc4289_creator_power_enabled
+            and "users" in power_level_content_override
+        ):
+            # Silently remove any creators
+            creators = config.get("creation_content", {}).get(EventContentFields.ADDITIONAL_CREATORS, [])
+            creators.append(user_id)
+            for creator in creators:
+                power_level_content_override["users"].pop(creator, None)
+
         creation_event_with_context = None
         if room_version.msc4291_room_ids_as_hashes:
             creation_event_with_context = await self._generate_create_event_for_room_id(
