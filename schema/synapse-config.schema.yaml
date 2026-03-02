@@ -5530,7 +5530,7 @@ properties:
     type: array
     description: >-
       You can restrict outbound federation traffic to only go through a specific subset
-      of workers including the [secure border gateway
+      of workers including the [Secure Border Gateway
       (SBG)](https://element.io/en/server-suite/secure-border-gateways). Any worker
       specified here (including the SBG) must also be in the
       [`instance_map`](#instance_map).
