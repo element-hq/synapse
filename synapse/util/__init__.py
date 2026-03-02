@@ -81,8 +81,8 @@ SYNAPSE_VERSION = os.getenv(
 """
 Version string with git info.
 
-This can be overriden via `SYNAPSE_VERSION_STRING` or is computed here once so that we
-don't invoke git multiple times.
+This can be overriden via the `SYNAPSE_VERSION_STRING` environment variable or is
+computed here once so that we don't invoke git multiple times.
 """
 
 
