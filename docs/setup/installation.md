@@ -307,7 +307,7 @@ Installing prerequisites on CentOS or Fedora Linux:
 
 ```sh
 sudo dnf install libtiff-devel libjpeg-devel libzip-devel freetype-devel \
-                 libwebp-devel libxml2-devel libxslt-devel libpq-devel \
+                 libwebp-devel libxslt-devel libpq-devel \
                  python3-virtualenv libffi-devel openssl-devel python3-devel
 sudo dnf group install "Development Tools"
 ```
@@ -632,10 +632,6 @@ previewing in the `url_preview_ip_range_blacklist` configuration parameter.
 This is critical from a security perspective to stop arbitrary Matrix users
 spidering 'internal' URLs on your network. At the very least we recommend that
 your loopback and RFC1918 IP addresses are blacklisted.
-
-This also requires the optional `lxml` python dependency to be  installed. This
-in turn requires the `libxml2` library to be available - on  Debian/Ubuntu this
-means `apt-get install libxml2-dev`, or equivalent for your OS.
 
 ### Backups
 

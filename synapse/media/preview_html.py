@@ -18,108 +18,27 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import codecs
 import logging
 import re
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-    Generator,
-    Iterable,
-    Optional,
-    cast,
-)
+from typing import TYPE_CHECKING, Callable, Generator, Iterable, Optional
 
 if TYPE_CHECKING:
-    from lxml import etree
+    from bs4 import BeautifulSoup
+    from bs4.element import PageElement, Tag
 
 logger = logging.getLogger(__name__)
 
-_charset_match = re.compile(
-    rb'<\s*meta[^>]*charset\s*=\s*"?([a-z0-9_-]+)"?', flags=re.I
-)
-_xml_encoding_match = re.compile(
-    rb'\s*<\s*\?\s*xml[^>]*encoding="([a-z0-9_-]+)"', flags=re.I
-)
 _content_type_match = re.compile(r'.*; *charset="?(.*?)"?(;|$)', flags=re.I)
 
 # Certain elements aren't meant for display.
 ARIA_ROLES_TO_IGNORE = {"directory", "menu", "menubar", "toolbar"}
 
-
-def _normalise_encoding(encoding: str) -> str | None:
-    """Use the Python codec's name as the normalised entry."""
-    try:
-        return codecs.lookup(encoding).name
-    except LookupError:
-        return None
+NON_BLANK = re.compile(".+")
 
 
-def _get_html_media_encodings(body: bytes, content_type: str | None) -> Iterable[str]:
+def decode_body(body: bytes | str, uri: str) -> Optional["BeautifulSoup"]:
     """
-    Get potential encoding of the body based on the (presumably) HTML body or the content-type header.
-
-    The precedence used for finding a character encoding is:
-
-    1. <meta> tag with a charset declared.
-    2. The XML document's character encoding attribute.
-    3. The Content-Type header.
-    4. Fallback to utf-8.
-    5. Fallback to windows-1252.
-
-    This roughly follows the algorithm used by BeautifulSoup's bs4.dammit.EncodingDetector.
-
-    Args:
-        body: The HTML document, as bytes.
-        content_type: The Content-Type header.
-
-    Returns:
-        The character encoding of the body, as a string.
-    """
-    # There's no point in returning an encoding more than once.
-    attempted_encodings: set[str] = set()
-
-    # Limit searches to the first 1kb, since it ought to be at the top.
-    body_start = body[:1024]
-
-    # Check if it has an encoding set in a meta tag.
-    match = _charset_match.search(body_start)
-    if match:
-        encoding = _normalise_encoding(match.group(1).decode("ascii"))
-        if encoding:
-            attempted_encodings.add(encoding)
-            yield encoding
-
-    # TODO Support <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-
-    # Check if it has an XML document with an encoding.
-    match = _xml_encoding_match.match(body_start)
-    if match:
-        encoding = _normalise_encoding(match.group(1).decode("ascii"))
-        if encoding and encoding not in attempted_encodings:
-            attempted_encodings.add(encoding)
-            yield encoding
-
-    # Check the HTTP Content-Type header for a character set.
-    if content_type:
-        content_match = _content_type_match.match(content_type)
-        if content_match:
-            encoding = _normalise_encoding(content_match.group(1))
-            if encoding and encoding not in attempted_encodings:
-                attempted_encodings.add(encoding)
-                yield encoding
-
-    # Finally, fallback to UTF-8, then windows-1252.
-    for fallback in ("utf-8", "cp1252"):
-        if fallback not in attempted_encodings:
-            yield fallback
-
-
-def decode_body(
-    body: bytes, uri: str, content_type: str | None = None
-) -> Optional["etree._Element"]:
-    """
-    This uses lxml to parse the HTML document.
+    This uses BeautifulSoup to parse the HTML document.
 
     Args:
         body: The HTML document, as bytes.
@@ -133,54 +52,46 @@ def decode_body(
     if not body:
         return None
 
-    # The idea here is that multiple encodings are tried until one works.
-    # Unfortunately the result is never used and then LXML will decode the string
-    # again with the found encoding.
-    for encoding in _get_html_media_encodings(body, content_type):
-        try:
-            body.decode(encoding)
-        except Exception:
-            pass
-        else:
-            break
-    else:
+    from bs4 import BeautifulSoup
+    from bs4.builder import ParserRejectedMarkup
+
+    try:
+        soup = BeautifulSoup(body, "html.parser")
+        # If an empty document is returned, convert to None.
+        if not len(soup):
+            return None
+        return soup
+    except ParserRejectedMarkup:
         logger.warning("Unable to decode HTML body for %s", uri)
         return None
 
-    from lxml import etree
 
-    # Create an HTML parser.
-    parser = etree.HTMLParser(recover=True, encoding=encoding)
+def get_attribute(tag: "Tag", attribute_name: str) -> str:
+    """
+    Get an attribute from a beautifulsoup tag.
 
-    # Attempt to parse the body. With `lxml` 6.0.0+, this will be an empty HTML
-    # tree if the body was successfully parsed, but no tree was found. In
-    # previous `lxml` versions, `etree.fromstring` would return `None` in that
-    # case.
-    html_tree = etree.fromstring(body, parser)
+    Fetching an attribute may return either a string or list of strings depending
+    on if the attribute is a "multi-valued" attribute.
 
-    # Account for the above referenced case where `html_tree` is an HTML tree
-    # with an empty body. If so, return None.
-    if html_tree is not None and html_tree.tag == "html":
-        # If the tree has only a single <body> element and it's empty, then
-        # return None.
-        body_el = html_tree.find("body")
-        if body_el is not None and len(html_tree) == 1:
-            # Extract the content of the body tag as text.
-            body_text = "".join(cast(Iterable[str], body_el.itertext()))
+    The multi-valued attributes are never used in the HTML preview code, but this
+    function helps enforce type safety without casts.
 
-            # Strip any undecodable Unicode characters and whitespace.
-            body_text = body_text.strip("\ufffd").strip()
+    Args:
+        tag: The Tag object to get the attribute from.
+        attribute_name: The name of the attribute to get.
 
-            # If there's no text left, and there were no child tags,
-            # then we consider the <body> tag empty.
-            if not body_text and len(body_el) == 0:
-                return None
-
-    return html_tree
+    Returns:
+        The attribute value as a string.
+    """
+    attribute = tag[attribute_name]
+    assert isinstance(attribute, str), (
+        f"Expected attribute {attribute_name} to have a string value"
+    )
+    return attribute
 
 
 def _get_meta_tags(
-    tree: "etree._Element",
+    soup: "BeautifulSoup",
     property: str,
     prefix: str,
     property_mapper: Callable[[str], str | None] | None = None,
@@ -189,7 +100,7 @@ def _get_meta_tags(
     Search for meta tags prefixed with a particular string.
 
     Args:
-        tree: The parsed HTML document.
+        soup: The parsed HTML document.
         property: The name of the property which contains the tag name, e.g.
             "property" for Open Graph.
         prefix: The prefix on the property to search for, e.g. "og" for Open Graph.
@@ -199,15 +110,10 @@ def _get_meta_tags(
     Returns:
         A map of tag name to value.
     """
-    # This actually returns dict[str, str], but the caller sets this as a variable
-    # which is dict[str, str | None].
     results: dict[str, str | None] = {}
     # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-    for tag in cast(
-        list["etree._Element"],
-        tree.xpath(
-            f"//*/meta[starts-with(@{property}, '{prefix}:')][@content][not(@content='')]"
-        ),
+    for tag in soup.find_all(
+        "meta", attrs={property: re.compile(rf"^{prefix}:")}, content=NON_BLANK
     ):
         # if we've got more than 50 tags, someone is taking the piss
         if len(results) >= 50:
@@ -217,7 +123,7 @@ def _get_meta_tags(
             )
             return {}
 
-        key = cast(str, tag.attrib[property])
+        key = get_attribute(tag, property)
         if property_mapper:
             new_key = property_mapper(key)
             # None is a special value used to ignore a value.
@@ -225,7 +131,7 @@ def _get_meta_tags(
                 continue
             key = new_key
 
-        results[key] = cast(str, tag.attrib["content"])
+        results[key] = get_attribute(tag, "content")
 
     return results
 
@@ -250,15 +156,14 @@ def _map_twitter_to_open_graph(key: str) -> str | None:
     return "og" + key[7:]
 
 
-def parse_html_to_open_graph(tree: "etree._Element") -> dict[str, str | None]:
+def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
     """
-    Parse the HTML document into an Open Graph response.
+    Calculate metadata for an HTML document.
 
-    This uses lxml to search the HTML document for Open Graph data (or
-    synthesizes it from the document).
+    This uses BeautifulSoup to search the HTML document for Open Graph data.
 
     Args:
-        tree: The parsed HTML document.
+        soup: The parsed HTML document.
 
     Returns:
         The Open Graph response as a dictionary.
@@ -278,7 +183,8 @@ def parse_html_to_open_graph(tree: "etree._Element") -> dict[str, str | None]:
     # "og:video:height" : "720",
     # "og:video:secure_url": "https://www.youtube.com/v/LXDBoHyjmtw?version=3",
 
-    og = _get_meta_tags(tree, "property", "og")
+    # TODO: grab article: meta tags too, e.g.:
+    og = _get_meta_tags(soup, "property", "og")
 
     # TODO: Search for properties specific to the different Open Graph types,
     # such as article: meta tags, e.g.:
@@ -298,7 +204,7 @@ def parse_html_to_open_graph(tree: "etree._Element") -> dict[str, str | None]:
     # Twitter cards tags also duplicate Open Graph tags.
     #
     # See https://developer.twitter.com/en/docs/twitter-for-websites/cards/guides/getting-started
-    twitter = _get_meta_tags(tree, "name", "twitter", _map_twitter_to_open_graph)
+    twitter = _get_meta_tags(soup, "name", "twitter", _map_twitter_to_open_graph)
     # Merge the Twitter values with the Open Graph values, but do not overwrite
     # information from Open Graph tags.
     for key, value in twitter.items():
@@ -307,73 +213,67 @@ def parse_html_to_open_graph(tree: "etree._Element") -> dict[str, str | None]:
 
     if "og:title" not in og:
         # Attempt to find a title from the title tag, or the biggest header on the page.
-        # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-        title = cast(
-            list["etree._ElementUnicodeResult"],
-            tree.xpath("((//title)[1] | (//h1)[1] | (//h2)[1] | (//h3)[1])/text()"),
-        )
-        if title:
-            og["og:title"] = title[0].strip()
+        #
+        # mypy doesn't like passing both name and string, but it is used to ignore
+        # empty elements.
+        title = soup.find(("title", "h1", "h2", "h3"), string=True)  # type: ignore[call-overload]
+        if title and title.string:
+            og["og:title"] = title.string.strip()
         else:
             og["og:title"] = None
 
     if "og:image" not in og:
-        # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-        meta_image = cast(
-            list["etree._ElementUnicodeResult"],
-            tree.xpath(
-                "//*/meta[translate(@itemprop, 'IMAGE', 'image')='image'][not(@content='')]/@content[1]"
-            ),
+        # Check microdata for an image.
+        meta_image = soup.find(
+            "meta", itemprop=re.compile("image", re.I), content=NON_BLANK
         )
         # If a meta image is found, use it.
         if meta_image:
-            og["og:image"] = meta_image[0]
+            og["og:image"] = get_attribute(meta_image, "content")
         else:
             # Try to find images which are larger than 10px by 10px.
-            # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
             #
             # TODO: consider inlined CSS styles as well as width & height attribs
-            images = cast(
-                list["etree._Element"],
-                tree.xpath("//img[@src][number(@width)>10][number(@height)>10]"),
+            raw_images = soup.find_all(
+                "img", src=NON_BLANK, width=NON_BLANK, height=NON_BLANK
             )
             images = sorted(
-                images,
+                filter(
+                    lambda tag: int(get_attribute(tag, "width")) > 10
+                    and int(get_attribute(tag, "height")) > 10,
+                    raw_images,
+                ),
                 key=lambda i: (
-                    -1 * float(i.attrib["width"]) * float(i.attrib["height"])
+                    -1
+                    * float(get_attribute(i, "width"))
+                    * float(get_attribute(i, "height"))
                 ),
             )
             # If no images were found, try to find *any* images.
             if not images:
-                # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-                images = cast(list["etree._Element"], tree.xpath("//img[@src][1]"))
+                images = soup.find_all("img", src=NON_BLANK, limit=1)
             if images:
-                og["og:image"] = cast(str, images[0].attrib["src"])
+                og["og:image"] = get_attribute(images[0], "src")
 
             # Finally, fallback to the favicon if nothing else.
             else:
-                # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-                favicons = cast(
-                    list["etree._ElementUnicodeResult"],
-                    tree.xpath("//link[@href][contains(@rel, 'icon')]/@href[1]"),
-                )
-                if favicons:
-                    og["og:image"] = favicons[0]
+                favicon = soup.find("link", href=NON_BLANK, rel="icon")
+                if favicon:
+                    og["og:image"] = get_attribute(favicon, "href")
 
     if "og:description" not in og:
         # Check the first meta description tag for content.
-        # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-        meta_description = cast(
-            list["etree._ElementUnicodeResult"],
-            tree.xpath(
-                "//*/meta[translate(@name, 'DESCRIPTION', 'description')='description'][not(@content='')]/@content[1]"
-            ),
+        meta_description = soup.find(
+            "meta",
+            attrs={"name": re.compile("description", re.I)},
+            content=NON_BLANK,
         )
+
         # If a meta description is found with content, use it.
         if meta_description:
-            og["og:description"] = meta_description[0]
+            og["og:description"] = get_attribute(meta_description, "content")
         else:
-            og["og:description"] = parse_html_description(tree)
+            og["og:description"] = parse_html_description(soup)
     elif og["og:description"]:
         # This must be a non-empty string at this point.
         assert isinstance(og["og:description"], str)
@@ -384,7 +284,7 @@ def parse_html_to_open_graph(tree: "etree._Element") -> dict[str, str | None]:
     return og
 
 
-def parse_html_description(tree: "etree._Element") -> str | None:
+def parse_html_description(soup: "BeautifulSoup") -> str | None:
     """
     Calculate a text description based on an HTML document.
 
@@ -397,16 +297,14 @@ def parse_html_description(tree: "etree._Element") -> str | None:
     This is a very very very coarse approximation to a plain text render of the page.
 
     Args:
-        tree: The parsed HTML document.
+        soup: The parsed HTML document.
 
     Returns:
         The plain text description, or None if one cannot be generated.
     """
-    # We don't just use XPATH here as that is slow on some machines.
-
-    from lxml import etree
 
     TAGS_TO_REMOVE = {
+        "head",
         "header",
         "nav",
         "aside",
@@ -420,73 +318,55 @@ def parse_html_description(tree: "etree._Element") -> str | None:
         "canvas",
         "img",
         "picture",
-        # etree.Comment is a function which creates an etree._Comment element.
-        # The "tag" attribute of an etree._Comment instance is confusingly the
-        # etree.Comment function instead of a string.
-        etree.Comment,
     }
 
     # Split all the text nodes into paragraphs (by splitting on new
     # lines)
     text_nodes = (
         re.sub(r"\s+", "\n", el).strip()
-        for el in _iterate_over_text(tree.find("body"), TAGS_TO_REMOVE)
+        for el in _iterate_over_text(soup, TAGS_TO_REMOVE)
     )
     return summarize_paragraphs(text_nodes)
 
 
 def _iterate_over_text(
-    tree: Optional["etree._Element"],
-    tags_to_ignore: set[object],
+    soup: "Tag",
+    tags_to_ignore: Iterable[str],
     stack_limit: int = 1024,
 ) -> Generator[str, None, None]:
-    """Iterate over the tree returning text nodes in a depth first fashion,
+    """Iterate over the document returning text nodes in a depth first fashion,
     skipping text nodes inside certain tags.
 
     Args:
-        tree: The parent element to iterate. Can be None if there isn't one.
+        soup: The parent element to iterate.
         tags_to_ignore: Set of tags to ignore
         stack_limit: Maximum stack size limit for depth-first traversal.
             Nodes will be dropped if this limit is hit, which may truncate the
             textual result.
             Intended to limit the maximum working memory when generating a preview.
     """
+    from bs4.element import NavigableString, Tag
 
-    if tree is None:
-        return
-
-    # This is a stack whose items are elements to iterate over *or* strings
+    # This is basically a stack that we extend using itertools.chain.
+    # This will either consist of an element to iterate over *or* a string
     # to be returned.
-    elements: list[str | "etree._Element"] = [tree]
+    elements: list["PageElement"] = [soup]
     while elements:
         el = elements.pop()
 
-        if isinstance(el, str):
-            yield el
-        elif el.tag not in tags_to_ignore:
-            # If the element isn't meant for display, ignore it.
-            if el.get("role") in ARIA_ROLES_TO_IGNORE:
-                continue
-
-            # el.text is the text before the first child, so we can immediately
-            # return it if the text exists.
-            if el.text:
-                yield el.text
-
-            # We add to the stack all the element's children, interspersed with
-            # each child's tail text (if it exists).
+        # Do not consider sub-classes of NavigableString since those represent
+        # stylesheets, etc.
+        if type(el) == NavigableString:  # noqa: E721
+            yield str(el)
+        elif isinstance(el, Tag) and el.name not in tags_to_ignore:
+            # We add to the stack all the element's children.
             #
             # We iterate in reverse order so that earlier pieces of text appear
             # closer to the top of the stack.
-            for child in el.iterchildren(reversed=True):
+            for child in reversed(el.contents):
                 if len(elements) > stack_limit:
                     # We've hit our limit for working memory
                     break
-
-                if child.tail:
-                    # The tail text of a node is text that comes *after* the node,
-                    # so we always include it even if we ignore the child node.
-                    elements.append(child.tail)
 
                 elements.append(child)
 
