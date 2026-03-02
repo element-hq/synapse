@@ -33,6 +33,7 @@ from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 class ProfileTestCase(unittest.HomeserverTestCase):
@@ -113,9 +114,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.get_success(self.store.get_profile_displayname(self.frank))
         )
 
-    def test_set_my_name_if_disabled(self) -> None:
-        self.hs.config.registration.enable_set_displayname = False
-
+    @override_config({"enable_set_displayname": False})
+    def test_set_displayname_if_disabled(self) -> None:
         # Setting displayname for the first time is allowed
         self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
 
@@ -234,9 +234,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             (self.get_success(self.store.get_profile_avatar_url(self.frank))),
         )
 
-    def test_set_my_avatar_if_disabled(self) -> None:
-        self.hs.config.registration.enable_set_avatar_url = False
-
+    @override_config({"enable_set_avatar_url": False})
+    def test_set_avatar_url_if_disabled(self) -> None:
         # Setting displayname for the first time is allowed
         self.get_success(
             self.store.set_profile_avatar_url(self.frank, "http://my.server/me.png")
