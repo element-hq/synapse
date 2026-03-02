@@ -25,7 +25,7 @@ import collections
 import inspect
 import itertools
 import logging
-import typing
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from typing import (
     Any,
@@ -572,7 +572,7 @@ class _LinearizerEntry:
     # The number of things executing.
     count: int
     # Deferreds for the things blocked from executing.
-    deferreds: typing.OrderedDict["defer.Deferred[None]", Literal[1]]
+    deferreds: OrderedDict["defer.Deferred[None]", Literal[1]]
 
 
 class Linearizer:
