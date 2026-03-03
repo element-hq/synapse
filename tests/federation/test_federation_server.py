@@ -338,7 +338,7 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
     def _make_endpoint_path(self, room_id: str) -> str:
         return f"/_matrix/federation/unstable/org.matrix.msc4370/extremities/{room_id}"
 
-    def _remote_join(self, room_id: str, room_version: str) -> None:
+    def _remote_join(self, room_id: str, room_version: str) -> str:
         # Note: other tests ensure the called endpoints in this function return useful
         # and proper data.
 
@@ -377,6 +377,8 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
         r = self.get_success(self._storage_controllers.state.get_current_state(room_id))
         self.assertEqual(r[("m.room.member", joining_user)].membership, "join")
 
+        return r[("m.room.member", joining_user)].event_id
+
     def _test_get_extremities_common(self, room_version: str) -> None:
         # Create a room to test with
         creator_user_id = self.register_user("kermit", "test")
@@ -403,22 +405,13 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
 
         # Now join the room and try again
-        # Note: we're expecting a linear room DAG, so there should be just one extremity
-        self._remote_join(room_id, room_version)
+        # Note: there should be just one extremity: the join
+        join_event_id = self._remote_join(room_id, room_version)
         channel = self.make_signed_federation_request(
             "GET", self._make_endpoint_path(room_id)
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
-        self.assertEqual(
-            channel.json_body["prev_events"],
-            [
-                self.get_success(
-                    self._storage_controllers.main.get_forward_extremities_for_room(
-                        room_id
-                    )
-                )[0][0]
-            ],
-        )
+        self.assertEqual(channel.json_body["prev_events"], [join_event_id])
 
         # ACL the calling server and try again. This should cause an error getting extremities.
         self.helper.send_state(
