@@ -608,6 +608,8 @@ class ProfileHandler:
 
         target_user_str = target_user.to_string()
 
+        # Cancel any ongoing profile membership updates for this user,
+        # and start a new one.
         async with self._worker_locks.acquire_read_write_lock(
             UPDATE_JOIN_STATES_LOCK_NAME,
             target_user_str,
