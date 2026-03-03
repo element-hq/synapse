@@ -646,9 +646,13 @@ class ProfileHandler:
 
         if last_room_id:
             unhandled_room_ids = []
-            for room_id in room_ids:
+            # The unhandled rooms should be at the end of the list, so we iterate in reverse
+            # and break when we reach the last handled room.
+            for room_id in reversed(room_ids):
                 if room_id > last_room_id:
                     unhandled_room_ids.append(room_id)
+                else:
+                    break
             room_ids = unhandled_room_ids
 
         requester = create_requester(
