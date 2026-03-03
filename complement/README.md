@@ -8,8 +8,7 @@ ensure everything works at a holistic level.
 ## Setup
 
 Nothing beyond a [normal Complement
-setup](https://github.com/matrix-org/complement?tab=readme-ov-file#running) (just Go and
-Docker).
+setup](https://github.com/matrix-org/complement#running) (just Go and Docker).
 
 
 ## Running tests
@@ -28,12 +27,37 @@ scripts-dev/complement.sh ./tests/csapi/... -run TestRoomCreate/Parallel/POST_/c
 scripts-dev/complement.sh ./tests/... -run 'TestRoomCreate/Parallel/POST_/createRoom_makes_a_(.*)'
 ```
 
-Typically, if you're developing the Synapse and Complement tests side-by-side, you will
-run something like this:
+It's often nice to develop on Synapse and write Complement tests at the same time.
+Here is how to run your local Synapse checkout against your local Complement checkout.
 
 ```shell
 # To run a specific test
 COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh ./tests/csapi/... -run TestRoomCreate
+```
+
+The above will run a monolithic (single-process) Synapse with SQLite as the database.
+For other configurations, try:
+
+- Passing `POSTGRES=1` as an environment variable to use the Postgres database instead.
+- Passing `WORKERS=1` as an environment variable to use a workerised setup instead. This
+  option implies the use of Postgres.
+  - If setting `WORKERS=1`, optionally set `WORKER_TYPES=` to declare which worker types
+    you wish to test. A simple comma-delimited string containing the worker types
+    defined from the `WORKERS_CONFIG` template in
+    [here](https://github.com/element-hq/synapse/blob/develop/docker/configure_workers_and_start.py#L54).
+    A safe example would be `WORKER_TYPES="federation_inbound, federation_sender,
+    synchrotron"`. See the [worker documentation](../workers.md) for additional
+    information on workers.
+- Passing `ASYNCIO_REACTOR=1` as an environment variable to use the Twisted asyncio
+  reactor instead of the default one.
+- Passing `PODMAN=1` will use the [podman](https://podman.io/) container runtime,
+  instead of docker.
+- Passing `UNIX_SOCKETS=1` will utilise Unix socket functionality for Synapse, Redis,
+  and Postgres(when applicable).
+
+To increase the log level for the tests, set `SYNAPSE_TEST_LOG_LEVEL`, e.g:
+```sh
+SYNAPSE_TEST_LOG_LEVEL=DEBUG COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh -run TestRoomCreate
 ```
 
 
