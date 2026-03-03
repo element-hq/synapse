@@ -1,7 +1,7 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2024 Mathieu Velten
+# Copyright (C) 2026 Mathieu Velten
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -61,7 +61,7 @@ class WebPushPusher(HttpPusher):
 
         self.http_client = hs.get_proxied_blocklisted_http_client()
 
-        self.webpush_config = hs.config.experimental.msc4174
+        self.webpush_config = hs.config.webpush
 
         self.cached_vapid_headers: Optional[JsonDict] = None
         self.cached_vapid_headers_expires: int = 0
@@ -141,9 +141,7 @@ class WebPushPusher(HttpPusher):
             vapid_claims["exp"] = int(time.time()) + (12 * 60 * 60)
 
             self.cached_vapid_headers_expires = vapid_claims["exp"]
-            self.cached_vapid_headers = self.webpush_config.vapid_signer.sign(
-                vapid_claims
-            )
+            self.cached_vapid_headers = self.webpush_config.vapid.sign(vapid_claims)
 
         request = WebPusher(
             subscription_info, requests_session=HTTP_REQUEST_FACTORY

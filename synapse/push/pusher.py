@@ -22,7 +22,6 @@
 import logging
 from typing import TYPE_CHECKING, Callable
 
-import synapse.config.experimental
 from synapse.push import Pusher, PusherConfig, PusherType
 from synapse.push.emailpusher import EmailPusher
 from synapse.push.httppusher import HttpPusher
@@ -44,10 +43,7 @@ class PusherFactory:
             PusherType.HTTP: HttpPusher
         }
 
-        if (
-            synapse.config.experimental.HAS_PYWEBPUSH
-            and self.config.experimental.msc4174.enabled
-        ):
+        if self.config.webpush.enabled:
             from synapse.push.webpushpusher import WebPushPusher
 
             self.pusher_types[PusherType.WEBPUSH] = WebPushPusher

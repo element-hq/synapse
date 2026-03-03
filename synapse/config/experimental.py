@@ -20,13 +20,11 @@
 #
 
 import enum
-import os
 from functools import cache
 from typing import TYPE_CHECKING, Any, Optional
 
 import attr
 import attr.validators
-from py_vapid import Vapid
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
@@ -377,30 +375,6 @@ class MSC3866Config:
     require_approval_for_new_accounts: bool = False
 
 
-@attr.s(auto_attribs=True, frozen=True, slots=True)
-class MSC4174Config:
-    """Configuration for MSC4174: webpush push kind"""
-
-    enabled: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool))
-
-    @enabled.validator
-    def _check_enabled(self, attribute: attr.Attribute, value: bool) -> None:
-        # Only allow enabling MSC4174 if pywebpush is installed
-        if value and not HAS_PYWEBPUSH:
-            raise ConfigError(
-                "MSC4174 is enabled but pywebpush is not installed. "
-                "Please install pywebpush to use MSC4174.",
-                ("experimental", "msc4174", "enabled"),
-            )
-
-    vapid_contact_email: str = ""
-    vapid_private_key: str = ""
-    vapid_app_server_key: str = ""
-    ttl_seconds: int = 12 * 60 * 60
-
-    vapid_signer: Vapid = attr.ib(init=False)
-
-
 class ExperimentalConfig(Config):
     """Config section for enabling experimental features
 
@@ -647,30 +621,4 @@ class ExperimentalConfig(Config):
         self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
 
         # MSC4174: webpush push kind
-        raw_msc4174_config = experimental.get("msc4174", {})
-        self.msc4174 = MSC4174Config(**raw_msc4174_config)
-        if self.msc4174.enabled:
-            if not self.msc4174.vapid_contact_email:
-                raise ConfigError(
-                    "'vapid_contact_email' must be provided when enabling WebPush support",
-                    ("experimental", "msc4174", "vapid_contact_email"),
-                )
-            if not self.msc4174.vapid_private_key:
-                raise ConfigError(
-                    "'vapid_private_key' must be provided when enabling WebPush support",
-                    ("experimental", "msc4174", "vapid_private_key"),
-                )
-            if not self.msc4174.vapid_app_server_key:
-                raise ConfigError(
-                    "'vapid_app_server_key' must be provided when enabling WebPush support",
-                    ("experimental", "msc4174", "vapid_app_server_key"),
-                )
-
-            if os.path.isfile(self.msc4174.vapid_private_key):
-                self.vapid_signer = Vapid.from_file(
-                    private_key_file=self.msc4174.vapid_private_key
-                )
-            else:
-                self.vapid_signer = Vapid.from_string(
-                    private_key=self.msc4174.vapid_private_key
-                )
+        self.msc4174_enabled: bool = experimental.get("msc4174_enabled", False)

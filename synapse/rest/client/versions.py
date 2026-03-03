@@ -189,7 +189,7 @@ class VersionsRestServlet(RestServlet):
                     # MSC4380: Invite blocking
                     "org.matrix.msc4380.stable": True,
                     # MSC4174: Webpush support
-                    "org.matrix.msc4174": self.config.experimental.msc4174.enabled,
+                    "org.matrix.msc4174": self.config.experimental.msc4174_enabled,
                 },
             },
         )

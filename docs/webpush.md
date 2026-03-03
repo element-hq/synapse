@@ -3,25 +3,18 @@
 
 ## Setup & configuration
 
-In the synapse virtualenv, generate the server key pair by running
-`vapid --gen --applicationServerKey`. This will generate a `private_key.pem`
-(which you'll refer to in the config file with `vapid_private_key`)
-and `public_key.pem` file, and also a string labeled `Application Server Key`.
-
-You'll copy the Application Server Key to `vapid_app_server_key` so that
-web applications can fetch it through `/capabilities` and use it to subscribe
-to the push manager:
-
-```js
-serviceWorkerRegistration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: "...",
-});
-```
+WebPush support should be enabled in the config file by setting `enabled: true`
+under the `webpush` section.
 
 You also need to set an e-mail address in `vapid_contact_email` in the config file,
 where the push server operator can reach you in case they need to notify you
 about your usage of their API.
+
+If you already have a VAPID key pair, you can set `vapid_private_key`
+or `vapid_private_key_path` to point to the private key file.
+
+If you don't have a VAPID key pair, Synapse will create a new signing key on startup
+and store it in a file at `vapid_private_key_path`, or `CONFDIR/SERVERNAME.vapid.key` by default.
 
 Since for webpush, the push server endpoint is variable and comes from the browser
 through the push data, you may not want to have your synapse instance connect to any
@@ -29,7 +22,7 @@ random addressable server.
 You can use the global options `ip_range_blacklist` and `ip_range_allowlist` to manage that.
 
 A default time-to-live of a day is set for webpush, but you can adjust this by setting
-the `ttl: <number of seconds>` configuration option for the pusher.
+the `ttl_seconds: <number of seconds>` configuration option for the pusher.
 If notifications can't be delivered by the push server aftet this time, they are dropped.
 
 ## Push key and expected push data
