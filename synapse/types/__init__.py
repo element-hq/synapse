@@ -343,7 +343,7 @@ class DomainSpecificString(metaclass=abc.ABCMeta):
             # possible for invalid data to exist in room-state, etc.
             parse_and_validate_server_name(obj.domain)
             return True
-        except Exception:
+        except (SynapseError, ValueError):
             return False
 
     __repr__ = to_string
@@ -375,7 +375,7 @@ class UserID(DomainSpecificString):
             # possible for invalid data to exist in room-state, etc.
             parse_and_validate_server_name(obj.domain)
             return True
-        except Exception:
+        except (SynapseError, ValueError):
             return False
 
 
