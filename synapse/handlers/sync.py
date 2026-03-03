@@ -1046,9 +1046,18 @@ class SyncHandler:
                     if event.sender not in first_event_by_sender_map:
                         first_event_by_sender_map[event.sender] = event
 
-                    # We need the event's sender, unless their membership was in a
-                    # previous timeline event.
-                    if (EventTypes.Member, event.sender) not in timeline_state:
+                    # When using `state_after`, there is no special treatment with
+                    # regards to state also being in the `timeline`. Always fetch
+                    # relevant membership regardless of whether the state event is in
+                    # the `timeline`.
+                    if sync_config.use_state_after:
+                        members_to_fetch.add(event.sender)
+                    # For `state`, the client is supposed to do a flawed re-construction
+                    # of state over time by starting with the given `state` and layering
+                    # on state from the `timeline` as you go (flawed because state
+                    # resolution). In this case, we only need their membership in
+                    # `state` when their membership isn't already in the `timeline`.
+                    elif (EventTypes.Member, event.sender) not in timeline_state:
                         members_to_fetch.add(event.sender)
                     # FIXME: we also care about invite targets etc.
 
