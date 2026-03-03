@@ -335,7 +335,7 @@ For more details about other configurations, see the [Docker-specific documentat
 ## Run the integration tests ([Complement](https://github.com/matrix-org/complement)).
 
 See [our Complement docs](https://github.com/element-hq/synapse/tree/develop/complement)
-for how to use our `./scripts-dev/complement.sh` test runner script.
+for how to use the `./scripts-dev/complement.sh` test runner script.
 
 
 ### Prettier formatting with `gotestfmt`
