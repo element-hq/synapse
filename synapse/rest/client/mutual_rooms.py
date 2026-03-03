@@ -74,13 +74,6 @@ class UserMutualRoomsServlet(RestServlet):
         super().__init__()
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
-        if hs.config.experimental.msc2666_enabled:
-            self.PATTERNS.extend(
-                client_patterns(
-                    "/uk.half-shot.msc2666/user/mutual_rooms$",
-                    releases=(),
-                )
-            )
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # twisted.web.server.Request.args is incorrectly defined as Any | None
