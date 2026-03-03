@@ -610,10 +610,9 @@ class ProfileHandler:
 
         # Cancel any ongoing profile membership updates for this user,
         # and start a new one.
-        async with self._worker_locks.acquire_read_write_lock(
+        async with self._worker_locks.acquire_lock(
             UPDATE_JOIN_STATES_LOCK_NAME,
             target_user_str,
-            write=True,
         ):
             tasks_to_cancel = await self._task_scheduler.get_tasks(
                 actions=[UPDATE_JOIN_STATES_ACTION_NAME],
