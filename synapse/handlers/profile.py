@@ -619,7 +619,7 @@ class ProfileHandler:
                 resource_id=target_user_str,
                 statuses=[TaskStatus.ACTIVE, TaskStatus.SCHEDULED],
             )
-
+            assert len(tasks_to_cancel) <= 1, "Expected at most one task to cancel"
             for task in tasks_to_cancel:
                 await self._task_scheduler.cancel_task(task.id)
 
