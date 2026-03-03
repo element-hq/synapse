@@ -1,0 +1,1 @@
+Pre-allocate the buffer based on the expected `Content-Length` with the Rust HTTP client.

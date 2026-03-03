@@ -77,6 +77,7 @@ from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+from synapse.util.cancellation import cancellable
 from synapse.util.metrics import Measure
 from synapse.visibility import filter_and_transform_events_for_client
 
@@ -307,7 +308,7 @@ class SyncHandler:
             clock=hs.get_clock(),
             name="sync",
             server_name=self.server_name,
-            timeout_ms=hs.config.caches.sync_response_cache_duration,
+            timeout=hs.config.caches.sync_response_cache_duration,
         )
 
         # ExpiringCache((User, Device)) -> LruCache(user_id => event_id)
@@ -367,6 +368,10 @@ class SyncHandler:
         logger.debug("Returning sync response for %s", user_id)
         return res
 
+    # TODO: We mark this as cancellable, and we have tests for it, but we
+    # haven't gone through and exhaustively checked that all the code paths in
+    # this method are actually cancellable.
+    @cancellable
     async def _wait_for_sync_for_user(
         self,
         sync_config: SyncConfig,
