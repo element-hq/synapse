@@ -160,7 +160,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(membership[state_tuple].content["displayname"], "Frank Jr.")
 
-    def test_backgound_update_room_membership_on_set_displayname(self) -> None:
+    def test_background_update_room_membership_on_set_displayname(self) -> None:
         """Test that `set_displayname` returns immediately and that room membership updates are still done in background."""
 
         self.get_success(
