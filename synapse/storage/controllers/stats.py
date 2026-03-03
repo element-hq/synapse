@@ -20,7 +20,8 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Collection, Counter
+from collections import Counter
+from typing import TYPE_CHECKING, Collection
 
 from synapse.api.errors import SynapseError
 from synapse.storage.database import LoggingTransaction

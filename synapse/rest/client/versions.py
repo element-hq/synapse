@@ -187,7 +187,7 @@ class VersionsRestServlet(RestServlet):
                     # MSC4354: Sticky events
                     "org.matrix.msc4354": self.config.experimental.msc4354_enabled,
                     # MSC4380: Invite blocking
-                    "org.matrix.msc4380": self.config.experimental.msc4380_enabled,
+                    "org.matrix.msc4380.stable": True,
                 },
             },
         )
