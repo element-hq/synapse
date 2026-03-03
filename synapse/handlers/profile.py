@@ -644,15 +644,15 @@ class ProfileHandler:
         last_room_id = task.result.get("last_room_id", None) if task.result else None
 
         if last_room_id:
-            unhandled_room_ids = []
-            # The unhandled rooms should be at the end of the list, so we iterate in reverse
-            # and break when we reach the last handled room.
-            for room_id in reversed(room_ids):
+            # Filter out room IDs that have already been handled
+            # by finding the first room ID greater than the last handled room ID
+            # and slicing the list from that point onwards.
+            first_unhandled_room_idx = 0
+            for idx, room_id in enumerate(room_ids):
                 if room_id > last_room_id:
-                    unhandled_room_ids.append(room_id)
-                else:
+                    first_unhandled_room_idx = idx
                     break
-            room_ids = unhandled_room_ids
+            room_ids = room_ids[first_unhandled_room_idx:]
 
         requester = create_requester(
             user_id=target_user,
