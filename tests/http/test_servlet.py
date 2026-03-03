@@ -37,7 +37,7 @@ from synapse.util.cancellation import cancellable
 from synapse.util.duration import Duration
 
 from tests import unittest
-from tests.http.server._base import test_disconnect
+from tests.http.server._base import disconnect_and_assert
 
 
 def make_request(content: bytes | JsonDict) -> Mock:
@@ -127,7 +127,7 @@ class TestRestServletCancellation(unittest.HomeserverTestCase):
     def test_cancellable_disconnect(self) -> None:
         """Test that handlers with the `@cancellable` flag can be cancelled."""
         channel = self.make_request("GET", "/sleep", await_result=False)
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=True,
@@ -137,7 +137,7 @@ class TestRestServletCancellation(unittest.HomeserverTestCase):
     def test_uncancellable_disconnect(self) -> None:
         """Test that handlers without the `@cancellable` flag cannot be cancelled."""
         channel = self.make_request("POST", "/sleep", await_result=False)
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=False,

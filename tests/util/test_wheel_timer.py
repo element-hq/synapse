@@ -19,6 +19,7 @@
 #
 #
 
+from synapse.util.duration import Duration
 from synapse.util.wheel_timer import WheelTimer
 
 from .. import unittest
@@ -26,7 +27,7 @@ from .. import unittest
 
 class WheelTimerTestCase(unittest.TestCase):
     def test_single_insert_fetch(self) -> None:
-        wheel: WheelTimer[object] = WheelTimer(bucket_size=5)
+        wheel: WheelTimer[object] = WheelTimer(bucket_size=Duration(milliseconds=5))
 
         wheel.insert(100, "1", 150)
 
@@ -39,7 +40,7 @@ class WheelTimerTestCase(unittest.TestCase):
         self.assertListEqual(wheel.fetch(170), [])
 
     def test_multi_insert(self) -> None:
-        wheel: WheelTimer[object] = WheelTimer(bucket_size=5)
+        wheel: WheelTimer[object] = WheelTimer(bucket_size=Duration(milliseconds=5))
 
         wheel.insert(100, "1", 150)
         wheel.insert(105, "2", 130)
@@ -54,13 +55,13 @@ class WheelTimerTestCase(unittest.TestCase):
         self.assertListEqual(wheel.fetch(210), [])
 
     def test_insert_past(self) -> None:
-        wheel: WheelTimer[object] = WheelTimer(bucket_size=5)
+        wheel: WheelTimer[object] = WheelTimer(bucket_size=Duration(milliseconds=5))
 
         wheel.insert(100, "1", 50)
         self.assertListEqual(wheel.fetch(120), ["1"])
 
     def test_insert_past_multi(self) -> None:
-        wheel: WheelTimer[object] = WheelTimer(bucket_size=5)
+        wheel: WheelTimer[object] = WheelTimer(bucket_size=Duration(milliseconds=5))
 
         wheel.insert(100, "1", 150)
         wheel.insert(100, "2", 140)
@@ -72,7 +73,7 @@ class WheelTimerTestCase(unittest.TestCase):
         self.assertListEqual(wheel.fetch(240), [])
 
     def test_multi_insert_then_past(self) -> None:
-        wheel: WheelTimer[object] = WheelTimer(bucket_size=5)
+        wheel: WheelTimer[object] = WheelTimer(bucket_size=Duration(milliseconds=5))
 
         wheel.insert(100, "1", 150)
         wheel.insert(100, "2", 160)

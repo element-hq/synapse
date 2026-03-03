@@ -1,0 +1,1 @@
+Cancel long-running sync requests if the client has gone away.
