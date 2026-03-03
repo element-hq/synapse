@@ -151,7 +151,7 @@ class UserMutualRoomsServlet(RestServlet):
             return 200, {"joined": rooms, "count": total_count}
 
         return 200, {
-            "joined": list(rooms),
+            "joined": rooms,
             "next_batch": next_batch,
             "count": total_count,
         }
