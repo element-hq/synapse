@@ -117,6 +117,22 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.150.0
+
+## Removal of the `systemd` pip extra
+
+The `matrix-synapse[systemd]` pip extra has been removed.
+If you use `systemd.journal.JournalHandler` in your logging configuration
+(e.g. `contrib/systemd/log_config.yaml`), you must now install
+`systemd-python` manually in Synapse's runtime environment:
+
+```bash
+pip install systemd-python
+```
+
+No action is needed if you do not use journal logging, or if you installed
+Synapse from the Debian packages (which handle this automatically).
+
 # Upgrading to v1.146.0
 
 ## Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka
