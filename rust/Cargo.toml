@@ -35,6 +35,9 @@ pyo3 = { version = "0.27.2", features = [
     "anyhow",
     "abi3",
     "abi3-py310",
+    # So we can pass `bytes::Bytes` directly back to Python efficiently,
+    # https://docs.rs/pyo3/latest/pyo3/bytes/index.html
+    "bytes",
 ] }
 pyo3-log = "0.13.1"
 pythonize = "0.27.0"

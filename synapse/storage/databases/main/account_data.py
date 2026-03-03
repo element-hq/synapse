@@ -109,7 +109,6 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         )
 
         self._msc4155_enabled = hs.config.experimental.msc4155_enabled
-        self._msc4380_enabled = hs.config.experimental.msc4380_enabled
 
     def get_max_account_data_stream_id(self) -> int:
         """Get the current max stream ID for account data stream
@@ -573,14 +572,13 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         Args:
             user_id: The user whose invite configuration should be returned.
         """
-        if self._msc4380_enabled:
-            data = await self.get_global_account_data_by_type_for_user(
-                user_id, AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG
-            )
-            # If the user has an MSC4380-style config setting, prioritise that
-            # above an MSC4155 one
-            if data is not None:
-                return MSC4380InviteRulesConfig.from_account_data(data)
+        data = await self.get_global_account_data_by_type_for_user(
+            user_id, AccountDataTypes.INVITE_PERMISSION_CONFIG
+        )
+        # If the user has an MSC4380-style config setting, prioritise that
+        # above an MSC4155 one
+        if data is not None:
+            return MSC4380InviteRulesConfig.from_account_data(data)
 
         if self._msc4155_enabled:
             data = await self.get_global_account_data_by_type_for_user(

@@ -15,7 +15,7 @@
 use std::{collections::HashMap, future::Future, sync::OnceLock};
 
 use anyhow::Context;
-use futures::TryStreamExt;
+use http_body_util::BodyExt;
 use once_cell::sync::OnceCell;
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 use reqwest::RequestBuilder;
@@ -235,23 +235,30 @@ impl HttpClient {
 
             let status = response.status();
 
-            let mut stream = response.bytes_stream();
-            let mut buffer = Vec::new();
-            while let Some(chunk) = stream.try_next().await.context("reading body")? {
-                if buffer.len() + chunk.len() > response_limit {
-                    Err(anyhow::anyhow!("Response size too large"))?;
-                }
-
-                buffer.extend_from_slice(&chunk);
-            }
+            // A light-weight way to read the response up until the `response_limit`. We
+            // want to avoid allocating a giant response object on the server above our
+            // expected `response_limit` to avoid out-of-memory DOS problems.
+            let body = reqwest::Body::from(response);
+            let limited_body = http_body_util::Limited::new(body, response_limit);
+            let collected = limited_body
+                .collect()
+                .await
+                .map_err(anyhow::Error::from_boxed)
+                .with_context(|| {
+                    format!(
+                        "Response body exceeded response limit ({} bytes)",
+                        response_limit
+                    )
+                })?;
+            let bytes: bytes::Bytes = collected.to_bytes();
 
             if !status.is_success() {
-                return Err(HttpResponseException::new(status, buffer));
+                return Err(HttpResponseException::new(status, bytes));
             }
 
-            let r = Python::attach(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
-
-            Ok(r)
+            // Because of the `pyo3` `bytes` feature, we can pass this back to Python
+            // land efficiently
+            Ok(bytes)
         })
     }
 }

@@ -166,7 +166,7 @@ class FederationServer(FederationBase):
             clock=hs.get_clock(),
             name="fed_txn_handler",
             server_name=self.server_name,
-            timeout_ms=30000,
+            timeout=Duration(seconds=30),
         )
 
         self.transaction_actions = TransactionActions(self.store)
@@ -179,13 +179,13 @@ class FederationServer(FederationBase):
             clock=hs.get_clock(),
             name="state_resp",
             server_name=self.server_name,
-            timeout_ms=30000,
+            timeout=Duration(seconds=30),
         )
         self._state_ids_resp_cache: ResponseCache[tuple[str, str]] = ResponseCache(
             clock=hs.get_clock(),
             name="state_ids_resp",
             server_name=self.server_name,
-            timeout_ms=30000,
+            timeout=Duration(seconds=30),
         )
 
         self._federation_metrics_domains = (
