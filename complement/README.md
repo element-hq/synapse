@@ -76,3 +76,20 @@ To run the in-repo Complement tests, use the `--in-repo` command line argument.
 # Similarly, you can also use `-run` to specify all or part of a specific test path to run
 scripts-dev/complement.sh --in-repo ./tests/... -run TestIntraShardFederation
 ```
+
+### Access database for homeserver after Complement test runs.
+
+If you're curious what the database looks like after you run some tests, here are some
+steps to get you going in Synapse:
+
+1. In your Complement test comment out `defer deployment.Destroy(t)` and replace with
+   `defer time.Sleep(2 * time.Hour)` to keep the homeserver running after the tests
+   complete
+1. Start the Complement tests
+1. Find the name of the container, `docker ps -f name=complement_` (this will filter for
+   just the Compelement related Docker containers)
+1. Access the container replacing the name with what you found in the previous step:
+   `docker exec -it complement_1_hs_with_application_service.hs1_2 /bin/bash`
+1. Install sqlite (database driver), `apt-get update && apt-get install -y sqlite3`
+1. Then run `sqlite3` and open the database `.open /conf/homeserver.db` (this db path
+   comes from the Synapse homeserver.yaml)

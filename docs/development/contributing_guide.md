@@ -352,18 +352,6 @@ COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh -json | gotestfmt -hide
 (Remove `-hide successful-tests` if you don't want to hide successful tests.)
 
 
-### Access database for homeserver after Complement test runs.
-
-If you're curious what the database looks like after you run some tests, here are some steps to get you going in Synapse:
-
-1. In your Complement test comment out `defer deployment.Destroy(t)` and replace with `defer time.Sleep(2 * time.Hour)` to keep the homeserver running after the tests complete
-1. Start the Complement tests
-1. Find the name of the container, `docker ps -f name=complement_` (this will filter for just the Compelement related Docker containers)
-1. Access the container replacing the name with what you found in the previous step: `docker exec -it complement_1_hs_with_application_service.hs1_2 /bin/bash`
-1. Install sqlite (database driver), `apt-get update && apt-get install -y sqlite3`
-1. Then run `sqlite3` and open the database `.open /conf/homeserver.db` (this db path comes from the Synapse homeserver.yaml)
-
-
 # 9. Submit your patch.
 
 Once you're happy with your patch, it's time to prepare a Pull Request.
