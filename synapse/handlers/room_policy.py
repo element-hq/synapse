@@ -50,7 +50,7 @@ class RoomPolicyHandler:
             return event.type in [POLICY_SERVER_EVENT_TYPE, "org.matrix.msc4284.policy"]
         return False
 
-    async def get_policy_server_name(self, room_id: str) -> tuple[str, str] | None:
+    async def _get_policy_server(self, room_id: str) -> tuple[str, str] | None:
         """Get the policy server name for a room.
 
         Args:
@@ -128,7 +128,7 @@ class RoomPolicyHandler:
         if self._is_policy_server_state_event(event):
             return True  # always allow policy server change events
 
-        tup = await self.get_policy_server_name(event.room_id)
+        tup = await self._get_policy_server(event.room_id)
         if tup is None:
             return True  # no policy server configured, so allow
         policy_server, public_key = tup
@@ -187,7 +187,7 @@ class RoomPolicyHandler:
             When the policy server refuses to sign the event, or when verify is True and the
             signature is invalid.
         """
-        tup = await self.get_policy_server_name(event.room_id)
+        tup = await self._get_policy_server(event.room_id)
         if tup is None:
             return
         policy_server, public_key = tup
