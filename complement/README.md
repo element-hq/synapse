@@ -48,8 +48,8 @@ For other configurations, try:
     A safe example would be `WORKER_TYPES="federation_inbound, federation_sender,
     synchrotron"`. See the [worker documentation](../workers.md) for additional
     information on workers.
-- Passing `ASYNCIO_REACTOR=1` as an environment variable to use the Twisted asyncio
-  reactor instead of the default one.
+- Passing `ASYNCIO_REACTOR=1` as an environment variable to use the asyncio-backed
+  reactor with Twisted instead of the default one.
 - Passing `PODMAN=1` will use the [podman](https://podman.io/) container runtime,
   instead of docker.
 - Passing `UNIX_SOCKETS=1` will utilise Unix socket functionality for Synapse, Redis,
