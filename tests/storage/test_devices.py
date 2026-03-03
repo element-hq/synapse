@@ -207,8 +207,6 @@ class DeviceStoreTestCase(HomeserverTestCase):
         """
         Tests that `get_device_updates_by_remote` limits the length of the return value
         properly when cross-signing key updates are present.
-        Current behaviour is that the cross-signing key updates will always come in pairs,
-        even if that means leaving an earlier batch one EDU short of the limit.
         """
 
         assert self.hs.is_mine_id("@user_id:test"), (
