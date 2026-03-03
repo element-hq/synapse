@@ -558,7 +558,7 @@ class ApplicationServiceApi(SimpleHttpClient):
             user_id: The user who is requesting the preview.
 
         Returns:
-            A unstructrued map of data from the application service OR
+            A unstructured map of data from the application service OR
             None if the service could not be contacted, or returned any other response.
 
         """
@@ -578,9 +578,8 @@ class ApplicationServiceApi(SimpleHttpClient):
             # The response *must* be a JsonDict if successful.
             assert isinstance(response, dict)
         except HttpResponseException as e:
-            # The appservice doesn't support this endpoint.
-            # Since the AS has opted into these requests, we warn if the AS squarks about unknown
-            # endpoints.
+            if is_unknown_endpoint(e):
+                return None
             logger.warning("query_url_preview to %s received %s", uri, e.code)
             return None
         except Exception as ex:

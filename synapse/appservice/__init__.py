@@ -85,9 +85,6 @@ class ApplicationService:
     NS_ALIASES = "aliases"
     NS_ROOMS = "rooms"
     NS_PREVIEW_URLS = "uk.half-shot.msc4417.preview_urls"
-    # The ordering here is important as it is used to map database values (which
-    # are stored as ints representing the position in this list) to namespace
-    # values.
     NS_LIST = [NS_USERS, NS_ALIASES, NS_ROOMS, NS_PREVIEW_URLS]
 
     def __init__(
@@ -149,7 +146,7 @@ class ApplicationService:
         #   users: [ {regex: "[A-z]+.*", exclusive: true}, ...],
         #   aliases: [ {regex: "[A-z]+.*", exclusive: true}, ...],
         #   rooms: [ {regex: "[A-z]+.*", exclusive: true}, ...],
-        #   uk.half-shot.msc4417.preview_urls: [ {regex: "[A-z]+.*", exclusive: true}, ...],
+        #   uk.half-shot.msc4417.preview_urls: [ {regex: "https?://(www.)?example.org/?.*", exclusive: true}, ...],
         # }
         if namespaces is None:
             namespaces = {}

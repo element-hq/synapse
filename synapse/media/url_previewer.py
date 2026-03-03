@@ -227,14 +227,17 @@ class UrlPreviewer:
         if self.allow_as_previews:
             as_og_data = await self.as_services.query_preview_url(url, user)
             if as_og_data.result:
-                # This data is never cached in the homeserver, but the appservice
-                # is expected to cache the data.
+                # This result should NEVER be cached (e.g. via ResponseCache) as
+                # the result is dependant on which user requested the preview.
+                # Any caching performed should be done on the application service
+                # side.
                 return json_encoder.encode(as_og_data.result).encode("utf8")
 
             if as_og_data.exclusive:
                 # XXX: _do_preview typically returns a 500 for any failed
                 # requests but in this case we know the appservice requested
                 # exclusivity over this URL pattern, so we can say it's a 404.
+                # https://github.com/matrix-org/matrix-spec/issues/2327
                 raise SynapseError(
                     404,
                     "Not able to preview URL",
@@ -513,6 +516,7 @@ class UrlPreviewer:
             )
         except Exception as e:
             # FIXME: pass through 404s and other error messages nicely
+            # https://github.com/matrix-org/matrix-spec/issues/2327
             logger.warning("Error downloading %s: %r", url, e)
 
             raise SynapseError(

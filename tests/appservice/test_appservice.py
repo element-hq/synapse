@@ -184,7 +184,7 @@ class ApplicationServiceTestCase(unittest.TestCase):
 
     def test_non_exclusive_url(self) -> None:
         self.service.namespaces[ApplicationService.NS_PREVIEW_URLS].append(
-            _regex("https:\\/\\/matrix.org.*", exclusive=False)
+            _regex(r"https:\/\/matrix.org.*", exclusive=False)
         )
         self.assertFalse(self.service.is_exclusive_preview_url("https://matrix.org"))
         self.assertFalse(
