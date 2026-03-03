@@ -685,10 +685,10 @@ class FederationServer(FederationBase):
         return 200, resp
 
     async def on_get_extremities_request(self, origin: str, room_id: str) -> JsonDict:
+        # Assert host in room first to hide contents of the ACL from the caller
+        await self._event_auth_handler.assert_host_in_room(room_id, origin)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, room_id)
-
-        await self._event_auth_handler.assert_host_in_room(room_id, origin)
 
         extremities = await self.store.get_forward_extremities_for_room(room_id)
         prev_event_ids = [event_id for event_id, _, _, _ in extremities]
