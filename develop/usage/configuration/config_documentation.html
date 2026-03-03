@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-deb51e5a.js";
+            window.path_to_searchindex_js = "../../searchindex-b05bf627.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-4dc10a98.js"></script>
@@ -4006,7 +4006,7 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 </code></pre>
 <hr>
 <h3 id="outbound_federation_restricted_to"><a class="header" href="#outbound_federation_restricted_to"><code>outbound_federation_restricted_to</code></a></h3>
-<p><em>(array)</em> When using workers, you can restrict outbound federation traffic to only go through a specific subset of workers. Any worker specified here must also be in the <a href="#instance_map"><code>instance_map</code></a>. <a href="#worker_replication_secret"><code>worker_replication_secret</code></a> must also be configured to authorize inter-worker communication.</p>
+<p><em>(array)</em> You can restrict outbound federation traffic to only go through a specific subset of workers including the <a href="https://element.io/en/server-suite/secure-border-gateways">Secure Border Gateway (SBG)</a>. Any worker specified here (including the SBG) must also be in the <a href="#instance_map"><code>instance_map</code></a>. <a href="#worker_replication_secret"><code>worker_replication_secret</code></a> must also be configured to authorize inter-worker communication.</p>
 <p>Also see the <a href="../../workers.html#restrict-outbound-federation-traffic-to-a-specific-set-of-workers">worker documentation</a> for more info.</p>
 <p><em>Added in Synapse 1.89.0.</em></p>
 <p>Defaults to <code>[]</code>.</p>
