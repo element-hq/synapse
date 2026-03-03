@@ -452,7 +452,7 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
         {"use_frozen_dicts": False, "experimental_features": {"msc4370_enabled": True}}
     )
     def test_get_extremities_without_frozen_dicts(self, room_version: str) -> None:
-        """Test GET /extremities with USE_FROZEN_DICTS=True"""
+        """Test GET /extremities with USE_FROZEN_DICTS=False"""
         self._test_get_extremities_common(room_version)
 
     # note the lack of config-setting stuff on this test.

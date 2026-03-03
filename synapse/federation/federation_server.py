@@ -691,7 +691,9 @@ class FederationServer(FederationBase):
         await self._event_auth_handler.assert_host_in_room(room_id, origin)
 
         extremities = await self.store.get_forward_extremities_for_room(room_id)
-        prev_event_ids = [e[0] for e in extremities]
+        prev_event_ids = [event_id for event_id, _, _, _ in extremities]
+        if len(prev_event_ids) == 0:
+            raise SynapseError(500, "Room has no forward extremities")
         return {"prev_events": prev_event_ids}
 
     async def on_make_join_request(
