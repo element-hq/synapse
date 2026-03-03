@@ -258,6 +258,18 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         self.assertEqual(result.result, return_value)
         self.assertTrue(result.exclusive)
 
+    async def test_query_url_preview_rejects_invalid(self) -> None:
+        self.mock_store.get_app_services.return_value = [
+            self._mkservice_url_preview(True, True)
+        ]
+        self.mock_as_api.query_preview_url = AsyncMock(return_value={"og:title": True})
+        result = await self.handler.query_preview_url(
+            "https://matrix.org", UserID(localpart="a", domain="b")
+        )
+        assert result is not None
+        self.assertEqual(result.result, None)
+        self.assertTrue(result.exclusive)
+
     async def test_query_url_preview_multiple_services(self) -> None:
         return_value = {"og:title": "foobar"}
         url_service = self._mkservice_url_preview()

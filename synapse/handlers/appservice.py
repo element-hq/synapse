@@ -19,6 +19,7 @@
 #
 #
 import logging
+from sys import exc_info
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -94,7 +95,7 @@ class ApplicationServiceUrlPreviewResult(ParseModel):
         def check_str(key):
             if self.result:
                 v = self.result.get(key)
-                if v is not None and isinstance(v, str):
+                if v is not None and not isinstance(v, str):
                     raise ValueError(f"'{key}' must be a string if defined")
 
         # Non-exhaustive list of keys that should be strings based on https://ogp.me/.
@@ -777,7 +778,16 @@ class ApplicationServicesHandler:
                 exclusive_appservice, url, user_id
             )
             url_previews_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(1)
-            return ApplicationServiceUrlPreviewResult(exclusive=True, result=result)
+            try:
+                return ApplicationServiceUrlPreviewResult(exclusive=True, result=result)
+            except Exception:
+                logger.warning(
+                    "exclusive appservice preview from %s was not valid",
+                    exclusive_appservice.id,
+                    exc_info=True,
+                )
+                return ApplicationServiceUrlPreviewResult(exclusive=True, result=None)
+
         for appservice in self._get_services_for_preview_url(url=url):
             result = await self.appservice_api.query_preview_url(
                 appservice, url, user_id
@@ -786,10 +796,21 @@ class ApplicationServicesHandler:
                 url_previews_counter.labels(
                     **{SERVER_NAME_LABEL: self.server_name}
                 ).inc(1)
-                return ApplicationServiceUrlPreviewResult(
-                    exclusive=False,
-                    result=result,
-                )
+
+                try:
+                    return ApplicationServiceUrlPreviewResult(
+                        exclusive=False,
+                        result=result,
+                    )
+                except Exception:
+                    logger.warning(
+                        "appservice preview from %s was not valid",
+                        appservice.id,
+                        exc_info=True,
+                    )
+                    return ApplicationServiceUrlPreviewResult(
+                        exclusive=True, result=None
+                    )
         return ApplicationServiceUrlPreviewResult(
             exclusive=False,
             result=None,
