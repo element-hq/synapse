@@ -678,7 +678,7 @@ class ProfileHandler:
                     "Failed to update join event for room %s - %s", room_id, str(e)
                 )
             await self._task_scheduler.update_task(
-                task.id, result={"last_room_id": last_room_id}
+                task.id, result={"last_room_id": room_id}
             )
 
         return TaskStatus.COMPLETE, None, None

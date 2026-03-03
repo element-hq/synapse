@@ -219,20 +219,35 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        room_id = self.helper.create_room_as(
+        room_id_1 = self.helper.create_room_as(
             self.frank.to_string(), tok=self.frank_token
         )
 
+        room_id_2 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+
+        if room_id_1 > room_id_2:
+            room_id_1, room_id_2 = room_id_2, room_id_1
+
         original_update_membership = self.hs.get_room_member_handler().update_membership
 
-        async def slow_update_membership(*args: Any, **kwargs: Any) -> tuple[str, int]:
-            await self.clock.sleep(Duration(milliseconds=10))
+        room_1_updated = False
+
+        async def potentially_slow_update_membership(
+            *args: Any, **kwargs: Any
+        ) -> tuple[str, int]:
+            if args[2] == room_id_2:
+                await self.clock.sleep(Duration(milliseconds=10))
+            if args[2] == room_id_1:
+                nonlocal room_1_updated
+                room_1_updated = True
             return await original_update_membership(*args, **kwargs)
 
         with patch.object(
             self.hs.get_room_member_handler(),
             "update_membership",
-            side_effect=slow_update_membership,
+            side_effect=potentially_slow_update_membership,
         ):
             state_tuple = (EventTypes.Member, self.frank.to_string())
             self.get_success(
@@ -241,10 +256,23 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 )
             )
 
+            # Check that the displayname is updated immediately for the first room
+            membership = self.get_success(
+                self.storage_controllers.state.get_current_state(
+                    room_id_1, StateFilter.from_types([state_tuple])
+                )
+            )
+            self.assertEqual(
+                membership[state_tuple].content["displayname"], "Frank Jr."
+            )
+
             # Simulate a synapse restart by emptying the list of running tasks
             # and canceling the deferred
             _, deferred = self.task_scheduler._running_tasks.popitem()
             deferred.cancel()
+
+            # Let's reset the flag to track whether room 1 was updated after the restart
+            room_1_updated = False
 
             # Let's be sure we are over the delay introduced by slow_update_membership
             # and that the task was not executed as expected
@@ -252,7 +280,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
             membership = self.get_success(
                 self.storage_controllers.state.get_current_state(
-                    room_id, StateFilter.from_types([state_tuple])
+                    room_id_2, StateFilter.from_types([state_tuple])
                 )
             )
             self.assertEqual(membership[state_tuple].content["displayname"], "Frank")
@@ -272,9 +300,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             # Let's be sure we are over the delay introduced by slow_update_membership
             self.get_success(self.clock.sleep(Duration(milliseconds=20)), by=1)
 
+            # Updates should have been resumed from room 2 after the restart
+            # so room 1 should not have been updated this time
+            self.assertFalse(room_1_updated)
+
             membership = self.get_success(
                 self.storage_controllers.state.get_current_state(
-                    room_id, StateFilter.from_types([state_tuple])
+                    room_id_2, StateFilter.from_types([state_tuple])
                 )
             )
             self.assertEqual(
