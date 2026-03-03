@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b05bf627.js";
+            window.path_to_searchindex_js = "../searchindex-99781f0e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-4dc10a98.js"></script>
@@ -414,38 +414,8 @@ configuration:</p>
 </ul>
 <p>For more details about other configurations, see the <a href="https://github.com/matrix-org/sytest/blob/develop/docker/README.md">Docker-specific documentation in the SyTest repo</a>.</p>
 <h2 id="run-the-integration-tests-complement"><a class="header" href="#run-the-integration-tests-complement">Run the integration tests (<a href="https://github.com/matrix-org/complement">Complement</a>).</a></h2>
-<p><a href="https://github.com/matrix-org/complement">Complement</a> is a suite of black box tests that can be run on any homeserver implementation. It can also be thought of as end-to-end (e2e) tests.</p>
-<p>It’s often nice to develop on Synapse and write Complement tests at the same time.
-Here is how to run your local Synapse checkout against your local Complement checkout.</p>
-<p>(checkout <a href="https://github.com/matrix-org/complement"><code>complement</code></a> alongside your <code>synapse</code> checkout)</p>
-<pre><code class="language-sh">COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh
-</code></pre>
-<p>To run a specific test file, you can pass the test name at the end of the command. The name passed comes from the naming structure in your Complement tests. If you’re unsure of the name, you can do a full run and copy it from the test output:</p>
-<pre><code class="language-sh">COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh -run TestImportHistoricalMessages
-</code></pre>
-<p>To run a specific test, you can specify the whole name structure:</p>
-<pre><code class="language-sh">COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh -run TestImportHistoricalMessages/parallel/Historical_events_resolve_in_the_correct_order
-</code></pre>
-<p>The above will run a monolithic (single-process) Synapse with SQLite as the database. For other configurations, try:</p>
-<ul>
-<li>Passing <code>POSTGRES=1</code> as an environment variable to use the Postgres database instead.</li>
-<li>Passing <code>WORKERS=1</code> as an environment variable to use a workerised setup instead. This option implies the use of Postgres.
-<ul>
-<li>If setting <code>WORKERS=1</code>, optionally set <code>WORKER_TYPES=</code> to declare which worker
-types you wish to test. A simple comma-delimited string containing the worker types
-defined from the <code>WORKERS_CONFIG</code> template in
-<a href="https://github.com/element-hq/synapse/blob/develop/docker/configure_workers_and_start.py#L54">here</a>.
-A safe example would be <code>WORKER_TYPES="federation_inbound, federation_sender, synchrotron"</code>.
-See the <a href="../workers.html">worker documentation</a> for additional information on workers.</li>
-</ul>
-</li>
-<li>Passing <code>ASYNCIO_REACTOR=1</code> as an environment variable to use the Twisted asyncio reactor instead of the default one.</li>
-<li>Passing <code>PODMAN=1</code> will use the <a href="https://podman.io/">podman</a> container runtime, instead of docker.</li>
-<li>Passing <code>UNIX_SOCKETS=1</code> will utilise Unix socket functionality for Synapse, Redis, and Postgres(when applicable).</li>
-</ul>
-<p>To increase the log level for the tests, set <code>SYNAPSE_TEST_LOG_LEVEL</code>, e.g:</p>
-<pre><code class="language-sh">SYNAPSE_TEST_LOG_LEVEL=DEBUG COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh -run TestImportHistoricalMessages
-</code></pre>
+<p>See our <a href="https://github.com/element-hq/synapse/tree/develop/complement">Complement docs</a>
+for how to use the <code>./scripts-dev/complement.sh</code> test runner script.</p>
 <h3 id="prettier-formatting-with-gotestfmt"><a class="header" href="#prettier-formatting-with-gotestfmt">Prettier formatting with <code>gotestfmt</code></a></h3>
 <p>If you want to format the output of the tests the same way as it looks in CI,
 install <a href="https://github.com/GoTestTools/gotestfmt">gotestfmt</a>.</p>
@@ -453,16 +423,6 @@ install <a href="https://github.com/GoTestTools/gotestfmt">gotestfmt</a>.</p>
 <pre><code class="language-sh">COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh -json | gotestfmt -hide successful-tests
 </code></pre>
 <p>(Remove <code>-hide successful-tests</code> if you don’t want to hide successful tests.)</p>
-<h3 id="access-database-for-homeserver-after-complement-test-runs"><a class="header" href="#access-database-for-homeserver-after-complement-test-runs">Access database for homeserver after Complement test runs.</a></h3>
-<p>If you’re curious what the database looks like after you run some tests, here are some steps to get you going in Synapse:</p>
-<ol>
-<li>In your Complement test comment out <code>defer deployment.Destroy(t)</code> and replace with <code>defer time.Sleep(2 * time.Hour)</code> to keep the homeserver running after the tests complete</li>
-<li>Start the Complement tests</li>
-<li>Find the name of the container, <code>docker ps -f name=complement_</code> (this will filter for just the Compelement related Docker containers)</li>
-<li>Access the container replacing the name with what you found in the previous step: <code>docker exec -it complement_1_hs_with_application_service.hs1_2 /bin/bash</code></li>
-<li>Install sqlite (database driver), <code>apt-get update &amp;&amp; apt-get install -y sqlite3</code></li>
-<li>Then run <code>sqlite3</code> and open the database <code>.open /conf/homeserver.db</code> (this db path comes from the Synapse homeserver.yaml)</li>
-</ol>
 <h1 id="9-submit-your-patch"><a class="header" href="#9-submit-your-patch">9. Submit your patch.</a></h1>
 <p>Once you’re happy with your patch, it’s time to prepare a Pull Request.</p>
 <p>To prepare a Pull Request, please:</p>
