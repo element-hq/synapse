@@ -87,7 +87,7 @@ steps to get you going in Synapse:
    complete
 1. Start the Complement tests
 1. Find the name of the container, `docker ps -f name=complement_` (this will filter for
-   just the Compelement related Docker containers)
+   just the Complement related Docker containers)
 1. Access the container replacing the name with what you found in the previous step:
    `docker exec -it complement_1_hs_with_application_service.hs1_2 /bin/bash`
 1. Install sqlite (database driver), `apt-get update && apt-get install -y sqlite3`
