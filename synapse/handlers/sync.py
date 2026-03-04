@@ -2214,14 +2214,21 @@ class SyncHandler:
         # 2. We check up front if anything has changed, if it hasn't then there is
         # no point in going further.
         if not sync_result_builder.full_state:
-            if since_token and not ephemeral_by_room and not account_data_by_room:
+            # TODO: try to figure out + comment this
+            if (
+                since_token
+                and not ephemeral_by_room
+                and not account_data_by_room
+                # TODO: does this belong here?
+                and not sticky_by_room
+            ):
                 have_changed = await self._have_rooms_changed(sync_result_builder)
                 log_kv({"rooms_have_changed": have_changed})
                 if not have_changed:
                     tags_by_room = await self.store.get_updated_tags(
                         user_id, since_token.account_data_key
                     )
-                    if not tags_by_room and not sticky_by_room:
+                    if not tags_by_room:
                         logger.debug("no-oping sync")
                         return set(), set()
 
