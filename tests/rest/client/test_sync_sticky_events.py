@@ -127,6 +127,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         # that the /sync will get.
         regular_event_ids = []
         for i in range(10):
+            # (Note: each one advances time by 100ms)
             response = self.helper.send(
                 room_id=self.room_id,
                 body=f"regular message {i}",
@@ -135,6 +136,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
             regular_event_ids.append(response["event_id"])
 
         # Send another sticky event
+        # (Note: this advances time by 100ms)
         second_sticky_response = self.helper.send_sticky_event(
             self.room_id,
             EventTypes.Message,
@@ -156,28 +158,38 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         timeline_events = channel.json_body["rooms"]["join"][self.room_id]["timeline"][
             "events"
         ]
+        timeline_event_ids = [event["event_id"] for event in timeline_events]
         sticky_events = channel.json_body["rooms"]["join"][self.room_id][
             "msc4354_sticky"
         ]["events"]
 
-        # Extract event IDs from the timeline
-        timeline_event_ids = [event["event_id"] for event in timeline_events]
-
-        self.assertNotIn(
-            first_sticky_event_id,
-            timeline_event_ids,
-            f"First sticky event {first_sticky_event_id} unexpectedly found in sync timeline (expected it to be outside the timeline window)",
-        )
-
-        # We don't necessarily need this regular event here, but it's a good canary to ensure we actually pushed
-        # events out of the timeline window.
+        # As a canary to ensure we actually pushed the first sticky event out of the timeline window,
+        # check that we pushed out the first regular event too. If not, fail the test early so we can diagnose the test setup.
         self.assertNotIn(
             regular_event_ids[0],
             timeline_event_ids,
             f"First regular event {regular_event_ids[0]} unexpectedly found in sync timeline (this means our test is invalid)",
         )
 
-        # But the second sticky event *is*
+        # Assertions for the first sticky event: should be only in sticky section
+        self.assertNotIn(
+            first_sticky_event_id,
+            timeline_event_ids,
+            f"First sticky event {first_sticky_event_id} unexpectedly found in sync timeline (expected it to be outside the timeline window)",
+        )
+        self.assertEqual(
+            len(sticky_events),
+            1,
+            f"Expected exactly 1 item in sticky events section, got {sticky_events}",
+        )
+        self.assertEqual(sticky_events[0]["event_id"], first_sticky_event_id)
+        self.assertEqual(
+            # The 'missing' 1100 ms were elapsed when sending events
+            sticky_events[0]["unsigned"][EventUnsignedContentFields.STICKY_TTL],
+            58_800,
+        )
+
+        # Assertions for the second sticky event: should be only in timeline section
         self.assertEqual(
             timeline_events[-1]["event_id"],
             second_sticky_event_id,
@@ -188,18 +200,8 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
             # The other 100 ms is advanced in FakeChannel.await_result.
             59_900,
         )
-
-        # The first sticky event is only found in the sticky section, which doesn't
-        # include the second sticky event (as that one was present in the timeline)
-        self.assertEqual(
-            len(sticky_events),
-            1,
-            f"Expected exactly 1 item in sticky events section, got {sticky_events}",
-        )
-        self.assertEqual(sticky_events[0]["event_id"], first_sticky_event_id)
-        self.assertEqual(
-            sticky_events[0]["unsigned"][EventUnsignedContentFields.STICKY_TTL], 58_800
-        )
+        # (sticky section: we already checked it only has 1 item and
+        # that item was the first above)
 
     def test_sticky_event_filtered_from_timeline_appears_in_sticky_section(
         self,
