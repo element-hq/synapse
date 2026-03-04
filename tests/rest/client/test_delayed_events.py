@@ -135,6 +135,53 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
 
+    def test_delayed_member_events_are_sent_on_timeout(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(
+                self.room_id,
+                "m.room.member",
+                self.user2_user_id,
+                900,
+            ),
+            {
+                "membership": "leave",
+                "reason": "Delayed kick",
+            },
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        assert delay_id is not None
+
+        events = self._get_delayed_events()
+        self.assertEqual(1, len(events), events)
+        content = self._get_delayed_event_content(events[0])
+        self.assertEqual("leave", content.get("membership"), content)
+        self.assertEqual("Delayed kick", content.get("reason"), content)
+
+        content = self.helper.get_state(
+            self.room_id,
+            "m.room.member",
+            self.user1_access_token,
+            state_key=self.user2_user_id,
+        )
+        self.assertEqual("join", content.get("membership"), content)
+
+        self.reactor.advance(1)
+        self.assertListEqual([], self._get_delayed_events())
+        content = self.helper.get_state(
+            self.room_id,
+            "m.room.member",
+            self.user1_access_token,
+            state_key=self.user2_user_id,
+        )
+        self.assertEqual("leave", content.get("membership"), content)
+        self.assertEqual("Delayed kick", content.get("reason"), content)
+
+        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
     def test_get_delayed_events_auth(self) -> None:
         channel = self.make_request("GET", PATH_PREFIX)
         self.assertEqual(HTTPStatus.UNAUTHORIZED, channel.code, channel.result)
@@ -589,8 +636,13 @@ class DelayedEventsTestCase(HomeserverTestCase):
         channel = self.make_request("GET", "/sync", access_token=access_token)
         self.assertEqual(HTTPStatus.OK, channel.code)
 
+        rooms = channel.json_body["rooms"]
+        events = []
+        for membership in "join", "leave":
+            if membership in rooms:
+                events += rooms[membership][self.room_id]["timeline"]["events"]
+
         found = False
-        events = channel.json_body["rooms"]["join"][self.room_id]["timeline"]["events"]
         for event in events:
             if event["unsigned"].get("delay_id") == delay_id:
                 if not should_find:
