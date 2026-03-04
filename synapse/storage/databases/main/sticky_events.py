@@ -159,7 +159,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             now: The current time in unix millis, used for skipping expired events.
             limit: Max sticky events to return, or None to apply no limit.
         Returns:
-            to_id, map[room_id, event_ids]
+            to_id, dict[room_id, list[event_ids]]
         """
         sticky_events_rows = await self.db_pool.runInteraction(
             "get_sticky_events_in_rooms",
@@ -178,12 +178,12 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         new_to_id, _, _ = sticky_events_rows[-1]
 
         # room ID -> event IDs
-        room_to_events: dict[str, list[str]] = {}
+        room_id_to_event_ids: dict[str, list[str]] = {}
         for _, room_id, event_id in sticky_events_rows:
-            events = room_to_events.setdefault(room_id, [])
+            events = room_id_to_event_ids.setdefault(room_id, [])
             events.append(event_id)
 
-        return (new_to_id, room_to_events)
+        return (new_to_id, room_id_to_event_ids)
 
     def _get_sticky_events_in_rooms_txn(
         self,
