@@ -1372,3 +1372,13 @@ def start_test_homeserver(
     load_legacy_third_party_event_rules(hs)
     load_legacy_presence_router(hs)
     load_legacy_password_auth_providers(hs)
+
+    # Load the OIDC provider metadatas, if OIDC is enabled.
+    # This matches `start` in synapse/app/_base.py
+    #
+    # TODO: Extract common startup logic somewhere cleaner
+    if hs.config.oidc.oidc_enabled:
+        oidc = hs.get_oidc_handler()
+        # Preload the provider metadata.
+        # This will spawn fire-and-forget background processes.
+        oidc.preload_metadata()
