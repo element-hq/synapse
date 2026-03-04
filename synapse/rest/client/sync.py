@@ -59,6 +59,7 @@ from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.cancellation import cancellable
 from synapse.util.json import json_decoder
 
 from ._base import client_patterns, set_timeline_upper_limit
@@ -138,6 +139,7 @@ class SyncRestServlet(RestServlet):
             cfg=hs.config.ratelimiting.rc_presence_per_user,
         )
 
+    @cancellable
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None

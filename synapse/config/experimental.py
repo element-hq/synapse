@@ -606,6 +606,3 @@ class ExperimentalConfig(Config):
         # Note that sticky events persisted before this feature is enabled will not be
         # considered sticky by the local homeserver.
         self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
-
-        # MSC4380: Invite blocking
-        self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
