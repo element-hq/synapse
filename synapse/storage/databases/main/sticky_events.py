@@ -147,7 +147,9 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         limit: int | None,
     ) -> tuple[int, dict[str, list[str]]]:
         """
-        Fetch all the sticky events in the given rooms, from the given sticky stream ID.
+        Fetch all the sticky events' IDs in the given rooms, with sticky stream IDs satisfying
+        from_id < sticky stream ID <= to_id.
+
         The events are returned ordered by the sticky events stream.
 
         Args:
