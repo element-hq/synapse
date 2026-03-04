@@ -134,8 +134,6 @@ class RoomPolicyHandler:
             return True  # no policy server configured, so allow
         policy_server, public_key = tup
 
-        logger.info("Debug: ", policy_server, event.type, event.get_state_key())
-
         # Check if the event has been signed with the public key in the policy server state event.
         # If it is, we can save an HTTP hit to get a fresh signature.
         valid = await self._verify_policy_server_signature(
@@ -190,6 +188,9 @@ class RoomPolicyHandler:
             When the policy server refuses to sign the event, or when verify is True and the
             signature is invalid.
         """
+        if self._is_policy_server_state_event(event):
+            return  # don't sign the policy server change event (it shouldn't be signed)
+
         tup = await self._get_policy_server(event.room_id)
         if tup is None:
             return
