@@ -1494,6 +1494,10 @@ class EventsWorkerStore(SQLBaseStore):
             original_ev.internal_metadata.instance_name = row.instance_name
             original_ev.internal_metadata.outlier = row.outlier
 
+            # Erikj: temporary hack to avoid recomputing event IDs for perf.
+            if hasattr(original_ev, "_event_id") and original_ev._event_id is None:
+                original_ev._event_id = event_id
+
             # Consistency check: if the content of the event has been modified in the
             # database, then the calculated event ID will not match the event id in the
             # database.
