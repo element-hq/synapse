@@ -215,7 +215,10 @@ class RoomPolicyHandler:
                 "This event has been rejected as probable spam by the policy server",
                 Codes.FORBIDDEN,
             )
-        event.signatures.update(signature)
+        # Note: if the policy server and event sender are the same server, the returned
+        # signatures from the policy server might not contain the actual event signature.
+        # This is why we go out of our way to add defaults.
+        event.signatures.setdefault(policy_server, {}).update(signature.get(policy_server, {}))
         if verify:
             is_valid = await self._verify_policy_server_signature(
                 event, policy_server, public_key
