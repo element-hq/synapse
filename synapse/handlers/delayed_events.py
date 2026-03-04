@@ -560,6 +560,7 @@ class DelayedEventsHandler:
                     action=membership,
                     content=event.content,
                     origin_server_ts=event.origin_server_ts,
+                    delay_id=event.delay_id,
                 )
             else:
                 event_dict: JsonDict = {
