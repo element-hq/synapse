@@ -586,7 +586,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             delay_id: The delay_id to search for in synced events.
             should_find: Whether /sync should include an event with a matching delay_id.
         """
-        channel = self.make_request("GET", "/sync", b"", access_token)
+        channel = self.make_request("GET", "/sync", access_token=access_token)
         self.assertEqual(HTTPStatus.OK, channel.code)
 
         found = False
