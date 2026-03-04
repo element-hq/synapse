@@ -21,7 +21,7 @@ from signedjson.key import decode_verify_key_bytes
 from unpaddedbase64 import decode_base64
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import Codes, SynapseError, HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.crypto.keyring import VerifyJsonRequest
 from synapse.events import EventBase
 from synapse.util.stringutils import parse_and_validate_server_name
