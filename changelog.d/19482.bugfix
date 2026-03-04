@@ -1,1 +1,1 @@
-When an access token had a refresh token associated to it in the database, deleting this refresh token (for example when deleting the device using it) would cascade delete the access token, which wouldn't be returned by the sql query that was supposed to delete it on its own, and an empty array was passed to the cache invalidation function. Contributed by @FrenchGithubUser @ Famedly.
+Fix access token cache not being invalidated for sessions using refresh tokens. Contributed by @FrenchGithubUser @ Famedly.
