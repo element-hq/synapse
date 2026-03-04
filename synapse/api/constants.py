@@ -158,6 +158,8 @@ class EventTypes:
 
     PollStart: Final = "m.poll.start"
 
+    RoomPolicy: Final = "m.room.policy"
+
 
 class ToDeviceEventTypes:
     RoomKeyRequest: Final = "m.room_key_request"

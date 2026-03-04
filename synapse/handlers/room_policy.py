@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from signedjson.key import decode_verify_key_bytes
 from unpaddedbase64 import decode_base64
 
+from synapse.api.constants import EventTypes
 from synapse.api.errors import Codes, SynapseError
 from synapse.crypto.keyring import VerifyJsonRequest
 from synapse.events import EventBase
@@ -30,7 +31,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-POLICY_SERVER_EVENT_TYPE = "m.room.policy"
 POLICY_SERVER_KEY_ID = "ed25519:policy_server"
 
 
@@ -48,7 +48,7 @@ class RoomPolicyHandler:
             # TODO: Remove unstable MSC4284 support
             # https://github.com/element-hq/synapse/issues/19502
             # Note: we can probably drop this whole function when we remove unstable support
-            return event.type in [POLICY_SERVER_EVENT_TYPE, "org.matrix.msc4284.policy"]
+            return event.type in [EventTypes.RoomPolicy, "org.matrix.msc4284.policy"]
         return False
 
     async def _get_policy_server(self, room_id: str) -> tuple[str, str] | None:
@@ -62,7 +62,7 @@ class RoomPolicyHandler:
             configuration is invalid.
         """
         policy_event = await self._storage_controllers.state.get_current_state_event(
-            room_id, POLICY_SERVER_EVENT_TYPE, ""
+            room_id, EventTypes.RoomPolicy, ""
         )
         public_key = None
         if not policy_event:

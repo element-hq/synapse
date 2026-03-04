@@ -19,10 +19,11 @@ from signedjson.key import encode_verify_key_base64, get_verify_key
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import EventTypes
 from synapse.api.errors import HttpResponseException, SynapseError
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase, make_event_from_dict
-from synapse.handlers.room_policy import POLICY_SERVER_EVENT_TYPE, POLICY_SERVER_KEY_ID
+from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID
 from synapse.rest import admin
 from synapse.rest.client import filter, login, room, sync
 from synapse.server import HomeServer
@@ -161,7 +162,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             }
         self.helper.send_state(
             self.room_id,
-            POLICY_SERVER_EVENT_TYPE,
+            EventTypes.RoomPolicy,
             content,
             tok=self.creator_token,
             state_key="",
@@ -176,7 +177,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def test_empty_policy_event_set(self) -> None:
         self.helper.send_state(
             self.room_id,
-            POLICY_SERVER_EVENT_TYPE,
+            EventTypes.RoomPolicy,
             {
                 # empty content (no `via`)
             },
@@ -190,7 +191,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def test_nonstring_policy_event_set(self) -> None:
         self.helper.send_state(
             self.room_id,
-            POLICY_SERVER_EVENT_TYPE,
+            EventTypes.RoomPolicy,
             {
                 "via": 42,  # should be a server name
             },
@@ -204,7 +205,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def test_self_policy_event_set(self) -> None:
         self.helper.send_state(
             self.room_id,
-            POLICY_SERVER_EVENT_TYPE,
+            EventTypes.RoomPolicy,
             {
                 # We ignore events when the policy server is ourselves (for now?)
                 "via": (UserID.from_string(self.creator)).domain,
@@ -219,7 +220,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def test_invalid_server_policy_event_set(self) -> None:
         self.helper.send_state(
             self.room_id,
-            POLICY_SERVER_EVENT_TYPE,
+            EventTypes.RoomPolicy,
             {
                 "via": "|this| is *not* a (valid) server name.com",
             },
@@ -233,7 +234,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def test_not_in_room_policy_event_set(self) -> None:
         self.helper.send_state(
             self.room_id,
-            POLICY_SERVER_EVENT_TYPE,
+            EventTypes.RoomPolicy,
             {
                 "via": f"x.{self.OTHER_SERVER_NAME}",
             },
