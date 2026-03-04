@@ -96,21 +96,21 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             timeline_events[-1]["unsigned"][EventUnsignedContentFields.STICKY_TTL],
+            # The other 100 ms is advanced in FakeChannel.await_result.
             59_900,
         )
 
         self.assertNotIn(
             "sticky",
             channel.json_body["rooms"]["join"][self.room_id],
-            "Unexpected sticky section of sync response",
+            "Unexpected sticky section of sync response (sticky event should be deduplicated)",
         )
 
     def test_sticky_event_beyond_timeline_in_initial_sync(self) -> None:
         """
-        Test that sends a sticky event into a room and pushes it out of the
-        timeline window.
-        The test then checks that the event comes down the dedicated sticky
-        section of the sync response.
+        Test that when sending a sticky event which is subsequently
+        pushed out of the timeline window by other messages,
+        the sticky event comes down the dedicated sticky section of the sync response.
         """
         # Send the first sticky event
         first_sticky_response = self.helper.send_sticky_event(
@@ -163,18 +163,18 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         # Extract event IDs from the timeline
         timeline_event_ids = [event["event_id"] for event in timeline_events]
 
-        # The sticky event is not in the timeline section
         self.assertNotIn(
             first_sticky_event_id,
             timeline_event_ids,
-            f"First sticky event {first_sticky_event_id} unexpectedly found in sync timeline",
+            f"First sticky event {first_sticky_event_id} unexpectedly found in sync timeline (expected it to be outside the timeline window)",
         )
 
-        # The first 'regular' event is also not in the timeline section
+        # We don't necessarily need this regular event here, but it's a good canary to ensure we actually pushed
+        # events out of the timeline window.
         self.assertNotIn(
             regular_event_ids[0],
             timeline_event_ids,
-            f"First regular event {regular_event_ids[0]} unexpectedly found in sync timeline",
+            f"First regular event {regular_event_ids[0]} unexpectedly found in sync timeline (this means our test is invalid)",
         )
 
         # But the second sticky event *is*
@@ -185,6 +185,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             timeline_events[-1]["unsigned"][EventUnsignedContentFields.STICKY_TTL],
+            # The other 100 ms is advanced in FakeChannel.await_result.
             59_900,
         )
 
