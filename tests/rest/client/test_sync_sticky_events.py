@@ -207,7 +207,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         self,
     ) -> None:
         """
-        Test that a sticky event that is filtered out by the timeline filter
+        Test that a sticky event which is excluded from the timeline by a timeline filter
         still appears in the sticky section of the sync response.
 
         > Interaction with RoomFilter: The RoomFilter does not apply to the sticky.events section,
