@@ -2839,10 +2839,10 @@ class SyncHandler:
                     # events. This is particularly important given the risk of sticky events spam since
                     # anyone can send sticky events, so halving the bandwidth on average for each sticky
                     # event is helpful.
-                    timeline = {ev.event_id for ev in batch.events}
+                    timeline_event_id_set = {ev.event_id for ev in batch.events}
                     # Must preserve sticky event stream order
                     sticky_event_ids = [
-                        e for e in sticky_event_ids if e not in timeline
+                        e for e in sticky_event_ids if e not in timeline_event_id_set
                     ]
                     if sticky_event_ids:
                         # Fetch and filter the sticky events
