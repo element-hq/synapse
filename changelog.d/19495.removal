@@ -1,1 +1,1 @@
-MSC4140: No longer cancel a user's delayed state events by a more recent state event sent from a different user.
+[MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): No longer cancel a user's delayed state events due to a more recent state event sent from a different user.
