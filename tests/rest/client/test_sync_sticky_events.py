@@ -12,11 +12,13 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import json
 import sqlite3
+from dataclasses import dataclass
+from unittest.mock import patch
 from urllib.parse import quote
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes, EventUnsignedContentFields
+from synapse.api.constants import EventTypes, EventUnsignedContentFields, StickyEvent
 from synapse.rest import admin
 from synapse.rest.client import account_data, login, register, room, sync
 from synapse.server import HomeServer
@@ -438,16 +440,34 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
             f"Expecting to not see regular event ({regular_event_id}) before user1 joined.",
         )
 
+    @patch.object(StickyEvent, "MAX_EVENTS_IN_SYNC", 3)
     def test_pagination_with_many_sticky_events(self) -> None:
         """
-        TODO
-        Test that pagination works correctly when there are many sticky events.
-        The MSC specifies a default limit of 100 events, and events should
-        be delivered in stream order.
+        Test that pagination works correctly when there are more sticky events than
+        the intended limit.
+
+        The MSC doesn't define a limit or how to set one.
+        See thread: https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r2885670008
+
+        But Synapse currently emits 100 at a time, controlled by `MAX_EVENTS_IN_SYNC`.
+        In this test we patch it to 3 (as sending 100 events is not very efficient).
         """
-        # Send 105 sticky events (more than the default limit of 100)
-        sticky_event_ids = []
-        for i in range(105):
+
+        # A filter that excludes message events
+        # This is needed so that the sticky events come down the sticky section
+        # and not the timeline section, which would hamper our test.
+        filter_json = json.dumps(
+            {
+                "room": {
+                    # We only want these io.element.example events
+                    "timeline": {"types": ["io.element.example"]},
+                }
+            }
+        )
+
+        # Send 8 sticky events: enough for 2 full pages and then a partial page with 2.
+        sent_sticky_event_ids = []
+        for i in range(8):
             response = self.helper.send_sticky_event(
                 self.room_id,
                 EventTypes.Message,
@@ -455,39 +475,55 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
                 content={"body": f"sticky message {i}", "msgtype": "m.text"},
                 tok=self.token,
             )
-            sticky_event_ids.append(response["event_id"])
+            sent_sticky_event_ids.append(response["event_id"])
 
-        # Perform initial sync
-        channel = self.make_request(
-            "GET",
-            "/sync",
-            access_token=self.token,
-        )
-        self.assertEqual(channel.code, 200, channel.result)
+        @dataclass
+        class SyncHelperResponse:
+            sticky_event_ids: list[str]
+            """Event IDs of events returned from the sticky section, in-order."""
 
-        # Get sticky events from the sync response
-        sticky_events = channel.json_body["rooms"]["join"][self.room_id][
-            "msc4354_sticky"
-        ]["events"]
+            next_batch: str
+            """Sync token to pass to `?since=` in order to do an incremental sync."""
 
-        # Should get at most 100 events (default limit)
-        self.assertLessEqual(
-            len(sticky_events),
-            100,
-            f"Expected at most 100 sticky events, got {len(sticky_events)}",
-        )
+        def _do_sync(*, since: str | None) -> SyncHelperResponse:
+            """Small helper to do a sync and get the sticky events out."""
+            and_since_param = "" if since is None else f"&since={since}"
+            channel = self.make_request(
+                "GET",
+                f"/sync?filter={quote(filter_json)}{and_since_param}",
+                access_token=self.token,
+            )
+            self.assertEqual(channel.code, 200, channel.result)
 
-        # Verify events are delivered in stream order (oldest first)
-        returned_event_ids = [event["event_id"] for event in sticky_events]
-        expected_event_ids = sticky_event_ids[: len(sticky_events)]
+            # Get sticky events from the sync response
+            sticky_events = []
+            # In this test, when no sticky events are in the response,
+            # we don't have a rooms section at all
+            if "rooms" in channel.json_body:
+                sticky_events = channel.json_body["rooms"]["join"][self.room_id][
+                    "msc4354_sticky"
+                ]["events"]
 
-        self.assertEqual(
-            returned_event_ids,
-            expected_event_ids,
-            "Sticky events should be delivered in stream order",
-        )
+            return SyncHelperResponse(
+                sticky_event_ids=[
+                    sticky_event["event_id"] for sticky_event in sticky_events
+                ],
+                next_batch=channel.json_body["next_batch"],
+            )
 
-        # The remaining sticky events should appear in subsequent syncs
-        # (unless they've expired, but they won't have yet)
-        # Since the test doesn't explicitly verify stream token behavior,
-        # we'll just verify that we got events and they were ordered correctly.
+        # Perform initial sync, we should get the first 3 sticky events,
+        # in order.
+        sync1 = _do_sync(since=None)
+        self.assertEqual(sync1.sticky_event_ids, sent_sticky_event_ids[0:3])
+
+        # Now do an incremental sync and expect the next page of 3
+        sync2 = _do_sync(since=sync1.next_batch)
+        self.assertEqual(sync2.sticky_event_ids, sent_sticky_event_ids[3:6])
+
+        # Now do another incremental sync and expect the last 2
+        sync3 = _do_sync(since=sync2.next_batch)
+        self.assertEqual(sync3.sticky_event_ids, sent_sticky_event_ids[6:8])
+
+        # Finally, expect an empty incremental sync at the end
+        sync4 = _do_sync(since=sync3.next_batch)
+        self.assertEqual(sync4.sticky_event_ids, [])
