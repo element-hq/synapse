@@ -21,7 +21,7 @@ from signedjson.key import decode_verify_key_bytes
 from unpaddedbase64 import decode_base64
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import Codes, SynapseError
+from synapse.api.errors import Codes, SynapseError, HttpResponseException
 from synapse.crypto.keyring import VerifyJsonRequest
 from synapse.events import EventBase
 from synapse.util.stringutils import parse_and_validate_server_name
@@ -198,29 +198,33 @@ class RoomPolicyHandler:
 
         # Ask the policy server to sign this event.
         # We set a smallish timeout here as we don't want to block event sending too long.
-        # Note: we expect that http errors will fall through to calling code.
-        signature = await self._federation_client.ask_policy_server_to_sign_event(
-            policy_server,
-            event,
-            timeout=3000,
-        )
-        # TODO: We can *probably* remove this when we remove unstable MSC4284 support.
-        # The server *should* be returning either a signature or an error, but there could
-        # also be implementation bugs. Whoever reads this when removing unstable MSC4284
-        # stuff, make a decision on whether to remove this bit.
-        # https://github.com/element-hq/synapse/issues/19502
-        if not signature or len(signature) == 0:
-            raise SynapseError(
-                403,
-                "This event has been rejected as probable spam by the policy server",
-                Codes.FORBIDDEN,
+        try:
+            signature = await self._federation_client.ask_policy_server_to_sign_event(
+                policy_server,
+                event,
+                timeout=3000,
             )
-        # Note: if the policy server and event sender are the same server, the returned
-        # signatures from the policy server might not contain the actual event signature.
-        # This is why we go out of our way to add defaults.
-        event.signatures.setdefault(policy_server, {}).update(
-            signature.get(policy_server, {})
-        )
+            # TODO: We can *probably* remove this when we remove unstable MSC4284 support.
+            # The server *should* be returning either a signature or an error, but there could
+            # also be implementation bugs. Whoever reads this when removing unstable MSC4284
+            # stuff, make a decision on whether to remove this bit.
+            # https://github.com/element-hq/synapse/issues/19502
+            if not signature or len(signature) == 0:
+                raise SynapseError(
+                    403,
+                    "This event has been rejected as probable spam by the policy server",
+                    Codes.FORBIDDEN,
+                )
+            # Note: if the policy server and event sender are the same server, the returned
+            # signatures from the policy server might not contain the actual event signature.
+            # This is why we go out of our way to add defaults.
+            event.signatures.setdefault(policy_server, {}).update(
+                signature.get(policy_server, {})
+            )
+        except HttpResponseException as ex:
+            # re-wrap http errors as SynapseErrors so they can be proxied to clients directly
+            raise ex.to_synapse_error() from ex
+
         if verify:
             is_valid = await self._verify_policy_server_signature(
                 event, policy_server, public_key
