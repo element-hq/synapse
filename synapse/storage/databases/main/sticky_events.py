@@ -165,10 +165,10 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             "get_sticky_events_in_rooms",
             self._get_sticky_events_in_rooms_txn,
             room_ids,
-            from_id,
-            to_id,
-            now,
-            limit,
+            from_id=from_id,
+            to_id=to_id,
+            now=now,
+            limit=limit,
         )
 
         if not sticky_events_rows:
@@ -189,6 +189,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         self,
         txn: LoggingTransaction,
         room_ids: Collection[str],
+        *,
         from_id: int,
         to_id: int,
         now: int,
