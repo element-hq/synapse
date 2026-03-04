@@ -2850,6 +2850,9 @@ class SyncHandler:
                             self._storage_controllers,
                             sync_result_builder.sync_config.user.to_string(),
                             await self.store.get_events_as_list(sticky_event_ids),
+                            # As per MSC4354:
+                            # > History visibility checks MUST NOT be applied to sticky events.
+                            # > Any joined user is authorised to see sticky events for the duration they remain sticky.
                             always_include_ids=frozenset(sticky_event_ids),
                         )
                 room_sync = JoinedSyncResult(
