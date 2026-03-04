@@ -578,6 +578,14 @@ class DelayedEventsTestCase(HomeserverTestCase):
     def _find_sent_delayed_event(
         self, access_token: str, delay_id: str, should_find: bool
     ) -> None:
+        """Call /sync and look for a synced event with a specified delay_id.
+        At most one event will ever have a matching delay_id.
+
+        Args:
+            access_token: The access token of the user to call /sync for.
+            delay_id: The delay_id to search for in synced events.
+            should_find: Whether /sync should include an event with a matching delay_id.
+        """
         channel = self.make_request("GET", "/sync", b"", access_token)
         self.assertEqual(HTTPStatus.OK, channel.code)
 
