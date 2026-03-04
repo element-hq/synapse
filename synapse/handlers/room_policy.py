@@ -43,7 +43,8 @@ class RoomPolicyHandler:
         self._federation_client = hs.get_federation_client()
 
     def _is_policy_server_state_event(self, event: EventBase) -> bool:
-        if event.state_key is not None and event.state_key == "":
+        state_key = event.get_state_key()
+        if state_key is not None and state_key == "":
             # TODO: Remove unstable MSC4284 support
             # https://github.com/element-hq/synapse/issues/19502
             # Note: we can probably drop this whole function when we remove unstable support
