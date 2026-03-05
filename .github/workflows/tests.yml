@@ -733,9 +733,6 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-        # We don't run `gotestfmt` for the sanity check step as it's only one test so
-        # there is nothing to organize. And the extra step is more noise to click
-        # through and grok. If this step fails, it will be obvious still.
 
       - name: Run Complement Tests
         id: run_complement_tests
