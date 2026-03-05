@@ -648,7 +648,7 @@ class ProfileHandler:
             # Filter out room IDs that have already been handled
             # by finding the first room ID greater than the last handled room ID
             # and slicing the list from that point onwards.
-            room_ids = room_ids[bisect_right(room_ids, last_room_id):]
+            room_ids = room_ids[bisect_right(room_ids, last_room_id) :]
 
         requester = create_requester(
             user_id=target_user,
