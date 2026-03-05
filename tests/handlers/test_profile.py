@@ -227,7 +227,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.frank.to_string(), tok=self.frank_token
         )
 
-        # Ensure `room_id_1` comes before `room_id_2` alphabetically 
+        # Ensure `room_id_1` comes before `room_id_2` alphabetically
         if room_id_1 > room_id_2:
             room_id_1, room_id_2 = room_id_2, room_id_1
 
