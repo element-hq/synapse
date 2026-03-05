@@ -1138,7 +1138,14 @@ class DeviceWriterHandler(DeviceHandler):
                         converted_upto_stream_id=stream_id,
                     )
 
-                    all_hosts_to_notify.update(hosts)
+                    if hosts:
+                        all_hosts_to_notify.update(hosts)
+                        if self.federation_sender:
+                            logger.info(
+                                "Sending device list update notif for %r to: %r",
+                                user_id,
+                                hosts,
+                            )
 
                     if current_stream_id != stream_id:
                         # Clear the set of hosts we've already sent to as we're
