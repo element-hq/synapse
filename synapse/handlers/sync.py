@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import contextlib
 import itertools
 import logging
 from typing import (
@@ -73,7 +74,7 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.state import StateFilter
-from synapse.util.async_helpers import concurrently_execute
+from synapse.util.async_helpers import Linearizer, concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
@@ -311,6 +312,12 @@ class SyncHandler:
             timeout=hs.config.caches.sync_response_cache_duration,
         )
 
+        # We want to limit the number of in-flight initial syncs, as they can be
+        # expensive.
+        self._initial_sync_linearizer = Linearizer(
+            name="initial_sync", clock=hs.get_clock(), max_count=10
+        )
+
         # ExpiringCache((User, Device)) -> LruCache(user_id => event_id)
         self.lazy_loaded_members_cache: ExpiringCache[
             tuple[str, str | None], LruCache[str, str]
@@ -356,15 +363,23 @@ class SyncHandler:
         user_id = sync_config.user.to_string()
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
-        res = await self.response_cache.wrap(
-            request_key,
-            self._wait_for_sync_for_user,
-            sync_config,
-            since_token,
-            timeout,
-            full_state,
-            cache_context=True,
-        )
+        # Add a linearizer if this is a) an initial sync request, and b) we
+        # don't have a cached response for this request. This is to prevent
+        # trying to do too much work at once and not making progress on any.
+        linearizer: "contextlib.AbstractAsyncContextManager" = contextlib.nullcontext()
+        if since_token is None and request_key not in self.response_cache.keys():
+            linearizer = self._initial_sync_linearizer.queue(())
+
+        async with linearizer:
+            res = await self.response_cache.wrap(
+                request_key,
+                self._wait_for_sync_for_user,
+                sync_config,
+                since_token,
+                timeout,
+                full_state,
+                cache_context=True,
+            )
         logger.debug("Returning sync response for %s", user_id)
         return res
 
