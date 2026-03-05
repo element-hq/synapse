@@ -644,7 +644,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         found = False
         for event in events:
-            if event["unsigned"].get("delay_id") == delay_id:
+            if event["unsigned"].get("org.matrix.msc4140.delay_id") == delay_id:
                 if not should_find:
                     self.fail(
                         "Found event with matching delay_id, but expected to not find one"

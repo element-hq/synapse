@@ -517,7 +517,7 @@ def serialize_event(
     # as the one requesting the event.
     delay_id: str | None = getattr(e.internal_metadata, "delay_id", None)
     if delay_id is not None and requester_is_sender():
-        d["unsigned"]["delay_id"] = delay_id
+        d["unsigned"]["org.matrix.msc4140.delay_id"] = delay_id
 
     # invite_room_state and knock_room_state are a list of stripped room state events
     # that are meant to provide metadata about a room to an invitee/knocker. They are
