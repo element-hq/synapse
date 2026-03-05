@@ -20,7 +20,10 @@
 #
 import logging
 import random
+from bisect import bisect_right
 from typing import TYPE_CHECKING
+
+from twisted.internet.defer import CancelledError
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import (
@@ -32,7 +35,16 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
-from synapse.types import JsonDict, JsonValue, Requester, UserID, create_requester
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    JsonValue,
+    Requester,
+    ScheduledTask,
+    TaskStatus,
+    UserID,
+    create_requester,
+)
 from synapse.util.caches.descriptors import cached
 from synapse.util.duration import Duration
 from synapse.util.stringutils import parse_and_validate_mxc_uri
@@ -46,6 +58,8 @@ MAX_DISPLAYNAME_LEN = 256
 MAX_AVATAR_URL_LEN = 1000
 # Field name length is specced at 255 bytes.
 MAX_CUSTOM_FIELD_LEN = 255
+UPDATE_JOIN_STATES_ACTION_NAME = "update_join_states"
+UPDATE_JOIN_STATES_LOCK_NAME = "update_join_states_lock"
 
 
 class ProfileHandler:
@@ -77,6 +91,12 @@ class ProfileHandler:
         self._is_mine_server_name = hs.is_mine_server_name
 
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
+
+        self._task_scheduler = hs.get_task_scheduler()
+        self._task_scheduler.register_action(
+            self._update_join_states_task, UPDATE_JOIN_STATES_ACTION_NAME
+        )
+        self._worker_locks = hs.get_worker_locks_handler()
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
@@ -587,7 +607,53 @@ class ProfileHandler:
             await self.clock.sleep(Duration(seconds=random.randint(1, 10)))
             return
 
-        room_ids = await self.store.get_rooms_for_user(target_user.to_string())
+        target_user_str = target_user.to_string()
+
+        # Cancel any ongoing profile membership updates for this user,
+        # and start a new one.
+        async with self._worker_locks.acquire_lock(
+            UPDATE_JOIN_STATES_LOCK_NAME,
+            target_user_str,
+        ):
+            tasks_to_cancel = await self._task_scheduler.get_tasks(
+                actions=[UPDATE_JOIN_STATES_ACTION_NAME],
+                resource_id=target_user_str,
+                statuses=[TaskStatus.ACTIVE, TaskStatus.SCHEDULED],
+            )
+            assert len(tasks_to_cancel) <= 1, "Expected at most one task to cancel"
+            for task in tasks_to_cancel:
+                await self._task_scheduler.cancel_task(task.id)
+
+            await self._task_scheduler.schedule_task(
+                UPDATE_JOIN_STATES_ACTION_NAME,
+                resource_id=target_user_str,
+                params={
+                    "requester_authenticated_entity": requester.authenticated_entity,
+                },
+            )
+
+    async def _update_join_states_task(
+        self,
+        task: ScheduledTask,
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
+        assert task.resource_id
+        assert task.params
+
+        target_user = UserID.from_string(task.resource_id)
+        room_ids = sorted(await self.store.get_rooms_for_user(target_user.to_string()))
+
+        last_room_id = task.result.get("last_room_id", None) if task.result else None
+
+        if last_room_id:
+            # Filter out room IDs that have already been handled
+            # by finding the first room ID greater than the last handled room ID
+            # and slicing the list from that point onwards.
+            room_ids = room_ids[bisect_right(room_ids, last_room_id) :]
+
+        requester = create_requester(
+            user_id=target_user,
+            authenticated_entity=task.params.get("requester_authenticated_entity"),
+        )
 
         for room_id in room_ids:
             handler = self.hs.get_room_member_handler()
@@ -601,10 +667,17 @@ class ProfileHandler:
                     "join",  # We treat a profile update like a join.
                     ratelimit=False,  # Try to hide that these events aren't atomic.
                 )
+            except CancelledError as e:
+                raise e
             except Exception as e:
                 logger.warning(
                     "Failed to update join event for room %s - %s", room_id, str(e)
                 )
+            await self._task_scheduler.update_task(
+                task.id, result={"last_room_id": room_id}
+            )
+
+        return TaskStatus.COMPLETE, None, None
 
     async def check_profile_query_allowed(
         self, target_user: UserID, requester: UserID | None = None
