@@ -1,0 +1,1 @@
+Reduce database disk space usage by pruning old rows from `device_lists_changes_in_room`.

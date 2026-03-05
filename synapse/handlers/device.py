@@ -58,6 +58,7 @@ from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    MultiWriterStreamToken,
     ScheduledTask,
     StrCollection,
     StreamKeyType,
@@ -1194,7 +1195,16 @@ class DeviceWriterHandler(DeviceHandler):
         changes = await self.store.get_device_list_changes_in_room(
             room_id, device_lists_stream_id
         )
-        local_changes = {(u, d) for u, d in changes if self.hs.is_mine_id(u)}
+        if changes is not None:
+            local_changes = {(u, d) for u, d in changes if self.hs.is_mine_id(u)}
+        else:
+            # The `device_lists_stream_id` is too old, so we need to fall back
+            # to looking for changes for all local users.
+            local_users = await self.store.get_local_users_in_room(room_id)
+            local_changes = await self.store.get_device_changes_for_users(
+                MultiWriterStreamToken(stream=device_lists_stream_id), local_users
+            )
+
         if not local_changes:
             return
 
