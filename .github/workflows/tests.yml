@@ -699,6 +699,13 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
+      # We use `poetry` in `complement.sh`
+      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        with:
+          poetry-version: "2.1.1"
+          # Matches the `path` where we checkout Synapse above
+          working-directory: "synapse"
+
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
 
@@ -706,12 +713,6 @@ jobs:
         with:
           cache-dependency-path: complement/go.sum
           go-version-file: complement/go.mod
-
-      # We use `poetry` in `complement.sh`
-      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
-        with:
-          poetry-version: "2.1.1"
-          working-directory: "synapse"
 
       # Run the image sanity check test first as this is the first thing we want to know
       # about (are we actually testing what we expect?) and we don't want to debug
