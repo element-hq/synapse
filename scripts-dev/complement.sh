@@ -192,6 +192,10 @@ main() {
       $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' complement-synapse-editable -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
 
     else
+      # We remove the `egg-info` as it can contain outdated information which won't line
+      # up with our current reality.
+      rm -rf matrix_synapse.egg-info/
+      # Figure out the Synapse version string in our current checkout
       synapse_version_string="$(poetry run python -c 'from synapse.util import SYNAPSE_VERSION; print(SYNAPSE_VERSION)')"
 
       # Build the base Synapse image from the local checkout
