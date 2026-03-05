@@ -29,6 +29,7 @@ import attr
 
 from synapse.types import JsonDict
 from synapse.util.check_dependencies import check_requirements
+from synapse.util.duration import Duration
 
 from ._base import Config, ConfigError
 
@@ -108,7 +109,7 @@ class CacheConfig(Config):
     global_factor: float
     track_memory_usage: bool
     expiry_time_msec: int | None
-    sync_response_cache_duration: int
+    sync_response_cache_duration: Duration
 
     @staticmethod
     def reset() -> None:
@@ -207,8 +208,12 @@ class CacheConfig(Config):
             min_cache_ttl = self.cache_autotuning.get("min_cache_ttl")
             self.cache_autotuning["min_cache_ttl"] = self.parse_duration(min_cache_ttl)
 
-        self.sync_response_cache_duration = self.parse_duration(
+        sync_response_cache_duration_ms = self.parse_duration(
             cache_config.get("sync_response_cache_duration", "2m")
+        )
+
+        self.sync_response_cache_duration = Duration(
+            milliseconds=sync_response_cache_duration_ms
         )
 
     def resize_all_caches(self) -> None:

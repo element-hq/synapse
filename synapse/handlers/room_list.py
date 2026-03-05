@@ -44,6 +44,7 @@ from synapse.storage.databases.main.room import LargestRoomStats
 from synapse.types import JsonDict, JsonMapping, ThirdPartyInstanceID
 from synapse.util.caches.descriptors import _CacheContext, cached
 from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -79,7 +80,7 @@ class RoomListHandler:
             clock=hs.get_clock(),
             name="remote_room_list",
             server_name=self.server_name,
-            timeout_ms=30 * 1000,
+            timeout=Duration(seconds=30),
         )
 
     async def get_local_public_room_list(

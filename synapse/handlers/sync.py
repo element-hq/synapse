@@ -78,6 +78,7 @@ from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+from synapse.util.cancellation import cancellable
 from synapse.util.metrics import Measure
 from synapse.visibility import filter_and_transform_events_for_client
 
@@ -313,7 +314,7 @@ class SyncHandler:
             clock=hs.get_clock(),
             name="sync",
             server_name=self.server_name,
-            timeout_ms=hs.config.caches.sync_response_cache_duration,
+            timeout=hs.config.caches.sync_response_cache_duration,
         )
 
         # ExpiringCache((User, Device)) -> LruCache(user_id => event_id)
@@ -373,6 +374,10 @@ class SyncHandler:
         logger.debug("Returning sync response for %s", user_id)
         return res
 
+    # TODO: We mark this as cancellable, and we have tests for it, but we
+    # haven't gone through and exhaustively checked that all the code paths in
+    # this method are actually cancellable.
+    @cancellable
     async def _wait_for_sync_for_user(
         self,
         sync_config: SyncConfig,
@@ -1082,9 +1087,18 @@ class SyncHandler:
                     if event.sender not in first_event_by_sender_map:
                         first_event_by_sender_map[event.sender] = event
 
-                    # We need the event's sender, unless their membership was in a
-                    # previous timeline event.
-                    if (EventTypes.Member, event.sender) not in timeline_state:
+                    # When using `state_after`, there is no special treatment with
+                    # regards to state also being in the `timeline`. Always fetch
+                    # relevant membership regardless of whether the state event is in
+                    # the `timeline`.
+                    if sync_config.use_state_after:
+                        members_to_fetch.add(event.sender)
+                    # For `state`, the client is supposed to do a flawed re-construction
+                    # of state over time by starting with the given `state` and layering
+                    # on state from the `timeline` as you go (flawed because state
+                    # resolution). In this case, we only need their membership in
+                    # `state` when their membership isn't already in the `timeline`.
+                    elif (EventTypes.Member, event.sender) not in timeline_state:
                         members_to_fetch.add(event.sender)
                     # FIXME: we also care about invite targets etc.
 
