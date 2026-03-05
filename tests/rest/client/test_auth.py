@@ -30,7 +30,16 @@ import synapse.rest.admin
 from synapse.api.constants import ApprovalNoticeMedium, LoginType
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.ui_auth.checkers import UserInteractiveAuthChecker
-from synapse.rest.client import account, auth, devices, login, logout, register
+from synapse.rest.client import (
+    account,
+    auth,
+    devices,
+    login,
+    logout,
+    read_marker,
+    register,
+    room,
+)
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
@@ -625,10 +634,13 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
     servlets = [
         auth.register_servlets,
         account.register_servlets,
+        devices.register_servlets,
         login.register_servlets,
         logout.register_servlets,
-        synapse.rest.admin.register_servlets_for_client_rest_resource,
+        read_marker.register_servlets,
         register.register_servlets,
+        room.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
     ]
     hijack_auth = False
 
@@ -1168,6 +1180,84 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
         # and no refresh token
         self.assertEqual(_table_length("access_tokens"), 0)
         self.assertEqual(_table_length("refresh_tokens"), 0)
+
+    def test_token_invalid_after_refresh_token_issued_and_device_removed(self) -> None:
+        """
+        Test that an access token is invalidated after the device (which had a
+        refresh token) is removed by another device.
+        The removal of a refresh token cascade deletes the associated access
+        token in the db, which can make cache invalidation fail, if not handled
+        properly. This test will catch such behavior if it ever happens again.
+        1. User logs in with device1
+        2. User logs in with device2 and requests a refresh token
+        3. Device2 calls /whoami (should work)
+        4. Device1 removes device2
+        5. Device2 calls /whoami (should fail)
+        """
+        # Login with device1
+        device1_tok = self.login("test", self.user_pass, device_id="device1")
+
+        # Login with device2 and request a refresh token
+        login_response = self.make_request(
+            "POST",
+            "/_matrix/client/r0/login",
+            {
+                "type": "m.login.password",
+                "user": "test",
+                "password": self.user_pass,
+                "device_id": "device2",
+                "refresh_token": True,
+            },
+        )
+        self.assertEqual(login_response.code, HTTPStatus.OK, login_response.result)
+        device2_tok = login_response.json_body["access_token"]
+        device2_id = login_response.json_body["device_id"]
+        self.assertEqual(device2_id, "device2")
+
+        # Device2 calls /whoami (should work)
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/account/whoami",
+            access_token=device2_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # Device1 removes device2
+        # First, attempt to delete device2
+        delete_channel = self.make_request(
+            "DELETE",
+            f"devices/{device2_id}",
+            access_token=device1_tok,
+        )
+        self.assertEqual(
+            delete_channel.code, HTTPStatus.UNAUTHORIZED, delete_channel.result
+        )
+        session = delete_channel.json_body["session"]
+
+        # Complete the UI auth flow
+        delete_channel = self.make_request(
+            "DELETE",
+            f"devices/{device2_id}",
+            content={
+                "auth": {
+                    "type": "m.login.password",
+                    "user": "test",
+                    "password": self.user_pass,
+                    "session": session,
+                },
+            },
+            access_token=device1_tok,
+        )
+        self.assertEqual(delete_channel.code, HTTPStatus.OK, delete_channel.result)
+
+        # Device2 calls /whoami (should fail)
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/account/whoami",
+            access_token=device2_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
 
 
 def oidc_config(
