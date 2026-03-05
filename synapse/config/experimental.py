@@ -519,6 +519,7 @@ class ExperimentalConfig(Config):
         )
 
         # MSC4370: Get extremities federation endpoint
+        # See https://github.com/element-hq/synapse/issues/19524
         self.msc4370_enabled = experimental.get("msc4370_enabled", False)
 
         auth_delegated = self.msc3861.enabled or (
