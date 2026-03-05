@@ -1,1 +1,0 @@
-Log `docker system info` in CI so we have a plain record of how GitHub runners evolve over time.

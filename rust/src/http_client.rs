@@ -15,8 +15,7 @@
 use std::{collections::HashMap, future::Future, sync::OnceLock};
 
 use anyhow::Context;
-use futures::TryStreamExt;
-use headers::HeaderMapExt;
+use http_body_util::BodyExt;
 use once_cell::sync::OnceCell;
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 use reqwest::RequestBuilder;
@@ -236,62 +235,30 @@ impl HttpClient {
 
             let status = response.status();
 
-            // Find the expected `Content-Length` so we can pre-allocate the buffer
-            // necessary to read the response. It's expected that not every request will
-            // have a `Content-Length` header.
-            //
-            // `response.content_length()` does exist but the "value does not directly
-            // represents the value of the `Content-Length` header, but rather the size
-            // of the response’s body"
-            // (https://docs.rs/reqwest/latest/reqwest/struct.Response.html#method.content_length)
-            // and we want to avoid reading the entire body at this point because we
-            // purposely stream it below until the `response_limit`.
-            let content_length = {
-                let content_length = response
-                    .headers()
-                    .typed_get::<headers::ContentLength>()
-                    // We need a `usize` for the `Vec::with_capacity(...)` usage below
-                    .and_then(|content_length| content_length.0.try_into().ok());
-
-                // Sanity check that the request isn't too large from the information
-                // they told us (may be inaccurate so we also check below as we actually
-                // read the bytes)
-                if let Some(content_length_bytes) = content_length {
-                    if content_length_bytes > response_limit {
-                        Err(anyhow::anyhow!(
-                            "Response size (defined by `Content-Length`) too large"
-                        ))?;
-                    }
-                }
-
-                content_length
-            };
-
-            // Stream the response to avoid allocating a giant object on the server
-            // above our expected `response_limit`.
-            let mut stream = response.bytes_stream();
-            // Pre-allocate the buffer based on the expected `Content-Length`
-            let mut buffer = Vec::with_capacity(
-                content_length
-                    // Default to pre-allocating nothing when the request doesn't have a
-                    // `Content-Length` header
-                    .unwrap_or(0),
-            );
-            while let Some(chunk) = stream.try_next().await.context("reading body")? {
-                if buffer.len() + chunk.len() > response_limit {
-                    Err(anyhow::anyhow!("Response size too large"))?;
-                }
-
-                buffer.extend_from_slice(&chunk);
-            }
+            // A light-weight way to read the response up until the `response_limit`. We
+            // want to avoid allocating a giant response object on the server above our
+            // expected `response_limit` to avoid out-of-memory DOS problems.
+            let body = reqwest::Body::from(response);
+            let limited_body = http_body_util::Limited::new(body, response_limit);
+            let collected = limited_body
+                .collect()
+                .await
+                .map_err(anyhow::Error::from_boxed)
+                .with_context(|| {
+                    format!(
+                        "Response body exceeded response limit ({} bytes)",
+                        response_limit
+                    )
+                })?;
+            let bytes: bytes::Bytes = collected.to_bytes();
 
             if !status.is_success() {
-                return Err(HttpResponseException::new(status, buffer));
+                return Err(HttpResponseException::new(status, bytes));
             }
 
-            let r = Python::attach(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
-
-            Ok(r)
+            // Because of the `pyo3` `bytes` feature, we can pass this back to Python
+            // land efficiently
+            Ok(bytes)
         })
     }
 }
