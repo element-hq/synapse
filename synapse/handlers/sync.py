@@ -2213,16 +2213,34 @@ class SyncHandler:
 
         # 2. We check up front if anything has changed, if it hasn't then there is
         # no point in going further.
+        #
+        # If this is an initial sync (no since_token), then of course we can't skip
+        # the sync entry, as we have no base to use as a comparison for the question
+        # 'has anything changed' (this is the client's first time 'seeing' anything).
+        #
+        # Otherwise, for incremental syncs, we consider skipping the sync entry,
+        # doing cheap checks first:
+        #
+        # - are there any per-room EDUs;
+        # - is there any Room Account Data; or
+        # - are there any sticky events in the rooms; or
+        # - might the rooms have changed
+        #   (using in-memory event stream change caches, which can
+        #   only answer either 'Not changed' or 'Possibly changed')
+        #
+        # If none of those cheap checks give us a reason to continue generating the sync entry,
+        # we finally query the database to check for changed room tags.
+        # If there are also no changed tags, we can short-circuit return an empty sync entry.
         if not sync_result_builder.full_state:
-            # TODO: try to figure out + comment this
+            # Cheap checks first
             if (
                 since_token
                 and not ephemeral_by_room
                 and not account_data_by_room
-                # TODO: does this belong here?
                 and not sticky_by_room
             ):
-                have_changed = await self._have_rooms_changed(sync_result_builder)
+                # This is also a cheap check, but we log the answer
+                have_changed = self._may_have_rooms_changed(sync_result_builder)
                 log_kv({"rooms_have_changed": have_changed})
                 if not have_changed:
                     tags_by_room = await self.store.get_updated_tags(
@@ -2279,11 +2297,9 @@ class SyncHandler:
 
         return set(newly_joined_rooms), set(newly_left_rooms)
 
-    async def _have_rooms_changed(
-        self, sync_result_builder: "SyncResultBuilder"
-    ) -> bool:
+    def _may_have_rooms_changed(self, sync_result_builder: "SyncResultBuilder") -> bool:
         """Returns whether there may be any new events that should be sent down
-        the sync. Returns True if there are.
+        the sync. Returns True if there **may** be.
 
         Does not modify the `sync_result_builder`.
         """
