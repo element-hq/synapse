@@ -12,6 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 #
+from http import HTTPStatus
 from typing import Literal
 
 from twisted.internet.testing import MemoryReactor
@@ -355,9 +356,11 @@ class FederatedEventSpamCheckMetadataTestCase(unittest.FederatingHomeserverTestC
         )
 
         # Check the join made it to the 'local' view of the room
-        self.assertEqual(
-            self.get_success(self._store.get_latest_event_ids_in_room(self.room_id)),
-            {self.remote_user_join_event.event_id},
+        self.helper.get_event(
+            room_id=self.room_id,
+            event_id=self.remote_user_join_event.event_id,
+            tok=user1_tok,
+            expect_code=HTTPStatus.OK,
         )
 
     def test_federated_events_with_spam_checker_metadata(self) -> None:
