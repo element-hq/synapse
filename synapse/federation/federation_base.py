@@ -177,7 +177,9 @@ class FederationBase:
             # Note: we don't redact the event so admins can inspect the event after the
             # fact. Other processes may redact the event, but that won't be applied to
             # the database copy of the event until the server's config requires it.
-            return pdu
+            #
+            # We also *don't* return early here as we would still like to evaluate
+            # `spam_checker_spammy`, for completeness.
 
         spam_check = await self._spam_checker_module_callbacks.check_event_for_spam(pdu)
 
