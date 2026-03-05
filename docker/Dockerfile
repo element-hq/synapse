@@ -173,7 +173,7 @@ ARG TARGETARCH
 
 # If specified, Synapse will use this as the version string in the app.
 #
-# This can be useful to capture the git info of the build as `.git/` won't be be
+# This can be useful to capture the git info of the build as `.git/` won't be
 # available in the Docker image for Synapse to generate from.
 ARG SYNAPSE_VERSION_STRING
 # Pass it through to Synapse as an environment variable.
