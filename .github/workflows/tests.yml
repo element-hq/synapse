@@ -707,6 +707,11 @@ jobs:
           cache-dependency-path: complement/go.sum
           go-version-file: complement/go.mod
 
+      # We use `poetry` in `complement.sh`
+      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        with:
+          poetry-version: "2.1.1"
+
       # Run the image sanity check test first as this is the first thing we want to know
       # about (are we actually testing what we expect?) and we don't want to debug
       # downstream failures (wild goose chase).
