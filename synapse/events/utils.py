@@ -475,49 +475,49 @@ def serialize_event(
             config=config,
         )
 
-    requester_is_sender = lambda: config.requester is not None and config.requester.user.to_string() == e.sender
+    # If we have applicable fields saved in the internal_metadata, include them in the
+    # unsigned section of the event if the event was sent by the same session (or when
+    # appropriate, just the same sender) as the one requesting the event.
+    if config.requester is not None and config.requester.user.to_string() == e.sender:
+        txn_id: str | None = getattr(e.internal_metadata, "txn_id", None)
+        if txn_id is not None:
+            # Some events do not have the device ID stored in the internal metadata,
+            # this includes old events as well as those created by appservice, guests,
+            # or with tokens minted with the admin API. For those events, fallback
+            # to using the access token instead.
+            event_device_id: str | None = getattr(
+                e.internal_metadata, "device_id", None
+            )
+            if event_device_id is not None:
+                if event_device_id == config.requester.device_id:
+                    d["unsigned"]["transaction_id"] = txn_id
 
-    # If we have a txn_id saved in the internal_metadata, we should include it in the
-    # unsigned section of the event if it was sent by the same session as the one
-    # requesting the event.
-    txn_id: str | None = getattr(e.internal_metadata, "txn_id", None)
-    if txn_id is not None and requester_is_sender():
-        # Some events do not have the device ID stored in the internal metadata,
-        # this includes old events as well as those created by appservice, guests,
-        # or with tokens minted with the admin API. For those events, fallback
-        # to using the access token instead.
-        event_device_id: str | None = getattr(e.internal_metadata, "device_id", None)
-        if event_device_id is not None:
-            if event_device_id == config.requester.device_id:
-                d["unsigned"]["transaction_id"] = txn_id
-
-        else:
-            # Fallback behaviour: only include the transaction ID if the event
-            # was sent from the same access token.
-            #
-            # For regular users, the access token ID can be used to determine this.
-            # This includes access tokens minted with the admin API.
-            #
-            # For guests and appservice users, we can't check the access token ID
-            # so assume it is the same session.
-            event_token_id: int | None = getattr(e.internal_metadata, "token_id", None)
-            if (
-                (
-                    event_token_id is not None
-                    and config.requester.access_token_id is not None
-                    and event_token_id == config.requester.access_token_id
+            else:
+                # Fallback behaviour: only include the transaction ID if the event
+                # was sent from the same access token.
+                #
+                # For regular users, the access token ID can be used to determine this.
+                # This includes access tokens minted with the admin API.
+                #
+                # For guests and appservice users, we can't check the access token ID
+                # so assume it is the same session.
+                event_token_id: int | None = getattr(
+                    e.internal_metadata, "token_id", None
                 )
-                or config.requester.is_guest
-                or config.requester.app_service
-            ):
-                d["unsigned"]["transaction_id"] = txn_id
+                if (
+                    (
+                        event_token_id is not None
+                        and config.requester.access_token_id is not None
+                        and event_token_id == config.requester.access_token_id
+                    )
+                    or config.requester.is_guest
+                    or config.requester.app_service
+                ):
+                    d["unsigned"]["transaction_id"] = txn_id
 
-    # If we have a delay_id saved in the internal_metadata, we should include it in the
-    # unsigned section of the event if it was sent by the same sender (with any session)
-    # as the one requesting the event.
-    delay_id: str | None = getattr(e.internal_metadata, "delay_id", None)
-    if delay_id is not None and requester_is_sender():
-        d["unsigned"]["org.matrix.msc4140.delay_id"] = delay_id
+        delay_id: str | None = getattr(e.internal_metadata, "delay_id", None)
+        if delay_id is not None:
+            d["unsigned"]["org.matrix.msc4140.delay_id"] = delay_id
 
     # invite_room_state and knock_room_state are a list of stripped room state events
     # that are meant to provide metadata about a room to an invitee/knocker. They are
