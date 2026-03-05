@@ -3,6 +3,7 @@
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -516,6 +517,10 @@ class ExperimentalConfig(Config):
         self.msc4108_delegation_endpoint: str | None = experimental.get(
             "msc4108_delegation_endpoint", None
         )
+
+        # MSC4370: Get extremities federation endpoint
+        # See https://github.com/element-hq/synapse/issues/19524
+        self.msc4370_enabled = experimental.get("msc4370_enabled", False)
 
         auth_delegated = self.msc3861.enabled or (
             config.get("matrix_authentication_service") or {}
