@@ -1,0 +1,1 @@
+Don't send unstable signing key updates. The stable version has been accepted since Synapse v1.50.0 (January 2022). Contributed by @velikopter.

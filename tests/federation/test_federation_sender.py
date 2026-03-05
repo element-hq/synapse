@@ -642,11 +642,8 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
         self.reactor.advance(1)
 
         # expect signing key update edu
-        self.assertEqual(len(self.edus), 2)
+        self.assertEqual(len(self.edus), 1)
         self.assertEqual(self.edus.pop(0)["edu_type"], EduTypes.SIGNING_KEY_UPDATE)
-        self.assertEqual(
-            self.edus.pop(0)["edu_type"], EduTypes.UNSTABLE_SIGNING_KEY_UPDATE
-        )
 
         # sign the devices
         d1_json = build_device_dict(u1, "D1", device1_signing_key)

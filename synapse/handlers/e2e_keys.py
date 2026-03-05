@@ -87,19 +87,9 @@ class E2eKeysHandler:
                 EduTypes.SIGNING_KEY_UPDATE,
                 edu_updater.incoming_signing_key_update,
             )
-            # also handle the unstable version
-            # FIXME: remove this when enough servers have upgraded
-            federation_registry.register_edu_handler(
-                EduTypes.UNSTABLE_SIGNING_KEY_UPDATE,
-                edu_updater.incoming_signing_key_update,
-            )
         else:
             federation_registry.register_instances_for_edu(
                 EduTypes.SIGNING_KEY_UPDATE,
-                [edu_writer],
-            )
-            federation_registry.register_instances_for_edu(
-                EduTypes.UNSTABLE_SIGNING_KEY_UPDATE,
                 [edu_writer],
             )
 

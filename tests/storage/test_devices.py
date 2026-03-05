@@ -207,8 +207,6 @@ class DeviceStoreTestCase(HomeserverTestCase):
         """
         Tests that `get_device_updates_by_remote` limits the length of the return value
         properly when cross-signing key updates are present.
-        Current behaviour is that the cross-signing key updates will always come in pairs,
-        even if that means leaving an earlier batch one EDU short of the limit.
         """
 
         assert self.hs.is_mine_id("@user_id:test"), (
@@ -282,19 +280,10 @@ class DeviceStoreTestCase(HomeserverTestCase):
             self.store.get_device_updates_by_remote("somehost", next_stream_id, limit=3)
         )
 
-        # The next 2 updates should be a cross-signing key update
-        # (the master key update and the self-signing key update are combined into
-        # one 'signing key update', but the cross-signing key update is emitted
-        # twice, once with an unprefixed type and once again with an unstable-prefixed type)
-        # (This is a temporary arrangement for backwards compatibility!)
-        self.assertEqual(len(device_updates), 2, device_updates)
+        # The next update should be a cross-signing key update
+        self.assertEqual(len(device_updates), 1, device_updates)
         self.assertEqual(
             device_updates[0][0], EduTypes.SIGNING_KEY_UPDATE, device_updates[0]
-        )
-        self.assertEqual(
-            device_updates[1][0],
-            EduTypes.UNSTABLE_SIGNING_KEY_UPDATE,
-            device_updates[1],
         )
 
         # Check there are no more device updates left.
