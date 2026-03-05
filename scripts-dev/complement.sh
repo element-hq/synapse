@@ -35,6 +35,26 @@
 # Exit if a line returns a non-zero exit code
 set -e
 
+# Tag local builds with a dummy registry namespace so that later builds may reference
+# them exactly instead of accidentally pulling from a remote registry.
+#
+# This is important as some storage drivers/types prefer remote images over local
+# (`containerd`) which causes problems as we're testing against some remote image that
+# doesn't include all of the changes that we're trying to test (be it locally or in a PR
+# in CI). This is spawning from a real-world problem where the GitHub runners were
+# updated to use Docker Engine 29.0.0+ which uses `containerd` by default for new
+# installations.
+LOCAL_IMAGE_NAMESPACE=localhost
+
+# The image tags for how these images will be stored in the registry
+SYNAPSE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse"
+SYNAPSE_WORKERS_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-workers"
+COMPLEMENT_SYNAPSE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/complement-synapse"
+
+SYNAPSE_EDITABLE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-editable"
+SYNAPSE_WORKERS_EDITABLE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-workers-editable"
+COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/complement-synapse-editable"
+
 # Helper to emit annotations that collapse portions of the log in GitHub Actions
 echo_if_github() {
   if [[ -n "$GITHUB_WORKFLOW" ]]; then
@@ -53,7 +73,7 @@ Run the complement test suite on Synapse.
 
   -f, --fast
         Skip rebuilding the docker images, and just use the most recent
-        'complement-synapse:latest' image.
+        'localhost/complement-synapse:latest' image.
         Conflicts with --build-only.
 
   --build-only
@@ -154,16 +174,16 @@ main() {
     editable_mount="$(realpath .):/editable-src:z"
     if [ -n "$rebuild_editable_synapse" ]; then
       unset skip_docker_build
-    elif $CONTAINER_RUNTIME inspect complement-synapse-editable &>/dev/null; then
+    elif $CONTAINER_RUNTIME inspect "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" &>/dev/null; then
       # complement-synapse-editable already exists: see if we can still use it:
       # - The Rust module must still be importable; it will fail to import if the Rust source has changed.
       # - The Poetry lock file must be the same (otherwise we assume dependencies have changed)
 
       # First set up the module in the right place for an editable installation.
-      $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' complement-synapse-editable -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
+      $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
 
-      if ($CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'python' complement-synapse-editable -c 'import synapse.synapse_rust' \
-        && $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'diff' complement-synapse-editable --brief /editable-src/poetry.lock /poetry.lock.bak); then
+      if ($CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'python' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -c 'import synapse.synapse_rust' \
+        && $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'diff' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" --brief /editable-src/poetry.lock /poetry.lock.bak); then
         skip_docker_build=1
       else
         echo "Editable Synapse image is stale. Will rebuild."
@@ -177,19 +197,22 @@ main() {
 
       # Build a special image designed for use in development with editable
       # installs.
-      $CONTAINER_RUNTIME build -t synapse-editable \
+      $CONTAINER_RUNTIME build \
+        -t "$SYNAPSE_EDITABLE_IMAGE_PATH" \
         -f "docker/editable.Dockerfile" .
 
-      $CONTAINER_RUNTIME build -t synapse-workers-editable \
-        --build-arg FROM=synapse-editable \
+      $CONTAINER_RUNTIME build \
+        -t "$SYNAPSE_WORKERS_EDITABLE_IMAGE_PATH" \
+        --build-arg FROM="$SYNAPSE_EDITABLE_IMAGE_PATH" \
         -f "docker/Dockerfile-workers" .
 
-      $CONTAINER_RUNTIME build -t complement-synapse-editable \
-        --build-arg FROM=synapse-workers-editable \
+      $CONTAINER_RUNTIME build \
+        -t "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" \
+        --build-arg FROM="$SYNAPSE_WORKERS_EDITABLE_IMAGE_PATH" \
         -f "docker/complement/Dockerfile" "docker/complement"
 
       # Prepare the Rust module
-      $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' complement-synapse-editable -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
+      $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
 
     else
       # We remove the `egg-info` as it can contain outdated information which won't line
@@ -200,25 +223,27 @@ main() {
 
       # Build the base Synapse image from the local checkout
       echo_if_github "::group::Build Docker image: matrixdotorg/synapse"
-      $CONTAINER_RUNTIME build -t matrixdotorg/synapse \
-      --build-arg SYNAPSE_VERSION_STRING="$synapse_version_string" \
-      --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
-      --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
-      -f "docker/Dockerfile" .
+      $CONTAINER_RUNTIME build \
+        -t "$SYNAPSE_IMAGE_PATH" \
+        --build-arg SYNAPSE_VERSION_STRING="$synapse_version_string" \
+        --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
+        --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
+        -f "docker/Dockerfile" .
       echo_if_github "::endgroup::"
 
       # Build the workers docker image (from the base Synapse image we just built).
       echo_if_github "::group::Build Docker image: matrixdotorg/synapse-workers"
-      $CONTAINER_RUNTIME build -t matrixdotorg/synapse-workers -f "docker/Dockerfile-workers" .
+      $CONTAINER_RUNTIME build \
+        -t "$SYNAPSE_WORKERS_IMAGE_PATH" \
+        --build-arg FROM="$SYNAPSE_IMAGE_PATH" \
+        -f "docker/Dockerfile-workers" .
       echo_if_github "::endgroup::"
 
       # Build the unified Complement image (from the worker Synapse image we just built).
       echo_if_github "::group::Build Docker image: complement/Dockerfile"
-      $CONTAINER_RUNTIME build -t complement-synapse \
-        `# This is the tag we end up pushing to the registry (see` \
-        `# .github/workflows/push_complement_image.yml) so let's just label it now` \
-        `# so people can reference it by the same name locally.` \
-        -t ghcr.io/element-hq/synapse/complement-synapse \
+      $CONTAINER_RUNTIME build \
+        -t "$COMPLEMENT_SYNAPSE_IMAGE_PATH" \
+        --build-arg FROM="$SYNAPSE_WORKERS_IMAGE_PATH" \
         -f "docker/complement/Dockerfile" "docker/complement"
       echo_if_github "::endgroup::"
 
@@ -245,6 +270,7 @@ main() {
     ./tests/msc4140
     ./tests/msc4155
     ./tests/msc4306
+    ./tests/msc4222
   )
 
   # Export the list of test packages as a space-separated environment variable, so other
@@ -259,9 +285,9 @@ main() {
     ./tests/...
   )
 
-  export COMPLEMENT_BASE_IMAGE=complement-synapse
+  export COMPLEMENT_BASE_IMAGE="$COMPLEMENT_SYNAPSE_IMAGE_PATH"
   if [ -n "$use_editable_synapse" ]; then
-    export COMPLEMENT_BASE_IMAGE=complement-synapse-editable
+    export COMPLEMENT_BASE_IMAGE="$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH"
     export COMPLEMENT_HOST_MOUNTS="$editable_mount"
   fi
 

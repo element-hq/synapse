@@ -20,12 +20,13 @@
 #
 #
 
+import collections
 import collections.abc
 import logging
 import typing
+from collections import ChainMap
 from typing import (
     Any,
-    ChainMap,
     Iterable,
     Mapping,
     MutableMapping,

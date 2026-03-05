@@ -132,6 +132,11 @@ EVENT_QUEUE_ITERATIONS = 3  # No. times we block waiting for requests for events
 EVENT_QUEUE_TIMEOUT_S = 0.1  # Timeout when waiting for requests for events
 
 
+# Number of iterations in a loop before we yield to the reactor to allow other
+# things to be processed, otherwise we can end up tight looping.
+ITERATIONS_BEFORE_YIELDING = 500
+
+
 event_fetch_ongoing_gauge = Gauge(
     "synapse_event_fetch_ongoing",
     "The number of event fetchers that are running",
@@ -817,7 +822,7 @@ class EventsWorkerStore(SQLBaseStore):
         # may be called repeatedly for the same event so at this point we cannot reach
         # out to any external cache for performance reasons. The external cache is
         # checked later on in the `get_missing_events_from_cache_or_db` function below.
-        event_entry_map = self._get_events_from_local_cache(
+        event_entry_map = await self._get_events_from_local_cache(
             event_ids,
         )
 
@@ -1004,7 +1009,7 @@ class EventsWorkerStore(SQLBaseStore):
             events: list of event_ids to fetch
             update_metrics: Whether to update the cache hit ratio metrics
         """
-        event_map = self._get_events_from_local_cache(
+        event_map = await self._get_events_from_local_cache(
             events, update_metrics=update_metrics
         )
 
@@ -1045,7 +1050,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         return event_map
 
-    def _get_events_from_local_cache(
+    async def _get_events_from_local_cache(
         self, events: Iterable[str], update_metrics: bool = True
     ) -> dict[str, EventCacheEntry]:
         """Fetch events from the local, in memory, caches.
@@ -1058,7 +1063,15 @@ class EventsWorkerStore(SQLBaseStore):
         """
         event_map = {}
 
+        i = 0
         for event_id in events:
+            i += 1
+
+            # Yield to the reactor to allow other things to be processed,
+            # otherwise we can end up tight looping.
+            if i % ITERATIONS_BEFORE_YIELDING == 0:
+                await self.clock.sleep(Duration(seconds=0))
+
             # First check if it's in the event cache
             ret = self._get_event_cache.get_local(
                 (event_id,), None, update_metrics=update_metrics
@@ -1375,7 +1388,15 @@ class EventsWorkerStore(SQLBaseStore):
 
         # build a map from event_id to EventBase
         event_map: dict[str, EventBase] = {}
+        i = 0
         for event_id, row in fetched_events.items():
+            i += 1
+
+            # Yield to the reactor to allow other things to be processed,
+            # otherwise we can end up tight looping.
+            if i % ITERATIONS_BEFORE_YIELDING == 0:
+                await self.clock.sleep(Duration(seconds=0))
+
             assert row.event_id == event_id
 
             rejected_reason = row.rejected_reason
