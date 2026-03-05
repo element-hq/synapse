@@ -20,6 +20,7 @@
 #
 import logging
 import random
+from bisect import bisect_right
 from typing import TYPE_CHECKING
 
 from twisted.internet.defer import CancelledError
@@ -647,12 +648,7 @@ class ProfileHandler:
             # Filter out room IDs that have already been handled
             # by finding the first room ID greater than the last handled room ID
             # and slicing the list from that point onwards.
-            first_unhandled_room_idx = 0
-            for idx, room_id in enumerate(room_ids):
-                if room_id > last_room_id:
-                    first_unhandled_room_idx = idx
-                    break
-            room_ids = room_ids[first_unhandled_room_idx:]
+            room_ids = room_ids[bisect_right(room_ids, last_room_id):]
 
         requester = create_requester(
             user_id=target_user,
