@@ -727,7 +727,7 @@ jobs:
         # real-time.
         run: |
           set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 | tee /tmp/gotest-complement.log
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log
         shell: bash
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
