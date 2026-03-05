@@ -39,7 +39,7 @@ func TestSynapseVersion(t *testing.T) {
 	//
 	// If this test fails, it probably means that Complement is using an image that
 	// doesn't encompass the changes you have checked out (unexpected). We want to yell
-	// loudly and point out what's wrong instead of silently letting your PR's pass
+	// loudly and point out what's wrong instead of silently letting your PRs pass
 	// without actually being tested.
 	t.Run("Synapse version matches current git checkout", func(t *testing.T) {
 		// Get the Synapse version details of the current git checkout
@@ -75,7 +75,7 @@ func TestSynapseVersion(t *testing.T) {
 			"Synapse version in the checkout doesn't match the Synapse version that Complement is running. "+
 				"If this test fails, it probably means that Complement is using an image that "+
 				"doesn't encompass the changes you have checked out (unexpected). We want to yell "+
-				"loudly and point out what's wrong instead of silently letting your PR's pass "+
+				"loudly and point out what's wrong instead of silently letting your PRs pass "+
 				"without actually being tested.",
 		)
 	})
