@@ -39,16 +39,6 @@ try:
 except ImportError:
     HAS_AUTHLIB = False
 
-# Determine whether pywebpush is installed.
-try:
-    # This module is imported simply to detect whether the `pywebpush` is installed and
-    # is not used here; flake8 needn't warn that it's unused.
-    import pywebpush  # noqa: F401
-
-    HAS_PYWEBPUSH = True
-except ImportError:
-    HAS_PYWEBPUSH = False
-
 if TYPE_CHECKING:
     # Only import this if we're type checking, as it might not be installed at runtime.
     from authlib.jose.rfc7517 import JsonWebKey
@@ -616,9 +606,3 @@ class ExperimentalConfig(Config):
         # Note that sticky events persisted before this feature is enabled will not be
         # considered sticky by the local homeserver.
         self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
-
-        # MSC4380: Invite blocking
-        self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
-
-        # MSC4174: webpush push kind
-        self.msc4174_enabled: bool = experimental.get("msc4174_enabled", False)

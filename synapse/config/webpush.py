@@ -15,12 +15,19 @@
 import os
 from typing import Any
 
-from py_vapid import b64urlencode, serialization
-
-from synapse.config.experimental import HAS_PYWEBPUSH
 from synapse.types import JsonDict
 
 from ._base import Config, ConfigError, read_file
+
+# Determine whether pywebpush is installed.
+try:
+    # This module is imported simply to detect whether the `pywebpush` is installed and
+    # is not used here; flake8 needn't warn that it's unused.
+    import pywebpush  # noqa: F401
+
+    HAS_PYWEBPUSH = True
+except ImportError:
+    HAS_PYWEBPUSH = False
 
 
 class WebpushConfig(Config):
@@ -36,13 +43,16 @@ class WebpushConfig(Config):
         webpush_config = config.get("webpush", {})
         self.enabled = webpush_config.get("enabled", False)
 
-        if self.enabled and not self.root.experimental.msc4174_enabled:
+        if not self.enabled:
+            return
+
+        if not config.get("experimental_features", {}).get("msc4174_enabled", False):
             raise ConfigError("webpush is enabled but MSC4174 is not enabled")
 
         if not HAS_PYWEBPUSH:
             raise ConfigError("webpush is enabled but pywebpush is not installed")
 
-        from py_vapid import Vapid
+        from py_vapid import Vapid, b64urlencode, serialization
 
         self.vapid_contact_email = webpush_config.get("vapid_contact_email")
         if not self.vapid_contact_email:
@@ -62,26 +72,22 @@ class WebpushConfig(Config):
             raise ConfigError(
                 "You have configured both `vapid_private_key` and `vapid_private_key_path`. These are mutually incompatible."
             )
-        if not vapid_private_key_path:
-            assert config_dir_path is not None
-            vapid_private_key_path = os.path.join(
-                config_dir_path, config["server_name"] + ".vapid.key"
-            )
-        vapid_private_key = read_file(
-            vapid_private_key_path, (vapid_private_key_path,)
-        ).strip()
 
         if not vapid_private_key:
-            raise ConfigError(
-                "vapid_private_key or vapid_private_key_path must be configured when WebPush is enabled"
+            if not vapid_private_key_path:
+                assert config_dir_path is not None
+                vapid_private_key_path = os.path.join(
+                    config_dir_path, config["server_name"] + ".vapid.key"
+                )
+            vapid_private_key = read_file(
+                vapid_private_key_path, (vapid_private_key_path,)
             )
 
-        self.vapid = Vapid.from_string(private_key=vapid_private_key)
+        self.vapid = Vapid.from_pem(vapid_private_key.encode())
 
-        vapid_public_key = self.vapid.public_key
-        assert vapid_public_key is not None
+        assert self.vapid.public_key is not None
         self.vapid_app_server_key = b64urlencode(
-            vapid_public_key.public_bytes(
+            self.vapid.public_key.public_bytes(
                 serialization.Encoding.X962,
                 serialization.PublicFormat.UncompressedPoint,
             )
@@ -113,7 +119,7 @@ class WebpushConfig(Config):
             vapid.generate_keys()
             with open(
                 vapid_private_key_path,
-                "w",
+                "wb",
                 opener=lambda p, f: os.open(p, f, mode=0o640),
             ) as vapid_private_key_file:
-                vapid.save_key(vapid_private_key_file)
+                vapid_private_key_file.write(vapid.private_pem())
