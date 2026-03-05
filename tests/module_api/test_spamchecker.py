@@ -22,6 +22,7 @@ from synapse.api.constants import (
     EventTypes,
     Membership,
 )
+from synapse.api.room_versions import RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.events import make_event_from_dict
 from synapse.module_api import EventBase
@@ -317,7 +318,10 @@ class FederatedEventSpamCheckMetadataTestCase(unittest.FederatingHomeserverTestC
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
         self.room_id = self.helper.create_room_as(
-            user1_id, tok=user1_tok, is_public=True
+            user1_id,
+            tok=user1_tok,
+            is_public=True,
+            room_version=RoomVersions.V10.identifier,
         )
 
         # Prepare a join for the 'remote' user
@@ -345,7 +349,7 @@ class FederatedEventSpamCheckMetadataTestCase(unittest.FederatingHomeserverTestC
                     "prev_events": list(forward_extremity_event_ids),
                 }
             ),
-            room_version=self.hs.config.server.default_room_version,
+            room_version=RoomVersions.V10,
         )
 
         # Send the join
@@ -404,7 +408,7 @@ class FederatedEventSpamCheckMetadataTestCase(unittest.FederatingHomeserverTestC
                     "prev_events": list(forward_extremity_event_ids),
                 }
             ),
-            room_version=self.hs.config.server.default_room_version,
+            room_version=RoomVersions.V10,
         )
         non_spammy_event = make_event_from_dict(
             self.add_hashes_and_signatures_from_other_server(
@@ -423,7 +427,7 @@ class FederatedEventSpamCheckMetadataTestCase(unittest.FederatingHomeserverTestC
                     "prev_events": list(forward_extremity_event_ids),
                 }
             ),
-            room_version=self.hs.config.server.default_room_version,
+            room_version=RoomVersions.V10,
         )
 
         # Receive these events over federation
