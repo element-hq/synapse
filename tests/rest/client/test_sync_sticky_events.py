@@ -165,8 +165,8 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
             "msc4354_sticky"
         ]["events"]
 
-        # As a canary to ensure we actually pushed the first sticky event out of the timeline window,
-        # check that we pushed out the first regular event too. If not, fail the test early so we can diagnose the test setup.
+        # This is canary to check the test setup is valid and that we're actually excluding the sticky event
+        # because it's outside the timeline window, not for some other potential reason.
         self.assertNotIn(
             regular_event_ids[0],
             timeline_event_ids,
