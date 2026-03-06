@@ -11,6 +11,11 @@ on:
         type: boolean
         default: false
 
+# Control the permissions granted to `GITHUB_TOKEN`.
+permissions:
+  # `actions/checkout` read the repository (also see
+  # https://github.com/actions/checkout/tree/de0fac2e4500dabe0009e67214ff5f5447ce83dd/#recommended-permissions)
+  contents: read
 env:
   RUST_VERSION: 1.87.0
 
