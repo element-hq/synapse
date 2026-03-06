@@ -49,6 +49,10 @@ class AuthIssuerServlet(RestServlet):
         self._auth = hs.get_auth()
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        # This endpoint is unauthenticated and the response only depends on
+        # the upstream OIDC provider metadata, so it can be cached.
+        request.setHeader(b"Cache-Control", b"public, max-age=600, s-maxage=3600")
+
         if self._config.mas.enabled:
             assert isinstance(self._auth, MasDelegatedAuth)
             return 200, {"issuer": await self._auth.issuer()}
@@ -94,6 +98,10 @@ class AuthMetadataServlet(RestServlet):
         self._auth = hs.get_auth()
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        # This endpoint is unauthenticated and the response only depends on
+        # the upstream OIDC provider metadata, so it can be cached.
+        request.setHeader(b"Cache-Control", b"public, max-age=3600, s-maxage=86400")
+
         if self._config.mas.enabled:
             assert isinstance(self._auth, MasDelegatedAuth)
             return 200, await self._auth.auth_metadata()

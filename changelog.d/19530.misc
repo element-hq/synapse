@@ -1,0 +1,1 @@
+Allow caching of the `/versions` and `/auth_metadata` public endpoints.

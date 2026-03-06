@@ -861,7 +861,9 @@ def respond_with_json(
         encoder = _encode_json_bytes
 
     request.setHeader(b"Content-Type", b"application/json")
-    request.setHeader(b"Cache-Control", b"no-cache, no-store, must-revalidate")
+    # Insert a default Cache-Control header if the servlet hasn't already set one
+    if not request.responseHeaders.hasHeader(b"Cache-Control"):
+        request.setHeader(b"Cache-Control", b"no-cache, no-store, must-revalidate")
 
     if send_cors:
         set_cors_headers(request)
@@ -901,7 +903,9 @@ def respond_with_json_bytes(
 
     request.setHeader(b"Content-Type", b"application/json")
     request.setHeader(b"Content-Length", b"%d" % (len(json_bytes),))
-    request.setHeader(b"Cache-Control", b"no-cache, no-store, must-revalidate")
+    # Insert a default Cache-Control header if the servlet hasn't already set one
+    if not request.responseHeaders.hasHeader(b"Cache-Control"):
+        request.setHeader(b"Cache-Control", b"no-cache, no-store, must-revalidate")
 
     if send_cors:
         set_cors_headers(request)
