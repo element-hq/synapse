@@ -111,6 +111,8 @@ async def create_event(
         event.internal_metadata.soft_failed = True
     if kwargs.get("internal_metadata", {}).get("policy_server_spammy", False):
         event.internal_metadata.policy_server_spammy = True
+    if kwargs.get("internal_metadata", {}).get("spam_checker_spammy", False):
+        event.internal_metadata.spam_checker_spammy = True
 
     context = await unpersisted_context.persist(event)
 
