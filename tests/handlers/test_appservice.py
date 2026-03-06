@@ -203,6 +203,93 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         self.assertEqual(result.room_id, room_id)
         self.assertEqual(result.servers, servers)
 
+    async def test_query_url_preview_none(self) -> None:
+        self.mock_store.get_app_services.return_value = []
+        result = await self.handler.query_preview_url(
+            "https://matrix.org", UserID(localpart="a", domain="b")
+        )
+        assert result is not None
+        self.assertIsNone(result.result)
+        self.assertFalse(result.exclusive)
+
+    async def test_query_url_preview_non_exclusive_no_result(self) -> None:
+        self.mock_store.get_app_services.return_value = [self._mkservice_url_preview()]
+        self.mock_as_api.query_preview_url = AsyncMock(return_value=None)
+        result = await self.handler.query_preview_url(
+            "https://matrix.org", UserID(localpart="a", domain="b")
+        )
+        assert result is not None
+        self.assertIsNone(result.result)
+        self.assertFalse(result.exclusive)
+
+    async def test_query_url_preview_non_exclusive_result(self) -> None:
+        return_value = {"og:title": "foobar"}
+        self.mock_store.get_app_services.return_value = [self._mkservice_url_preview()]
+        self.mock_as_api.query_preview_url = AsyncMock(return_value=return_value)
+        result = await self.handler.query_preview_url(
+            "https://matrix.org", UserID(localpart="a", domain="b")
+        )
+        assert result is not None
+        self.assertEqual(result.result, return_value)
+        self.assertFalse(result.exclusive)
+
+    async def test_query_url_preview_exclusive_no_result(self) -> None:
+        self.mock_store.get_app_services.return_value = [
+            self._mkservice_url_preview(True, True)
+        ]
+        self.mock_as_api.query_preview_url = AsyncMock(return_value=None)
+        result = await self.handler.query_preview_url(
+            "https://matrix.org", UserID(localpart="a", domain="b")
+        )
+        assert result is not None
+        self.assertIsNone(result.result)
+        self.assertTrue(result.exclusive)
+
+    async def test_query_url_preview_exclusive_result(self) -> None:
+        return_value = {"og:title": "foobar"}
+        self.mock_store.get_app_services.return_value = [
+            self._mkservice_url_preview(True, True)
+        ]
+        self.mock_as_api.query_preview_url = AsyncMock(return_value=return_value)
+        result = await self.handler.query_preview_url(
+            "https://matrix.org", UserID(localpart="a", domain="b")
+        )
+        assert result is not None
+        self.assertEqual(result.result, return_value)
+        self.assertTrue(result.exclusive)
+
+    async def test_query_url_preview_rejects_invalid(self) -> None:
+        self.mock_store.get_app_services.return_value = [
+            self._mkservice_url_preview(True, True)
+        ]
+        self.mock_as_api.query_preview_url = AsyncMock(return_value={"og:title": True})
+        result = await self.handler.query_preview_url(
+            "https://matrix.org", UserID(localpart="a", domain="b")
+        )
+        assert result is not None
+        self.assertEqual(result.result, None)
+        self.assertTrue(result.exclusive)
+
+    async def test_query_url_preview_multiple_services(self) -> None:
+        return_value = {"og:title": "foobar"}
+        url_service = self._mkservice_url_preview()
+        self.mock_store.get_app_services.return_value = [
+            self._mkservice_url_preview(False),
+            url_service,
+        ]
+        query_preview_url = self.mock_as_api.query_preview_url = AsyncMock(
+            return_value=return_value
+        )
+        result = await self.handler.query_preview_url(
+            "https://matrix.org", UserID(localpart="a", domain="b")
+        )
+        assert result is not None
+
+        # Ensure the correct service is used.
+        self.assertEqual(url_service, query_preview_url.call_args_list[0][0][0])
+        self.assertEqual(result.result, return_value)
+        self.assertFalse(result.exclusive)
+
     def test_get_3pe_protocols_no_appservices(self) -> None:
         self.mock_store.get_app_services.return_value = []
         response = self.successResultOf(
@@ -420,6 +507,27 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         """
         service = Mock()
         service.is_room_alias_in_namespace.return_value = is_room_alias_in_namespace
+        service.token = "mock_service_token"
+        service.url = "mock_service_url"
+        return service
+
+    def _mkservice_url_preview(
+        self, is_in_namespace: bool = True, is_exclusive: bool = False
+    ) -> Mock:
+        """
+        Create a new mock representing an ApplicationService that is or is not interested
+        in any preview urls.
+
+        Args:
+            is_in_namespace: If true, the application service will be interested in the url
+            is_exclusive: If true, the application service will be exclusively interested in the url
+
+        Returns:
+            A mock representing the ApplicationService.
+        """
+        service = Mock()
+        service.is_preview_url_in_namespace.return_value = is_in_namespace
+        service.is_exclusive_preview_url.return_value = is_exclusive
         service.token = "mock_service_token"
         service.url = "mock_service_url"
         return service

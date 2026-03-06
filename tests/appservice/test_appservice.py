@@ -182,6 +182,32 @@ class ApplicationServiceTestCase(unittest.TestCase):
         )
         self.assertTrue(self.service.is_exclusive_room("!irc_foobar:matrix.org"))
 
+    def test_non_exclusive_url(self) -> None:
+        self.service.namespaces[ApplicationService.NS_PREVIEW_URLS].append(
+            _regex(r"https:\/\/matrix.org.*", exclusive=False)
+        )
+        self.assertFalse(self.service.is_exclusive_preview_url("https://matrix.org"))
+        self.assertFalse(
+            self.service.is_exclusive_preview_url("https://matrix.org/foobar")
+        )
+        self.assertTrue(self.service.is_preview_url_in_namespace("https://matrix.org"))
+        self.assertTrue(
+            self.service.is_preview_url_in_namespace("https://matrix.org/foobar")
+        )
+
+    def test_exclusive_url(self) -> None:
+        self.service.namespaces[ApplicationService.NS_PREVIEW_URLS].append(
+            _regex("https:\\/\\/matrix.org.*", exclusive=True)
+        )
+        self.assertTrue(self.service.is_exclusive_preview_url("https://matrix.org"))
+        self.assertTrue(
+            self.service.is_exclusive_preview_url("https://matrix.org/foobar")
+        )
+        self.assertTrue(self.service.is_preview_url_in_namespace("https://matrix.org"))
+        self.assertTrue(
+            self.service.is_preview_url_in_namespace("https://matrix.org/foobar")
+        )
+
     @defer.inlineCallbacks
     def test_regex_alias_no_match(
         self,

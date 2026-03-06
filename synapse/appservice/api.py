@@ -44,7 +44,13 @@ from synapse.events.utils import SerializeEventConfig, serialize_event
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID
+from synapse.types import (
+    DeviceListUpdates,
+    JsonDict,
+    JsonMapping,
+    ThirdPartyInstanceID,
+    UserID,
+)
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.duration import Duration
 
@@ -536,6 +542,50 @@ class ApplicationServiceApi(SimpleHttpClient):
         except Exception as ex:
             logger.warning("query_keys to %s threw exception %s", uri, ex)
             return {}
+
+        return response
+
+    async def query_preview_url(
+        self, service: "ApplicationService", url: str, user_id: UserID
+    ) -> JsonDict | None:
+        """Query the application service for url preview data.
+
+        Note that any error (including a timeout) is treated as the application
+        service having no information.
+
+        Args:
+            service: The application service to query.
+            url: The url to query for.
+            user_id: The user who is requesting the preview.
+
+        Returns:
+            A unstructured map of data from the application service OR
+            None if the service could not be contacted, or returned any other response.
+
+        """
+        if service.url is None:
+            return None
+
+        # This is required by the configuration.
+        assert service.hs_token is not None
+
+        uri = f"{service.url}/_matrix/app/unstable/uk.half-shot.msc4417/preview_url"
+        try:
+            response = await self.get_json(
+                uri,
+                {"user_id": user_id.to_string(), "url": url},
+                headers=self._get_headers(service),
+            )
+            # The response *must* be a JsonDict if successful.
+            assert isinstance(response, dict)
+        except HttpResponseException as e:
+            if is_unknown_endpoint(e):
+                return None
+            logger.warning("query_url_preview to %s received %s", uri, e.code)
+            return None
+        except Exception as ex:
+            logger.warning("query_url_preview to %s threw exception %s", uri, ex)
+            return None
 
         return response
 

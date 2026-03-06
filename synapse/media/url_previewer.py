@@ -182,6 +182,8 @@ class UrlPreviewer:
         self.media_repo = media_repo
         self.primary_base_path = media_repo.primary_base_path
         self.media_storage = media_storage
+        self.as_services = hs.get_application_service_handler()
+        self.allow_as_previews = hs.config.experimental.msc4417_enabled
 
         self._oembed = OEmbedProvider(hs)
 
@@ -222,6 +224,25 @@ class UrlPreviewer:
         #
         # Note that autodiscovered oEmbed URLs and pre-caching of images
         # are not captured in the in-memory cache.
+        if self.allow_as_previews:
+            as_og_data = await self.as_services.query_preview_url(url, user)
+            if as_og_data.result:
+                # This result should NEVER be cached (e.g. via ResponseCache) as
+                # the result is dependant on which user requested the preview.
+                # Any caching performed should be done on the application service
+                # side.
+                return json_encoder.encode(as_og_data.result).encode("utf8")
+
+            if as_og_data.exclusive:
+                # XXX: _do_preview typically returns a 500 for any failed
+                # requests but in this case we know the appservice requested
+                # exclusivity over this URL pattern, so we can say it's a 404.
+                # https://github.com/matrix-org/matrix-spec/issues/2327
+                raise SynapseError(
+                    404,
+                    "Not able to preview URL",
+                    Codes.NOT_FOUND,
+                )
 
         observable = self._cache.get(url)
 
@@ -495,6 +516,7 @@ class UrlPreviewer:
             )
         except Exception as e:
             # FIXME: pass through 404s and other error messages nicely
+            # https://github.com/matrix-org/matrix-spec/issues/2327
             logger.warning("Error downloading %s: %r", url, e)
 
             raise SynapseError(
