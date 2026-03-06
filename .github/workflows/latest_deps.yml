@@ -181,84 +181,11 @@ jobs:
             /logs/**/*.log*
 
   complement:
+    uses: ./.github/workflows/complement_tests.yml
     needs: check_repo
     if: "!failure() && !cancelled() && needs.check_repo.outputs.should_run_workflow == 'true'"
-    runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arrangement: monolith
-            database: SQLite
-
-          - arrangement: monolith
-            database: Postgres
-
-          - arrangement: workers
-            database: Postgres
-
-    steps:
-      - name: Check out synapse codebase
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          path: synapse
-
-      - name: Prepare Complement's Prerequisites
-        run: synapse/.ci/scripts/setup_complement_prerequisites.sh
-
-      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
-        with:
-          cache-dependency-path: complement/go.sum
-          go-version-file: complement/go.mod
-
-      - name: Run Complement Tests
-        id: run_complement_tests
-        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
-        #     are underpowered and don't like running tons of Synapse instances at once.
-        # -json: Output JSON format so that gotestfmt can parse it.
-        #
-        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
-        # later on for better formatting with gotestfmt. But we still want the command
-        # to output to the terminal as it runs so we can see what's happening in
-        # real-time.
-        run: |
-          set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log
-        shell: bash
-        env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
-          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-          TEST_ONLY_IGNORE_POETRY_LOCKFILE: 1
-
-      - name: Formatted Complement test logs
-        # Always run this step if we attempted to run the Complement tests.
-        if: always() && steps.run_complement_tests.outcome != 'skipped'
-        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
-
-      - name: Run in-repo Complement Tests
-        id: run_in_repo_complement_tests
-        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
-        #     are underpowered and don't like running tons of Synapse instances at once.
-        # -json: Output JSON format so that gotestfmt can parse it.
-        #
-        # tee /tmp/gotest-in-repo-complement.log: We tee the output to a file so that we can re-process it
-        # later on for better formatting with gotestfmt. But we still want the command
-        # to output to the terminal as it runs so we can see what's happening in
-        # real-time.
-        run: |
-          set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 | tee /tmp/gotest-in-repo-complement.log
-        shell: bash
-        env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
-          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-          TEST_ONLY_IGNORE_POETRY_LOCKFILE: 1
-
-      - name: Formatted in-repo Complement test logs
-        # Always run this step if we attempted to run the Complement tests.
-        if: always() && steps.run_in_repo_complement_tests.outcome != 'skipped'
-        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
+    with:
+      use_latest_deps: true
 
   # Open an issue if the build fails, so we know about it.
   # Only do this if we're not experimenting with this action in a PR.
