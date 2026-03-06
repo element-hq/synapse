@@ -671,19 +671,6 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
     server_name = hs.hostname
     reactor = hs.get_reactor()
 
-    from synapse.synapse_rust.http_client import HttpClient
-
-    _rust_http_client = HttpClient(
-        reactor=hs.get_reactor(),
-        user_agent="asdf",
-    )
-    logger.info("asdf before request")
-    await _rust_http_client.get(
-        url="http://localhost:8000",
-        response_limit=1024,
-    )
-    logger.info("asdf after request")
-
     # We want to use a separate thread pool for the resolver so that large
     # numbers of DNS requests don't starve out other users of the threadpool.
     resolver_threadpool = ThreadPool(name="gai_resolver")
