@@ -16,6 +16,7 @@ permissions:
   # `actions/checkout` read the repository (also see
   # https://github.com/actions/checkout/tree/de0fac2e4500dabe0009e67214ff5f5447ce83dd/#recommended-permissions)
   contents: read
+
 env:
   RUST_VERSION: 1.87.0
 
@@ -92,8 +93,8 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-          TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps }}
-          TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk }}
+          TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
+          TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
 
       - name: Formatted Complement test logs
         # Always run this step if we attempted to run the Complement tests.
@@ -117,6 +118,8 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
+          TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
 
       - name: Formatted in-repo Complement test logs
         # Always run this step if we attempted to run the Complement tests.
