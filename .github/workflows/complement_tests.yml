@@ -1,0 +1,127 @@
+# Re-usable workflow (https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)
+name: Reusable Complement testing
+
+on:
+  workflow_call:
+    inputs:
+      use_latest_deps:
+        type: boolean
+        default: false
+      use_twisted_trunk:
+        type: boolean
+        default: false
+
+# Control the permissions granted to `GITHUB_TOKEN`.
+permissions:
+  # `actions/checkout` read the repository (also see
+  # https://github.com/actions/checkout/tree/de0fac2e4500dabe0009e67214ff5f5447ce83dd/#recommended-permissions)
+  contents: read
+
+env:
+  RUST_VERSION: 1.87.0
+
+jobs:
+  complement:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arrangement: monolith
+            database: SQLite
+
+          - arrangement: monolith
+            database: Postgres
+
+          - arrangement: workers
+            database: Postgres
+
+    steps:
+      - name: Checkout synapse codebase
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: synapse
+
+      # Log Docker system info for debugging (compare with your local environment) and
+      # tracking GitHub runner changes over time (can easily compare a run from last
+      # week with the current one in question).
+      - run: docker system info
+        shell: bash
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+
+      - name: Prepare Complement's Prerequisites
+        run: synapse/.ci/scripts/setup_complement_prerequisites.sh
+
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          cache-dependency-path: complement/go.sum
+          go-version-file: complement/go.mod
+
+      # This step is specific to the 'Twisted trunk' test run:
+      - name: Patch dependencies
+        if: ${{ inputs.use_twisted_trunk }}
+        run: |
+          set -x
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -yqq python3 pipx
+          pipx install poetry==2.1.1
+
+          poetry remove -n twisted
+          poetry add -n --extras tls git+https://github.com/twisted/twisted.git#trunk
+          poetry lock
+        working-directory: synapse
+
+      - name: Run Complement Tests
+        id: run_complement_tests
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
+          set -o pipefail
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log
+        shell: bash
+        env:
+          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
+          TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
+
+      - name: Formatted Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_complement_tests.outcome != 'skipped'
+        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
+
+      - name: Run in-repo Complement Tests
+        id: run_in_repo_complement_tests
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest-in-repo-complement.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
+          set -o pipefail
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 | tee /tmp/gotest-in-repo-complement.log
+        shell: bash
+        env:
+          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
+          TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
+
+      - name: Formatted in-repo Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_in_repo_complement_tests.outcome != 'skipped'
+        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
