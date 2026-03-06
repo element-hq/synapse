@@ -673,6 +673,8 @@ jobs:
     needs:
       - linting-done
       - changes
+    with:
+      use_twisted_trunk: true
 
   cargo-test:
     if: ${{ needs.changes.outputs.rust == 'true' }}
