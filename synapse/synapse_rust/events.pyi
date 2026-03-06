@@ -43,6 +43,9 @@ class EventInternalMetadata:
     device_id: str
     """The device ID of the user who sent this event, if any."""
 
+    # MSC4242 state dags
+    calculated_auth_event_ids: list[str]
+
     def get_dict(self) -> JsonDict: ...
     def is_outlier(self) -> bool: ...
     def copy(self) -> "EventInternalMetadata": ...

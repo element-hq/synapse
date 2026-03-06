@@ -171,6 +171,7 @@ Changes in SCHEMA_VERSION = 92
 
 Changes in SCHEMA_VERSION = 93
     - MSC4140: Set delayed events to be uniquely identifiable by their delay ID.
+    - MSC4242: Add state DAG tables.
 """
 
 

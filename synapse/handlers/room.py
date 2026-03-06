@@ -65,7 +65,7 @@ from synapse.api.filtering import Filter
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.event_auth import validate_event_for_room_version
-from synapse.events import EventBase
+from synapse.events import EventBase, event_exists_in_state_dag
 from synapse.events.snapshot import UnpersistedEventContext
 from synapse.events.utils import copy_and_fixup_power_levels_contents
 from synapse.handlers.relations import BundledAggregations
@@ -1486,6 +1486,9 @@ class RoomCreationHandler:
 
         # the most recently created event
         prev_event: list[str] = []
+        # the most recently created state event
+        prev_state_event: list[str] = []
+
         # a map of event types, state keys -> event_ids. We collect these mappings this as events are
         # created (but not persisted to the db) to determine state for future created events
         # (as this info can't be pulled from the db)
@@ -1512,6 +1515,7 @@ class RoomCreationHandler:
             """
             nonlocal depth
             nonlocal prev_event
+            nonlocal prev_state_event
 
             # Create the event dictionary.
             event_dict = {"type": etype, "content": content}
@@ -1525,6 +1529,7 @@ class RoomCreationHandler:
                 creator,
                 event_dict,
                 prev_event_ids=prev_event,
+                prev_state_events=prev_state_event,
                 depth=depth,
                 # Take a copy to ensure each event gets a unique copy of
                 # state_map since it is modified below.
@@ -1535,7 +1540,8 @@ class RoomCreationHandler:
             depth += 1
             prev_event = [new_event.event_id]
             state_map[(new_event.type, new_event.state_key)] = new_event.event_id
-
+            if room_version.msc4242_state_dags and event_exists_in_state_dag(new_event):
+                prev_state_event = [new_event.event_id]
             return new_event, new_unpersisted_context
 
         preset_config, config = self._room_preset_config(room_config)
@@ -1568,6 +1574,7 @@ class RoomCreationHandler:
             ignore_shadow_ban=True,
         )
         last_sent_event_id = ev.event_id
+        prev_state_event = [ev.event_id]
 
         member_event_id, _ = await self.room_member_handler.update_membership(
             creator,
@@ -1579,8 +1586,10 @@ class RoomCreationHandler:
             new_room=True,
             prev_event_ids=[last_sent_event_id],
             depth=depth,
+            prev_state_events=prev_state_event,
         )
         prev_event = [member_event_id]
+        prev_state_event = [member_event_id]
 
         # update the depth and state map here as the membership event has been created
         # through a different code path
