@@ -1,0 +1,1 @@
+Fix a bug where all messages from a server could be blocked because of one bad event. Contributed by @morguldir.
