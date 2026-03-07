@@ -109,6 +109,12 @@ class CapabilitiesRestServlet(RestServlet):
                 "enabled": self.config.room.forget_on_leave,
             }
 
+        if self.config.webpush.enabled:
+            response["capabilities"]["org.matrix.msc4174.webpush"] = {
+                "enabled": True,
+                "vapid": self.config.webpush.vapid_app_server_key,
+            }
+
         return HTTPStatus.OK, response
 
 

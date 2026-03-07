@@ -36,7 +36,7 @@ from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.storage.databases.main.event_push_actions import HttpPushAction
 from synapse.types import JsonDict, JsonMapping
 
-from . import push_tools
+from . import PusherType, push_tools
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -117,7 +117,6 @@ class HttpPusher(Pusher):
         self.device_display_name = pusher_config.device_display_name
         self.device_id = pusher_config.device_id
         self.pushkey_ts = pusher_config.ts
-        self.data = pusher_config.data
         self.backoff_delay = HttpPusher.INITIAL_BACKOFF_SEC
         self.failing_since = pusher_config.failing_since
         self.timed_call: Optional[IDelayedCall] = None
@@ -129,9 +128,9 @@ class HttpPusher(Pusher):
 
         self.push_jitter_delay_ms = hs.config.push.push_jitter_delay_ms
 
-        self.data = pusher_config.data
-        if self.data is None:
+        if pusher_config.data is None:
             raise PusherConfigException("'data' key can not be null for HTTP pusher")
+        self.data = pusher_config.data
 
         # Check if badge counts should be disabled for this push gateway
         self.disable_badge_count = self.hs.config.experimental.msc4076_enabled and bool(
@@ -144,22 +143,28 @@ class HttpPusher(Pusher):
             pusher_config.pushkey,
         )
 
-        # Validate that there's a URL and it is of the proper form.
-        if "url" not in self.data:
-            raise PusherConfigException("'url' required in data for HTTP pusher")
+        self.url = ""
+        if pusher_config.kind == PusherType.HTTP:
+            # Validate that there's a URL and it is of the proper form.
+            if "url" not in self.data:
+                raise PusherConfigException("'url' required in data for HTTP pusher")
 
-        url = self.data["url"]
-        if not isinstance(url, str):
-            raise PusherConfigException("'url' must be a string")
-        url_parts = urllib.parse.urlparse(url)
-        # Note that the specification also says the scheme must be HTTPS, but
-        # it isn't up to the homeserver to verify that.
-        if url_parts.path != "/_matrix/push/v1/notify":
-            raise PusherConfigException(
-                "'url' must have a path of '/_matrix/push/v1/notify'"
-            )
+            url = self.data["url"]
+            if not isinstance(url, str):
+                raise PusherConfigException("'url' must be a string")
+            url_parts = urllib.parse.urlparse(url)
+            # Note that the specification also says the scheme must be HTTPS, but
+            # it isn't up to the homeserver to verify that.
+            if url_parts.path != "/_matrix/push/v1/notify":
+                raise PusherConfigException(
+                    "'url' must have a path of '/_matrix/push/v1/notify'"
+                )
+            self.url = url
 
-        self.url = url
+            self.data_minus_url = {}
+            self.data_minus_url.update(self.data)
+            del self.data_minus_url["url"]
+
         self.http_client = hs.get_proxied_blocklisted_http_client()
         self.data_minus_url = {}
         self.data_minus_url.update(self.data)
@@ -196,7 +201,14 @@ class HttpPusher(Pusher):
         )
         if self.badge_count_last_call is None or self.badge_count_last_call != badge:
             self.badge_count_last_call = badge
-            await self._send_badge(badge)
+            if await self.send_badge(badge):
+                http_badges_processed_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
+            else:
+                http_badges_failed_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
 
     def on_timer(self) -> None:
         self._start_processing()
@@ -529,7 +541,7 @@ class HttpPusher(Pusher):
 
         return res
 
-    async def _send_badge(self, badge: int) -> None:
+    async def send_badge(self, badge: int) -> bool:
         """
         Args:
             badge: number of unread messages
@@ -553,13 +565,9 @@ class HttpPusher(Pusher):
         }
         try:
             await self.http_client.post_json_get_json(self.url, d)
-            http_badges_processed_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
+            return True
         except Exception as e:
             logger.warning(
                 "Failed to send badge count to %s: %s %s", self.name, type(e), e
             )
-            http_badges_failed_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
+            return False

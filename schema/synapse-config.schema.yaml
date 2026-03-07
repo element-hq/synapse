@@ -4820,6 +4820,37 @@ properties:
         include_content: false
         group_unread_count_by_room: false
         jitter_delay: 10s
+  webpush:
+    type: object
+    description: This setting defines options for WebPush notifications.
+    properties:
+      enabled:
+        type: boolean
+        description: >-
+          Enables or disables WebPush notifications.
+        default: false
+      vapid_contact_email:
+        type: string
+        description: >-
+          Email address where the push server operator can reach you
+          in case they need to notify you about your usage of their API.
+      vapid_private_key:
+        type: ["string", "null"]
+        description: >-
+          Private key for VAPID authentication.
+      vapid_private_key_path:
+        type: ["string", "null"]
+        description: >-
+          Path to a file containing the private key for VAPID authentication.
+      ttl_seconds:
+        type: number
+        description: >-
+          Time-to-live of WebPush notifications in seconds. Default is 86400 seconds (1 day).
+          If notifications can't be delivered by the push server aftet this time, they are expected to be dropped.
+        default: 86400
+    examples:
+      - enabled: true
+        vapid_contact_email: admin@example.org
   encryption_enabled_by_default_for_room_type:
     type: string
     description: >-

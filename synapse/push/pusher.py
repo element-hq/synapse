@@ -22,7 +22,7 @@
 import logging
 from typing import TYPE_CHECKING, Callable
 
-from synapse.push import Pusher, PusherConfig
+from synapse.push import Pusher, PusherConfig, PusherType
 from synapse.push.emailpusher import EmailPusher
 from synapse.push.httppusher import HttpPusher
 from synapse.push.mailer import Mailer
@@ -38,9 +38,15 @@ class PusherFactory:
         self.hs = hs
         self.config = hs.config
 
+        # Map from pusher kind to a factory that creates a new pusher given the config
         self.pusher_types: dict[str, Callable[[HomeServer, PusherConfig], Pusher]] = {
-            "http": HttpPusher
+            PusherType.HTTP: HttpPusher
         }
+
+        if self.config.webpush.enabled:
+            from synapse.push.webpushpusher import WebPushPusher
+
+            self.pusher_types[PusherType.WEBPUSH] = WebPushPusher
 
         logger.info("email enable notifs: %r", hs.config.email.email_enable_notifs)
         if hs.config.email.email_enable_notifs:
@@ -49,7 +55,7 @@ class PusherFactory:
             self._notif_template_html = hs.config.email.email_notif_template_html
             self._notif_template_text = hs.config.email.email_notif_template_text
 
-            self.pusher_types["email"] = self._create_email_pusher
+            self.pusher_types[PusherType.EMAIL] = self._create_email_pusher
 
             logger.info("defined email pusher type")
 
