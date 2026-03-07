@@ -47,10 +47,10 @@ class WebPushPusher(HttpPusher):
     def __init__(self, hs: "HomeServer", pusher_config: PusherConfig):
         super().__init__(hs, pusher_config)
 
-        self.endpoint: str = self.data.get("endpoint")  # type: ignore[assignment]
-        if not isinstance(self.endpoint, str):
+        self.url: str = self.data.get("url")  # type: ignore[assignment]
+        if not isinstance(self.url, str):
             raise PusherConfigException(
-                "'endpoint' required in data for WebPush pusher and must be a string"
+                "'url' required in data for WebPush pusher and must be a string"
             )
 
         self.auth: str = self.data.get("auth")  # type: ignore[assignment]
@@ -119,7 +119,7 @@ class WebPushPusher(HttpPusher):
             )
 
         subscription_info = {
-            "endpoint": self.endpoint,
+            "endpoint": self.url,
             "keys": {"p256dh": self.pushkey, "auth": self.auth},
         }
 
