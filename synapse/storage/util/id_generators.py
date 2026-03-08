@@ -339,6 +339,11 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             # position with the current minimum.
             self._current_positions[self._instance_name] = self._persisted_upto_position
 
+        # We remember the last inserted position so that we don't insert the same
+        # position twice, avoiding unnecessary writes.
+        self._last_inserted_stream_positions: int | None = None
+        self._last_inserted_stream_position_lock = threading.Lock()
+
     def _load_current_ids(
         self,
         db_conn: LoggingDatabaseConnection,
@@ -575,9 +580,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 run_as_background_process,
                 "MultiWriterIdGenerator._update_table",
                 self.server_name,
-                self._db.runInteraction,
-                "MultiWriterIdGenerator._update_table",
-                self._update_stream_positions_table_txn,
+                self._update_stream_positions_table,
             )
 
         return self._return_factor * next_id
@@ -622,9 +625,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 run_as_background_process,
                 "MultiWriterIdGenerator._update_table",
                 self.server_name,
-                self._db.runInteraction,
-                "MultiWriterIdGenerator._update_table",
-                self._update_stream_positions_table_txn,
+                self._update_stream_positions_table,
             )
 
         return [self._return_factor * next_id for next_id in next_ids]
@@ -820,11 +821,25 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 # do.
                 break
 
-    def _update_stream_positions_table_txn(self, txn: Cursor) -> None:
+    async def _update_stream_positions_table(self) -> None:
         """Update the `stream_positions` table with newly persisted position."""
 
-        if not self._writers:
-            return
+        with self._last_inserted_stream_position_lock:
+            pos = self.get_current_token_for_writer(self._instance_name)
+            if self._last_inserted_stream_positions == pos:
+                return
+
+            await self._db.runInteraction(
+                "MultiWriterIdGenerator._update_table",
+                self._update_stream_positions_table_txn,
+                pos,
+            )
+
+            self._last_inserted_stream_positions = pos
+
+    def _update_stream_positions_table_txn(self, txn: Cursor, pos: int):
+        assert self._writers, "This method should only be called if there are writers"
+        assert self._last_inserted_stream_position_lock.locked(), "Lock must be held"
 
         # We upsert the value, ensuring on conflict that we always increase the
         # value (or decrease if stream goes backwards).
@@ -839,7 +854,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 WHERE stream_positions.stream_id {cmp} EXCLUDED.stream_id
         """
 
-        pos = self.get_current_token_for_writer(self._instance_name)
         txn.execute(sql, (self._stream_name, self._instance_name, pos))
 
     async def get_max_allocated_token(self) -> int:
@@ -919,10 +933,6 @@ class _MultiWriterCtxManager:
         # for. If we don't do this then we'll often hit serialization errors due
         # to the fact we default to REPEATABLE READ isolation levels.
         if self.id_gen._writers:
-            await self.id_gen._db.runInteraction(
-                "MultiWriterIdGenerator._update_table",
-                self.id_gen._update_stream_positions_table_txn,
-                db_autocommit=True,
-            )
+            await self.id_gen._update_stream_positions_table()
 
         return False
