@@ -47,12 +47,6 @@ class WebPushPusher(HttpPusher):
     def __init__(self, hs: "HomeServer", pusher_config: PusherConfig):
         super().__init__(hs, pusher_config)
 
-        self.url: str = self.data.get("url")  # type: ignore[assignment]
-        if not isinstance(self.url, str):
-            raise PusherConfigException(
-                "'url' required in data for WebPush pusher and must be a string"
-            )
-
         self.auth: str = self.data.get("auth")  # type: ignore[assignment]
         if not isinstance(self.auth, str):
             raise PusherConfigException(
@@ -124,7 +118,7 @@ class WebPushPusher(HttpPusher):
         }
 
         # We cache the signed VAPID header as recommended by the spec, to avoid calculating a
-        # new one each time, and allowavoid the push server to cache it too and avoid verification.
+        # new one each time, and allow the push server to cache it too and avoid verification.
         if (
             not self.cached_vapid_headers
             or time.time() > self.cached_vapid_headers_expires - 60
@@ -155,7 +149,7 @@ class WebPushPusher(HttpPusher):
         response_text = (await readBody(response)).decode()
 
         reject_pushkey = self._handle_response(
-            response, response_text, self.pushkey, self.endpoint
+            response, response_text, self.pushkey, self.url
         )
         if reject_pushkey:
             return [self.pushkey]
@@ -289,7 +283,8 @@ class HttpDelayedRequest:
     """
 
     status_code: int = 200
-    text: Optional[str] = None
+    text: str | None = None
+    headers: Headers | None = None
 
     def __init__(
         self, endpoint: str, data: bytes, webpush_headers: CaseInsensitiveDict
@@ -301,21 +296,16 @@ class HttpDelayedRequest:
     def execute(
         self, http_client: SimpleHttpClient, low_priority: bool, topic: bytes
     ) -> defer.Deferred[IResponse]:
-        # Convert the headers to the camelcase version.
-        headers = {
-            b"User-Agent": ["sygnal"],
-            b"Content-Encoding": [self.webpush_headers["content-encoding"]],
-            b"Authorization": [self.webpush_headers["authorization"]],
-            b"TTL": [self.webpush_headers["ttl"]],
-            b"Urgency": ["low" if low_priority else "normal"],
-        }
+        headers = Headers()
+        for key, value in self.webpush_headers.items():
+            headers.addRawHeader(key, value)
         if topic:
-            headers[b"Topic"] = [topic]
+            headers.addRawHeader("Topic", topic)
         return defer.ensureDeferred(
             http_client.request(
                 "POST",
                 self.endpoint,
-                headers=Headers(headers),
+                headers=headers,
                 data=self.data,
             )
         )

@@ -143,23 +143,22 @@ class HttpPusher(Pusher):
             pusher_config.pushkey,
         )
 
-        self.url = ""
-        if pusher_config.kind == PusherType.HTTP:
-            # Validate that there's a URL and it is of the proper form.
-            if "url" not in self.data:
-                raise PusherConfigException("'url' required in data for HTTP pusher")
+        # Validate that there's a URL
+        if "url" not in self.data:
+            raise PusherConfigException("'url' required in data for HTTP pusher")
 
-            url = self.data["url"]
-            if not isinstance(url, str):
-                raise PusherConfigException("'url' must be a string")
-            url_parts = urllib.parse.urlparse(url)
+        self.url = self.data["url"]
+        if not isinstance(self.url, str):
+            raise PusherConfigException("'url' must be a string")
+
+        if pusher_config.kind == PusherType.HTTP:
+            url_parts = urllib.parse.urlparse(self.url)
             # Note that the specification also says the scheme must be HTTPS, but
             # it isn't up to the homeserver to verify that.
             if url_parts.path != "/_matrix/push/v1/notify":
                 raise PusherConfigException(
                     "'url' must have a path of '/_matrix/push/v1/notify'"
                 )
-            self.url = url
 
             self.data_minus_url = {}
             self.data_minus_url.update(self.data)
