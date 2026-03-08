@@ -21,6 +21,8 @@
 import logging
 from typing import TYPE_CHECKING, Mapping
 
+from immutabledict import immutabledict
+
 from synapse import event_auth
 from synapse.api.constants import (
     CREATOR_POWER_LEVEL,
@@ -343,13 +345,13 @@ class EventAuthHandler:
 
         # If allowed is of the wrong form, then only allow invited users.
         allow_list = join_rules_event.content.get("allow", [])
-        if not isinstance(allow_list, list):
+        if not isinstance(allow_list, (list, tuple)):
             return ()
 
         # Pull out the other room IDs, invalid data gets filtered.
         result = []
         for allow in allow_list:
-            if not isinstance(allow, dict):
+            if not isinstance(allow, (dict, immutabledict)):
                 continue
 
             # If the type is unexpected, skip it.
