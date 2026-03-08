@@ -16,20 +16,19 @@ import base64
 from typing import Any
 from unittest.mock import Mock
 
-from py_vapid import Vapid, ec, serialization
-
 from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 from twisted.web.http_headers import Headers
 
 import synapse.rest.admin
+from synapse.config.webpush import HAS_PYWEBPUSH
 from synapse.logging.context import make_deferred_yieldable
 from synapse.rest.client import login, push_rule, pusher, receipts, room, versions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, skip_unless
 
 
 class WebPushPusherTests(HomeserverTestCase):
@@ -47,7 +46,10 @@ class WebPushPusherTests(HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        vapid = Vapid()
+
+        import py_vapid
+
+        vapid = py_vapid.Vapid()
         vapid.generate_keys()
 
         config["webpush"] = {
@@ -76,6 +78,7 @@ class WebPushPusherTests(HomeserverTestCase):
 
         return hs
 
+    @skip_unless(HAS_PYWEBPUSH, "requires pywebpush")
     def test_sends_webpush(self) -> None:
         """
         The WebPush pusher will send a push for each message to a WebPush endpoint
@@ -98,6 +101,8 @@ class WebPushPusherTests(HomeserverTestCase):
 
         # pywebpush will use this key to encrypt the push message
         # so it needs to be a real key, not just a random string
+        from py_vapid import ec, serialization
+
         server_key = ec.generate_private_key(ec.SECP256R1())
         crypto_key = server_key.public_key().public_bytes(
             encoding=serialization.Encoding.X962,

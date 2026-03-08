@@ -170,7 +170,7 @@ webpush = [
     # aiohttp is not used by synapse impl however, which uses Twisted.
     # Version is random and choosen because it is not too recent but not too old either,
     # which should accomodate most downstream distros.
-    "aiohttp>=3.8.0",
+    "aiohttp>=3.6.0",
 ]
 
 # The duplication here is awful.
@@ -206,7 +206,7 @@ all = [
     # webpush
     "pywebpush>=2.0.0",
     "py-vapid>=1.7.0",
-    "aiohttp>=3.8.0",
+    "aiohttp>=3.6.0",
     # omitted:
     #   - test: it's useful to have this separate from dev deps in the olddeps job
     #   - systemd: this is a system-based requirement

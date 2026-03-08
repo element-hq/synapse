@@ -4593,4 +4593,4 @@ webpush = ["aiohttp", "py-vapid", "pywebpush"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "222a84560166bf3ca8a024db32dc9cb416be820f4cf1f217eba4e119b25f2753"
+content-hash = "c7d4bec8ad52362b42c602525f643248cbed387cfd1471f6e70bd043bc71a807"
