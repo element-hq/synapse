@@ -22,8 +22,9 @@ To receive soft failed events in APIs like `/sync` and `/messages`, set `return_
 to `true` in the admin client config. When `false`, the normal behaviour of these endpoints is to
 exclude soft failed events.
 
-**Note**: If the policy server flagged the event as spam and that caused soft failure, that will be indicated
-in the event's `unsigned` content like so:
+> [!NOTE]
+> If the policy server flagged the event as spam and that caused soft failure, that will be indicated
+> in the event's `unsigned` content like so:
 
 ```json
 {

@@ -63,9 +63,10 @@ file:
 serve_server_wellknown: true
 ```
 
-**Note**: this *only* works if `https://<server_name>` is routed to Synapse, so is
-generally not suitable if Synapse is hosted at a subdomain such as
-`https://synapse.example.com`.
+> [!NOTE]
+> This *only* works if `https://<server_name>` is routed to Synapse, so is
+> generally not suitable if Synapse is hosted at a subdomain such as
+> `https://synapse.example.com`.
 
 ## SRV DNS record delegation
 

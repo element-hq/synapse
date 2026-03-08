@@ -1,0 +1,1 @@
+Bump `mdbook` from 0.4.17 to 0.5.2 and remove our custom table-of-contents plugin in favour of the new default functionality.

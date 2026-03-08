@@ -2,7 +2,8 @@
 
 This API allows a server administrator to manage Synapse's federation with other homeservers.
 
-Note: This API is new, experimental and "subject to change".
+> [!NOTE]
+> This API is new, experimental and "subject to change".
 
 ## List of destinations
 
@@ -62,9 +63,10 @@ The following query parameters are available:
 - `dir` - Direction of room order. Either `f` for forwards or `b` for backwards. Setting
   this value to `b` will reverse the above sort order. Defaults to `f`.
 
-*Caution:* The database only has an index on the column `destination`.
-This means that if a different sort order is used,
-this can cause a large load on the database, especially for large environments.
+> [!CAUTION]
+> The database only has an index on the column `destination`.
+> This means that if a different sort order is used,
+> this can cause a large load on the database, especially for large environments.
 
 **Response**
 

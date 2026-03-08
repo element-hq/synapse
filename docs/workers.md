@@ -459,8 +459,9 @@ and be listed in the [`instance_map`](usage/configuration/config_documentation.m
 config.
 * Have the main process declared on the [`instance_map`](usage/configuration/config_documentation.md#instance_map) as well.
 
-Note: The same worker can handle multiple streams, but unless otherwise documented,
-each stream can only have a single writer.
+> [!NOTE]
+> The same worker can handle multiple streams, but unless otherwise documented,
+> each stream can only have a single writer.
 
 For example, to move event persistence off to a dedicated worker, the shared
 configuration would include:
