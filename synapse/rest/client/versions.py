@@ -144,6 +144,8 @@ class VersionsRestServlet(RestServlet):
                     "fi.mau.msc2815": self.config.experimental.msc2815_enabled,
                     # Adds a ping endpoint for appservices to check HS->AS connection
                     "fi.mau.msc2659.stable": True,  # TODO: remove when "v1.7" is added above
+                    # Adds Event visibility API
+                    "net.tadzik.msc4185": self.config.experimental.msc4185_enabled,
                     # TODO: this is no longer needed once unstable MSC3882 does not need to be supported:
                     "org.matrix.msc3882": self.config.auth.login_via_existing_enabled,
                     # Adds support for remotely enabling/disabling pushers, as per MSC3881
