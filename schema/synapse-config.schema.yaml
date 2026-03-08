@@ -2395,7 +2395,12 @@ properties:
       properties:
         module:
           type: string
-          description: "Type of resource, e.g. `file_system`."
+          description: >-
+            Import path to the Python class implementing the media storage
+            provider. The path must be expressed as a [qualified
+            name](https://peps.python.org/pep-3155/) in accordance with
+            PEP 3155. The value `file_system` is treated as a special case and
+            resolves to the built-in file system provider.
         store_local:
           type: boolean
           description: Whether to store newly uploaded local files.
@@ -2407,11 +2412,11 @@ properties:
           description: Whether to wait for successful storage for local uploads.
         config:
           type: object
-          description: Sets a path to the resource through the `directory` option.
-          properties:
-            directory:
-              type: string
-              description: Path to the resource.
+          description: >-
+            Module-dependent configuration. Refer to the respective storage
+            provider documentation for detailed information about supported
+            options and usage.
+          additionalProperties: true
     default: []
     examples:
       - - module: file_system
