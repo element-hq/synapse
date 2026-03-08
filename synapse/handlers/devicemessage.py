@@ -23,8 +23,15 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
-from synapse.api.constants import EduTypes, EventContentFields, ToDeviceEventTypes
-from synapse.api.errors import Codes, SynapseError
+from canonicaljson import encode_canonical_json
+
+from synapse.api.constants import (
+    MAX_EDU_SIZE,
+    EduTypes,
+    EventContentFields,
+    ToDeviceEventTypes,
+)
+from synapse.api.errors import Codes, EventSizeError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.logging.context import run_in_background
 from synapse.logging.opentracing import (
@@ -277,28 +284,29 @@ class DeviceMessageHandler:
                 destination = get_domain_from_id(user_id)
                 remote_messages.setdefault(destination, {})[user_id] = by_device
 
-        context = get_active_span_text_map()
-
-        remote_edu_contents = {}
-        for destination, messages in remote_messages.items():
-            # The EDU contains a "message_id" property which is used for
-            # idempotence. Make up a random one.
-            message_id = random_string(16)
-            log_kv({"destination": destination, "message_id": message_id})
-
-            remote_edu_contents[destination] = {
-                "messages": messages,
-                "sender": sender_user_id,
-                "type": message_type,
-                "message_id": message_id,
-                "org.matrix.opentracing_context": json_encoder.encode(context),
-            }
-
-        # Add messages to the database.
+        # Add local messages to the database.
         # Retrieve the stream id of the last-processed to-device message.
         last_stream_id = await self.store.add_messages_to_device_inbox(
-            local_messages, remote_edu_contents
+            local_messages, {}
         )
+        for destination, messages in remote_messages.items():
+            split_edus = get_split_device_message_edus(
+                sender_user_id, message_type, messages
+            )
+            for edu in split_edus:
+                edu["org.matrix.opentracing_context"] = json_encoder.encode(
+                    get_active_span_text_map()
+                )
+                # Add remote messages to the database.
+                last_stream_id = await self.store.add_messages_to_device_inbox(
+                    {}, {destination: edu}
+                )
+                log_kv(
+                    {
+                        "destination": destination,
+                        "message_id": edu["message_id"],
+                    }
+                )
 
         # Notify listeners that there are new to-device messages to process,
         # handing them the latest stream id.
@@ -397,3 +405,99 @@ class DeviceMessageHandler:
             "events": messages,
             "next_batch": f"d{stream_id}",
         }
+
+
+def get_split_device_message_edus(
+    sender_user_id: str,
+    message_type: str,
+    messages: dict[str, dict[str, JsonDict]],
+) -> list[JsonDict]:
+    """
+    This function takes many to-device messages and fits/splits them into several EDUs
+    as necessary. We split the messages up as the overall request can overrun the
+    `max_request_body_size` and prevent outbound federation traffic because of the size
+    of the transaction (cf. `MAX_EDU_SIZE`).
+
+    Args:
+        sender_user_id: The user that is sending the to-device messages.
+        message_type: The type of to-device messages that are being sent.
+        messages: A dictionary containing recipients mapped to messages intended for them.
+
+    Returns:
+        A list of dictionary containing the EDUs of to-device messages
+
+    Raises:
+        EventSizeError: If a single to-device message is too large to fit into an
+            EDU.
+    """
+    split_edus_content: list[JsonDict] = []
+
+    # Convert messages dict to a list of (recipient, messages_by_device) pairs
+    message_items = list(messages.items())
+
+    while message_items:
+        edu_messages = {}
+        # Start by trying to fit all remaining messages
+        target_count = len(message_items)
+
+        while target_count > 0:
+            # Take the first target_count messages
+            edu_messages = dict(message_items[:target_count])
+            edu_content = create_new_to_device_edu_content(
+                sender_user_id, message_type, edu_messages
+            )
+            # Let's add the whole EDU structure before testing the size
+            edu = {
+                "content": edu_content,
+                "edu_type": "m.direct_to_device",
+            }
+
+            if len(encode_canonical_json(edu)) <= MAX_EDU_SIZE:
+                # It fits! Add this EDU and remove these messages from the list
+                split_edus_content.append(edu_content)
+                message_items = message_items[target_count:]
+
+                logger.debug(
+                    "Created EDU with %d recipients from %s (message_id=%s), (total EDUs so far: %d)",
+                    target_count,
+                    sender_user_id,
+                    edu_content["message_id"],
+                    len(split_edus_content),
+                )
+                break
+            else:
+                if target_count == 1:
+                    # Single recipient's messages are too large
+                    recipient = message_items[0][0]
+                    raise EventSizeError(
+                        f"device message to {recipient} too large to fit in a single EDU",
+                        unpersistable=True,
+                    )
+
+                # Halve the number of messages and try again
+                target_count = target_count // 2
+
+    return split_edus_content
+
+
+def create_new_to_device_edu_content(
+    sender_user_id: str,
+    message_type: str,
+    messages: dict[str, Any] | None = None,
+    message_id: str | None = None,
+) -> JsonDict:
+    """
+    Create a new `m.direct_to_device` EDU `content` object with a unique message ID.
+    """
+    if messages is None:
+        messages = {}
+    if message_id is None:
+        message_id = random_string(16)
+
+    content = {
+        "sender": sender_user_id,
+        "type": message_type,
+        "message_id": message_id,
+        "messages": messages,
+    }
+    return content
