@@ -1585,9 +1585,8 @@ class EventCreationHandler:
                         auth_event = event_id_to_event.get(event_id)
                         if auth_event:
                             batched_auth_events[event_id] = auth_event
-                    if event.room_version.msc4242_state_dags and isinstance(
-                        event, FrozenEventVMSC4242
-                    ):
+                    if event.room_version.msc4242_state_dags:
+                         assert isinstance(event, FrozenEventVMSC4242)
                         # State DAG rooms will check that the prev_state_events are not rejected.
                         # To do that, we need to make sure we pass in the prev_state_events as
                         # batched_auth_events, else we will fail the event due to the
