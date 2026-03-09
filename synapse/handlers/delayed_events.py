@@ -385,6 +385,7 @@ class DelayedEventsHandler:
             origin_server_ts=origin_server_ts,
             content=content,
             delay=delay,
+            limit=self._config.experimental.msc4140_max_delayed_events_per_user,
             sticky_duration_ms=sticky_duration_ms,
         )
 

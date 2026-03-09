@@ -2456,6 +2456,40 @@ class RoomDelayedEventTestCase(RoomBase):
             channel.json_body,
         )
 
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 0,
+            },
+        }
+    )
+    def test_delayed_event_user_limit_exceeded(self) -> None:
+        """Test that users cannot have more delayed events scheduled at once than allowed."""
+        self.assertEqual(
+            self.hs.config.experimental.msc4140_max_delayed_events_per_user, 0
+        )
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+        self.assertEqual(
+            Codes.LIMIT_EXCEEDED,
+            channel.json_body["errcode"],
+            channel.json_body,
+        )
+        # Want a custom error message to have been set
+        self.assertNotEqual(
+            "Too Many Requests",
+            channel.json_body["error"],
+            channel.json_body,
+        )
+
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_delayed_event_with_negative_delay(self) -> None:
         """Test that sending a delayed event fails if its delay is negative."""
@@ -2472,7 +2506,14 @@ class RoomDelayedEventTestCase(RoomBase):
             Codes.INVALID_PARAM, channel.json_body["errcode"], channel.json_body
         )
 
-    @unittest.override_config({"max_event_delay_duration": "24h"})
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 1,
+            },
+        }
+    )
     def test_send_delayed_message_event(self) -> None:
         """Test sending a valid delayed message event."""
         channel = self.make_request(

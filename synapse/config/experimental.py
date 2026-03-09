@@ -563,6 +563,10 @@ class ExperimentalConfig(Config):
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
+        self.msc4140_max_delayed_events_per_user: int = experimental.get(
+            "msc4140_max_delayed_events_per_user", 100
+        )
+
         # MSC4143: Matrix RTC Transport using Livekit Backend
         self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
 
