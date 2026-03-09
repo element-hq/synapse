@@ -2419,7 +2419,10 @@ class RoomDelayedEventTestCase(RoomBase):
             {},
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        self.assertNotIn("org.matrix.msc4140.errcode", channel.json_body)
+        self.assertTrue(
+            channel.json_body.get("errcode", "").startswith("M_"),
+            channel.json_body,
+        )
 
     def test_delayed_event_unsupported_by_default(self) -> None:
         """Test that sending a delayed event is unsupported with the default config."""
@@ -2433,8 +2436,8 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            "M_MAX_DELAY_UNSUPPORTED",
-            channel.json_body.get("org.matrix.msc4140.errcode"),
+            "ORG.MATRIX.MSC4140_MAX_DELAY_EXCEEDED",
+            channel.json_body.get("errcode"),
             channel.json_body,
         )
 
@@ -2451,8 +2454,8 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            "M_MAX_DELAY_EXCEEDED",
-            channel.json_body.get("org.matrix.msc4140.errcode"),
+            "ORG.MATRIX.MSC4140_MAX_DELAY_EXCEEDED",
+            channel.json_body.get("errcode"),
             channel.json_body,
         )
 
