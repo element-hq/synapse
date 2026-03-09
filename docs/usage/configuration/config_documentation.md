@@ -3909,6 +3909,29 @@ push:
   jitter_delay: 10s
 ```
 ---
+### `webpush`
+
+*(object)* This setting defines options for WebPush notifications.
+
+This setting has the following sub-options:
+
+* `enabled` (boolean): Enables or disables WebPush notifications. Defaults to `false`.
+
+* `vapid_contact_email` (string): Email address where the push server operator can reach you in case they need to notify you about your usage of their API.
+
+* `vapid_private_key` (string|null): Private key for VAPID authentication.
+
+* `vapid_private_key_path` (string|null): Path to a file containing the private key for VAPID authentication.
+
+* `ttl_seconds` (number): Time-to-live of WebPush notifications in seconds. Default is 86400 seconds (1 day). If notifications can't be delivered by the push server aftet this time, they are expected to be dropped. Defaults to `86400`.
+
+Example configuration:
+```yaml
+webpush:
+  enabled: true
+  vapid_contact_email: admin@example.org
+```
+---
 ## Rooms
 
 Config options relating to rooms.

@@ -19,6 +19,8 @@
 #
 #
 
+from synapse.config.webpush import WebpushConfig
+
 from ._base import ConfigError, RootConfig
 from .account_validity import AccountValidityConfig
 from .api import ApiConfig
@@ -102,6 +104,7 @@ class HomeServerConfig(RootConfig):
         EmailConfig,
         PasswordAuthProviderConfig,
         PushConfig,
+        WebpushConfig,
         SpamCheckerConfig,
         RoomConfig,
         UserDirectoryConfig,

@@ -57,6 +57,7 @@ from synapse.config import (  # noqa: F401
     user_directory,
     user_types,
     voip,
+    webpush,
     workers,
 )
 from synapse.types import StrSequence
@@ -103,6 +104,7 @@ class RootConfig:
     worker: workers.WorkerConfig
     authproviders: password_auth_providers.PasswordAuthProviderConfig
     push: push.PushConfig
+    webpush: webpush.WebpushConfig
     spamchecker: spam_checker.SpamCheckerConfig
     room: room.RoomConfig
     userdirectory: user_directory.UserDirectoryConfig
