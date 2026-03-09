@@ -2996,12 +2996,14 @@ class PersistEventsStore:
                 },
             )
             return
+        assert len(event.prev_state_events) > 0
         self.db_pool.simple_upsert_many_txn(
             txn,
             table="msc4242_state_dag_edges",
             key_names=["room_id", "event_id", "prev_state_event_id"],
             key_values=[
-                (event.room_id, event.event_id, prev_state_event) for prev_state_event in event.prev_state_events
+                (event.room_id, event.event_id, prev_state_event)
+                for prev_state_event in event.prev_state_events
             ],
             value_names=(),
             value_values=(),

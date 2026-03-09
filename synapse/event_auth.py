@@ -215,7 +215,7 @@ async def check_state_independent_auth_rules(
             # we should have all the prev state events by now, so if we do not, that suggests
             # a synapse programming error
             known_prev_state_event_ids = set(prev_state_events)
-            raise RuntimeError(
+            raise AssertionError(
                 f"Event {event.event_id} has unknown prev_state_events "
                 + f"{len(prev_state_events)} != {len(prev_state_events_ids)} "
                 + f"{prev_state_events_ids - known_prev_state_event_ids} missing "
@@ -538,11 +538,10 @@ def _check_create(event: "EventBase") -> None:
         raise AuthError(403, "Create event has prev events")
 
     # State DAGs 1.2 If it has any prev_state_events, reject.
-    if (
-        event.room_version.msc4242_state_dags
-        and cast(FrozenEventVMSC4242, event).prev_state_events
-    ):
-        raise AuthError(403, "Create event has prev state events")
+    if event.room_version.msc4242_state_dags:
+        assert isinstance(event, FrozenEventVMSC4242)
+        if len(event.prev_state_events) > 0:
+            raise AuthError(403, "Create event has prev state events")
 
     if event.room_version.msc4291_room_ids_as_hashes:
         # 1.2 If the create event has a room_id, reject

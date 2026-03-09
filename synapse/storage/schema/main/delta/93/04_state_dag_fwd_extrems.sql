@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS msc4242_state_dag_forward_extremities(
     event_id TEXT NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
     -- it doesn't make sense to reference the same event multiple times, and this uniqueness
     -- index is also used to delete events once they are no longer forward extremities.
-    UNIQUE (event_id, room_id)
+    UNIQUE (event_id)
 );
 -- When creating events, we want to select all forward extremities for a room which this index helps with.
 CREATE INDEX msc4242_state_dag_room ON msc4242_state_dag_forward_extremities(room_id);
