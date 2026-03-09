@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+# Number of iterations in a loop before we yield to the reactor to allow other
+# things to be processed, otherwise we can end up tight looping.
+ITERATIONS_BEFORE_YIELDING = 500
+
+
 class BackgroundQueue(Generic[T]):
     """A single-producer single-consumer async queue processing items in the
     background.
@@ -65,6 +70,7 @@ class BackgroundQueue(Generic[T]):
         timeout_ms: int = 1000,
     ) -> None:
         self._hs = hs
+        self._clock = hs.get_clock()
         self._name = name
         self._callback = callback
         self._timeout_ms = Duration(milliseconds=timeout_ms)
@@ -107,7 +113,14 @@ class BackgroundQueue(Generic[T]):
                 # single threaded nature, but let's be a bit defensive anyway.)
                 self._wakeup_event.clear()
 
+                iterations = 0
                 while self._queue:
+                    iterations += 1
+                    if iterations % ITERATIONS_BEFORE_YIELDING == 0:
+                        # Yield to the reactor to allow other things to be processed,
+                        # otherwise we can end up tight looping.
+                        await self._clock.sleep(Duration(seconds=0))
+
                     item = self._queue.popleft()
                     try:
                         await self._callback(item)

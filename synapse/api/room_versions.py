@@ -18,7 +18,6 @@
 #
 #
 
-from typing import Callable
 
 import attr
 
@@ -538,42 +537,5 @@ KNOWN_ROOM_VERSIONS: dict[str, RoomVersion] = {
         RoomVersions.MSC3757v11,
         RoomVersions.MSC4242v12,
         RoomVersions.HydraV11,
-    )
-}
-
-
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class RoomVersionCapability:
-    """An object which describes the unique attributes of a room version."""
-
-    identifier: str  # the identifier for this capability
-    preferred_version: RoomVersion | None
-    support_check_lambda: Callable[[RoomVersion], bool]
-
-
-MSC3244_CAPABILITIES = {
-    cap.identifier: {
-        "preferred": (
-            cap.preferred_version.identifier
-            if cap.preferred_version is not None
-            else None
-        ),
-        "support": [
-            v.identifier
-            for v in KNOWN_ROOM_VERSIONS.values()
-            if cap.support_check_lambda(v)
-        ],
-    }
-    for cap in (
-        RoomVersionCapability(
-            "knock",
-            RoomVersions.V7,
-            lambda room_version: room_version.knock_join_rule,
-        ),
-        RoomVersionCapability(
-            "restricted",
-            RoomVersions.V9,
-            lambda room_version: room_version.restricted_join_rule,
-        ),
     )
 }

@@ -37,11 +37,17 @@ from typing import (
 import attr
 from unpaddedbase64 import encode_base64
 
-from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
+from synapse.api.constants import (
+    EventContentFields,
+    EventTypes,
+    RelationTypes,
+    StickyEvent,
+)
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict, StateKey, StrCollection
 from synapse.util.caches import intern_dict
+from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze
 
 if TYPE_CHECKING:
@@ -315,6 +321,28 @@ class EventBase(metaclass=abc.ABCMeta):
 
         # this will be a no-op if the event dict is already frozen.
         self._dict = freeze(self._dict)
+
+    def sticky_duration(self) -> Duration | None:
+        """
+        Returns the effective sticky duration of this event, or None
+        if the event does not have a sticky duration.
+        (Sticky Events are a MSC4354 feature.)
+
+        Clamps the sticky duration to the maximum allowed duration.
+        """
+        sticky_obj = self.get_dict().get(StickyEvent.EVENT_FIELD_NAME, None)
+        if type(sticky_obj) is not dict:
+            return None
+        sticky_duration_ms = sticky_obj.get("duration_ms", None)
+        # MSC: Clamp to 0 and MAX_DURATION (1 hour)
+        # We use `type(...) is int` to avoid accepting bools as `isinstance(True, int)`
+        # (bool is a subclass of int)
+        if type(sticky_duration_ms) is int and sticky_duration_ms >= 0:
+            return min(
+                Duration(milliseconds=sticky_duration_ms),
+                StickyEvent.MAX_DURATION,
+            )
+        return None
 
     def __str__(self) -> str:
         return self.__repr__()

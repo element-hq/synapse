@@ -139,3 +139,14 @@ mypy
 
 # Generate configuration documentation from the JSON Schema
 ./scripts-dev/gen_config_documentation.py schema/synapse-config.schema.yaml > docs/usage/configuration/config_documentation.md
+
+# Lint/format the in-repo Complement test code (Go)
+pushd ./complement
+# Run golangci-lint with:
+#  - The `run` command will lint the code
+#  - `--fix`: Will apply any suggested fixes like autofixes from `linters` *and*
+#    `formatters` which always produce suggested fixes that are equivalent to running
+#    `golangci-lint fmt`.
+#  - `--max-issues-per-linter=0`: Show all issues, don't limit the number reported
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.6.1 run ./... --fix --max-issues-per-linter=0
+popd

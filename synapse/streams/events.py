@@ -84,6 +84,7 @@ class EventSources:
             self._instance_name
         )
         thread_subscriptions_key = self.store.get_max_thread_subscriptions_stream_id()
+        sticky_events_key = self.store.get_max_sticky_events_stream_id()
 
         token = StreamToken(
             room_key=self.sources.room.get_current_key(),
@@ -98,6 +99,7 @@ class EventSources:
             groups_key=0,
             un_partial_stated_rooms_key=un_partial_stated_rooms_key,
             thread_subscriptions_key=thread_subscriptions_key,
+            sticky_events_key=sticky_events_key,
         )
         return token
 
@@ -125,6 +127,7 @@ class EventSources:
             StreamKeyType.DEVICE_LIST: self.store.get_device_stream_id_generator(),
             StreamKeyType.UN_PARTIAL_STATED_ROOMS: self.store.get_un_partial_stated_rooms_id_generator(),
             StreamKeyType.THREAD_SUBSCRIPTIONS: self.store.get_thread_subscriptions_stream_id_generator(),
+            StreamKeyType.STICKY_EVENTS: self.store.get_sticky_events_stream_id_generator(),
         }
 
         for _, key in StreamKeyType.__members__.items():

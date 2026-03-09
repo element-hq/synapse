@@ -3,6 +3,7 @@
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -366,7 +367,11 @@ class MSC3866Config:
 
 
 class ExperimentalConfig(Config):
-    """Config section for enabling experimental features"""
+    """Config section for enabling experimental features
+
+    All new experimental features should have a tracking issue with the
+    `T-ExperimentalFeatures` label, kept open as long as the experimental
+    feature is present in Synapse."""
 
     section = "experimental"
 
@@ -380,9 +385,6 @@ class ExperimentalConfig(Config):
 
         # MSC3814 (dehydrated devices with SSSS)
         self.msc3814_enabled: bool = experimental.get("msc3814_enabled", False)
-
-        # MSC3244 (room version capabilities)
-        self.msc3244_enabled: bool = experimental.get("msc3244_enabled", True)
 
         # MSC3266 (room summary api)
         self.msc3266_enabled: bool = experimental.get("msc3266_enabled", False)
@@ -508,12 +510,17 @@ class ExperimentalConfig(Config):
             "msc4069_profile_inhibit_propagation", False
         )
 
-        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version:
+        # See: https://github.com/element-hq/synapse/issues/19434
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
 
         self.msc4108_delegation_endpoint: str | None = experimental.get(
             "msc4108_delegation_endpoint", None
         )
+
+        # MSC4370: Get extremities federation endpoint
+        # See https://github.com/element-hq/synapse/issues/19524
+        self.msc4370_enabled = experimental.get("msc4370_enabled", False)
 
         auth_delegated = self.msc3861.enabled or (
             config.get("matrix_authentication_service") or {}
@@ -531,6 +538,26 @@ class ExperimentalConfig(Config):
             raise ConfigError(
                 "You cannot have MSC4108 both enabled and delegated at the same time",
                 ("experimental", "msc4108_delegation_endpoint"),
+            )
+
+        # MSC4388: Secure out-of-band channel for sign in with QR:
+        # See: https://github.com/element-hq/synapse/issues/19433
+        msc4388_mode = experimental.get("msc4388_mode", "off")
+
+        if msc4388_mode not in ["off", "public", "authenticated"]:
+            raise ConfigError(
+                "msc4388_mode must be one of 'off', 'public' or 'authenticated'",
+                ("experimental", "msc4388_mode"),
+            )
+        self.msc4388_enabled: bool = msc4388_mode != "off"
+        self.msc4388_requires_authentication: bool = msc4388_mode == "authenticated"
+
+        if self.msc4388_enabled and not (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False):
+            raise ConfigError(
+                "MSC4388 requires matrix_authentication_service to be enabled",
+                ("experimental", "msc4388_enabled"),
             )
 
         # MSC4133: Custom profile fields
@@ -579,5 +606,8 @@ class ExperimentalConfig(Config):
         # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
 
-        # MSC4380: Invite blocking
-        self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
+        # MSC4354: Sticky Events
+        # Tracked in: https://github.com/element-hq/synapse/issues/19409
+        # Note that sticky events persisted before this feature is enabled will not be
+        # considered sticky by the local homeserver.
+        self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)

@@ -185,7 +185,7 @@ class RoomCreationHandler:
             clock=hs.get_clock(),
             name="room_upgrade",
             server_name=self.server_name,
-            timeout_ms=FIVE_MINUTES_IN_MS,
+            timeout=Duration(minutes=5),
         )
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
 

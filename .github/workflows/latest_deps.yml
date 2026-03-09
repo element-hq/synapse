@@ -93,7 +93,7 @@ jobs:
             -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_INITDB_ARGS="--lc-collate C --lc-ctype C --encoding UTF8" \
             postgres:${{ matrix.postgres-version }}
-      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.x"
       - run: pip install .[all,test]
@@ -125,7 +125,6 @@ jobs:
           -exec cat {} \;
           -exec echo "::endgroup::" \;
           || true
-
 
   sytest:
     needs: check_repo
@@ -181,7 +180,6 @@ jobs:
             /logs/results.tap
             /logs/**/*.log*
 
-
   complement:
     needs: check_repo
     if: "!failure() && !cancelled() && needs.check_repo.outputs.should_run_workflow == 'true'"
@@ -214,11 +212,53 @@ jobs:
           cache-dependency-path: complement/go.sum
           go-version-file: complement/go.mod
 
-      - run: |
+      - name: Run Complement Tests
+        id: run_complement_tests
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
           set -o pipefail
-          TEST_ONLY_IGNORE_POETRY_LOCKFILE=1 POSTGRES=${{ (matrix.database == 'Postgres') && 1 || '' }} WORKERS=${{ (matrix.arrangement == 'workers') && 1 || '' }} COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -json 2>&1 | synapse/.ci/scripts/gotestfmt
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log
         shell: bash
-        name: Run Complement Tests
+        env:
+          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          TEST_ONLY_IGNORE_POETRY_LOCKFILE: 1
+
+      - name: Formatted Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_complement_tests.outcome != 'skipped'
+        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
+
+      - name: Run in-repo Complement Tests
+        id: run_in_repo_complement_tests
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest-in-repo-complement.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
+          set -o pipefail
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 | tee /tmp/gotest-in-repo-complement.log
+        shell: bash
+        env:
+          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          TEST_ONLY_IGNORE_POETRY_LOCKFILE: 1
+
+      - name: Formatted in-repo Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_in_repo_complement_tests.outcome != 'skipped'
+        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
 
   # Open an issue if the build fails, so we know about it.
   # Only do this if we're not experimenting with this action in a PR.
