@@ -304,7 +304,7 @@ class StateHandler:
             membership events.
             `False` if `state_ids_before_event` is the full state.
             `None` when `state_ids_before_event` is not provided. In this case, the
-            flag will be calculated based on `event`'s prev events or prev_state_events
+            flag will be calculated based on `event`'s `prev_events` or `prev_state_events`
             for state DAG rooms.
         state_group_before_event:
             the current state group at the time of event, if known
