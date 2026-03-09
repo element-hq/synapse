@@ -2872,8 +2872,12 @@ class SyncHandler:
                 unread_notifications: dict[str, int] = {}
                 sticky_events: list[EventBase] = []
                 if sticky_event_ids:
-                    # remove sticky events that are in the timeline, else we will needlessly duplicate
-                    # events. This is particularly important given the risk of sticky events spam since
+                    # As per MSC4354:
+                    # Remove sticky events that are already in the timeline, else we will needlessly duplicate
+                    # events.
+                    # There is no purpose in including sticky events in the sticky section if they're already in
+                    # the timeline, as either way the client becomes aware of them.
+                    # This is particularly important given the risk of sticky events spam since
                     # anyone can send sticky events, so halving the bandwidth on average for each sticky
                     # event is helpful.
                     timeline_event_id_set = {ev.event_id for ev in batch.events}
