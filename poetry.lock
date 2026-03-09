@@ -3129,18 +3129,6 @@ dev = ["duckdb (>=0.6)", "mypy", "pandas", "pandas-stubs", "pdoc", "pre-commit",
 rs = ["sqlglotrs (==0.13.0)"]
 
 [[package]]
-name = "systemd-python"
-version = "235"
-description = "Python interface for libsystemd"
-optional = true
-python-versions = "*"
-groups = ["main"]
-markers = "extra == \"systemd\""
-files = [
-    {file = "systemd-python-235.tar.gz", hash = "sha256:4e57f39797fd5d9e2d22b8806a252d7c0106c936039d1e71c8c6b8008e695c0a"},
-]
-
-[[package]]
 name = "threadloop"
 version = "1.0.2"
 description = "Tornado IOLoop Backed Concurrent Futures"
@@ -3761,11 +3749,10 @@ postgres = ["psycopg2", "psycopg2cffi", "psycopg2cffi-compat"]
 redis = ["hiredis", "txredisapi"]
 saml2 = ["defusedxml", "pysaml2", "pytz"]
 sentry = ["sentry-sdk"]
-systemd = ["systemd-python"]
 test = ["idna", "parameterized"]
 url-preview = ["lxml"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "1caa5072f6304122c89377420f993a54f54587f3618ccc8094ec31642264592c"
+content-hash = "dd63614889e7e181fca33760741a490e65fe4ef4f42756cafd0f804ae7324916"
