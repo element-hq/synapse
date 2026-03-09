@@ -216,7 +216,7 @@ async def check_state_independent_auth_rules(
             # a synapse programming error
             known_prev_state_event_ids = set(prev_state_events)
             raise RuntimeError(
-                f"Event {event.event_id} has unknown prev state events "
+                f"Event {event.event_id} has unknown prev_state_events "
                 + f"{len(prev_state_events)} != {len(prev_state_events_ids)} "
                 + f"{prev_state_events_ids - known_prev_state_event_ids} missing "
                 + f"out of {prev_state_events_ids}"
@@ -226,8 +226,8 @@ async def check_state_independent_auth_rules(
             if prev_state_event.room_id != event.room_id:
                 raise AuthError(
                     403,
-                    "During auth for event %s in room %s, found event %s in prev state events "
-                    "which is in room %s"
+                    "During auth for event %s in room %s, found event %s in prev_state_events "
+                    "which belongs to a different room %s"
                     % (
                         event.event_id,
                         event.room_id,

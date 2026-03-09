@@ -964,8 +964,8 @@ class EventsPersistenceStorageController:
         #    existing, processed events which have the to-be-persisted events as prev_state_events.
         #  - We don't care if they are an "outlier" in the main room dag, so long as they AREN'T
         #    an outlier on the state dag, which this function checks, so we don't check outlier-ness.
-        #  - We allow soft-failed events to become forward extremities, as per the MSC. We do not
-        #    allow rejected events to become forward extremities though.
+        #  - We allow *soft-failed* events to become forward extremities, as per the MSC. We do not
+        #    allow *rejected* events to become forward extremities though.
 
         rejected_events = [ev for ev, ctx in new_state_events_contexts if ctx.rejected]
         new_state_events = [

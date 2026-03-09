@@ -29,7 +29,7 @@ from tests.unittest import HomeserverTestCase
 
 
 class MSC4242StateDagsTests(HomeserverTestCase):
-    user_id = "@red:server"
+    user_id = "@user1:server"
     servlets = [room.register_servlets]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:

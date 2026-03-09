@@ -3001,7 +3001,7 @@ class PersistEventsStore:
             table="msc4242_state_dag_edges",
             key_names=["room_id", "event_id", "prev_state_event_id"],
             key_values=[
-                (event.room_id, event.event_id, pae) for pae in event.prev_state_events
+                (event.room_id, event.event_id, prev_state_event) for prev_state_event in event.prev_state_events
             ],
             value_names=(),
             value_values=(),
@@ -3527,7 +3527,7 @@ class PersistEventsStore:
         """
         state_groups = {}
         for event, context in events_and_contexts:
-            # state dag rooms allow outliers to have state, as /gme'd state dag events are nominally
+            # state dag rooms allow outliers to have state, as `/get_missing_events` state dag events are nominally
             # outliers (not present in the timeline) but do need state persisted so we can calculate
             # what the auth_events are for the event.
             if (

@@ -486,7 +486,7 @@ class EventAuthTestCase(unittest.TestCase):
                         "type": "m.room.name",
                         "sender": creator,
                         "state_key": "",
-                        "content": {"name": "prev state event is in another room"},
+                        "content": {"name": "prev_state_event is in another room"},
                         "prev_events": [join_event.event_id],
                         "prev_state_events": [event_in_another_room.event_id],
                     },
