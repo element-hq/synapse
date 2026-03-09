@@ -41,21 +41,53 @@ jobs:
           echo "SYNAPSE_VERSION=$(grep "^version" pyproject.toml | sed -E 's/version\s*=\s*["]([^"]*)["]/\1/')" >> $GITHUB_ENV
 
       - name: Log in to DockerHub
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Tailscale
+        uses: tailscale/github-action@53acf823325fe9ca47f4cdaa951f90b4b0de5bb9 # v4.1.1
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:github-actions
+
+      - name: Compute vault jwt role name
+        id: vault-jwt-role
+        run: |
+           echo "role_name=github_service_management_$( echo "${{ github.repository }}" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Get team registry token
+        id: import-secrets
+        uses: hashicorp/vault-action@4c06c5ccf5c0761b6029f56cfb1dcf5565918a3b # v3.4.0
+        with:
+          url: https://vault.infra.ci.i.element.dev
+          role: ${{ steps.vault-jwt-role.outputs.role_name }}
+          path: service-management/github-actions
+          jwtGithubAudience: https://vault.infra.ci.i.element.dev
+          method: jwt
+          secrets: |
+             services/backend-repositories/secret/data/oci.element.io username | OCI_USERNAME ;
+             services/backend-repositories/secret/data/oci.element.io password | OCI_PASSWORD ;
+
+      - name: Login to Element OCI Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: oci-push.vpn.infra.element.io
+          username: ${{ steps.import-secrets.outputs.OCI_USERNAME }}
+          password: ${{ steps.import-secrets.outputs.OCI_PASSWORD }}
+
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           push: true
           labels: |
@@ -64,6 +96,7 @@ jobs:
           tags: |
             docker.io/matrixdotorg/synapse
             ghcr.io/element-hq/synapse
+            oci-push.vpn.infra.element.io/synapse
           file: "docker/Dockerfile"
           platforms: ${{ matrix.platform }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
@@ -90,6 +123,7 @@ jobs:
         repository:
           - docker.io/matrixdotorg/synapse
           - ghcr.io/element-hq/synapse
+          - oci-push.vpn.infra.element.io/synapse
 
     needs:
       - build
@@ -102,19 +136,51 @@ jobs:
           merge-multiple: true
 
       - name: Log in to DockerHub
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         if: ${{ startsWith(matrix.repository, 'docker.io') }}
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         if: ${{ startsWith(matrix.repository, 'ghcr.io') }}
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tailscale
+        uses: tailscale/github-action@53acf823325fe9ca47f4cdaa951f90b4b0de5bb9 # v4.1.1
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:github-actions
+
+      - name: Compute vault jwt role name
+        id: vault-jwt-role
+        run: |
+           echo "role_name=github_service_management_$( echo "${{ github.repository }}" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Get team registry token
+        id: import-secrets
+        uses: hashicorp/vault-action@4c06c5ccf5c0761b6029f56cfb1dcf5565918a3b # v3.4.0
+        with:
+          url: https://vault.infra.ci.i.element.dev
+          role: ${{ steps.vault-jwt-role.outputs.role_name }}
+          path: service-management/github-actions
+          jwtGithubAudience: https://vault.infra.ci.i.element.dev
+          method: jwt
+          secrets: |
+             services/backend-repositories/secret/data/oci.element.io username | OCI_USERNAME ;
+             services/backend-repositories/secret/data/oci.element.io password | OCI_PASSWORD ;
+
+      - name: Login to Element OCI Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: oci-push.vpn.infra.element.io
+          username: ${{ steps.import-secrets.outputs.OCI_USERNAME }}
+          password: ${{ steps.import-secrets.outputs.OCI_PASSWORD }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0

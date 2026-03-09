@@ -49,6 +49,7 @@ from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import Requester, UserID, create_requester
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+from synapse.util.duration import Duration
 from synapse.util.json import json_decoder
 
 from . import introspection_response_timer
@@ -205,7 +206,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             clock=self._clock,
             name="token_introspection",
             server_name=self.server_name,
-            timeout_ms=120_000,
+            timeout=Duration(minutes=2),
             # don't log because the keys are access tokens
             enable_logging=False,
         )
