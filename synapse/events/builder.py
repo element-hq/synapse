@@ -145,11 +145,14 @@ class EventBuilder:
                 Should normally be set to None, which will cause the depth to be calculated
                 based on the prev_events.
             prev_state_events: The event IDs to use as prev_state_events.
-                Only applicable on MSC4242v11 rooms. If this is supplied, auth_event_ids
-                is ignored.
+                Only applicable on MSC4242 state DAG rooms. If this is supplied, auth_event_ids
+                must not be specified.
         Returns:
             The signed and hashed event.
         """
+        # If the caller specifies this, make sure the room version supports it.
+        if prev_state_events:
+            assert self.room_version.msc4242_state_dags
         if self.room_version.msc4242_state_dags:
             assert prev_state_events is not None
             if self.room_id:
@@ -180,15 +183,16 @@ class EventBuilder:
                 # event is a state DAG event and is the create event (room_id is not provided),
                 # therefore there are no auth_events.
                 calculated_auth_event_ids = []
+                assert self.type == EventTypes.Create and self.state_key == ""
             self.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
             auth_event_ids = calculated_auth_event_ids
 
-        # this block must not be hit for MSC4242 rooms as it resolves state with prev_events
         # Create events always have empty auth_events.
         if self.type == EventTypes.Create and self.is_state() and self.state_key == "":
             auth_event_ids = []
 
         # Calculate auth_events for non-create events
+        # this block must not be hit for MSC4242 rooms as it resolves state with prev_events
         if auth_event_ids is None:
             # Every non-create event must have a room ID
             assert self.room_id is not None
@@ -296,9 +300,10 @@ class EventBuilder:
                 auth_event_ids.remove(create_event_id)
                 event_dict["auth_events"] = auth_event_ids
 
-        if self.room_version.msc4242_state_dags and prev_state_events is not None:
+        if self.room_version.msc4242_state_dags:
             # Auth events are removed entirely on state DAG rooms
             event_dict.pop("auth_events")
+            assert prev_state_events is not None
             event_dict["prev_state_events"] = prev_state_events
         if self.room_id is not None:
             event_dict["room_id"] = self.room_id

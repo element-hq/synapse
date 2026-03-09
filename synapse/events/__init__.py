@@ -713,7 +713,7 @@ def event_exists_in_state_dag(
     event: Union["EventBase", "EventBuilder", "EventMetadata", "StateKey"],
 ) -> bool:
     """Given an event, returns true if this event should form part of the state DAG.
-    Only valid for room versions which use a state DAG."""
+    Only valid for room versions which use a state DAG (MSC4242)."""
     state_key = None
     if isinstance(event, EventMetadata):
         state_key = event.state_key
