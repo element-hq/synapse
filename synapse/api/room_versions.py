@@ -36,7 +36,7 @@ class EventFormatVersions:
     ROOM_V3 = 2  # MSC1659-style $hash event id format: used for room v3
     ROOM_V4_PLUS = 3  # MSC1884-style $hash format: introduced for room v4
     ROOM_V11_HYDRA_PLUS = 4  # MSC4291 room IDs as hashes: introduced for room HydraV11
-    ROOM_VMSC4242 = 5 # MSC4242 state dags: adds prev_state_events, removes auth_events
+    ROOM_VMSC4242 = 5  # MSC4242 state dags: adds prev_state_events, removes auth_events
 
 
 KNOWN_EVENT_FORMAT_VERSIONS = {
