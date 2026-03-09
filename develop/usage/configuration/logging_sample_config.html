@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-99781f0e.js";
+            window.path_to_searchindex_js = "../../searchindex-140a6b8c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-4dc10a98.js"></script>
@@ -208,6 +208,8 @@ the homeserver config when following the <a href="../../setup/installation.html"
 It should be named <code>&lt;SERVERNAME&gt;.log.config</code> by default.</p>
 <p>Hint: If you’re looking for a guide on what each of the fields in the “Processed request” log lines mean,
 see <a href="../administration/request_log.html">Request log format</a>.</p>
+<p>If you use <code>systemd.journal.JournalHandler</code> in your own logging config, ensure
+<code>systemd-python</code> is installed in Synapse’s runtime environment.</p>
 <pre><code class="language-yaml"># Log configuration for Synapse.
 #
 # This is a YAML file containing a standard Python logging configuration

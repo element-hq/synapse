@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-99781f0e.js";
+            window.path_to_searchindex_js = "searchindex-140a6b8c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -425,6 +425,10 @@ pip install --upgrade pip
 pip install --upgrade setuptools
 pip install matrix-synapse
 </code></pre>
+<p>If you want to use a logging configuration that references
+<code>systemd.journal.JournalHandler</code> (for example <code>contrib/systemd/log_config.yaml</code>),
+you must install <code>systemd-python</code> separately in the same environment.
+Synapse no longer provides a <code>matrix-synapse[systemd]</code> extra.</p>
 <p>This will download Synapse from <a href="https://pypi.org/project/matrix-synapse">PyPI</a>
 and install it, along with the python libraries it uses, into a virtual environment
 under <code>~/synapse/env</code>.  Feel free to pick a different directory if you
@@ -2028,6 +2032,16 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11500"><a class="header" href="#upgrading-to-v11500">Upgrading to v1.150.0</a></h1>
+<h2 id="removal-of-the-systemd-pip-extra"><a class="header" href="#removal-of-the-systemd-pip-extra">Removal of the <code>systemd</code> pip extra</a></h2>
+<p>The <code>matrix-synapse[systemd]</code> pip extra has been removed.
+If you use <code>systemd.journal.JournalHandler</code> in your logging configuration
+(e.g. <code>contrib/systemd/log_config.yaml</code>), you must now install
+<code>systemd-python</code> manually in Synapse’s runtime environment:</p>
+<pre><code class="language-bash">pip install systemd-python
+</code></pre>
+<p>No action is needed if you do not use journal logging, or if you installed
+Synapse from the Debian packages (which handle this automatically).</p>
 <h1 id="upgrading-to-v11460"><a class="header" href="#upgrading-to-v11460">Upgrading to v1.146.0</a></h1>
 <h2 id="drop-support-for-ubuntu-2504-plucky-puffin-and-add-support-for-2510-questing-quokka"><a class="header" href="#drop-support-for-ubuntu-2504-plucky-puffin-and-add-support-for-2510-questing-quokka">Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka</a></h2>
 <p>Ubuntu 25.04 Plucky Puffin <a href="https://endoflife.date/ubuntu">is end-of-life as of 17 Jan
@@ -8274,6 +8288,8 @@ the homeserver config when following the <a href="#installation-instructions">in
 It should be named <code>&lt;SERVERNAME&gt;.log.config</code> by default.</p>
 <p>Hint: If you’re looking for a guide on what each of the fields in the “Processed request” log lines mean,
 see <a href="#request-log-format">Request log format</a>.</p>
+<p>If you use <code>systemd.journal.JournalHandler</code> in your own logging config, ensure
+<code>systemd-python</code> is installed in Synapse’s runtime environment.</p>
 <pre><code class="language-yaml"># Log configuration for Synapse.
 #
 # This is a YAML file containing a standard Python logging configuration

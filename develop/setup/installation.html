@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-99781f0e.js";
+            window.path_to_searchindex_js = "../searchindex-140a6b8c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-4dc10a98.js"></script>
@@ -350,6 +350,10 @@ pip install --upgrade pip
 pip install --upgrade setuptools
 pip install matrix-synapse
 </code></pre>
+<p>If you want to use a logging configuration that references
+<code>systemd.journal.JournalHandler</code> (for example <code>contrib/systemd/log_config.yaml</code>),
+you must install <code>systemd-python</code> separately in the same environment.
+Synapse no longer provides a <code>matrix-synapse[systemd]</code> extra.</p>
 <p>This will download Synapse from <a href="https://pypi.org/project/matrix-synapse">PyPI</a>
 and install it, along with the python libraries it uses, into a virtual environment
 under <code>~/synapse/env</code>.  Feel free to pick a different directory if you
