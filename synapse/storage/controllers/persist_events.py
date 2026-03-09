@@ -895,6 +895,7 @@ class EventsPersistenceStorageController:
                 cast(list[EventPersistencePair], event_contexts),
                 existing_state_dag_fwd_extrems,
                 new_state_dag_fwd_extrems,
+                # do not prune forward extremities in the state DAG
                 should_prune=False,
             )
 
@@ -941,7 +942,10 @@ class EventsPersistenceStorageController:
     ) -> set[str]:
         """Calculate the new state dag forward extremities. Modifies existing_fwd_extrems.
 
-        Assumes that new_state_events are only state events which should be in the state DAG.
+        Assumes that event_contexts are only state events which should be in the state DAG.
+
+        Raises:
+            SynapseError: if the new events include unknown prev_state_events
         """
         # filter out events which don't belong in the state dag.
         new_state_events_contexts = [
@@ -967,10 +971,8 @@ class EventsPersistenceStorageController:
         new_state_events = [
             ev for ev, ctx in new_state_events_contexts if not ctx.rejected
         ]
-        # We include rejected_event_ids in this check
-        # otherwise if we persist a chunk of (R <- O) then O would fail the check since R was not in
-        # the DB of the to-be-persisted chunk yet (remember all the events in the chunk aren't
-        # persisted yet!)
+        # We want to check that we are not missing any prev_state_events.
+        # To do this, we include rejected events in this check.
         all_events = set(rejected_events + new_state_events)
 
         # First, verify that we know all prev_state_events. If we fail this check then we don't have
@@ -1022,8 +1024,8 @@ class EventsPersistenceStorageController:
             e_id for event in new_state_events for e_id in event.prev_state_events
         )
 
-        # Finally handle the case where the new events have rejected prev
-        # events. If they do we need to remove them and their prev events,
+        # Finally handle the case where the new events have rejected/soft-failed prev state events.
+        # If they do we need to remove them and their prev state events,
         # otherwise we end up with dangling extremities.
         # Specifically, this handles the case where (F=fwd extrem, SF=soft-failed, N=new event)
         # F <-- SF <-- SF <-- N
@@ -1127,6 +1129,9 @@ class EventsPersistenceStorageController:
 
             should_prune :
                 if true, attempt to prune the forward extremities.
+                Pruning means we will not communicate some new events to other servers,
+                which can compromise eventual delivery, so graphs which are fully synchronised
+                e.g. state DAGs should not prune.
 
         Returns:
             Returns a tuple of two state maps and a set of new forward
