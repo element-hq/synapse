@@ -28,7 +28,6 @@ from typing import (
     Generic,
     Iterable,
     Literal,
-    Optional,
     TypeVar,
     Union,
     overload,
@@ -527,8 +526,8 @@ class FrozenEventV4(FrozenEventV3):
         self,
         event_dict: JsonDict,
         room_version: RoomVersion,
-        internal_metadata_dict: Optional[JsonDict] = None,
-        rejected_reason: Optional[str] = None,
+        internal_metadata_dict: JsonDict | None = None,
+        rejected_reason: str | None = None,
     ):
         super().__init__(
             event_dict=event_dict,
@@ -587,8 +586,8 @@ class FrozenEventVMSC4242(FrozenEventV4):
         self,
         event_dict: JsonDict,
         room_version: RoomVersion,
-        internal_metadata_dict: Optional[JsonDict] = None,
-        rejected_reason: Optional[str] = None,
+        internal_metadata_dict: JsonDict | None = None,
+        rejected_reason: str | None = None,
     ):
         # Similar to how we assert event_id isn't in V2+ events, we do the same with auth_events.
         assert "auth_events" not in event_dict
@@ -769,5 +768,5 @@ class EventMetadata:
 
     room_id: str
     event_type: str
-    state_key: Optional[str]
-    rejection_reason: Optional[str]
+    state_key: str | None
+    rejection_reason: str | None
