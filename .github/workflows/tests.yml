@@ -673,8 +673,6 @@ jobs:
     needs:
       - linting-done
       - changes
-    with:
-      use_latest_deps: true
 
   cargo-test:
     if: ${{ needs.changes.outputs.rust == 'true' }}
