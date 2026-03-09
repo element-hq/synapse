@@ -491,7 +491,9 @@ class AdminHandler:
                         prev_state_events = event.get_dict().get(
                             "prev_state_events", None
                         )
-                        assert prev_state_events is not None, "Parent event of redaction has no `prev_state_events` which should be impossible as `prev_state_events` is a required event in MSC4242 rooms"
+                        assert prev_state_events is not None, (
+                            "Parent event of redaction has no `prev_state_events` which should be impossible as `prev_state_events` is a required event in MSC4242 rooms"
+                        )
                     # set the prev event to the offending message to allow for redactions
                     # to be processed in the case where the user has been kicked/banned before
                     # redactions are requested.

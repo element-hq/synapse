@@ -1300,6 +1300,7 @@ class EventCreationHandler:
                     )
             else:
                 # create event doesn't need prev_state_events to be fetched, but it must be non-None.
+                assert builder.type == EventTypes.Create and builder.state_key == ""
                 prev_state_events = []
 
         # Strip down the state_event_ids to only what we need to auth the event.
@@ -1586,15 +1587,19 @@ class EventCreationHandler:
                         if auth_event:
                             batched_auth_events[event_id] = auth_event
                     if event.room_version.msc4242_state_dags:
-                         assert isinstance(event, FrozenEventVMSC4242)
+                        assert isinstance(event, FrozenEventVMSC4242)
                         # State DAG rooms will check that the prev_state_events are not rejected.
                         # To do that, we need to make sure we pass in the prev_state_events as
                         # batched_auth_events, else we will fail the event due to the
                         # prev_state_events not existing in the database.
-                        for event_id in event.prev_state_events:
-                            pse = event_id_to_event.get(event_id)
-                            if pse:
-                                batched_auth_events[event_id] = pse
+                        for prev_state_event_id in event.prev_state_events:
+                            prev_state_event = event_id_to_event.get(
+                                prev_state_event_id
+                            )
+                            if prev_state_event:
+                                batched_auth_events[prev_state_event_id] = (
+                                    prev_state_event
+                                )
                     await self._event_auth_handler.check_auth_rules_from_context(
                         event, batched_auth_events
                     )

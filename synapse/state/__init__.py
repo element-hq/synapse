@@ -239,7 +239,7 @@ class StateHandler:
         )
         return await ret.get_state(self._state_storage_controller, state_filter)
 
-    # TODO(kegan): this is unused?
+    # TODO: Remove as this is unused
     async def get_current_user_ids_in_room(
         self, room_id: str, latest_event_ids: StrCollection
     ) -> set[str]:

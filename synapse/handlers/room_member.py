@@ -617,7 +617,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 by the MSC2716 /batch_send endpoint. This should normally be left as
                 None, which will cause the auth_event_ids to be calculated based on the
                 room state at the prev_events.
-                TODO(kegan): I don't see this being used anywhere.
             depth: Override the depth used to order the event in the DAG.
                 Should normally be set to None, which will cause the depth to be calculated
                 based on the prev_events.
@@ -1175,8 +1174,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     # see: https://github.com/matrix-org/synapse/issues/7139
                     if len(latest_event_ids) == 0:
                         latest_event_ids = [invite.event_id]
-                        # TODO(kegan): room version check?
-                        prev_state_events = [invite.event_id]
+                        if invite.room_version.msc4242_state_dags:
+                            prev_state_events = [invite.event_id]
 
                 # or perhaps this is a remote room that a local user has knocked on
                 elif current_membership_type == Membership.KNOCK:
@@ -2120,15 +2119,17 @@ class RoomMemberMasterHandler(RoomMemberHandler):
         #
         # the prev_events consist solely of the previous membership event.
         prev_event_ids = [previous_membership_event.event_id]
-        auth_event_ids = (
-            list(previous_membership_event.auth_event_ids()) + prev_event_ids
-        )
+        auth_event_ids = None
         # Authorise the leave by referencing the previous membership
         prev_state_events = None
         if previous_membership_event.room_version.msc4242_state_dags:
             prev_state_events = [
                 previous_membership_event.event_id,
             ]
+        else:
+            auth_event_ids = (
+                list(previous_membership_event.auth_event_ids()) + prev_event_ids
+            )
 
         # Try several times, it could fail with PartialStateConflictError
         # in handle_new_client_event, cf comment in except block.
