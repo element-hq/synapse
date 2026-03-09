@@ -295,7 +295,7 @@ class HttpDelayedRequest:
 
     def execute(
         self, http_client: SimpleHttpClient, low_priority: bool, topic: bytes
-    ) -> defer.Deferred[IResponse]:
+    ) -> "defer.Deferred[IResponse]":
         headers = Headers()
         for key, value in self.webpush_headers.items():
             headers.addRawHeader(key, value)
