@@ -1034,6 +1034,7 @@ class EventsPersistenceStorageController:
                 **{SERVER_NAME_LABEL: self.server_name}
             ).observe(len(result))
 
+        # There should always be at least one forward extremity. 
         assert result, f"No state dag forward extremities left in room {room_id}!"
         return result
 
