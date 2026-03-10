@@ -195,7 +195,7 @@ async def check_state_independent_auth_rules(
             for event_id in prev_state_events_ids
             if not batched_auth_events or event_id not in batched_auth_events
         }
-        # Try to load the prev state events from batched_auth_events initially
+        # Try to load the `prev _state_events` from `batched_auth_events` initially
         prev_state_events = (
             {}
             if not batched_auth_events
