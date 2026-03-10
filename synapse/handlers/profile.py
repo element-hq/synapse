@@ -176,17 +176,22 @@ class ProfileHandler:
         new_displayname: str,
         *,
         by_admin: bool = False,
-        deactivation: bool = False,
         propagate: bool = True,
     ) -> None:
         """Set the displayname of a user
+
+        Preconditions:
+        - This must NOT be called as part of deactivating the user, because we will
+          notify modules about the change whilst claiming it is not related
+          to user deactivation and we will also (if `propagate=True`) send
+          updates into rooms, which could cause rooms to be accidentally joined
+          after the deactivated user has left them.
 
         Args:
             target_user: the user whose displayname is to be changed.
             requester: The user attempting to make this change.
             new_displayname: The displayname to give this user.
             by_admin: Whether this change was made by an administrator.
-            deactivation: Whether this change was made while deactivating the user.
             propagate: Whether this change also applies to the user's membership events.
         """
         if not self.hs.is_mine(target_user):
@@ -236,7 +241,7 @@ class ProfileHandler:
         )
 
         await self._third_party_rules.on_profile_update(
-            target_user.to_string(), profile, by_admin, deactivation
+            target_user.to_string(), profile, by_admin, deactivation=False
         )
 
         if propagate:
@@ -282,17 +287,22 @@ class ProfileHandler:
         new_avatar_url: str,
         *,
         by_admin: bool = False,
-        deactivation: bool = False,
         propagate: bool = True,
     ) -> None:
         """Set a new avatar URL for a user.
+
+        Preconditions:
+        - This must NOT be called as part of deactivating the user, because we will
+          notify modules about the change whilst claiming it is not related
+          to user deactivation and we will also (if `propagate=True`) send
+          updates into rooms, which could cause rooms to be accidentally joined
+          after the deactivated user has left them.
 
         Args:
             target_user: the user whose avatar URL is to be changed.
             requester: The user attempting to make this change.
             new_avatar_url: The avatar URL to give this user.
             by_admin: Whether this change was made by an administrator.
-            deactivation: Whether this change was made while deactivating the user.
             propagate: Whether this change also applies to the user's membership events.
         """
         if not self.hs.is_mine(target_user):
@@ -340,7 +350,7 @@ class ProfileHandler:
         )
 
         await self._third_party_rules.on_profile_update(
-            target_user.to_string(), profile, by_admin, deactivation
+            target_user.to_string(), profile, by_admin, deactivation=False
         )
 
         if propagate:
@@ -528,9 +538,13 @@ class ProfileHandler:
         new_value: JsonValue,
         *,
         by_admin: bool = False,
-        deactivation: bool = False,
     ) -> None:
         """Set a new profile field for a user.
+
+        Preconditions:
+        - This must NOT be called as part of deactivating the user, because we will
+          notify modules about the change whilst claiming it is not related
+          to user deactivation.
 
         Args:
             target_user: the user whose profile is to be changed.
@@ -538,7 +552,6 @@ class ProfileHandler:
             field_name: The name of the profile field to update.
             new_value: The new field value for this user.
             by_admin: Whether this change was made by an administrator.
-            deactivation: Whether this change was made while deactivating the user.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -551,7 +564,7 @@ class ProfileHandler:
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)
         await self._third_party_rules.on_profile_update(
-            target_user.to_string(), profile, by_admin, deactivation
+            target_user.to_string(), profile, by_admin, deactivation=False
         )
 
     async def delete_profile_field(
@@ -561,16 +574,19 @@ class ProfileHandler:
         field_name: str,
         *,
         by_admin: bool = False,
-        deactivation: bool = False,
     ) -> None:
         """Delete a field from a user's profile.
+
+        Preconditions:
+        - This must NOT be called as part of deactivating the user, because we will
+          notify modules about the change whilst claiming it is not related
+          to user deactivation.
 
         Args:
             target_user: the user whose profile is to be changed.
             requester: The user attempting to make this change.
             field_name: The name of the profile field to remove.
             by_admin: Whether this change was made by an administrator.
-            deactivation: Whether this change was made while deactivating the user.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -583,7 +599,7 @@ class ProfileHandler:
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)
         await self._third_party_rules.on_profile_update(
-            target_user.to_string(), profile, by_admin, deactivation
+            target_user.to_string(), profile, by_admin, deactivation=False
         )
 
     async def on_profile_query(self, args: JsonDict) -> JsonDict:
