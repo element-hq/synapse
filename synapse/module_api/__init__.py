@@ -2001,15 +2001,26 @@ class ModuleApi:
             new_displayname:
                 The new display name to give the user.
             deactivation:
+                (deprecated)
                 Whether this change was made while deactivating the user.
+
+                Should be omitted, will produce a logged error if set to True.
+                It's likely that this flag should have stayed internal-only and
+                was accidentally exposed to the Module API.
+                It no longer has any function.
         """
         requester = create_requester(user_id)
+
+        if deactivation:
+            logger.error(
+                "Deprecated `deactivation=True` flag passed to `set_displayname` Module API"
+            )
+
         await self._hs.get_profile_handler().set_displayname(
             target_user=user_id,
             requester=requester,
             new_displayname=new_displayname,
             by_admin=True,
-            deactivation=deactivation,
         )
 
     def get_current_time_msec(self) -> int:
