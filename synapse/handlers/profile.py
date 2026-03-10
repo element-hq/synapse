@@ -173,6 +173,7 @@ class ProfileHandler:
         target_user: UserID,
         requester: Requester,
         new_displayname: str,
+        *,
         by_admin: bool = False,
         deactivation: bool = False,
         propagate: bool = True,
@@ -277,6 +278,7 @@ class ProfileHandler:
         target_user: UserID,
         requester: Requester,
         new_avatar_url: str,
+        *,
         by_admin: bool = False,
         deactivation: bool = False,
         propagate: bool = True,
@@ -462,6 +464,7 @@ class ProfileHandler:
         requester: Requester,
         field_name: str,
         new_value: JsonValue,
+        *,
         by_admin: bool = False,
         deactivation: bool = False,
     ) -> None:
@@ -494,6 +497,7 @@ class ProfileHandler:
         target_user: UserID,
         requester: Requester,
         field_name: str,
+        *,
         by_admin: bool = False,
         deactivation: bool = False,
     ) -> None:
