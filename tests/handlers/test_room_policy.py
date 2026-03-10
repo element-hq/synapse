@@ -333,7 +333,10 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         )
         self.assertIsInstance(fail.value, SynapseError)
         self.assertEqual(fail.value.code, 403)
-        self.assertEqual(fail.value.msg, "This event has been rejected as probable spam by the policy server")
+        self.assertEqual(
+            fail.value.msg,
+            "This event has been rejected as probable spam by the policy server",
+        )
         self.assertEqual(len(event.signatures), 0)
 
     def test_ask_policy_server_to_sign_event_cannot_reach(self) -> None:
