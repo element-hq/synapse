@@ -590,7 +590,7 @@ class FrozenEventVMSC4242(FrozenEventV4):
         rejected_reason: str | None = None,
     ):
         # Similar to how we assert event_id isn't in V2+ events, we do the same with auth_events.
-        # We don't expect it in the wire format because we calculate it from prev_state_events.
+        # We don't expect `auth_events` in the wire format because we calculate it from prev_state_events.
         assert "auth_events" not in event_dict
         super().__init__(
             event_dict=event_dict,
