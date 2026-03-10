@@ -1016,8 +1016,8 @@ class EventsPersistenceStorageController:
             e_id for event in new_state_events for e_id in event.prev_state_events
         )
 
-        # Finally handle the case where the new events have rejected/soft-failed prev state events.
-        # If they do we need to remove them and their prev state events,
+        # Finally handle the case where the new events have rejected/soft-failed `prev_state_events`.
+        # If they do we need to remove them and their `prev_state_events`,
         # otherwise we end up with dangling extremities.
         # Specifically, this handles the case where (F=fwd extrem, SF=soft-failed, N=new event)
         # F <-- SF <-- SF <-- N
