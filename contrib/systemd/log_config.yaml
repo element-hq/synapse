@@ -1,5 +1,6 @@
 version: 1
 
+# Requires the `systemd-python` package in Synapse's runtime environment.
 # In systemd's journal, loglevel is implicitly stored, so let's omit it
 # from the message text.
 formatters:
