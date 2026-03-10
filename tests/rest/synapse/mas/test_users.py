@@ -10,13 +10,14 @@
 #
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
-
+from http import HTTPStatus
 from urllib.parse import urlencode
 
 from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import StoreError
 from synapse.appservice import ApplicationService
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
@@ -660,6 +661,40 @@ class MasDeleteUserResource(BaseTestCase):
             self.get_success(store._get_user_in_directory(alice.to_string())),
             "User still present in user directory after deactivation!",
         )
+
+    def test_user_deactivation_removes_custom_profile_fields(self) -> None:
+        """
+        Test that when `/delete_user` deactivates a user with the `erase` flag,
+        their custom profile fields get removed.
+        """
+        alice = UserID("alice", "test")
+        store = self.hs.get_datastores().main
+
+        # Add custom profile field
+        self.get_success(store.set_profile_field(alice, "io.element.example", "hello"))
+
+        # Ensure we're testing what we think we are:
+        # check the user has profile data at the start of the test
+        self.assertEqual(
+            self.get_success(store.get_profile_fields(alice)),
+            {"io.element.example": "hello"},
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/_synapse/mas/delete_user",
+            shorthand=False,
+            access_token=self.SHARED_SECRET,
+            content={"localpart": "alice", "erase": True},
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {})
+
+        # With no profile, we expect a 404 (Not Found) StoreError
+        with self.assertRaises(StoreError) as raised:
+            self.get_success_or_raise(store.get_profile_fields(alice))
+
+        self.assertEqual(raised.exception.code, HTTPStatus.NOT_FOUND)
 
     def test_delete_user_missing_localpart(self) -> None:
         channel = self.make_request(
