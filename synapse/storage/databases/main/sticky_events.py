@@ -13,9 +13,7 @@
 import logging
 import random
 from dataclasses import dataclass
-from typing import (
-    TYPE_CHECKING,
-)
+from typing import TYPE_CHECKING, Collection, cast
 
 from twisted.internet.defer import Deferred
 
@@ -25,6 +23,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_in_list_sql_clause,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
@@ -137,6 +136,98 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
     def get_sticky_events_stream_id_generator(self) -> MultiWriterIdGenerator:
         return self._sticky_events_id_gen
+
+    async def get_sticky_events_in_rooms(
+        self,
+        room_ids: Collection[str],
+        *,
+        from_id: int,
+        to_id: int,
+        now: int,
+        limit: int | None,
+    ) -> tuple[int, dict[str, list[str]]]:
+        """
+        Fetch all the sticky events' IDs in the given rooms, with sticky stream IDs satisfying
+        from_id < sticky stream ID <= to_id.
+
+        The events are returned ordered by the sticky events stream.
+
+        Args:
+            room_ids: The room IDs to return sticky events in.
+            from_id: The sticky stream ID that sticky events should be returned from (exclusive).
+            to_id: The sticky stream ID that sticky events should end at (inclusive).
+            now: The current time in unix millis, used for skipping expired events.
+            limit: Max sticky events to return, or None to apply no limit.
+        Returns:
+            to_id, dict[room_id, list[event_ids]]
+        """
+        sticky_events_rows = await self.db_pool.runInteraction(
+            "get_sticky_events_in_rooms",
+            self._get_sticky_events_in_rooms_txn,
+            room_ids,
+            from_id=from_id,
+            to_id=to_id,
+            now=now,
+            limit=limit,
+        )
+
+        if not sticky_events_rows:
+            return to_id, {}
+
+        # Get stream_id of the last row, which is the highest
+        new_to_id, _, _ = sticky_events_rows[-1]
+
+        # room ID -> event IDs
+        room_id_to_event_ids: dict[str, list[str]] = {}
+        for _, room_id, event_id in sticky_events_rows:
+            events = room_id_to_event_ids.setdefault(room_id, [])
+            events.append(event_id)
+
+        return (new_to_id, room_id_to_event_ids)
+
+    def _get_sticky_events_in_rooms_txn(
+        self,
+        txn: LoggingTransaction,
+        room_ids: Collection[str],
+        *,
+        from_id: int,
+        to_id: int,
+        now: int,
+        limit: int | None,
+    ) -> list[tuple[int, str, str]]:
+        if len(room_ids) == 0:
+            return []
+        room_id_in_list_clause, room_id_in_list_values = make_in_list_sql_clause(
+            txn.database_engine, "se.room_id", room_ids
+        )
+        limit_clause = ""
+        limit_params: tuple[int, ...] = ()
+        if limit is not None:
+            limit_clause = "LIMIT ?"
+            limit_params = (limit,)
+
+        if isinstance(self.database_engine, PostgresEngine):
+            expr_soft_failed = "COALESCE(((ej.internal_metadata::jsonb)->>'soft_failed')::boolean, FALSE)"
+        else:
+            expr_soft_failed = "COALESCE(ej.internal_metadata->>'soft_failed', FALSE)"
+
+        txn.execute(
+            f"""
+            SELECT se.stream_id, se.room_id, event_id
+            FROM sticky_events se
+            INNER JOIN event_json ej USING (event_id)
+            WHERE
+                NOT {expr_soft_failed}
+                AND ? < expires_at
+                AND ? < stream_id
+                AND stream_id <= ?
+                AND {room_id_in_list_clause}
+            ORDER BY stream_id ASC
+            {limit_clause}
+            """,
+            (now, from_id, to_id, *room_id_in_list_values, *limit_params),
+        )
+        return cast(list[tuple[int, str, str]], txn.fetchall())
 
     async def get_updated_sticky_events(
         self, *, from_id: int, to_id: int, limit: int

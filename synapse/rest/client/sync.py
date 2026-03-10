@@ -59,6 +59,7 @@ from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.cancellation import cancellable
 from synapse.util.json import json_decoder
 
 from ._base import client_patterns, set_timeline_upper_limit
@@ -138,6 +139,7 @@ class SyncRestServlet(RestServlet):
             cfg=hs.config.ratelimiting.rc_presence_per_user,
         )
 
+    @cancellable
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None
@@ -617,6 +619,14 @@ class SyncRestServlet(RestServlet):
             ephemeral_events = room.ephemeral
             result["ephemeral"] = {"events": ephemeral_events}
             result["unread_notifications"] = room.unread_notifications
+            if room.sticky:
+                # The sticky events have already been deduplicated so that events
+                # appearing in the timeline won't appear again here
+                result["msc4354_sticky"] = {
+                    "events": await self._event_serializer.serialize_events(
+                        room.sticky, time_now, config=serialize_options
+                    )
+                }
             if room.unread_thread_notifications:
                 result["unread_thread_notifications"] = room.unread_thread_notifications
                 if self._msc3773_enabled:

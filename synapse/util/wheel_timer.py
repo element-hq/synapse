@@ -23,6 +23,8 @@ from typing import Generic, Hashable, TypeVar
 
 import attr
 
+from synapse.util.duration import Duration
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=Hashable)
@@ -39,13 +41,13 @@ class WheelTimer(Generic[T]):
     expired.
     """
 
-    def __init__(self, bucket_size: int = 5000) -> None:
+    def __init__(self, bucket_size: Duration = Duration(seconds=5)) -> None:
         """
         Args:
             bucket_size: Size of buckets in ms. Corresponds roughly to the
                 accuracy of the timer.
         """
-        self.bucket_size: int = bucket_size
+        self.bucket_size = bucket_size
         self.entries: list[_Entry[T]] = []
 
     def insert(self, now: int, obj: T, then: int) -> None:
@@ -56,8 +58,8 @@ class WheelTimer(Generic[T]):
             obj: Object to be inserted
             then: When to return the object strictly after.
         """
-        then_key = int(then / self.bucket_size) + 1
-        now_key = int(now / self.bucket_size)
+        then_key = int(then / self.bucket_size.as_millis()) + 1
+        now_key = int(now / self.bucket_size.as_millis())
 
         if self.entries:
             min_key = self.entries[0].end_key
@@ -100,7 +102,7 @@ class WheelTimer(Generic[T]):
         Returns:
             List of objects that have timed out
         """
-        now_key = int(now / self.bucket_size)
+        now_key = int(now / self.bucket_size.as_millis())
 
         ret: list[T] = []
         while self.entries and self.entries[0].end_key <= now_key:
