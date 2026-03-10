@@ -41,6 +41,7 @@ from typing import (
 import attr
 from prometheus_client import Counter, Histogram
 
+from synapse.util.stringutils import shortstr
 from twisted.internet import defer
 
 from synapse.api.constants import EventTypes, Membership
@@ -995,8 +996,8 @@ class EventsPersistenceStorageController:
                 missing_prev_state_events,
             )
             logger.error(
-                "_calculate_new_state_dag_extremities: was handling (max 10) %s",
-                [ev.event_id for ev in list(all_new_state_events)[:10]],
+                "_calculate_new_state_dag_extremities: was handling %s",
+                shortstr([ev.event_id for ev in all_new_state_events]),
             )
             raise SynapseError(
                 code=500,
