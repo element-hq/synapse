@@ -1487,7 +1487,9 @@ class RoomCreationHandler:
         # the most recently created event
         prev_event: list[str] = []
         # the most recently created state event
-        prev_state_event: list[str] = []
+        prev_state_event: list[str] | None = (
+            [] if room_version.msc4242_state_dags else None
+        )
 
         # a map of event types, state keys -> event_ids. We collect these mappings this as events are
         # created (but not persisted to the db) to determine state for future created events
@@ -1574,7 +1576,8 @@ class RoomCreationHandler:
             ignore_shadow_ban=True,
         )
         last_sent_event_id = ev.event_id
-        prev_state_event = [ev.event_id]
+        if room_version.msc4242_state_dags:
+            prev_state_event = [ev.event_id]
 
         member_event_id, _ = await self.room_member_handler.update_membership(
             creator,
@@ -1589,7 +1592,8 @@ class RoomCreationHandler:
             prev_state_events=prev_state_event,
         )
         prev_event = [member_event_id]
-        prev_state_event = [member_event_id]
+        if room_version.msc4242_state_dags:
+            prev_state_event = [member_event_id]
 
         # update the depth and state map here as the membership event has been created
         # through a different code path

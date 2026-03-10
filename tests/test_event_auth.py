@@ -389,7 +389,6 @@ class EventAuthTestCase(unittest.TestCase):
 
         create_event = make_event_from_dict(
             {
-                "room_id": TEST_ROOM_ID,
                 "type": "m.room.create",
                 "sender": creator,
                 "state_key": "",
@@ -399,9 +398,22 @@ class EventAuthTestCase(unittest.TestCase):
             },
             room_version,
         )
+        create_event_2 = make_event_from_dict(
+            {
+                "type": "m.room.create",
+                "sender": creator,
+                "state_key": "",
+                "content": {"creator": creator, "another": "room"},
+                "prev_events": [],
+                "prev_state_events": [],
+            },
+            room_version,
+        )
+        room_id = create_event.room_id
+        another_room_id = create_event_2.room_id
         join_event = make_event_from_dict(
             {
-                "room_id": TEST_ROOM_ID,
+                "room_id": room_id,
                 "type": "m.room.member",
                 "sender": creator,
                 "state_key": creator,
@@ -414,7 +426,7 @@ class EventAuthTestCase(unittest.TestCase):
         )
         event_in_another_room = make_event_from_dict(
             {
-                "room_id": f"!another_room:{TEST_DOMAIN}",
+                "room_id": another_room_id,
                 "type": "m.room.join_rules",
                 "sender": creator,
                 "state_key": "",
@@ -427,7 +439,7 @@ class EventAuthTestCase(unittest.TestCase):
         )
         msg_event = make_event_from_dict(
             {
-                "room_id": TEST_ROOM_ID,
+                "room_id": room_id,
                 "type": "m.room.message",
                 "sender": creator,
                 "content": {"msgtype": "m.text", "body": "I am a message"},
@@ -439,7 +451,7 @@ class EventAuthTestCase(unittest.TestCase):
         )
         rejected_event = make_event_from_dict(
             {
-                "room_id": TEST_ROOM_ID,
+                "room_id": room_id,
                 "type": "m.room.name",
                 "sender": creator,
                 "state_key": "",
@@ -457,24 +469,18 @@ class EventAuthTestCase(unittest.TestCase):
         rejecting_test_cases = [
             RejectingTestCase(
                 name="create event has prev_state_events",
-                events_in_store=[create_event, join_event],
+                events_in_store=[],
                 test_event=make_event_from_dict(
                     {
-                        "room_id": TEST_ROOM_ID,
                         "type": "m.room.create",
                         "sender": creator,
                         "state_key": "",
                         "content": {"creator": creator},
                         "prev_events": [],
-                        "prev_state_events": [join_event.event_id],
+                        "prev_state_events": [create_event.event_id],
                     },
                     room_version,
-                    {
-                        "calculated_auth_event_ids": [
-                            create_event.event_id,
-                            join_event.event_id,
-                        ]
-                    },
+                    {},
                 ),
             ),
             RejectingTestCase(
@@ -482,7 +488,7 @@ class EventAuthTestCase(unittest.TestCase):
                 events_in_store=[create_event, join_event, event_in_another_room],
                 test_event=make_event_from_dict(
                     {
-                        "room_id": TEST_ROOM_ID,
+                        "room_id": room_id,
                         "type": "m.room.name",
                         "sender": creator,
                         "state_key": "",
@@ -504,7 +510,7 @@ class EventAuthTestCase(unittest.TestCase):
                 events_in_store=[create_event, join_event, msg_event],
                 test_event=make_event_from_dict(
                     {
-                        "room_id": TEST_ROOM_ID,
+                        "room_id": room_id,
                         "type": "m.room.name",
                         "sender": creator,
                         "state_key": "",
@@ -526,7 +532,7 @@ class EventAuthTestCase(unittest.TestCase):
                 events_in_store=[create_event, join_event, rejected_event],
                 test_event=make_event_from_dict(
                     {
-                        "room_id": TEST_ROOM_ID,
+                        "room_id": room_id,
                         "type": "m.room.name",
                         "sender": creator,
                         "state_key": "",

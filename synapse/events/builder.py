@@ -146,7 +146,9 @@ class EventBuilder:
                 based on the prev_events.
             prev_state_events: The event IDs to use as prev_state_events.
                 Only applicable on MSC4242 state DAG rooms. If this is supplied, auth_event_ids
-                must not be specified.
+                must not be specified unless this event is part of a batch such that the builder
+                will be unable to compute the auth_event_ids due to the events not being persisted
+                yet.
         Returns:
             The signed and hashed event.
         """
