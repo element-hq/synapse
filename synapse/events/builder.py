@@ -198,6 +198,7 @@ class EventBuilder:
         if auth_event_ids is None:
             # Every non-create event must have a room ID
             assert self.room_id is not None
+            assert not self.room_version.msc4242_state_dags
             state_ids = await self._state.compute_state_after_events(
                 self.room_id,
                 prev_event_ids,

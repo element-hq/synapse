@@ -642,7 +642,7 @@ class EventCreationHandler:
 
             prev_state_events:
                 The state event IDs which represent the current forward extremities of the state DAG.
-                Only applicable on room versions which use a state DAG.
+                Only applicable on room versions which use a state DAG (MSC4242).
 
         Raises:
             ResourceLimitError if server is blocked to some resource being
@@ -1003,7 +1003,7 @@ class EventCreationHandler:
                 based on the prev_events.
             prev_state_events:
                 The state event IDs which represent the current forward extremities of the state DAG.
-                Only applicable on room versions which use a state DAG.
+                Only applicable on room versions which use a state DAG (MSC4242).
         Returns:
             The event, and its stream ordering (if deduplication happened,
             the previous, duplicate event).
@@ -1281,8 +1281,8 @@ class EventCreationHandler:
 
             prev_state_events:
                 The state event IDs which represent the current forward extremities of the state DAG.
-                Only applicable on room versions which use a state DAG. If unset, populates them
-                from the current state dag forward extremities.
+                Only applicable on room versions which use a state DAG (MSC4242).
+                If unset, populates them from the current state dag forward extremities.
 
         Returns:
             Tuple of created event, UnpersistedEventContext
