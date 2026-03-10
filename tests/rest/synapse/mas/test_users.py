@@ -13,6 +13,8 @@
 
 from urllib.parse import urlencode
 
+from parameterized import parameterized
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.appservice import ApplicationService
@@ -620,6 +622,44 @@ class MasDeleteUserResource(BaseTestCase):
         )
         # And erased
         self.assertTrue(self.get_success(store.is_user_erased(user_id=str(alice))))
+
+    @parameterized.expand([(False,), (True,)])
+    def test_user_deactivation_removes_user_from_user_directory(
+        self, erase: bool
+    ) -> None:
+        """
+        Test that when `/delete_user` deactivates a user, they get removed from the user directory.
+
+        This is applicable regardless of whether the `erase` flag is set.
+
+        Regression test for:
+            'Users are not removed from user directory upon deactivation if erase flag is true'
+            https://github.com/element-hq/synapse/issues/19540
+        """
+        alice = UserID("alice", "test")
+        store = self.hs.get_datastores().main
+
+        # Ensure we're testing what we think we are:
+        # check the user is IN the directory at the start of the test
+        self.assertEqual(
+            self.get_success(store._get_user_in_directory(alice.to_string())),
+            ("Alice", None),
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/_synapse/mas/delete_user",
+            shorthand=False,
+            access_token=self.SHARED_SECRET,
+            content={"localpart": "alice", "erase": erase},
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {})
+
+        self.assertIsNone(
+            self.get_success(store._get_user_in_directory(alice.to_string())),
+            "User still present in user directory after deactivation!",
+        )
 
     def test_delete_user_missing_localpart(self) -> None:
         channel = self.make_request(
