@@ -327,9 +327,13 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             },
         )
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_refuses_to_sign_event
-        self.get_success(
-            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        fail = self.get_failure(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True),
+            SynapseError,
         )
+        self.assertIsInstance(fail.value, SynapseError)
+        self.assertEqual(fail.value.code, 403)
+        self.assertEqual(fail.value.msg, "This event has been rejected as probable spam by the policy server")
         self.assertEqual(len(event.signatures), 0)
 
     def test_ask_policy_server_to_sign_event_cannot_reach(self) -> None:
@@ -349,9 +353,12 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             },
         )
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_event_sign_error
-        self.get_success(
-            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        fail = self.get_failure(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True),
+            SynapseError,
         )
+        self.assertIsInstance(fail.value, SynapseError)
+        self.assertEqual(fail.value.code, 500)
         self.assertEqual(len(event.signatures), 0)
 
     def test_ask_policy_server_to_sign_event_wrong_sig(self) -> None:
