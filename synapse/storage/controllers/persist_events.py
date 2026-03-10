@@ -41,7 +41,6 @@ from typing import (
 import attr
 from prometheus_client import Counter, Histogram
 
-from synapse.util.stringutils import shortstr
 from twisted.internet import defer
 
 from synapse.api.constants import EventTypes, Membership
@@ -72,6 +71,7 @@ from synapse.types import (
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import ObservableDeferred, yieldable_gather_results
 from synapse.util.metrics import Measure
+from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
