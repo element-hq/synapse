@@ -1713,7 +1713,6 @@ class DatabasePool:
                 ", ".join(key_names),
                 latter,
             )
-
             txn.execute_values(sql, args, fetch=False)
 
         else:

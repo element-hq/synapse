@@ -395,6 +395,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                         user1_invite_membership_event,
                     ],
                     event_dict=user1_join_membership_event_signed.get_pdu_json(),
+                    state_dag=[],
                     event=user1_join_membership_event_signed,
                     members_omitted=False,
                     servers_in_room=[

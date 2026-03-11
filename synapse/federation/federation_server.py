@@ -29,6 +29,8 @@ from typing import (
     Callable,
     Collection,
     Mapping,
+    Sequence,
+    cast,
 )
 
 from prometheus_client import Counter, Gauge, Histogram
@@ -54,7 +56,7 @@ from synapse.api.errors import (
 )
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
-from synapse.events import EventBase
+from synapse.events import EventBase, FrozenEventVMSC4242
 from synapse.events.snapshot import EventPersistencePair
 from synapse.federation.federation_base import (
     FederationBase,
@@ -597,7 +599,10 @@ class FederationServer(FederationBase):
         )
 
     async def on_room_state_request(
-        self, origin: str, room_id: str, event_id: str
+        self,
+        origin: str,
+        room_id: str,
+        event_id: str,
     ) -> tuple[int, JsonDict]:
         await self._event_auth_handler.assert_host_in_room(room_id, origin)
         origin_host, _ = parse_server_name(origin)
@@ -621,7 +626,10 @@ class FederationServer(FederationBase):
     @trace
     @tag_args
     async def on_state_ids_request(
-        self, origin: str, room_id: str, event_id: str
+        self,
+        origin: str,
+        room_id: str,
+        event_id: str,
     ) -> tuple[int, JsonDict]:
         if not event_id:
             raise NotImplementedError("Specify an event")
@@ -642,17 +650,27 @@ class FederationServer(FederationBase):
     @trace
     @tag_args
     async def _on_state_ids_request_compute(
-        self, room_id: str, event_id: str
+        self,
+        room_id: str,
+        event_id: str,
     ) -> JsonDict:
-        state_ids = await self.handler.get_state_ids_for_pdu(room_id, event_id)
+        state_ids = await self.handler.get_state_ids_for_pdu(
+            room_id,
+            event_id,
+        )
         auth_chain_ids = await self.store.get_auth_chain_ids(room_id, state_ids)
         return {"pdu_ids": state_ids, "auth_chain_ids": list(auth_chain_ids)}
 
     async def _on_context_state_request_compute(
-        self, room_id: str, event_id: str
+        self,
+        room_id: str,
+        event_id: str,
     ) -> dict[str, list]:
         pdus: Collection[EventBase]
-        event_ids = await self.handler.get_state_ids_for_pdu(room_id, event_id)
+        event_ids = await self.handler.get_state_ids_for_pdu(
+            room_id,
+            event_id,
+        )
         pdus = await self.store.get_events_as_list(event_ids)
 
         auth_chain = await self.store.get_auth_chain(
@@ -772,6 +790,10 @@ class FederationServer(FederationBase):
             origin, content, Membership.JOIN, room_id
         )
 
+        if event.room_version.msc4242_state_dags and caller_supports_partial_state:
+            # TODO(kegan): for now, MSC4242 won't support partial state for ease of prototyping.
+            caller_supports_partial_state = False
+
         prev_state_ids = await context.get_prev_state_ids()
 
         state_event_ids: Collection[str]
@@ -782,15 +804,31 @@ class FederationServer(FederationBase):
                 event, prev_state_ids, summary
             )
             servers_in_room = await self.state.get_hosts_in_room_at_events(
-                room_id, event_ids=event.prev_event_ids()
+                room_id,
+                event_ids=event.prev_state_events
+                if isinstance(event, FrozenEventVMSC4242)
+                else event.prev_event_ids(),
             )
         else:
             state_event_ids = prev_state_ids.values()
             servers_in_room = None
 
-        auth_chain_event_ids = await self.store.get_auth_chain_ids(
-            room_id, state_event_ids
-        )
+        state_dag = None
+        auth_chain_event_ids = set()
+        if event.room_version.msc4242_state_dags:
+            assert isinstance(event, FrozenEventVMSC4242)
+            # NOTE: we don't return the state dag for forward extremities that aren't part of this
+            # join event to make it easier for the receiving server to set their own forward
+            # extremities (they are equal to the join event's prev_state_events). This means we may
+            # fail to sync concurrent forks not on the path to the join event, but this is an
+            # outstanding problem in general.
+            state_dag = await self.store.get_state_dag(
+                room_id, set(event.prev_state_events)
+            )
+        else:
+            auth_chain_event_ids = await self.store.get_auth_chain_ids(
+                room_id, state_event_ids
+            )
 
         # if the caller has opted in, we can omit any auth_chain events which are
         # already in state_event_ids
@@ -807,13 +845,18 @@ class FederationServer(FederationBase):
         resp = {
             "event": event_json,
             "state": serialize_and_filter_pdus(state_events, time_now),
-            "auth_chain": serialize_and_filter_pdus(auth_chain_events, time_now),
             "members_omitted": caller_supports_partial_state,
         }
+        if state_dag is None:
+            resp["auth_chain"] = serialize_and_filter_pdus(auth_chain_events, time_now)
+        else:
+            resp["state_dag"] = serialize_and_filter_pdus(
+                cast(Sequence[EventBase], state_dag.values()), time_now
+            )
+            del resp["state"]
 
         if servers_in_room is not None:
             resp["servers_in_room"] = list(servers_in_room)
-
         return resp
 
     async def on_make_leave_request(
@@ -1110,6 +1153,7 @@ class FederationServer(FederationBase):
         earliest_events: list[str],
         latest_events: list[str],
         limit: int,
+        walk_state_dag: bool = False,
     ) -> dict[str, list]:
         async with self._server_linearizer.queue((origin, room_id)):
             origin_host, _ = parse_server_name(origin)
@@ -1124,7 +1168,7 @@ class FederationServer(FederationBase):
             )
 
             missing_events = await self.handler.on_get_missing_events(
-                origin, room_id, earliest_events, latest_events, limit
+                origin, room_id, earliest_events, latest_events, limit, walk_state_dag
             )
 
             if len(missing_events) < 5:

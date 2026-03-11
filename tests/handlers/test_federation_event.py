@@ -18,19 +18,23 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from typing import Iterable
 from unittest import mock
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import AuthError, StoreError
-from synapse.api.room_versions import RoomVersion
+from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.event_auth import (
     check_state_dependent_auth_rules,
     check_state_independent_auth_rules,
 )
-from synapse.events import make_event_from_dict
+from synapse.events import EventBase, FrozenEventVMSC4242, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.federation.transport.client import StateRequestResponse
+from synapse.handlers.federation_event import (
+    is_state_dag_connected,
+)
 from synapse.logging.context import LoggingContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -1184,3 +1188,298 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                 bert_member_event.event_id,
                 "Rejected kick event unexpectedly became part of room state.",
             )
+
+
+MSC4242_ROOM_ID = "!msc4242:example.com"
+counter = 1
+
+
+class FederationEventMSC4242AuthDAGTests(unittest.FederatingHomeserverTestCase):
+    def test_is_state_dag_connected(self) -> None:
+        linear_1 = msc4242_event([])
+        linear_2 = msc4242_event([linear_1.event_id])
+        linear_3 = msc4242_event([linear_2.event_id])
+        self.assertEqual(is_state_dag_connected([linear_3, linear_1, linear_2]), True)
+
+        fork_1 = msc4242_event([])
+        fork_2 = msc4242_event([fork_1.event_id])
+        fork_3 = msc4242_event([fork_1.event_id])
+        fork_4 = msc4242_event([fork_1.event_id])
+        fork_5 = msc4242_event([fork_2.event_id, fork_4.event_id])
+        self.assertEqual(
+            is_state_dag_connected([fork_1, fork_2, fork_3, fork_4, fork_5]), True
+        )
+
+        unconnected_1 = msc4242_event([])
+        unconnected_2 = msc4242_event([unconnected_1.event_id])
+        unconnected_3 = msc4242_event(["$unknown"])
+        self.assertEqual(
+            is_state_dag_connected([unconnected_1, unconnected_2, unconnected_3]), False
+        )
+
+    def test_fetch_missing_state_dag_events_linear(self) -> None:
+        linear = self.make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["B"],
+            }
+        )
+        seen_events: set[str] = set()
+        get_missing_events_req_resps = {
+            ("C",): ["A", "B"],
+        }
+        self.prepare_handler(seen_events, linear, get_missing_events_req_resps)
+        self.assert_fetch_missing_state_dag_events(linear, "C", ["A", "B"])
+
+    def test_fetch_missing_state_dag_events_linear_seen(self) -> None:
+        linear = self.make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["B"],
+                "D": ["C"],
+            }
+        )
+        seen_events: set[str] = {"A", "B"}
+        get_missing_events_req_resps = {
+            ("D",): ["C"],
+            ("C",): ["B"],
+        }
+        self.prepare_handler(seen_events, linear, get_missing_events_req_resps)
+        self.assert_fetch_missing_state_dag_events(linear, "D", ["C"])
+
+    def test_fetch_missing_state_dag_events_fork_merge(self) -> None:
+        fork_merge = self.make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["A"],
+                "D": ["C"],
+                "E": ["B"],
+                "F": ["D", "E"],
+            }
+        )
+        seen_events: set[str] = set()
+        get_missing_events_req_resps = {
+            ("F",): ["D", "E"],
+            (
+                "D",
+                "E",
+            ): ["C", "A"],
+            ("E",): ["B", "A"],
+        }
+        self.prepare_handler(seen_events, fork_merge, get_missing_events_req_resps)
+        self.assert_fetch_missing_state_dag_events(
+            fork_merge, "F", ["A", "B", "C", "D", "E"]
+        )
+
+    def test_fetch_missing_state_dag_events_give_up_no_forward_progress(self) -> None:
+        fork_merge = self.make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["A"],
+                "D": ["C", "B"],
+            }
+        )
+        seen_events: set[str] = set()
+        get_missing_events_req_resps = {
+            ("D",): ["C"],  # never provide B
+        }
+        self.prepare_handler(seen_events, fork_merge, get_missing_events_req_resps)
+        self.assert_fetch_missing_state_dag_events(fork_merge, "D", [])
+
+    def test_fetch_missing_state_dag_events_seen(self) -> None:
+        fork_merge = self.make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["A"],
+                "D": ["C"],
+                "E": ["B"],
+                "F": ["D", "E"],
+            }
+        )
+        seen_events: set[str] = {"A", "B"}
+        get_missing_events_req_resps = {
+            ("F",): ["D", "E"],
+            ("D",): ["C", "A"],  # NB: not D,E as we've seen E's prev_state_events => B.
+            ("E",): ["B", "A"],
+        }
+        self.prepare_handler(seen_events, fork_merge, get_missing_events_req_resps)
+        self.assert_fetch_missing_state_dag_events(fork_merge, "F", ["C", "D", "E"])
+
+    # test that we maintain a visited set so we don't needlessly make expensive /get_missing_events
+    # calls in cases like:
+    # A <- B <- C <- D <------------------------ I
+    #           `----- E <-- F <-- G <-- H <--`
+    # In this scenario, there's two paths to A: via D and via EFGH. Both paths converge at C and then
+    # go to A. The first path to reach A should be remembered so we don't make additional requests.
+    def test_fetch_missing_state_dag_events_memoise(self) -> None:
+        memoise_concurrent = self.make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["B"],
+                "D": ["C"],
+                "E": ["C"],
+                "F": ["E"],
+                "G": ["F"],
+                "H": ["G"],
+                "I": ["D", "H"],
+            }
+        )
+        get_missing_events_req_resps = {
+            ("I",): ["D", "H"],
+            (
+                "D",
+                "H",
+            ): ["C", "G"],
+            ("C", "G"): ["B", "F"],
+            ("B", "F"): ["A", "E"],
+            # we should never request C on its own as we should remember we have visited C already.
+        }
+        self.prepare_handler(set(), memoise_concurrent, get_missing_events_req_resps)
+        self.assert_fetch_missing_state_dag_events(
+            memoise_concurrent,
+            "I",
+            [
+                "A",
+                "B",
+                "C",
+                "D",
+                "E",
+                "F",
+                "G",
+                "H",
+            ],
+        )
+
+    def test_fetch_missing_state_dag_seen_all(self) -> None:
+        seen_all = self.make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["A"],
+                "D": ["C"],
+            }
+        )
+        seen_events: set[str] = {"A", "B", "C", "D"}
+        get_missing_events_req_resps: dict[tuple, list[str]] = {}
+        self.prepare_handler(seen_events, seen_all, get_missing_events_req_resps)
+        self.assert_fetch_missing_state_dag_events(seen_all, "D", [])
+
+    def assert_fetch_missing_state_dag_events(
+        self,
+        graph: dict[str, FrozenEventVMSC4242],
+        start_event_id: str,
+        want_event_ids: list[str],
+    ) -> None:
+        """Run _fetch_missing_state_dag_events with the param start_event_id on the graph provided
+        and ensure the result matches want_event_ids."""
+        got = self.get_success(
+            self.hs.get_federation_event_handler()._fetch_missing_state_dag_events(
+                "unknown", graph[start_event_id]
+            )
+        )
+        self.assertEqual(
+            {ev.event_id for ev in got}, {graph[x].event_id for x in want_event_ids}
+        )
+
+    def prepare_handler(
+        self,
+        seen_fake_events: set[str],
+        graph: dict[str, FrozenEventVMSC4242],
+        gme_req_resps: dict[tuple, list[str]],
+    ) -> None:
+        """Setup mocks on federation event handler to return the right data at the right time.
+        Args:
+            seen_fake_events: The events seen by this homeserver already (in the database)
+            graph: The prepared state DAG graph mapping from fake event ID to real event.
+            gme_req_resps: The /get_missing_events responses to return. The keys are the events
+            provided as 'latest_events' and the values will be the events returned."""
+        h = self.hs.get_federation_event_handler()
+        h._federation_client = mock.Mock(
+            spec=[
+                "get_missing_events",
+            ]
+        )
+        for x in graph:
+            print(f"{x} => {graph[x].event_id}")
+
+        async def get_missing_events(
+            destination: str,
+            room_id: str,
+            earliest_events_ids: Iterable[str],
+            latest_events: Iterable[EventBase],
+            limit: int,
+            min_depth: int,
+            timeout: int,
+            state_dag: bool = False,
+        ) -> list[EventBase]:
+            assert state_dag
+            assert room_id == MSC4242_ROOM_ID
+            target_key = [ev.event_id for ev in latest_events]
+            target_key.sort()
+            assert target_key
+            # test which response to return
+            for req, resp in gme_req_resps.items():
+                key = [graph[x].event_id for x in req]
+                key.sort()
+                if key == target_key:
+                    return [graph[x] for x in resp]
+            raise AssertionError(
+                f"get_missing_events with latest={target_key} but no matches found (tested {len(gme_req_resps)})"
+            )
+
+        h._federation_client.get_missing_events.side_effect = get_missing_events
+
+        seen_events = {
+            graph[fake_event_id].event_id for fake_event_id in seen_fake_events
+        }
+
+        async def have_seen_events(room_id: str, event_ids: Iterable[str]) -> set[str]:
+            return seen_events.intersection(set(event_ids))
+
+        main_store = self.hs.get_datastores().main
+        main_store.have_seen_events = mock.AsyncMock()  # type: ignore[method-assign]
+        main_store.have_seen_events.side_effect = have_seen_events
+
+    def make_state_dag(
+        self, graph: dict[str, list[str]]
+    ) -> dict[str, FrozenEventVMSC4242]:
+        """Create a state dag from a graph of event_id -> prev_state_events.
+        Returns a map of fake ID to real event.
+        The map must be sorted topologically else this raises an exception."""
+        fake_to_real_id: dict[str, str] = {}
+        result: dict[str, FrozenEventVMSC4242] = {}
+        for fake_id, fake_prev_state_events in graph.items():
+            # lookup fails if graph not sorted topologically
+            paes = [fake_to_real_id[fpae] for fpae in fake_prev_state_events]
+            ev = msc4242_event(paes)
+            fake_to_real_id[fake_id] = ev.event_id
+            result[fake_id] = ev
+        return result
+
+
+def msc4242_event(prev_state_events: list[str]) -> FrozenEventVMSC4242:
+    global counter
+    counter += 1
+    ev = make_event_from_dict(
+        {
+            "type": "m.room.member",
+            "state_key": "@alice:example.com",
+            "content": {
+                "membership": "join",
+            },
+            "sender": "@alice:example.com",
+            "origin_server_ts": counter,  # ensure hashed event changes
+            "room_id": MSC4242_ROOM_ID,
+            "prev_state_events": prev_state_events,
+            "prev_events": [],  # we shouldn't look at this field
+        },
+        RoomVersions.MSC4242v12,
+    )
+    assert isinstance(ev, FrozenEventVMSC4242)
+    return ev

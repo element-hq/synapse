@@ -534,36 +534,54 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
-        # we should get complete room state back
-        returned_state = [
-            (ev["type"], ev["state_key"]) for ev in channel.json_body["state"]
-        ]
-        self.assertCountEqual(
-            returned_state,
-            [
-                ("m.room.create", ""),
-                ("m.room.power_levels", ""),
-                ("m.room.join_rules", ""),
-                ("m.room.history_visibility", ""),
-                ("m.room.member", f"@kermit_v{room_version}:test"),
-                ("m.room.member", f"@fozzie_v{room_version}:test"),
-                # nb: *not* the joining user
-            ],
-        )
+        if KNOWN_ROOM_VERSIONS[room_version].msc4242_state_dags:
+            # we should get complete state dag back
+            returned_state_dag = [
+                (ev["type"], ev["state_key"]) for ev in channel.json_body["state_dag"]
+            ]
+            self.assertCountEqual(
+                returned_state_dag,
+                [
+                    ("m.room.create", ""),
+                    ("m.room.power_levels", ""),
+                    ("m.room.join_rules", ""),
+                    ("m.room.history_visibility", ""),
+                    ("m.room.member", f"@kermit_v{room_version}:test"),
+                    ("m.room.member", f"@fozzie_v{room_version}:test"),
+                    # nb: *not* the joining user
+                ],
+            )
+        else:
+            # we should get complete room state back
+            returned_state = [
+                (ev["type"], ev["state_key"]) for ev in channel.json_body["state"]
+            ]
+            self.assertCountEqual(
+                returned_state,
+                [
+                    ("m.room.create", ""),
+                    ("m.room.power_levels", ""),
+                    ("m.room.join_rules", ""),
+                    ("m.room.history_visibility", ""),
+                    ("m.room.member", f"@kermit_v{room_version}:test"),
+                    ("m.room.member", f"@fozzie_v{room_version}:test"),
+                    # nb: *not* the joining user
+                ],
+            )
 
-        # also check the auth chain
-        returned_auth_chain_events = [
-            (ev["type"], ev["state_key"]) for ev in channel.json_body["auth_chain"]
-        ]
-        self.assertCountEqual(
-            returned_auth_chain_events,
-            [
-                ("m.room.create", ""),
-                ("m.room.member", f"@kermit_v{room_version}:test"),
-                ("m.room.power_levels", ""),
-                ("m.room.join_rules", ""),
-            ],
-        )
+            # also check the auth chain
+            returned_auth_chain_events = [
+                (ev["type"], ev["state_key"]) for ev in channel.json_body["auth_chain"]
+            ]
+            self.assertCountEqual(
+                returned_auth_chain_events,
+                [
+                    ("m.room.create", ""),
+                    ("m.room.member", f"@kermit_v{room_version}:test"),
+                    ("m.room.power_levels", ""),
+                    ("m.room.join_rules", ""),
+                ],
+            )
 
         # the room should show that the new user is a member
         r = self.get_success(self._storage_controllers.state.get_current_state(room_id))
@@ -573,18 +591,12 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     @override_config({"use_frozen_dicts": True})
     def test_send_join_with_frozen_dicts(self, room_version: str) -> None:
         """Test send_join with USE_FROZEN_DICTS=True"""
-        if room_version == RoomVersions.MSC4242v12.identifier:
-            # TODO: This room version doesn't work over federation in this PR.
-            return
         self._test_send_join_common(room_version)
 
     @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys()])
     @override_config({"use_frozen_dicts": False})
     def test_send_join_without_frozen_dicts(self, room_version: str) -> None:
         """Test send_join with USE_FROZEN_DICTS=False"""
-        if room_version == RoomVersions.MSC4242v12.identifier:
-            # TODO: This room version doesn't work over federation in this PR.
-            return
         self._test_send_join_common(room_version)
 
     def test_send_join_partial_state(self) -> None:

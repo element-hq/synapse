@@ -42,7 +42,12 @@ from typing import (
 import attr
 from prometheus_client import Counter
 
-from synapse.api.constants import Direction, EventContentFields, EventTypes, Membership
+from synapse.api.constants import (
+    Direction,
+    EventContentFields,
+    EventTypes,
+    Membership,
+)
 from synapse.api.errors import (
     CodeMessageException,
     Codes,
@@ -119,6 +124,8 @@ class SendJoinResult:
     origin: str
     state: list[EventBase]
     auth_chain: list[EventBase]
+    # Only valid for state DAG rooms (MSC4242)
+    state_dag: list[EventBase] | None
 
     # True if 'state' elides non-critical membership events
     partial_state: bool
@@ -658,7 +665,10 @@ class FederationClient(FederationBase):
     @trace
     @tag_args
     async def get_room_state_ids(
-        self, destination: str, room_id: str, event_id: str
+        self,
+        destination: str,
+        room_id: str,
+        event_id: str,
     ) -> tuple[list[str], list[str]]:
         """Calls the /state_ids endpoint to fetch the state at a particular point
         in the room, and the auth events for the given event
@@ -670,7 +680,9 @@ class FederationClient(FederationBase):
             InvalidResponseError: if fields in the response have the wrong type.
         """
         result = await self.transport_layer.get_room_state_ids(
-            destination, room_id, event_id=event_id
+            destination,
+            room_id,
+            event_id=event_id,
         )
 
         state_event_ids = result["pdu_ids"]
@@ -1178,7 +1190,6 @@ class FederationClient(FederationBase):
             response = await self._do_send_join(
                 room_version, destination, pdu, omit_members=partial_state
             )
-
             # If an event was returned (and expected to be returned):
             #
             # * Ensure it has the same event ID (note that the event ID is a hash
@@ -1201,13 +1212,21 @@ class FederationClient(FederationBase):
                 event = pdu
 
             state = response.state
-            auth_chain = response.auth_events
-
+            auth_events = response.auth_events
             create_event = None
             for e in state:
                 if (e.type, e.state_key) == (EventTypes.Create, ""):
                     create_event = e
                     break
+
+            if room_version.msc4242_state_dags and response.state_dag:
+                # assign to auth_events to reuse the below code which ultimately just does
+                # sig/hash checks. We'll set the right field in SendJoinResult later.
+                auth_events = response.state_dag
+                for e in response.state_dag:
+                    if (e.type, e.state_key) == (EventTypes.Create, ""):
+                        create_event = e
+                        break
 
             if create_event is None:
                 # If the state doesn't have a create event then the room is
@@ -1227,7 +1246,7 @@ class FederationClient(FederationBase):
                 )
 
             logger.info(
-                "Processing from send_join %d events", len(state) + len(auth_chain)
+                "Processing from send_join %d events", len(state) + len(auth_events)
             )
 
             # We now go and check the signatures and hashes for the event. Note
@@ -1246,7 +1265,7 @@ class FederationClient(FederationBase):
                     valid_pdus_map[valid_pdu.event_id] = valid_pdu
 
             await concurrently_execute(
-                _execute, itertools.chain(state, auth_chain), 10000
+                _execute, itertools.chain(state, auth_events), 10000
             )
 
             # NB: We *need* to copy to ensure that we don't have multiple
@@ -1259,27 +1278,28 @@ class FederationClient(FederationBase):
 
             signed_auth = [
                 valid_pdus_map[p.event_id]
-                for p in auth_chain
+                for p in auth_events
                 if p.event_id in valid_pdus_map
             ]
 
             # NB: We *need* to copy to ensure that we don't have multiple
             # references being passed on, as that causes... issues.
+            # TODO(kegan): It's unclear why we only need to do this for state and not auth_events
             for s in signed_state:
                 s.internal_metadata = s.internal_metadata.copy()
 
-            # double-check that the auth chain doesn't include a different create event
-            auth_chain_create_events = [
+            # double-check that the auth events doesn't include a different create event
+            auth_events_create_events = [
                 e.event_id
                 for e in signed_auth
                 if (e.type, e.state_key) == (EventTypes.Create, "")
             ]
-            if auth_chain_create_events and auth_chain_create_events != [
+            if auth_events_create_events and auth_events_create_events != [
                 create_event.event_id
             ]:
                 raise InvalidResponseError(
                     "Unexpected create event(s) in auth chain: %s"
-                    % (auth_chain_create_events,)
+                    % (auth_events_create_events,)
                 )
 
             servers_in_room = None
@@ -1301,10 +1321,21 @@ class FederationClient(FederationBase):
                 # Fix things up in case the remote homeserver is badly behaved.
                 servers_in_room.add(destination)
 
+            signed_auth_events = signed_auth
+            signed_state_dag = None
+            if room_version.msc4242_state_dags:
+                # We previously set the state dag to auth_events so re-assign it correctly
+                signed_state_dag = signed_auth
+                # Ensure the caller cannot accidentally use these values even if the server
+                # returned them.
+                signed_state = []
+                signed_auth_events = []
+
             return SendJoinResult(
                 event=event,
                 state=signed_state,
-                auth_chain=signed_auth,
+                auth_chain=signed_auth_events,
+                state_dag=signed_state_dag,
                 origin=destination,
                 partial_state=response.members_omitted,
                 servers_in_room=servers_in_room or frozenset(),
@@ -1608,6 +1639,7 @@ class FederationClient(FederationBase):
         limit: int,
         min_depth: int,
         timeout: int,
+        state_dag: bool = False,
     ) -> list[EventBase]:
         """Tries to fetch events we are missing. This is called when we receive
         an event without having received all of its ancestors.
@@ -1623,6 +1655,7 @@ class FederationClient(FederationBase):
             limit: Maximum number of events to return.
             min_depth: Minimum depth of events to return.
             timeout: Max time to wait in ms
+            state_dag: True to walk the state DAG (MSC4242 rooms)
         """
         try:
             content = await self.transport_layer.get_missing_events(
@@ -1633,6 +1666,7 @@ class FederationClient(FederationBase):
                 limit=limit,
                 min_depth=min_depth,
                 timeout=timeout,
+                state_dag=state_dag,
             )
 
             room_version = await self.store.get_room_version(room_id)

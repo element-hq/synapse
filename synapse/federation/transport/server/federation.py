@@ -638,6 +638,7 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
         limit = int(content.get("limit", 10))
         earliest_events = content.get("earliest_events", [])
         latest_events = content.get("latest_events", [])
+        walk_state_dag = content.get("org.matrix.msc4242.state_dag", False)
 
         result = await self.handler.on_get_missing_events(
             origin,
@@ -645,6 +646,7 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
             earliest_events=earliest_events,
             latest_events=latest_events,
             limit=limit,
+            walk_state_dag=walk_state_dag,
         )
 
         return 200, result
