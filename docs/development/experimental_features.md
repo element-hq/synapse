@@ -32,6 +32,33 @@ expected and not an issue.
 It is not a requirement for experimental features to be behind a configuration flag,
 but one should be used if unsure.
 
-New experimental configuration flags should be added under the `experimental`
+New experimental configuration flags should be added under the `experimental_features`
 configuration key (see the `synapse.config.experimental` file) and either explain
 (briefly) what is being enabled, or include the MSC number.
+The configuration flag should link to the tracking issue for the experimental feature (see below).
+
+
+## Tracking issues for experimental features
+
+In the interest of having some documentation around experimental features, without
+polluting the stable documentation, all new experimental features should have a tracking issue with
+[the `T-ExperimentalFeature` label](https://github.com/element-hq/synapse/issues?q=sort%3Aupdated-desc+state%3Aopen+label%3A%22T-ExperimentalFeature%22),
+kept open as long as the experimental feature is present in Synapse.
+
+The configuration option for the feature should have a comment linking to the tracking issue,
+for ease of discoverability.
+
+As a guideline, the issue should contain:
+
+- Context for why this experimental feature is in Synapse
+  - This could well be a link to somewhere else, where this context is already available.
+- If applicable, why the feature is enabled by default. (Why do we need to enable it by default and why is it safe?)
+- If applicable, setup instructions for any non-standard components or configuration needed by the feature.
+  (Ideally this will be moved to the configuration manual after stabilisation.)
+- Design decisions behind the Synapse implementation.
+  (Ideally this will be moved to the developers' documentation after stabilisation.)
+- Any caveats around the current implementation of the feature, such as:
+  - missing aspects
+  - breakage or incompatibility that is expected if/when the feature is stabilised,
+    or when the feature is turned on/off
+- Criteria for how we know whether we can remove the feature in the future.

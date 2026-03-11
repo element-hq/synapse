@@ -642,7 +642,7 @@ class EventCreationHandler:
 
             prev_state_events:
                 The state event IDs which represent the current forward extremities of the state DAG.
-                Only applicable on room versions which use a state DAG.
+                Only applicable on room versions which use a state DAG (MSC4242).
 
         Raises:
             ResourceLimitError if server is blocked to some resource being
@@ -1003,7 +1003,7 @@ class EventCreationHandler:
                 based on the prev_events.
             prev_state_events:
                 The state event IDs which represent the current forward extremities of the state DAG.
-                Only applicable on room versions which use a state DAG.
+                Only applicable on room versions which use a state DAG (MSC4242).
         Returns:
             The event, and its stream ordering (if deduplication happened,
             the previous, duplicate event).
@@ -1281,8 +1281,8 @@ class EventCreationHandler:
 
             prev_state_events:
                 The state event IDs which represent the current forward extremities of the state DAG.
-                Only applicable on room versions which use a state DAG. If unset, populates them
-                from the current state dag forward extremities.
+                Only applicable on room versions which use a state DAG (MSC4242).
+                If unset, populates them from the current state dag forward extremities.
 
         Returns:
             Tuple of created event, UnpersistedEventContext
@@ -1300,6 +1300,7 @@ class EventCreationHandler:
                     )
             else:
                 # create event doesn't need prev_state_events to be fetched, but it must be non-None.
+                assert builder.type == EventTypes.Create and builder.state_key == ""
                 prev_state_events = []
 
         # Strip down the state_event_ids to only what we need to auth the event.
@@ -1585,17 +1586,20 @@ class EventCreationHandler:
                         auth_event = event_id_to_event.get(event_id)
                         if auth_event:
                             batched_auth_events[event_id] = auth_event
-                    if event.room_version.msc4242_state_dags and isinstance(
-                        event, FrozenEventVMSC4242
-                    ):
+                    if event.room_version.msc4242_state_dags:
+                        assert isinstance(event, FrozenEventVMSC4242)
                         # State DAG rooms will check that the prev_state_events are not rejected.
                         # To do that, we need to make sure we pass in the prev_state_events as
                         # batched_auth_events, else we will fail the event due to the
                         # prev_state_events not existing in the database.
-                        for event_id in event.prev_state_events:
-                            pse = event_id_to_event.get(event_id)
-                            if pse:
-                                batched_auth_events[event_id] = pse
+                        for prev_state_event_id in event.prev_state_events:
+                            prev_state_event = event_id_to_event.get(
+                                prev_state_event_id
+                            )
+                            if prev_state_event:
+                                batched_auth_events[prev_state_event_id] = (
+                                    prev_state_event
+                                )
                     await self._event_auth_handler.check_auth_rules_from_context(
                         event, batched_auth_events
                     )

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.interfaces import IDelayedCall
 
-from synapse.api.constants import EventTypes
+from synapse.api.constants import EventTypes, StickyEvent, StickyEventField
 from synapse.api.errors import ShadowBanError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
@@ -333,6 +333,7 @@ class DelayedEventsHandler:
         origin_server_ts: int | None,
         content: JsonDict,
         delay: int,
+        sticky_duration_ms: int | None,
     ) -> str:
         """
         Creates a new delayed event and schedules its delivery.
@@ -346,7 +347,9 @@ class DelayedEventsHandler:
                 If None, the timestamp will be the actual time when the event is sent.
             content: The content of the event to be sent.
             delay: How long (in milliseconds) to wait before automatically sending the event.
-
+            sticky_duration_ms: If an MSC4354 sticky event: the sticky duration (in milliseconds).
+                The event will be attempted to be reliably delivered to clients and remote servers
+                during its sticky period.
         Returns: The ID of the added delayed event.
 
         Raises:
@@ -382,6 +385,7 @@ class DelayedEventsHandler:
             origin_server_ts=origin_server_ts,
             content=content,
             delay=delay,
+            sticky_duration_ms=sticky_duration_ms,
         )
 
         if self._repl_client is not None:
@@ -570,7 +574,10 @@ class DelayedEventsHandler:
 
                 if event.state_key is not None:
                     event_dict["state_key"] = event.state_key
-
+                if event.sticky_duration_ms is not None:
+                    event_dict[StickyEvent.EVENT_FIELD_NAME] = StickyEventField(
+                        duration_ms=event.sticky_duration_ms
+                    )
                 (
                     sent_event,
                     _,

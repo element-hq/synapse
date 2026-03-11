@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 import attr
 from signedjson.types import SigningKey
 
-from synapse.api.constants import MAX_DEPTH, EventTypes
+from synapse.api.constants import MAX_DEPTH, EventTypes, StickyEvent, StickyEventField
 from synapse.api.room_versions import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     EventFormatVersions,
@@ -89,6 +89,10 @@ class EventBuilder:
 
     content: JsonDict = attr.Factory(dict)
     unsigned: JsonDict = attr.Factory(dict)
+    sticky: StickyEventField | None = None
+    """
+    Fields for MSC4354: Sticky Events
+    """
 
     # These only exist on a subset of events, so they raise AttributeError if
     # someone tries to get them when they don't exist.
@@ -141,11 +145,16 @@ class EventBuilder:
                 Should normally be set to None, which will cause the depth to be calculated
                 based on the prev_events.
             prev_state_events: The event IDs to use as prev_state_events.
-                Only applicable on MSC4242v11 rooms. If this is supplied, auth_event_ids
-                is ignored.
+                Only applicable on MSC4242 state DAG rooms. If this is supplied, auth_event_ids
+                must not be specified unless this event is part of a batch such that the builder
+                will be unable to compute the auth_event_ids due to the events not being persisted
+                yet.
         Returns:
             The signed and hashed event.
         """
+        # If the caller specifies this, make sure the room version supports it.
+        if prev_state_events:
+            assert self.room_version.msc4242_state_dags
         if self.room_version.msc4242_state_dags:
             assert prev_state_events is not None
             if self.room_id:
@@ -176,18 +185,20 @@ class EventBuilder:
                 # event is a state DAG event and is the create event (room_id is not provided),
                 # therefore there are no auth_events.
                 calculated_auth_event_ids = []
+                assert self.type == EventTypes.Create and self.state_key == ""
             self.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
             auth_event_ids = calculated_auth_event_ids
 
-        # this block must not be hit for MSC4242 rooms as it resolves state with prev_events
         # Create events always have empty auth_events.
         if self.type == EventTypes.Create and self.is_state() and self.state_key == "":
             auth_event_ids = []
 
         # Calculate auth_events for non-create events
+        # this block must not be hit for MSC4242 rooms as it resolves state with prev_events
         if auth_event_ids is None:
             # Every non-create event must have a room ID
             assert self.room_id is not None
+            assert not self.room_version.msc4242_state_dags
             state_ids = await self._state.compute_state_after_events(
                 self.room_id,
                 prev_event_ids,
@@ -292,9 +303,10 @@ class EventBuilder:
                 auth_event_ids.remove(create_event_id)
                 event_dict["auth_events"] = auth_event_ids
 
-        if self.room_version.msc4242_state_dags and prev_state_events is not None:
+        if self.room_version.msc4242_state_dags:
             # Auth events are removed entirely on state DAG rooms
             event_dict.pop("auth_events")
+            assert prev_state_events is not None
             event_dict["prev_state_events"] = prev_state_events
         if self.room_id is not None:
             event_dict["room_id"] = self.room_id
@@ -309,6 +321,9 @@ class EventBuilder:
 
         if self._origin_server_ts is not None:
             event_dict["origin_server_ts"] = self._origin_server_ts
+
+        if self.sticky is not None:
+            event_dict[StickyEvent.EVENT_FIELD_NAME] = self.sticky
 
         return create_local_event_from_event_dict(
             clock=self._clock,
@@ -359,6 +374,7 @@ class EventBuilderFactory:
             unsigned=key_values.get("unsigned", {}),
             redacts=key_values.get("redacts", None),
             origin_server_ts=key_values.get("origin_server_ts", None),
+            sticky=key_values.get(StickyEvent.EVENT_FIELD_NAME, None),
         )
 
 

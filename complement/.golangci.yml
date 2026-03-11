@@ -1,0 +1,38 @@
+# Docs: https://golangci-lint.run/docs/configuration/file/
+#
+# Go formatting/linting rules
+#
+# This is run as part of the normal linting utility script,
+# `poetry run ./scripts-dev/lint.sh`
+
+version: "2"
+
+linters:
+  # Default set of linters.
+  # The value can be:
+  # - `standard`: https://golangci-lint.run/docs/linters/#enabled-by-default
+  # - `all`: enables all linters by default.
+  # - `none`: disables all linters by default.
+  # - `fast`: enables only linters considered as "fast" (`golangci-lint help linters --json | jq '[ .[] | select(.fast==true) ] | map(.name)'`).
+  # Default: standard
+  default: standard
+
+  # Enable specific linter.
+  # enable:
+  #   - example
+
+  # Disable specific linters.
+  disable:
+    # FIXME: Ideally, we'd enable the `bodyclose` lint but there are many
+    # false-positives (like https://github.com/timakin/bodyclose/issues/39) and just is
+    # not well-suited for our use case (https://github.com/timakin/bodyclose/issues/11 and
+    # https://github.com/timakin/bodyclose/issues/76).
+    - bodyclose
+
+formatters:
+  # Enable specific formatter.
+  # Default: [] (uses standard Go formatting)
+  enable:
+    - gofmt
+    - goimports
+    - golines

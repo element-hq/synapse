@@ -48,6 +48,7 @@ from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.api.errors import Codes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
+from synapse.util.duration import Duration
 
 from tests.server import FakeChannel, make_request
 from tests.test_utils.html_parsers import TestHtmlParser
@@ -449,6 +450,44 @@ class RestHelper:
             expect_code,
             channel.code,
             channel.result["body"],
+        )
+
+        return channel.json_body
+
+    def send_sticky_event(
+        self,
+        room_id: str,
+        type: str,
+        *,
+        duration: Duration,
+        content: dict | None = None,
+        txn_id: str | None = None,
+        tok: str | None = None,
+        expect_code: int = HTTPStatus.OK,
+        custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
+    ) -> JsonDict:
+        """
+        Send an event that has a sticky duration according to MSC4354.
+        """
+
+        if txn_id is None:
+            txn_id = f"m{time.time()}"
+
+        path = f"/_matrix/client/r0/rooms/{room_id}/send/{type}/{txn_id}?org.matrix.msc4354.sticky_duration_ms={duration.as_millis()}"
+        if tok:
+            path = path + f"&access_token={tok}"
+
+        channel = make_request(
+            self.reactor,
+            self.site,
+            "PUT",
+            path,
+            content or {},
+            custom_headers=custom_headers,
+        )
+
+        assert channel.code == expect_code, (
+            f"Expected: {expect_code}, got: {channel.code}, resp: {channel.result['body']!r}"
         )
 
         return channel.json_body

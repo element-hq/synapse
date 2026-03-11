@@ -22,6 +22,7 @@
 import abc
 import logging
 from contextlib import ExitStack
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Callable, Iterable
 
 import attr
@@ -58,6 +59,15 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+# List of Unpadded Base64 server signing keys that are known to be vulnerable to attack.
+# Incoming requests from homeservers using any of these keys should be refused.
+# Events containing signatures using any of these keys should be refused.
+BANNED_SERVER_SIGNING_KEYS = (
+    # ELEMENTSEC-2025-1670
+    "l/O9hxMVKB6Lg+3Hqf0FQQZhVESQcMzbPN1Cz2nM3og=",
+)
 
 
 @attr.s(slots=True, frozen=True, cmp=False, auto_attribs=True)
@@ -348,6 +358,19 @@ class Keyring:
 
             if key_result.valid_until_ts < verify_request.minimum_valid_until_ts:
                 continue
+
+            key = encode_verify_key_base64(key_result.verify_key)
+            if key in BANNED_SERVER_SIGNING_KEYS:
+                raise SynapseError(
+                    HTTPStatus.UNAUTHORIZED,
+                    "Server signing key %s:%s for server %s has been banned by this server"
+                    % (
+                        key_result.verify_key.alg,
+                        key_result.verify_key.version,
+                        verify_request.server_name,
+                    ),
+                    Codes.UNAUTHORIZED,
+                )
 
             await self.process_json(key_result.verify_key, verify_request)
             verified = True

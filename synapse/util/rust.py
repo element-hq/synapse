@@ -40,24 +40,24 @@ def check_rust_lib_up_to_date() -> None:
         return None
 
     # Get the hash of all Rust source files
-    rust_path = os.path.join(synapse_root, "rust", "src")
+    rust_path = os.path.join(synapse_root, "rust")
     if not os.path.exists(rust_path):
         return None
 
-    hash = _hash_rust_files_in_directory(rust_path)
+    hash = _hash_rust_files_in_directory(synapse_root)
 
     if hash != get_rust_file_digest():
         raise Exception("Rust module outdated. Please rebuild using `poetry install`")
 
 
-def _hash_rust_files_in_directory(directory: str) -> str:
+def _hash_rust_files_in_directory(synapse_root: str) -> str:
     """Get the hash of all files in a directory (recursively)"""
 
-    directory = os.path.abspath(directory)
+    src_directory = os.path.abspath(os.path.join(synapse_root, "rust", "src"))
 
     paths = []
 
-    dirs = [directory]
+    dirs = [src_directory]
     while dirs:
         dir = dirs.pop()
         with os.scandir(dir) as d:
@@ -67,13 +67,20 @@ def _hash_rust_files_in_directory(directory: str) -> str:
                 else:
                     paths.append(entry.path)
 
+    # Manually add Cargo.toml's, Cargo.lock and build.rs to the hash, since
+    # changes to these files should also invalidate the built module.
+    paths.append(os.path.join(synapse_root, "rust", "Cargo.toml"))
+    paths.append(os.path.join(synapse_root, "rust", "build.rs"))
+    paths.append(os.path.join(synapse_root, "Cargo.lock"))
+    paths.append(os.path.join(synapse_root, "Cargo.toml"))
+
     # We sort to make sure that we get a consistent and well-defined ordering.
     paths.sort()
 
     hasher = blake2b()
 
     for path in paths:
-        with open(os.path.join(directory, path), "rb") as f:
+        with open(path, "rb") as f:
             hasher.update(f.read())
 
     return hasher.hexdigest()

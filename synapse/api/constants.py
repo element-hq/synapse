@@ -24,7 +24,9 @@
 """Contains constants from the specification."""
 
 import enum
-from typing import Final
+from typing import Final, TypedDict
+
+from synapse.util.duration import Duration
 
 # the max size of a (canonical-json-encoded) event
 MAX_PDU_SIZE = 65536
@@ -292,6 +294,8 @@ class EventUnsignedContentFields:
     # Requesting user's membership, per MSC4115
     MEMBERSHIP: Final = "membership"
 
+    STICKY_TTL: Final = "msc4354_sticky_duration_ttl_ms"
+
 
 class MTextFields:
     """Fields found inside m.text content blocks."""
@@ -321,9 +325,7 @@ class AccountDataTypes:
         "org.matrix.msc4155.invite_permission_config"
     )
     # MSC4380: Invite blocking
-    MSC4380_INVITE_PERMISSION_CONFIG: Final = (
-        "org.matrix.msc4380.invite_permission_config"
-    )
+    INVITE_PERMISSION_CONFIG: Final = "m.invite_permission_config"
     # Synapse-specific behaviour. See "Client-Server API Extensions" documentation
     # in Admin API for more information.
     SYNAPSE_ADMIN_CLIENT_CONFIG: Final = "io.element.synapse.admin_client_config"
@@ -377,3 +379,40 @@ class Direction(enum.Enum):
 class ProfileFields:
     DISPLAYNAME: Final = "displayname"
     AVATAR_URL: Final = "avatar_url"
+
+
+class StickyEventField(TypedDict):
+    """
+    Dict content of the `sticky` part of an event.
+    """
+
+    duration_ms: int
+
+
+class StickyEvent:
+    QUERY_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
+    """
+    Query parameter used by clients for setting the sticky duration of an event they are sending.
+
+    Applies to:
+        - /rooms/.../send/...
+        - /rooms/.../state/...
+    """
+
+    EVENT_FIELD_NAME: Final = "msc4354_sticky"
+    """
+    Name of the field in the top-level event dict that contains the sticky event dict.
+    """
+
+    MAX_DURATION: Duration = Duration(hours=1)
+    """
+    Maximum stickiness duration as specified in MSC4354.
+    Ensures that data in the /sync response can go down and not grow unbounded.
+    """
+
+    MAX_EVENTS_IN_SYNC: Final = 100
+    """
+    Maximum number of sticky events to include in /sync.
+
+    This is the default specified in the MSC. Chosen arbitrarily.
+    """

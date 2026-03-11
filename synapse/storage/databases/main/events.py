@@ -266,6 +266,7 @@ class PersistEventsStore:
         self.database_engine = db.engine
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -1198,6 +1199,11 @@ class PersistEventsStore:
                 state_delta_for_room,
                 min_stream_order,
                 sliding_sync_table_changes,
+            )
+
+        if self._msc4354_enabled:
+            self.store.insert_sticky_events_txn(
+                txn, [ev for ev, _ in events_and_contexts]
             )
 
         # We only update the sliding sync tables for non-backfilled events.
@@ -2684,6 +2690,11 @@ class PersistEventsStore:
                 # event isn't an outlier any more.
                 self._update_backward_extremeties(txn, [event])
 
+                if self._msc4354_enabled and event.sticky_duration():
+                    # The de-outliered event is sticky. Update the sticky events table to ensure
+                    # we deliver this down /sync.
+                    self.store.insert_sticky_events_txn(txn, [event])
+
         return [ec for ec in events_and_contexts if ec[0] not in to_remove]
 
     def _store_event_txn(
@@ -2985,12 +2996,14 @@ class PersistEventsStore:
                 },
             )
             return
+        assert len(event.prev_state_events) > 0
         self.db_pool.simple_upsert_many_txn(
             txn,
             table="msc4242_state_dag_edges",
             key_names=["room_id", "event_id", "prev_state_event_id"],
             key_values=[
-                (event.room_id, event.event_id, pae) for pae in event.prev_state_events
+                (event.room_id, event.event_id, prev_state_event)
+                for prev_state_event in event.prev_state_events
             ],
             value_names=(),
             value_values=(),
@@ -3516,7 +3529,7 @@ class PersistEventsStore:
         """
         state_groups = {}
         for event, context in events_and_contexts:
-            # state dag rooms allow outliers to have state, as /gme'd state dag events are nominally
+            # state dag rooms allow outliers to have state, as `/get_missing_events` state dag events are nominally
             # outliers (not present in the timeline) but do need state persisted so we can calculate
             # what the auth_events are for the event.
             if (

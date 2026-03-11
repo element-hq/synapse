@@ -71,6 +71,7 @@ from synapse.types import (
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import ObservableDeferred, yieldable_gather_results
 from synapse.util.metrics import Measure
+from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -635,11 +636,8 @@ class EventsPersistenceStorageController:
 
         # Get the room version for the first event. This room version is the same for all events
         # as events_and_contexts is all for one room.
-        room_version = (
-            events_and_contexts[0][0].room_version
-            if len(events_and_contexts) > 0
-            else None
-        )
+        assert len(events_and_contexts) > 0
+        room_version = events_and_contexts[0][0].room_version
 
         for chunk in chunks:
             # We can't easily parallelize these since different chunks
@@ -656,17 +654,16 @@ class EventsPersistenceStorageController:
                         name="_process_state_dag_forward_extremities_and_state_delta",
                         server_name=self.server_name,
                     ):
+                        assert all(
+                            isinstance(ev, FrozenEventVMSC4242) for ev, _ in chunk
+                        )
                         (
                             new_forward_extremities,  # for prev_events
                             state_delta_for_room,  # for state groups
                             new_state_dag_extrems,  # for prev_state_events
                         ) = await self._process_state_dag_forward_extremities_and_state_delta(
                             room_id,
-                            [
-                                (ev, ctx)
-                                for ev, ctx in chunk
-                                if isinstance(ev, FrozenEventVMSC4242)
-                            ],
+                            cast(list[tuple[FrozenEventVMSC4242, EventContext]], chunk),
                         )
                 else:
                     with Measure(
@@ -864,9 +861,6 @@ class EventsPersistenceStorageController:
             existing_state_dag_fwd_extrems,
             event_contexts,
         )
-        assert new_state_dag_fwd_extrems, (
-            f"No state dag forward extremities left in room {room_id}!"
-        )
         # ...and the room DAG
         existing_room_dag_fwd_extrems = (
             await self.main_store.get_latest_event_ids_in_room(room_id)
@@ -895,6 +889,8 @@ class EventsPersistenceStorageController:
                 cast(list[EventPersistencePair], event_contexts),
                 existing_state_dag_fwd_extrems,
                 new_state_dag_fwd_extrems,
+                # do not prune forward extremities in the state DAG
+                # else we lose eventual delivery
                 should_prune=False,
             )
 
@@ -941,13 +937,15 @@ class EventsPersistenceStorageController:
     ) -> set[str]:
         """Calculate the new state dag forward extremities. Modifies existing_fwd_extrems.
 
-        Assumes that new_state_events are only state events which should be in the state DAG.
+        Assumes that event_contexts are only state events which should be in the state DAG.
+
+        Raises:
+            SynapseError: if the new events include unknown prev_state_events
+            AssertionError: if there are no state DAG forward extremities remaining in the room
         """
         # filter out events which don't belong in the state dag.
         new_state_events_contexts = [
-            (e, ctx)
-            for e, ctx in event_contexts
-            if event_exists_in_state_dag(e) and isinstance(e, FrozenEventVMSC4242)
+            (e, ctx) for e, ctx in event_contexts if event_exists_in_state_dag(e)
         ]
         if len(new_state_events_contexts) == 0:
             # if there are no state events being persisted, then the fwd extremities of the state dag
@@ -960,30 +958,28 @@ class EventsPersistenceStorageController:
         #    existing, processed events which have the to-be-persisted events as prev_state_events.
         #  - We don't care if they are an "outlier" in the main room dag, so long as they AREN'T
         #    an outlier on the state dag, which this function checks, so we don't check outlier-ness.
-        #  - We allow soft-failed events to become forward extremities, as per the MSC. We do not
-        #    allow rejected events to become forward extremities though.
+        #  - We allow *soft-failed* events to become forward extremities, as per the MSC. We do not
+        #    allow *rejected* events to become forward extremities though.
 
         rejected_events = [ev for ev, ctx in new_state_events_contexts if ctx.rejected]
         new_state_events = [
             ev for ev, ctx in new_state_events_contexts if not ctx.rejected
         ]
-        # We include rejected_event_ids in this check
-        # otherwise if we persist a chunk of (R <- O) then O would fail the check since R was not in
-        # the DB of the to-be-persisted chunk yet (remember all the events in the chunk aren't
-        # persisted yet!)
-        all_events = set(rejected_events + new_state_events)
+        # We want to check that we are not missing any prev_state_events.
+        # To do this, we include rejected events in this check.
+        all_new_state_events = set(rejected_events + new_state_events)
 
         # First, verify that we know all prev_state_events. If we fail this check then we don't have
         # a complete DAG and that is bad, so bail out.
 
         # Start with them all missing.
         missing_prev_state_events = {
-            e_id for event in all_events for e_id in event.prev_state_events
+            e_id for event in all_new_state_events for e_id in event.prev_state_events
         }
 
         # remove prev events which appear in all_events
         missing_prev_state_events.difference_update(
-            event.event_id for event in all_events
+            event.event_id for event in all_new_state_events
         )
         # the rest of these events should be present in the DB. Some of them may be forward extremities,
         # some may not be, that's ok.
@@ -999,10 +995,9 @@ class EventsPersistenceStorageController:
                 room_id,
                 missing_prev_state_events,
             )
-            msg = (ev.event_id for ev in all_events)
             logger.error(
                 "_calculate_new_state_dag_extremities: was handling %s",
-                msg,
+                shortstr([ev.event_id for ev in all_new_state_events]),
             )
             raise SynapseError(
                 code=500,
@@ -1022,8 +1017,8 @@ class EventsPersistenceStorageController:
             e_id for event in new_state_events for e_id in event.prev_state_events
         )
 
-        # Finally handle the case where the new events have rejected prev
-        # events. If they do we need to remove them and their prev events,
+        # Finally handle the case where the new events have rejected/soft-failed `prev_state_events`.
+        # If they do we need to remove them and their `prev_state_events`,
         # otherwise we end up with dangling extremities.
         # Specifically, this handles the case where (F=fwd extrem, SF=soft-failed, N=new event)
         # F <-- SF <-- SF <-- N
@@ -1039,6 +1034,9 @@ class EventsPersistenceStorageController:
             msc4242_state_dag_forward_extremities_counter.labels(
                 **{SERVER_NAME_LABEL: self.server_name}
             ).observe(len(result))
+
+        # There should always be at least one forward extremity.
+        assert result, f"No state dag forward extremities left in room {room_id}!"
         return result
 
     async def _calculate_new_extremities(
@@ -1127,6 +1125,9 @@ class EventsPersistenceStorageController:
 
             should_prune :
                 if true, attempt to prune the forward extremities.
+                Pruning means we will not communicate some new events to other servers,
+                which can compromise eventual delivery, so graphs which are fully synchronised
+                e.g. state DAGs should not prune.
 
         Returns:
             Returns a tuple of two state maps and a set of new forward

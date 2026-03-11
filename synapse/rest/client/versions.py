@@ -161,7 +161,7 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4069": self.config.experimental.msc4069_profile_inhibit_propagation,
                     # Allows clients to handle push for encrypted events.
                     "org.matrix.msc4028": self.config.experimental.msc4028_push_encrypted_events,
-                    # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+                    # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version
                     "org.matrix.msc4108": (
                         self.config.experimental.msc4108_enabled
                         or (
@@ -169,6 +169,8 @@ class VersionsRestServlet(RestServlet):
                             is not None
                         )
                     ),
+                    # MSC4388: Secure out-of-band channel for sign in with QR
+                    "io.element.msc4388": (self.config.experimental.msc4388_enabled),
                     # MSC4140: Delayed events
                     "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
                     # Simplified sliding sync
@@ -182,8 +184,10 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4306": self.config.experimental.msc4306_enabled,
                     # MSC4169: Backwards-compatible redaction sending using `/send`
                     "com.beeper.msc4169": self.config.experimental.msc4169_enabled,
+                    # MSC4354: Sticky events
+                    "org.matrix.msc4354": self.config.experimental.msc4354_enabled,
                     # MSC4380: Invite blocking
-                    "org.matrix.msc4380": self.config.experimental.msc4380_enabled,
+                    "org.matrix.msc4380.stable": True,
                 },
             },
         )

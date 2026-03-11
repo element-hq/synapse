@@ -1,8 +1,9 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-#  Copyright 2021 The Matrix.org Foundation C.I.C.
+# Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -271,6 +272,22 @@ class FederationQueryServlet(BaseFederationServerServlet):
         args = {k.decode("utf8"): v[0].decode("utf-8") for k, v in query.items()}
         args["origin"] = origin
         return await self.handler.on_query_request(query_type, args)
+
+
+class FederationUnstableGetExtremitiesServlet(BaseFederationServerServlet):
+    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc4370"
+    PATH = "/extremities/(?P<room_id>[^/]*)"
+    CATEGORY = "Federation requests"
+
+    async def on_GET(
+        self,
+        origin: str,
+        content: Literal[None],
+        query: dict[bytes, list[bytes]],
+        room_id: str,
+    ) -> tuple[int, JsonDict]:
+        result = await self.handler.on_get_extremities_request(origin, room_id)
+        return 200, result
 
 
 class FederationMakeJoinServlet(BaseFederationServerServlet):
@@ -886,6 +903,7 @@ FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationBackfillServlet,
     FederationTimestampLookupServlet,
     FederationQueryServlet,
+    FederationUnstableGetExtremitiesServlet,
     FederationMakeJoinServlet,
     FederationMakeLeaveServlet,
     FederationEventServlet,

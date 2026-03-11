@@ -18,7 +18,6 @@
 #
 #
 
-from typing import Callable
 
 import attr
 
@@ -37,7 +36,7 @@ class EventFormatVersions:
     ROOM_V3 = 2  # MSC1659-style $hash event id format: used for room v3
     ROOM_V4_PLUS = 3  # MSC1884-style $hash format: introduced for room v4
     ROOM_V11_HYDRA_PLUS = 4  # MSC4291 room IDs as hashes: introduced for room HydraV11
-    ROOM_VMSC4242 = 5
+    ROOM_VMSC4242 = 5  # MSC4242 state dags: adds prev_state_events, removes auth_events
 
 
 KNOWN_EVENT_FORMAT_VERSIONS = {
@@ -538,42 +537,5 @@ KNOWN_ROOM_VERSIONS: dict[str, RoomVersion] = {
         RoomVersions.MSC3757v11,
         RoomVersions.MSC4242v12,
         RoomVersions.HydraV11,
-    )
-}
-
-
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class RoomVersionCapability:
-    """An object which describes the unique attributes of a room version."""
-
-    identifier: str  # the identifier for this capability
-    preferred_version: RoomVersion | None
-    support_check_lambda: Callable[[RoomVersion], bool]
-
-
-MSC3244_CAPABILITIES = {
-    cap.identifier: {
-        "preferred": (
-            cap.preferred_version.identifier
-            if cap.preferred_version is not None
-            else None
-        ),
-        "support": [
-            v.identifier
-            for v in KNOWN_ROOM_VERSIONS.values()
-            if cap.support_check_lambda(v)
-        ],
-    }
-    for cap in (
-        RoomVersionCapability(
-            "knock",
-            RoomVersions.V7,
-            lambda room_version: room_version.knock_join_rule,
-        ),
-        RoomVersionCapability(
-            "restricted",
-            RoomVersions.V9,
-            lambda room_version: room_version.restricted_join_rule,
-        ),
     )
 }

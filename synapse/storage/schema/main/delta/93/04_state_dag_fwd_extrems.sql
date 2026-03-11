@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS msc4242_state_dag_forward_extremities(
     event_id TEXT NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
     -- it doesn't make sense to reference the same event multiple times, and this uniqueness
     -- index is also used to delete events once they are no longer forward extremities.
-    UNIQUE (event_id, room_id)
+    UNIQUE (event_id)
 );
 -- When creating events, we want to select all forward extremities for a room which this index helps with.
 CREATE INDEX msc4242_state_dag_room ON msc4242_state_dag_forward_extremities(room_id);
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS msc4242_state_dag_edges(
     -- DAG room to function with an holey DAG, so these events _cannot_ be purged. To purge them, the
     -- entire room would need to be deleted.
     event_id TEXT NOT NULL REFERENCES events(event_id),
-    -- one of the prev state events for this event ID. We must have it since we must have the entire state DAG.
+    -- one of the `prev_state_events` for this event ID. We must have it since we must have the entire state DAG.
     -- can be NULL for the create event.
     prev_state_event_id TEXT REFERENCES events(event_id)
     -- calculated depth for this event ID. There is some denormalisation here as we're storing the depth

@@ -29,7 +29,7 @@ from tests.unittest import HomeserverTestCase
 
 
 class MSC4242StateDagsTests(HomeserverTestCase):
-    user_id = "@red:server"
+    user_id = "@user1:server"
     servlets = [room.register_servlets]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
@@ -57,16 +57,16 @@ class MSC4242StateDagsTests(HomeserverTestCase):
         for non-state events.
         """
         # they don't change for messages
-        first_id = self.helper.send(self.room_id, body="test1")["event_id"]
-        first_pae = self._get_prev_state_events(first_id)
-        assert len(first_pae) == 1
+        first_event_id = self.helper.send(self.room_id, body="test1")["event_id"]
+        first_prev_state_event = self._get_prev_state_events(first_event_id)
+        assert len(first_prev_state_event) == 1
         second_id = self.helper.send(self.room_id, body="test2")["event_id"]
-        second_pae = self._get_prev_state_events(second_id)
-        assert len(second_pae) == 1
-        self.assertEquals(first_pae, second_pae)
+        second_prev_state_event = self._get_prev_state_events(second_id)
+        assert len(second_prev_state_event) == 1
+        self.assertEquals(first_prev_state_event, second_prev_state_event)
 
-        # send another auth event, which should change the prev_state_events on subsequent events
-        jr_id = self.helper.send_state(
+        # send an auth event, which should change the prev_state_events on *subsequent* events
+        join_rule_state_event_id = self.helper.send_state(
             self.room_id,
             EventTypes.JoinRules,
             {
@@ -74,25 +74,29 @@ class MSC4242StateDagsTests(HomeserverTestCase):
             },
             tok="nope",
         )["event_id"]
-        jr_pae = self._get_prev_state_events(jr_id)
-        self.assertEquals(second_pae, jr_pae)
+        join_rule_prev_state_event_ids = self._get_prev_state_events(
+            join_rule_state_event_id
+        )
+        self.assertEquals(second_prev_state_event, join_rule_prev_state_event_ids)
 
         # prev_state_events should always point to the join rule now
-        third_id = self.helper.send(self.room_id, body="test3")["event_id"]
-        third_pae = self._get_prev_state_events(third_id)
-        self.assertEquals(third_pae, [jr_id])
-        # ..including for non-auth state
-        # TODO FIXME KEGAN
-        # name_id = self.helper.send_state(
-        #    self.room_id,
-        #    EventTypes.Name,
-        #    {
-        #        "name": "State DAGs!",
-        #    },
-        #    tok="nope",
-        # )["event_id"]
-        # name_pae = self._get_prev_state_events(name_id)
-        # self.assertEquals(name_pae, [jr_id])
+        third_event_id = self.helper.send(self.room_id, body="test3")["event_id"]
+        third_prev_state_event = self._get_prev_state_events(third_event_id)
+        self.assertEquals(third_prev_state_event, [join_rule_state_event_id])
+        # and non-auth state should also update prev_state_events
+        name_state_event_id = self.helper.send_state(
+            self.room_id,
+            EventTypes.Name,
+            {
+                "name": "State DAGs!",
+            },
+            tok="nope",
+        )["event_id"]
+        name_prev_state_event_ids = self._get_prev_state_events(name_state_event_id)
+        self.assertEquals(name_prev_state_event_ids, [join_rule_state_event_id])
+        fourth_event_id = self.helper.send(self.room_id, body="test4")["event_id"]
+        fourth_prev_state_event = self._get_prev_state_events(fourth_event_id)
+        self.assertEquals(fourth_prev_state_event, [name_state_event_id])
 
 
 class MSC4242EventPersistenceAuthDagsStoreTestCase(HomeserverTestCase):
@@ -135,6 +139,7 @@ class MSC4242EventPersistenceAuthDagsStoreTestCase(HomeserverTestCase):
         id: str,
         prev_state_events: list[str],
         rejected: bool = False,
+        soft_failed: bool = False,
     ) -> tuple[FrozenEventVMSC4242, EventContext]:
         ev = make_event_from_dict(
             {
@@ -149,6 +154,8 @@ class MSC4242EventPersistenceAuthDagsStoreTestCase(HomeserverTestCase):
             },
             room_version=RoomVersions.MSC4242v12,
         )
+        if soft_failed:
+            ev.internal_metadata.soft_failed = True
         assert isinstance(ev, FrozenEventVMSC4242)
         ev._event_id = id
         ctx = Mock()
@@ -162,17 +169,23 @@ class MSC4242EventPersistenceAuthDagsStoreTestCase(HomeserverTestCase):
         want_new_extrems: set[str],
         want_raises: bool = False,
     ) -> None:
-        promise = self.persistence._calculate_new_state_dag_extremities(
+        """
+        Tests the logic of _calculate_new_state_dag_extremities.
+
+        Tests that the new extremities calculated as a result of processing current_fwds and new_events
+        matches want_new_extrems or raises if want_raises is True.
+        """
+        coroutine = self.persistence._calculate_new_state_dag_extremities(
             self.room_id,
             frozenset(current_fwds),
             new_events,
         )
         if want_raises:
-            f = self.get_failure(promise, SynapseError)
+            f = self.get_failure(coroutine, SynapseError)
             assert f is not None
             return
 
-        new_extrems = set(self.get_success(promise))
+        new_extrems = set(self.get_success(coroutine))
         self.assertEqual(
             new_extrems,
             want_new_extrems,

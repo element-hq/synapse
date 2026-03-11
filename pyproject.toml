@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.146.0"
+version = "1.149.0rc1"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -410,6 +410,12 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    # Durations are immutable
+    "synapse.util.duration.Duration",
+]
 
 [tool.maturin]
 manifest-path = "rust/Cargo.toml"
