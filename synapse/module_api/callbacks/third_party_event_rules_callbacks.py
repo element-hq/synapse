@@ -29,6 +29,7 @@ from synapse.events.snapshot import UnpersistedEventContextBase
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import Requester, StateMap
 from synapse.util.async_helpers import delay_cancellation, maybe_awaitable
+from synapse.util.frozenutils import unfreeze
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -322,7 +323,10 @@ class ThirdPartyEventRulesModuleApiCallbacks:
                 event_dict = replacement_data
                 break
 
-        event.unfreeze()
+        # Unfreeze the event dict to avoid potential issues with frozen dicts further
+        # down the code. Pydantic for example is not happy with frozen dicts.
+        # cf https://github.com/element-hq/synapse/issues/18117
+        event._dict = unfreeze(event._dict)
 
         return allow, event_dict
 
