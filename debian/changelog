@@ -1,8 +1,14 @@
-matrix-synapse-py3 (1.149.0+nmu1) UNRELEASED; urgency=medium
+matrix-synapse-py3 (1.149.1+nmu1) UNRELEASED; urgency=medium
 
   * Change how the systemd journald integration is installed.
 
  -- Quentin Gliech <packages@matrix.org>  Fri, 20 Feb 2026 19:19:51 +0100
+
+matrix-synapse-py3 (1.149.1) stable; urgency=medium
+
+  * New synapse release 1.149.1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Wed, 11 Mar 2026 09:30:24 +0000
 
 matrix-synapse-py3 (1.149.0) stable; urgency=medium
 

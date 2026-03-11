@@ -1548,24 +1548,25 @@ test = ["aiounittest", "tox", "twisted"]
 
 [[package]]
 name = "matrix-synapse-ldap3"
-version = "0.3.0"
+version = "0.4.0"
 description = "An LDAP3 auth provider for Synapse"
 optional = true
-python-versions = ">=3.7"
+python-versions = ">=3.10"
 groups = ["main"]
 markers = "extra == \"matrix-synapse-ldap3\" or extra == \"all\""
 files = [
-    {file = "matrix-synapse-ldap3-0.3.0.tar.gz", hash = "sha256:8bb6517173164d4b9cc44f49de411d8cebdb2e705d5dd1ea1f38733c4a009e1d"},
-    {file = "matrix_synapse_ldap3-0.3.0-py3-none-any.whl", hash = "sha256:8b4d701f8702551e98cc1d8c20dbed532de5613584c08d0df22de376ba99159d"},
+    {file = "matrix_synapse_ldap3-0.4.0-py3-none-any.whl", hash = "sha256:bf080037230d2af5fd3639cb87266de65c1cad7a68ea206278c5b4bf9c1a17f3"},
+    {file = "matrix_synapse_ldap3-0.4.0.tar.gz", hash = "sha256:cff52ba780170de5e6e8af42863d2648ee23f3bf0a9fea6db52372f9fc00be2b"},
 ]
 
 [package.dependencies]
 ldap3 = ">=2.8"
-service-identity = "*"
+packaging = ">=14.1"
+service_identity = "*"
 Twisted = ">=15.1.0"
 
 [package.extras]
-dev = ["black (==22.3.0)", "flake8 (==4.0.1)", "isort (==5.9.3)", "ldaptor", "matrix-synapse", "mypy (==0.910)", "tox", "types-setuptools"]
+dev = ["black (==24.2.0)", "flake8 (==7.0.0)", "isort (==5.9.3)", "ldaptor", "matrix-synapse", "mypy (==1.9.0)", "tox", "types-setuptools"]
 
 [[package]]
 name = "mdurl"
