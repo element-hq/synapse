@@ -398,6 +398,8 @@ class ProfileHandler:
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
 
+        # Prevent users from deactivating anyone but themselves,
+        # except for admins who can deactivate anyone.
         if not by_admin and target_user != requester.user:
             # It's a little strange to have this check here, but given all the sibling
             # methods have these checks, it'd be even stranger to be inconsistent and not
