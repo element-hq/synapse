@@ -1,3 +1,1 @@
-Unfreeze event dict after check_event_allowed module callbacks. Frozen dicts can cause issues with Pydantic validation among other things.
-
-Contributed by @c-cal
+Unfreeze event dict after check_event_allowed module callbacks. Frozen dicts can cause issues with Pydantic validation among other things. Contributed by @c-cal.
