@@ -1,0 +1,1 @@
+Bump `matrix-synapse-ldap3` to `0.4.0` to support `setuptools>=82.0.0`.
