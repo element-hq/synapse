@@ -30,6 +30,8 @@ You have configured both `redis.password` and `redis.password_path`.
 These are mutually incompatible.
 """
 
+VALID_REDIS_TYPES = {"standalone", "sentinel", "cluster"}
+
 
 class RedisConfig(Config):
     section = "redis"
@@ -66,6 +68,43 @@ class RedisConfig(Config):
                     "password_path",
                 ),
             ).strip()
+
+        self.redis_type = redis_config.get("type", "standalone")
+        if self.redis_type not in VALID_REDIS_TYPES:
+            raise ConfigError(
+                "Invalid value for redis.type: expected one of "
+                "'standalone', 'sentinel', or 'cluster'",
+                ("redis", "type"),
+            )
+
+        self.redis_sentinel_master = redis_config.get("sentinel_master")
+        self.redis_sentinel_hosts = redis_config.get("sentinel_hosts", [])
+        self.redis_sentinel_password = redis_config.get("sentinel_password")
+        if self.redis_sentinel_password and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("redis", "sentinel_password"),
+            )
+
+        # Validate sentinel configuration
+        if self.redis_type == "sentinel":
+            if not self.redis_sentinel_master:
+                raise ConfigError(
+                    "redis.sentinel_master is required when redis.type is 'sentinel'",
+                    ("redis", "sentinel_master"),
+                )
+            if not self.redis_sentinel_hosts:
+                raise ConfigError(
+                    "redis.sentinel_hosts is required when redis.type is 'sentinel'",
+                    ("redis", "sentinel_hosts"),
+                )
+            # Validate sentinel_hosts format - should be list of tuples or strings
+            for idx, host_entry in enumerate(self.redis_sentinel_hosts):
+                if not isinstance(host_entry, (list, tuple)) or len(host_entry) != 2:
+                    raise ConfigError(
+                        f"Each entry in redis.sentinel_hosts must be a list/tuple of [host, port], got: {host_entry}",
+                        ("redis", "sentinel_hosts", idx),
+                    )
 
         self.redis_use_tls = redis_config.get("use_tls", False)
         self.redis_certificate = redis_config.get("certificate_file", None)
