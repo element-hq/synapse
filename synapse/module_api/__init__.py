@@ -160,6 +160,7 @@ from synapse.util.caches.descriptors import CachedFunction, cached as _cached
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze
+from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
     # Old versions don't have `LiteralString`
@@ -1989,7 +1990,7 @@ class ModuleApi:
         self,
         user_id: UserID,
         new_displayname: str,
-        deactivation: bool = False,
+        deactivation: bool | Sentinel = Sentinel.UNSET_SENTINEL,
     ) -> None:
         """Sets a user's display name.
 
@@ -2006,6 +2007,7 @@ class ModuleApi:
             deactivation:
                 **deprecated since v1.150.0**
                 Callers should NOT pass this argument. Instead, omit it and leave it to the default.
+                Will log an error if it is passed.
                 Remove after 2027-01-01
                 Tracked by https://github.com/element-hq/synapse/issues/19546
 
@@ -2018,9 +2020,10 @@ class ModuleApi:
         """
         requester = create_requester(user_id)
 
-        if deactivation:
+        if deactivation is not Sentinel.UNSET_SENTINEL:
             logger.error(
-                "Deprecated `deactivation=True` flag passed to `set_displayname` Module API"
+                "Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: %r). This will break in 2027.",
+                deactivation,
             )
 
         await self._hs.get_profile_handler().set_displayname(

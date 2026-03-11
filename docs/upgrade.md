@@ -143,6 +143,9 @@ This parameter is now deprecated and it is intended to be removed in 2027.
 No immediate change is necessary, however once the parameter is removed, modules passing it will produce errors.
 [Issue #19546](https://github.com/element-hq/synapse/issues/19546) tracks this removal.
 
+From this version, when the parameter is passed, an error such as
+``Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: False). This will break in 2027.`` will be logged. The method will otherwise continue to work.
+
 # Upgrading to v1.146.0
 
 ## Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka
