@@ -206,15 +206,15 @@ class ProfileFieldRestServlet(RestServlet):
 
         if field_name == ProfileFields.DISPLAYNAME:
             await self.profile_handler.set_displayname(
-                user, requester, new_value, is_admin, propagate=propagate
+                user, requester, new_value, by_admin=is_admin, propagate=propagate
             )
         elif field_name == ProfileFields.AVATAR_URL:
             await self.profile_handler.set_avatar_url(
-                user, requester, new_value, is_admin, propagate=propagate
+                user, requester, new_value, by_admin=is_admin, propagate=propagate
             )
         else:
             await self.profile_handler.set_profile_field(
-                user, requester, field_name, new_value, is_admin
+                user, requester, field_name, new_value, by_admin=is_admin
             )
 
         return 200, {}
@@ -263,15 +263,15 @@ class ProfileFieldRestServlet(RestServlet):
 
         if field_name == ProfileFields.DISPLAYNAME:
             await self.profile_handler.set_displayname(
-                user, requester, "", is_admin, propagate=propagate
+                user, requester, "", by_admin=is_admin, propagate=propagate
             )
         elif field_name == ProfileFields.AVATAR_URL:
             await self.profile_handler.set_avatar_url(
-                user, requester, "", is_admin, propagate=propagate
+                user, requester, "", by_admin=is_admin, propagate=propagate
             )
         else:
             await self.profile_handler.delete_profile_field(
-                user, requester, field_name, is_admin
+                user, requester, field_name, by_admin=is_admin
             )
 
         return 200, {}
