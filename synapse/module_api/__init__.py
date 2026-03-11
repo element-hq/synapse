@@ -1995,13 +1995,20 @@ class ModuleApi:
 
         Added in Synapse v1.76.0.
 
+        (Synapse Developer note: All future arguments should be kwargs-only
+        due to https://github.com/element-hq/synapse/issues/19546)
+
         Args:
             user_id:
                 The user whose display name is to be changed.
             new_displayname:
                 The new display name to give the user.
             deactivation:
-                (deprecated)
+                **deprecated since v1.150.0**
+                Callers should NOT pass this argument. Instead, omit it and leave it to the default.
+                Remove after 2027-01-01
+                Tracked by https://github.com/element-hq/synapse/issues/19546
+
                 Whether this change was made while deactivating the user.
 
                 Should be omitted, will produce a logged error if set to True.
