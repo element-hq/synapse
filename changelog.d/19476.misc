@@ -1,0 +1,1 @@
+Add in-repo Complement test to sanity check Synapse version matches git checkout (testing what we think we are).

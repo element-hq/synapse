@@ -133,6 +133,19 @@ pip install systemd-python
 No action is needed if you do not use journal logging, or if you installed
 Synapse from the Debian packages (which handle this automatically).
 
+## Module API: Deprecation of the `deactivation` parameter in the `set_displayname` method
+
+If you have Synapse modules installed that use the `set_displayname` method to change
+the display name of your users, please ensure that it doesn't pass the optional
+`deactivation` parameter.
+
+This parameter is now deprecated and it is intended to be removed in 2027.
+No immediate change is necessary, however once the parameter is removed, modules passing it will produce errors.
+[Issue #19546](https://github.com/element-hq/synapse/issues/19546) tracks this removal.
+
+From this version, when the parameter is passed, an error such as
+``Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: False). This will break in 2027.`` will be logged. The method will otherwise continue to work.
+
 ## Updated request log format (`Processed request: ...`)
 
 The [request log format](usage/administration/request_log.md) has slightly changed to
