@@ -112,6 +112,18 @@ class MasProvisionUserResource(MasBaseResource):
         unset_emails: StrictBool = False
         set_emails: list[StrictStr] | None = None
 
+        locked: StrictBool | None = None
+        """
+        True to lock user. False to unlock. None to leave the same.
+
+        This is mostly for informational purposes; if the user's account is locked in MAS
+        but not in Synapse, the token introspection response will prevent them from using
+        their account.
+
+        However, having a local copy of the locked state in Synapse is useful for excluding
+        the user from the user directory.
+        """
+
         @model_validator(mode="before")
         @classmethod
         def validate_exclusive(cls, values: Any) -> Any:
@@ -205,6 +217,9 @@ class MasProvisionUserResource(MasBaseResource):
                         address=address,
                         validated_at=current_time,
                     )
+
+        if body.locked is not None:
+            await self.store.set_user_locked_status(user_id.to_string(), body.locked)
 
         if body.unset_avatar_url:
             await self.profile_handler.set_avatar_url(

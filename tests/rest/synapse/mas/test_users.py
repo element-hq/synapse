@@ -362,6 +362,64 @@ class MasProvisionUserResource(BaseTestCase):
             )
             self.assertEqual(channel.code, 400, f"Should fail for content: {content}")
 
+    def test_lock_and_unlock(self) -> None:
+        store = self.hs.get_datastores().main
+
+        # Create a user in the locked state
+        alice = UserID("alice", "test")
+        channel = self.make_request(
+            "POST",
+            "/_synapse/mas/provision_user",
+            shorthand=False,
+            access_token=self.SHARED_SECRET,
+            content={
+                "localpart": alice.localpart,
+                "locked": True,
+            },
+        )
+        # This created the user, hence the 201 status code
+        self.assertEqual(channel.code, 201, channel.json_body)
+        self.assertEqual(channel.json_body, {})
+        self.assertTrue(
+            self.get_success(store.get_user_locked_status(alice.to_string()))
+        )
+
+        # Then transition from locked to unlocked
+        channel = self.make_request(
+            "POST",
+            "/_synapse/mas/provision_user",
+            shorthand=False,
+            access_token=self.SHARED_SECRET,
+            content={
+                "localpart": alice.localpart,
+                "locked": False,
+            },
+        )
+        # This updated the user, hence the 200 status code
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {})
+        self.assertFalse(
+            self.get_success(store.get_user_locked_status(alice.to_string()))
+        )
+
+        # And back from unlocked to locked
+        channel = self.make_request(
+            "POST",
+            "/_synapse/mas/provision_user",
+            shorthand=False,
+            access_token=self.SHARED_SECRET,
+            content={
+                "localpart": alice.localpart,
+                "locked": True,
+            },
+        )
+        # This updated the user, hence the 200 status code
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {})
+        self.assertTrue(
+            self.get_success(store.get_user_locked_status(alice.to_string()))
+        )
+
 
 @skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasIsLocalpartAvailableResource(BaseTestCase):
