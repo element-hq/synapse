@@ -146,6 +146,14 @@ No immediate change is necessary, however once the parameter is removed, modules
 From this version, when the parameter is passed, an error such as
 ``Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: False). This will break in 2027.`` will be logged. The method will otherwise continue to work.
 
+## Updated request log format (`Processed request: ...`)
+
+The [request log format](usage/administration/request_log.md) has slightly changed to
+include `ru=(...)` and `db=(...)` labels to better disambiguate the number groupings.
+Previously, these values appeared without labels.
+
+This only matters if you have third-party tooling that parses the Synapse logs.
+
 # Upgrading to v1.146.0
 
 ## Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka

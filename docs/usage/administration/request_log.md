@@ -5,8 +5,8 @@ HTTP request logs are written by synapse (see [`synapse/http/site.py`](https://g
 See the following for how to decode the dense data available from the default logging configuration.
 
 ```
-2020-10-01 12:00:00,000 - synapse.access.http.8008 - 311 - INFO - PUT-1000- 192.168.0.1 - 8008 - {another-matrix-server.com} Processed request: 0.100sec/-0.000sec (0.000sec, 0.000sec) (0.001sec/0.090sec/3) 11B !200 "PUT /_matrix/federation/v1/send/1600000000000 HTTP/1.1" "Synapse/1.20.1" [0 dbevts]
--AAAAAAAAAAAAAAAAAAAAA-   -BBBBBBBBBBBBBBBBBBBBBB-   -C-   -DD-   -EEEEEE-  -FFFFFFFFF-   -GG-    -HHHHHHHHHHHHHHHHHHHHHHH-                     -IIIIII- -JJJJJJJ-  -KKKKKK-, -LLLLLL-  -MMMMMMM- -NNNNNN- O  -P- -QQ-  -RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR-   -SSSSSSSSSSSS-   -TTTTTT-
+2020-10-01 12:00:00,000 - synapse.access.http.8008 - 311 - INFO - PUT-1000- 192.168.0.1 - 8008 - {another-matrix-server.com} Processed request: 0.100sec/-0.000sec ru=(0.000sec, 0.000sec) db=(0.001sec/0.090sec/3) 11B !200 "PUT /_matrix/federation/v1/send/1600000000000 HTTP/1.1" "Synapse/1.20.1" [0 dbevts]
+-AAAAAAAAAAAAAAAAAAAAA-   -BBBBBBBBBBBBBBBBBBBBBB-   -C-   -DD-   -EEEEEE-  -FFFFFFFFF-   -GG-    -HHHHHHHHHHHHHHHHHHHHHHH-                     -IIIIII- -JJJJJJJ-     -KKKKKK-, -LLLLLL-      -MMMMMM- -NNNNNN- O  -P- -QQ-  -RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR-   -SSSSSSSSSSSS-   -TTTTTT-
 ```
 
 
