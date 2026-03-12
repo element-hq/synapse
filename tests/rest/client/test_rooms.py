@@ -42,7 +42,7 @@ from synapse.api.constants import (
     PublicRoomsFilterFields,
     RoomTypes,
 )
-from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException, LimitExceededError
 from synapse.api.room_versions import RoomVersions
 from synapse.appservice import ApplicationService
 from synapse.events import EventBase, make_event_from_dict
@@ -2488,7 +2488,7 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         # Want a custom error message to have been set
         self.assertNotEqual(
-            "Too Many Requests",
+            LimitExceededError("test_delayed_event_user_limit_exceeded").msg,
             channel.json_body["error"],
             channel.json_body,
         )
