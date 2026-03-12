@@ -84,6 +84,12 @@ class VersionsRestServlet(RestServlet):
         else:
             # Allow caching of unauthenticated responses, as they only depend
             # on server configuration which rarely changes.
+            #
+            # - `public` means it can be cached both in the browser and in caching proxies
+            # - `max-age` controls how long we cache on the browser side. 10m is sane enough
+            # - `s-maxage` controls how long we cache on the proxy side. Since caching
+            #   proxies usually have a way to purge caches, it is fine to cache there for
+            #   longer (1h), and issue cache invalidations in case we need it
             request.setHeader(b"Cache-Control", b"public, max-age=600, s-maxage=3600")
 
         # Tell caches to vary on the Authorization header, so that
