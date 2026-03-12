@@ -48,7 +48,7 @@ from synapse.api.room_versions import RoomVersion
 from synapse.logging.opentracing import SynapseTags, set_tag, trace
 from synapse.types import JsonDict, Requester
 
-from . import EventBase, StrippedStateEvent, make_event_from_dict
+from . import EventBase, FrozenEventV2, StrippedStateEvent, make_event_from_dict
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
@@ -108,6 +108,14 @@ def clone_event(event: EventBase) -> EventBase:
     new_event = make_event_from_dict(
         event.get_dict(), event.room_version, event.internal_metadata.get_dict()
     )
+
+    # Starting FrozenEventV2, the event ID is an (expensive) hash of the event. This is
+    # lazily computed when we get the FrozenEventV2.event_id property, then cached in
+    # _event_id field. Later FrozenEvent formats all inherit from FrozenEventV2, so we
+    # can use the same logic here.
+    if isinstance(event, FrozenEventV2) and isinstance(new_event, FrozenEventV2):
+        # If we already pre-computed the event ID, use it.
+        new_event._event_id = event._event_id
 
     # Copy the bits of `internal_metadata` that aren't returned by `get_dict`.
     new_event.internal_metadata.stream_ordering = (
