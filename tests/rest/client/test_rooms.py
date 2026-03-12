@@ -2469,9 +2469,7 @@ class RoomDelayedEventTestCase(RoomBase):
     )
     def test_delayed_event_user_limit_exceeded(self) -> None:
         """Test that users cannot have more delayed events scheduled at once than allowed."""
-        self.assertEqual(
-            self.hs.config.experimental.msc4140_max_delayed_events_per_user, 0
-        )
+        self.assertEqual(self.hs.config.server.max_delayed_events_per_user, 0)
         channel = self.make_request(
             "PUT",
             (
