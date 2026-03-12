@@ -133,6 +133,14 @@ pip install systemd-python
 No action is needed if you do not use journal logging, or if you installed
 Synapse from the Debian packages (which handle this automatically).
 
+## Updated request log format (`Processed request: ...`)
+
+The [request log format](usage/administration/request_log.md) has slightly changed to
+include `ru=(...)` and `db=(...)` labels to better disambiguate the number groupings.
+Previously, these values appeared without labels.
+
+This only matters if you have third-party tooling that parses the Synapse logs.
+
 # Upgrading to v1.146.0
 
 ## Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka
