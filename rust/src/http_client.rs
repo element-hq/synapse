@@ -163,6 +163,13 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 }
 
 #[pyclass]
+struct RequestOptions {
+    response_limit: Option<usize>,
+    headers: Option<HashMap<String, String>>,
+    request_body: Option<String>,
+}
+
+#[pyclass]
 struct HttpClient {
     client: reqwest::Client,
     reactor: Py<PyAny>,
@@ -200,26 +207,18 @@ impl HttpClient {
         &self,
         py: Python<'a>,
         url: String,
-        response_limit: usize,
+        request_options: RequestOptions,
     ) -> PyResult<Bound<'a, PyAny>> {
-        self.send_request(py, self.client.get(url), response_limit)
+        self.send_request(py, reqwest::Method::GET, url, request_options)
     }
 
     pub fn post<'a>(
         &self,
         py: Python<'a>,
         url: String,
-        response_limit: usize,
-        headers: HashMap<String, String>,
-        request_body: String,
+        request_options: RequestOptions,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let mut builder = self.client.post(url);
-        for (name, value) in headers {
-            builder = builder.header(name, value);
-        }
-        builder = builder.body(request_body);
-
-        self.send_request(py, builder, response_limit)
+        self.send_request(py, reqwest::Method::POST, url, request_options)
     }
 }
 
@@ -227,9 +226,26 @@ impl HttpClient {
     fn send_request<'a>(
         &self,
         py: Python<'a>,
-        builder: RequestBuilder,
-        response_limit: usize,
+        method: reqwest::Method,
+        url: String,
+        request_options: RequestOptions,
     ) -> PyResult<Bound<'a, PyAny>> {
+        // Create the request
+        let builder = {
+            let mut builder = self.client.request(method, url);
+            if let Some(headers) = request_options.headers {
+                for (name, value) in headers {
+                    builder = builder.header(name, value);
+                }
+            }
+            if let Some(request_body) = request_options.request_body {
+                builder = builder.body(request_body);
+            }
+
+            builder
+        };
+
+        // Fire-off the request
         create_deferred(py, self.reactor.bind(py), async move {
             let response = builder.send().await.context("sending request")?;
 
@@ -238,19 +254,24 @@ impl HttpClient {
             // A light-weight way to read the response up until the `response_limit`. We
             // want to avoid allocating a giant response object on the server above our
             // expected `response_limit` to avoid out-of-memory DOS problems.
-            let body = reqwest::Body::from(response);
-            let limited_body = http_body_util::Limited::new(body, response_limit);
-            let collected = limited_body
-                .collect()
-                .await
-                .map_err(anyhow::Error::from_boxed)
-                .with_context(|| {
-                    format!(
-                        "Response body exceeded response limit ({} bytes)",
-                        response_limit
-                    )
-                })?;
-            let bytes: bytes::Bytes = collected.to_bytes();
+            let bytes = if let Some(response_limit) = request_options.response_limit {
+                let body = reqwest::Body::from(response);
+                let limited_body = http_body_util::Limited::new(body, response_limit);
+                let collected = limited_body
+                    .collect()
+                    .await
+                    .map_err(anyhow::Error::from_boxed)
+                    .with_context(|| {
+                        format!(
+                            "Response body exceeded response limit ({} bytes)",
+                            response_limit
+                        )
+                    })?;
+                let bytes: bytes::Bytes = collected.to_bytes();
+                bytes
+            } else {
+                response.bytes().await.map_err(anyhow::Error::from)?
+            };
 
             if !status.is_success() {
                 return Err(HttpResponseException::new(status, bytes));
