@@ -864,6 +864,9 @@ def respond_with_json(
     # Insert a default Cache-Control header if the servlet hasn't already set one. The
     # default directive tells both the client and any intermediary cache to not cache
     # the response, which is a sensible default to have on most API endpoints.
+    # The absence `Cache-Control` header would mean that it's up to the clients and
+    # caching proxies mood to cache things if they want. This can be dangerous, which is
+    # why we explicitly set a "don't cache by default" policy.
     # In practice, `no-store` should be enough, but having all three directives is more
     # conservative in case we encounter weird, non-spec compliant caches.
     # See https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#directives
@@ -912,6 +915,9 @@ def respond_with_json_bytes(
     # Insert a default Cache-Control header if the servlet hasn't already set one. The
     # default directive tells both the client and any intermediary cache to not cache
     # the response, which is a sensible default to have on most API endpoints.
+    # The absence `Cache-Control` header would mean that it's up to the clients and
+    # caching proxies mood to cache things if they want. This can be dangerous, which is
+    # why we explicitly set a "don't cache by default" policy.
     # In practice, `no-store` should be enough, but having all three directives is more
     # conservative in case we encounter weird, non-spec compliant caches.
     # See https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#directives
