@@ -19,7 +19,8 @@ from signedjson.key import encode_verify_key_base64, get_verify_key
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.errors import SynapseError
+from synapse.api.constants import EventTypes
+from synapse.api.errors import HttpResponseException, SynapseError
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase, make_event_from_dict
 from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID
@@ -27,7 +28,6 @@ from synapse.rest import admin
 from synapse.rest.client import filter, login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -49,12 +49,8 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         # mock out the federation transport client
         self.mock_federation_transport_client = mock.Mock(
             spec=[
-                "get_policy_recommendation_for_pdu",
                 "ask_policy_server_to_sign_event",
             ]
-        )
-        self.mock_federation_transport_client.get_policy_recommendation_for_pdu = (
-            mock.AsyncMock()
         )
         self.mock_federation_transport_client.ask_policy_server_to_sign_event = (
             mock.AsyncMock()
@@ -106,25 +102,6 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             },
         )
 
-        # Prepare the policy server mock to decide spam vs not spam on those events
-        self.call_count = 0
-
-        async def get_policy_recommendation_for_pdu(
-            destination: str,
-            pdu: EventBase,
-            timeout: int | None = None,
-        ) -> JsonDict:
-            self.call_count += 1
-            self.assertEqual(destination, self.OTHER_SERVER_NAME)
-            if pdu.event_id == self.spammy_event.event_id:
-                return {"recommendation": RECOMMENDATION_SPAM}
-            elif pdu.event_id == self.not_spammy_event.event_id:
-                return {"recommendation": RECOMMENDATION_OK}
-            else:
-                self.fail("Unexpected event ID")
-
-        self.mock_federation_transport_client.get_policy_recommendation_for_pdu.side_effect = get_policy_recommendation_for_pdu
-
         # Mock policy server actions on signing events
         async def policy_server_signs_event(
             destination: str, pdu: EventBase, timeout: int | None = None
@@ -157,7 +134,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         async def policy_server_event_sign_error(
             destination: str, pdu: EventBase, timeout: int | None = None
         ) -> JsonDict | None:
-            return None
+            raise HttpResponseException(
+                500, "Internal Server Error", b'{"errcode": "M_UNKNOWN"}'
+            )
 
         self.policy_server_signs_event = policy_server_signs_event
         self.policy_server_refuses_to_sign_event = policy_server_refuses_to_sign_event
@@ -174,14 +153,16 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 self.hs, self.room_id, policy_user_id, "join"
             )
         )
-        content = {
+        content: JsonDict = {
             "via": self.OTHER_SERVER_NAME,
         }
         if public_key is not None:
-            content["public_key"] = public_key
+            content["public_keys"] = {
+                "ed25519": public_key,
+            }
         self.helper.send_state(
             self.room_id,
-            "org.matrix.msc4284.policy",
+            EventTypes.RoomPolicy,
             content,
             tok=self.creator_token,
             state_key="",
@@ -192,12 +173,11 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         # case where a room doesn't use a policy server.
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
-        self.assertEqual(self.call_count, 0)
 
     def test_empty_policy_event_set(self) -> None:
         self.helper.send_state(
             self.room_id,
-            "org.matrix.msc4284.policy",
+            EventTypes.RoomPolicy,
             {
                 # empty content (no `via`)
             },
@@ -207,12 +187,11 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
-        self.assertEqual(self.call_count, 0)
 
     def test_nonstring_policy_event_set(self) -> None:
         self.helper.send_state(
             self.room_id,
-            "org.matrix.msc4284.policy",
+            EventTypes.RoomPolicy,
             {
                 "via": 42,  # should be a server name
             },
@@ -222,12 +201,11 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
-        self.assertEqual(self.call_count, 0)
 
     def test_self_policy_event_set(self) -> None:
         self.helper.send_state(
             self.room_id,
-            "org.matrix.msc4284.policy",
+            EventTypes.RoomPolicy,
             {
                 # We ignore events when the policy server is ourselves (for now?)
                 "via": (UserID.from_string(self.creator)).domain,
@@ -238,12 +216,11 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
-        self.assertEqual(self.call_count, 0)
 
     def test_invalid_server_policy_event_set(self) -> None:
         self.helper.send_state(
             self.room_id,
-            "org.matrix.msc4284.policy",
+            EventTypes.RoomPolicy,
             {
                 "via": "|this| is *not* a (valid) server name.com",
             },
@@ -253,12 +230,11 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
-        self.assertEqual(self.call_count, 0)
 
     def test_not_in_room_policy_event_set(self) -> None:
         self.helper.send_state(
             self.room_id,
-            "org.matrix.msc4284.policy",
+            EventTypes.RoomPolicy,
             {
                 "via": f"x.{self.OTHER_SERVER_NAME}",
             },
@@ -268,14 +244,19 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
-        self.assertEqual(self.call_count, 0)
+
+    def test_missing_public_key_event_set(self) -> None:
+        self._add_policy_server_to_room()  # no public_key
+
+        ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
+        self.assertEqual(ok, True)
 
     def test_spammy_event_is_spam(self) -> None:
-        self._add_policy_server_to_room()
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, False)
-        self.assertEqual(self.call_count, 1)
 
     def test_signed_event_is_not_spam(self) -> None:
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
@@ -306,8 +287,6 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         ok = self.get_success(self.handler.is_event_allowed(event))
         self.assertEqual(ok, True)
-        # Make sure we did not make an HTTP hit to get_policy_recommendation_for_pdu
-        self.assertEqual(self.call_count, 0)
 
     def test_ask_policy_server_to_sign_event_ok(self) -> None:
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
@@ -348,8 +327,15 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             },
         )
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_refuses_to_sign_event
-        self.get_success(
-            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        fail = self.get_failure(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True),
+            SynapseError,
+        )
+        self.assertIsInstance(fail.value, SynapseError)
+        self.assertEqual(fail.value.code, 403)
+        self.assertEqual(
+            fail.value.msg,
+            "This event has been rejected as probable spam by the policy server",
         )
         self.assertEqual(len(event.signatures), 0)
 
@@ -370,9 +356,12 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             },
         )
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_event_sign_error
-        self.get_success(
-            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        fail = self.get_failure(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True),
+            SynapseError,
         )
+        self.assertIsInstance(fail.value, SynapseError)
+        self.assertEqual(fail.value.code, 500)
         self.assertEqual(len(event.signatures), 0)
 
     def test_ask_policy_server_to_sign_event_wrong_sig(self) -> None:
