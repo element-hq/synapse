@@ -638,6 +638,8 @@ class SynapseRequest(Request):
         if authenticated_entity:
             requester = f"{authenticated_entity}|{requester}"
 
+        # Updates to this log line should also be reflected in our docs,
+        # `docs/usage/administration/request_log.md`
         self.synapse_site.access_logger.log(
             log_level,
             "%s - %s - {%s}"
