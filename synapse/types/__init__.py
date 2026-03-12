@@ -343,7 +343,7 @@ class DomainSpecificString(metaclass=abc.ABCMeta):
             # possible for invalid data to exist in room-state, etc.
             parse_and_validate_server_name(obj.domain)
             return True
-        except Exception:
+        except (SynapseError, ValueError):
             return False
 
     __repr__ = to_string
@@ -354,6 +354,29 @@ class UserID(DomainSpecificString):
     """Structure representing a user ID."""
 
     SIGIL = "@"
+
+    @classmethod
+    def is_valid_strict(cls, s: str) -> bool:
+        """
+        Parses the input string and attempts to ensure it is a valid and compliant user
+        ID according to https://spec.matrix.org/v1.17/appendices/#historical-user-ids.
+
+        This should be used with care: there are existing non-compliant user IDs in the
+        wild with empty or non-ASCII localparts, which will be rejected by this method.
+        """
+        if len(s.encode("utf-8")) > 255:
+            return False
+        try:
+            obj = cls.from_string(s)
+            if not is_compliant_user_id_localpart(obj.localpart):
+                return False
+            # Apply additional validation to the domain. This is only done
+            # during  is_valid (and not part of from_string) since it is
+            # possible for invalid data to exist in room-state, etc.
+            parse_and_validate_server_name(obj.domain)
+            return True
+        except (SynapseError, ValueError):
+            return False
 
 
 @attr.s(slots=True, frozen=True, repr=False)
@@ -453,17 +476,44 @@ GUEST_USER_ID_PATTERN = re.compile(r"^\d+$")
 
 
 def contains_invalid_mxid_characters(localpart: str) -> bool:
-    """Check for characters not allowed in an mxid or groupid localpart
+    """
+    Check for characters not allowed in a modern user ID localpart.
+
+    This is primarily used for new registrations and MUST NOT be used to validate
+    existing user IDs, as there are real users whose user IDs don't follow this
+    character set.
+
+    See https://spec.matrix.org/v1.17/appendices/#user-identifiers
 
     Args:
         localpart: the localpart to be checked
-        use_extended_character_set: True to use the extended allowed characters
-            from MSC4009.
 
     Returns:
         True if there are any naughty characters
     """
     return any(c not in MXID_LOCALPART_ALLOWED_CHARACTERS for c in localpart)
+
+
+def is_compliant_user_id_localpart(localpart: str) -> bool:
+    """
+    Validates that the given user ID localpart is within the "compliant" range,
+    i.e. not empty and all characters are between U+0021 and U+007E inclusive.
+    See https://spec.matrix.org/v1.17/appendices/#historical-user-ids
+
+    To check if a localpart is non-historical, use contains_invalid_mxid_characters instead.
+
+    This should be used with care: there are existing non-compliant user IDs in the
+    wild with empty or non-ASCII localparts, which will be rejected by this method.
+
+    Args:
+        localpart: the localpart to be checked
+
+    Returns:
+        True if the localpart is compliant, False otherwise
+    """
+    if not localpart:
+        return False
+    return all(0x21 <= ord(c) <= 0x7E for c in localpart)
 
 
 UPPER_CASE_PATTERN = re.compile(b"[A-Z_]")

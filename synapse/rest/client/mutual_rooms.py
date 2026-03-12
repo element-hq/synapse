@@ -29,7 +29,7 @@ from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_strings_from_args
 from synapse.http.site import SynapseRequest
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 
 from ._base import client_patterns
 
@@ -65,13 +65,10 @@ def _parse_mutual_rooms_batch_token_args(args: dict[bytes, list[bytes]]) -> str 
 
 class UserMutualRoomsServlet(RestServlet):
     """
-    GET /uk.half-shot.msc2666/user/mutual_rooms?user_id={user_id}&from={token} HTTP/1.1
+    GET /user/mutual_rooms?user_id={user_id}&from={token} HTTP/1.1
     """
 
-    PATTERNS = client_patterns(
-        "/uk.half-shot.msc2666/user/mutual_rooms$",
-        releases=(),  # This is an unstable feature
-    )
+    PATTERNS = [*client_patterns("/user/mutual_rooms$", releases=("v1",))]
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -82,7 +79,9 @@ class UserMutualRoomsServlet(RestServlet):
         # twisted.web.server.Request.args is incorrectly defined as Any | None
         args: dict[bytes, list[bytes]] = request.args  # type: ignore
 
-        user_ids = parse_strings_from_args(args, "user_id", required=True)
+        user_ids = parse_strings_from_args(
+            args, "user_id", required=True, encoding="utf-8"
+        )
         from_batch = _parse_mutual_rooms_batch_token_args(args)
 
         if len(user_ids) > 1:
@@ -93,13 +92,19 @@ class UserMutualRoomsServlet(RestServlet):
             )
 
         user_id = user_ids[0]
+        if not UserID.is_valid_strict(user_id):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Invalid user_id query parameter",
+                errcode=Codes.INVALID_PARAM,
+            )
 
         requester = await self.auth.get_user_by_req(request)
         if user_id == requester.user.to_string():
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "You cannot request a list of shared rooms with yourself",
-                errcode=Codes.UNKNOWN,
+                errcode=Codes.INVALID_PARAM,
             )
 
         # Sort here instead of the database function, so that we don't expose
@@ -109,6 +114,7 @@ class UserMutualRoomsServlet(RestServlet):
                 frozenset((requester.user.to_string(), user_id))
             )
         )
+        total_count = len(rooms)
 
         if from_batch:
             # A from_batch token was provided, so cut off any rooms where the ID is
@@ -123,7 +129,7 @@ class UserMutualRoomsServlet(RestServlet):
 
         if len(rooms) <= MUTUAL_ROOMS_BATCH_LIMIT:
             # We've reached the end of the list, don't return a batch token
-            return 200, {"joined": rooms}
+            return 200, {"joined": rooms, "count": total_count}
 
         rooms = rooms[:MUTUAL_ROOMS_BATCH_LIMIT]
         # We use urlsafe unpadded base64 encoding for the batch token in order to
@@ -135,11 +141,14 @@ class UserMutualRoomsServlet(RestServlet):
         # in the room ID. In the event that some silly user does that, don't let
         # them paginate further.
         if next_batch == from_batch:
-            return 200, {"joined": rooms}
+            return 200, {"joined": rooms, "count": total_count}
 
-        return 200, {"joined": list(rooms), "next_batch": next_batch}
+        return 200, {
+            "joined": rooms,
+            "next_batch": next_batch,
+            "count": total_count,
+        }
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.experimental.msc2666_enabled:
-        UserMutualRoomsServlet(hs).register(http_server)
+    UserMutualRoomsServlet(hs).register(http_server)

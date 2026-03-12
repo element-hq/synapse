@@ -43,12 +43,6 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         mutual_rooms.register_servlets,
     ]
 
-    def default_config(self) -> dict:
-        config = super().default_config()
-        experimental = config.setdefault("experimental_features", {})
-        experimental.setdefault("msc2666_enabled", True)
-        return config
-
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
         return self.setup_test_homeserver(config=config)
@@ -62,26 +56,11 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
     ) -> FakeChannel:
         return self.make_request(
             "GET",
-            "/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms"
+            "/_matrix/client/v1/user/mutual_rooms"
             f"?user_id={quote(other_user)}"
             + (f"&from={quote(since_token)}" if since_token else ""),
             access_token=token,
         )
-
-    @unittest.override_config({"experimental_features": {"msc2666_enabled": False}})
-    def test_mutual_rooms_no_experimental_flag(self) -> None:
-        """
-        The endpoint should 404 if the experimental flag is not enabled.
-        """
-        # Register a user.
-        u1 = self.register_user("user1", "pass")
-        u1_token = self.login(u1, "pass")
-
-        # Check that we're unable to query the endpoint due to the endpoint
-        # being unrecognised.
-        channel = self._get_mutual_rooms(u1_token, "@not-used:test")
-        self.assertEqual(404, channel.code, channel.result)
-        self.assertEqual("M_UNRECOGNIZED", channel.json_body["errcode"], channel.result)
 
     def test_shared_room_list_public(self) -> None:
         """
@@ -129,6 +108,7 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 1)
+        self.assertEqual(channel.json_body["count"], 1)
         self.assertEqual(channel.json_body["joined"][0], room_id_one)
 
         # Create another room and invite user2 to it
@@ -142,6 +122,7 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 2)
+        self.assertEqual(channel.json_body["count"], 2)
         for room_id_id in channel.json_body["joined"]:
             self.assertIn(room_id_id, [room_id_one, room_id_two])
 
@@ -167,11 +148,13 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(channel.json_body["joined"], room_ids[0:10])
+        self.assertEqual(channel.json_body["count"], 15)
         self.assertIn("next_batch", channel.json_body)
 
         channel = self._get_mutual_rooms(u1_token, u2, channel.json_body["next_batch"])
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(channel.json_body["joined"], room_ids[10:20])
+        self.assertEqual(channel.json_body["count"], 15)
         self.assertNotIn("next_batch", channel.json_body)
 
     def test_shared_room_list_pagination_one_page(self) -> None:
@@ -180,6 +163,7 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(channel.json_body["joined"], room_ids)
+        self.assertEqual(channel.json_body["count"], 10)
         self.assertNotIn("next_batch", channel.json_body)
 
     def test_shared_room_list_pagination_invalid_token(self) -> None:
@@ -209,6 +193,7 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 1)
+        self.assertEqual(channel.json_body["count"], 1)
         self.assertEqual(channel.json_body["joined"][0], room)
 
         self.helper.leave(room, user=u1, tok=u1_token)
@@ -217,11 +202,13 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 0)
+        self.assertEqual(channel.json_body["count"], 0)
 
         # Check user2's view of shared rooms with user1
         channel = self._get_mutual_rooms(u2_token, u1)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 0)
+        self.assertEqual(channel.json_body["count"], 0)
 
     def test_shared_room_list_nonexistent_user(self) -> None:
         u1 = self.register_user("user1", "pass")
@@ -232,4 +219,27 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         channel = self._get_mutual_rooms(u1_token, "@meow:example.com")
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 0)
+        self.assertEqual(channel.json_body["count"], 0)
         self.assertNotIn("next_batch", channel.json_body)
+
+    def test_shared_room_list_invalid_user(self) -> None:
+        u1 = self.register_user("user1", "pass")
+        u1_token = self.login(u1, "pass")
+
+        channel = self._get_mutual_rooms(u1_token, "@:example.com")
+        self.assertEqual(400, channel.code, channel.result)
+        self.assertEqual(
+            "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
+        )
+
+        channel = self._get_mutual_rooms(u1_token, "@" + "a" * 255 + ":example.com")
+        self.assertEqual(400, channel.code, channel.result)
+        self.assertEqual(
+            "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
+        )
+
+        channel = self._get_mutual_rooms(u1_token, "@🐈️:example.com")
+        self.assertEqual(400, channel.code, channel.result)
+        self.assertEqual(
+            "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
+        )
