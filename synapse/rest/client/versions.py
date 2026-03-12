@@ -90,7 +90,13 @@ class VersionsRestServlet(RestServlet):
             # - `s-maxage` controls how long we cache on the proxy side. Since caching
             #   proxies usually have a way to purge caches, it is fine to cache there for
             #   longer (1h), and issue cache invalidations in case we need it
-            request.setHeader(b"Cache-Control", b"public, max-age=600, s-maxage=3600")
+            # - `stale-while-revalidate` allows caching proxies to serve stale content while
+            #   revalidating in the background. This is useful for making this request always
+            #   'snappy' to end users whilst still keeping it fresh
+            request.setHeader(
+                b"Cache-Control",
+                b"public, max-age=600, s-maxage=3600, stale-while-revalidate=600",
+            )
 
         # Tell caches to vary on the Authorization header, so that
         # authenticated responses are not served from cache.

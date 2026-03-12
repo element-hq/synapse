@@ -56,11 +56,17 @@ class AuthIssuerServlet(RestServlet):
         # given by MAS, but this is fine for now.
         #
         # - `public` means it can be cached both in the browser and in caching proxies
-        # - `max-age` controls how long we cache on the browser side. 1h is sane enough
+        # - `max-age` controls how long we cache on the browser side. 10m is sane enough
         # - `s-maxage` controls how long we cache on the proxy side. Since caching
         #   proxies usually have a way to purge caches, it is fine to cache there for
-        #   longer (24h), and issue cache invalidations in case we need it
-        request.setHeader(b"Cache-Control", b"public, max-age=600, s-maxage=3600")
+        #   longer (1h), and issue cache invalidations in case we need it
+        # - `stale-while-revalidate` allows caching proxies to serve stale content while
+        #   revalidating in the background. This is useful for making this request always
+        #   'snappy' to end users whilst still keeping it fresh
+        request.setHeader(
+            b"Cache-Control",
+            b"public, max-age=600, s-maxage=3600, stale-while-revalidate=600",
+        )
 
         if self._config.mas.enabled:
             assert isinstance(self._auth, MasDelegatedAuth)
@@ -114,11 +120,17 @@ class AuthMetadataServlet(RestServlet):
         # given by MAS, but this is fine for now.
         #
         # - `public` means it can be cached both in the browser and in caching proxies
-        # - `max-age` controls how long we cache on the browser side. 1h is sane enough
+        # - `max-age` controls how long we cache on the browser side. 10m is sane enough
         # - `s-maxage` controls how long we cache on the proxy side. Since caching
         #   proxies usually have a way to purge caches, it is fine to cache there for
-        #   longer (24h), and issue cache invalidations in case we need it
-        request.setHeader(b"Cache-Control", b"public, max-age=3600, s-maxage=86400")
+        #   longer (1h), and issue cache invalidations in case we need it
+        # - `stale-while-revalidate` allows caching proxies to serve stale content while
+        #   revalidating in the background. This is useful for making this request always
+        #   'snappy' to end users whilst still keeping it fresh
+        request.setHeader(
+            b"Cache-Control",
+            b"public, max-age=600, s-maxage=3600, stale-while-revalidate=600",
+        )
 
         if self._config.mas.enabled:
             assert isinstance(self._auth, MasDelegatedAuth)
