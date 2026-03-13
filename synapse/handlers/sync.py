@@ -2113,6 +2113,20 @@ class SyncHandler:
         sync_result_builder: "SyncResultBuilder",
         profile_fields: list[str],
     ) -> None:
+        """
+        Build an initial sync entry for profile updates and attach it to the
+        given `sync_result_builder`.
+
+        Note: Only the profile information for local users is returned. This is
+        to prevent fetching *too* many profiles in one request. Clients should
+        ideally instead first fetch profiles on-demand, then track updates for
+        all users via incremental `/sync`.
+
+        Args:
+            user_id: The Matrix ID of the user to generate the sync entry for.
+            sync_result_builder:
+            profile_fields: The list of field IDs to filter for.
+        """
         user_ids = await self.store.get_users_who_share_room_with_user(user_id)
         user_ids = {u for u in user_ids if self._is_mine_id(u)}
         if not user_ids:
@@ -2147,7 +2161,13 @@ class SyncHandler:
     async def _generate_sync_entry_for_profile_updates(
         self, sync_result_builder: "SyncResultBuilder"
     ) -> None:
-        """Generates the profile update portion of the sync response."""
+        """
+        Build a sync entry for profile updates and attach it to the given
+        `sync_result_builder`.
+
+        Args:
+            sync_result_builder:
+        """
         sync_config = sync_result_builder.sync_config
         profile_fields = sync_config.filter_collection.profile_fields
         if not profile_fields:
@@ -2158,7 +2178,6 @@ class SyncHandler:
         now_token = sync_result_builder.now_token
 
         if since_token is None:
-            # TODO: Refactor this into a separate function.
             await self._generate_initial_sync_entry_for_profile_updates(
                 user_id, sync_result_builder, profile_fields
             )
@@ -2176,9 +2195,6 @@ class SyncHandler:
             return
 
         updated_user_ids = {update.user_id for update in updates}
-        if not updated_user_ids:
-            return
-
         shared_user_ids = await self.store.do_users_share_a_room(
             user_id, updated_user_ids
         )
@@ -2190,13 +2206,19 @@ class SyncHandler:
                 continue
             user_fields.setdefault(update.user_id, set()).add(update.field_name)
 
-        if not user_fields:
-            return
-
+        # Note: there's a small race condition here where a profile update may
+        # occur between fetching `now_token` above and reaching this step. In
+        # that case, the profile information will be newer than `now_token`.
+        # This is fine, as users will generally always want the latest profile
+        # information. However, it does mean that on the next sync, the same
+        # profile update will come down a second time.
+        #
+        # Hopefully clients can just filter these out.
         profile_data_by_user = await self.store.get_profile_data_for_users(
             user_fields.keys()
         )
 
+        # Serialise the profile updates into the sync response format.
         profile_updates: dict[str, dict[str, JsonValue | None]] = {}
         for other_user_id, fields in user_fields.items():
             displayname = None
