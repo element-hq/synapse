@@ -21,6 +21,7 @@
 #
 
 import logging
+from dataclasses import dataclass
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
@@ -44,6 +45,7 @@ from synapse.api.errors import StoreError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase
+from synapse.replication.tcp.streams._base import QuarantinedMediaStream
 from synapse.replication.tcp.streams.partial_state import UnPartialStatedRoomStream
 from synapse.storage._base import (
     db_to_json,
@@ -100,6 +102,14 @@ class RoomStats(LargestRoomStats):
     encryption: str | None
     federatable: bool
     public: bool
+
+
+@dataclass(frozen=True)
+class QuarantinedMediaUpdate:
+    stream_id: int
+    origin: str
+    media_id: str
+    quarantined: bool
 
 
 class RoomSortOrder(Enum):
@@ -162,11 +172,27 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             writers=["master"],
         )
 
+        self._quarantined_media_changes_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name=QuarantinedMediaStream.NAME,
+            server_name=self.server_name,
+            instance_name=self._instance_name,
+            tables=[
+                ("quarantined_media_changes", "instance_name", "stream_id")
+            ],
+            sequence_name="quarantined_media_id_seq",
+            writers=[], # we don't use `get_current_token` or `get_positions`, per docs
+        )
+
     def process_replication_position(
         self, stream_name: str, instance_name: str, token: int
     ) -> None:
         if stream_name == UnPartialStatedRoomStream.NAME:
             self._un_partial_stated_rooms_stream_id_gen.advance(instance_name, token)
+        elif stream_name == QuarantinedMediaStream.NAME:
+            self._quarantined_media_changes_id_gen.advance(instance_name, token)
         return super().process_replication_position(stream_name, instance_name, token)
 
     async def store_room(
@@ -1127,6 +1153,51 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # TODO: Figure out all remote media a user has referenced in a message
 
         return local_media_ids
+
+    async def get_quarantined_media_changes(
+        self, *, from_id: int, to_id: int, limit: int
+    ) -> list[QuarantinedMediaUpdate]:
+        """Get updates to quarantined media between two stream IDs.
+
+        Bounds: from_id < ... <= to_id
+
+        Args:
+            from_id: The starting stream ID (exclusive)
+            to_id: The ending stream ID (inclusive)
+            limit: The maximum number of rows to return
+
+        Returns:
+            list of QuarantinedMediaUpdate update rows
+        """
+        return await self.db_pool.runInteraction(
+            "get_quarantined_media_changes",
+            self._get_quarantined_media_changes_txn,
+            from_id,
+            to_id,
+            limit,
+        )
+
+    def _get_quarantined_media_changes_txn(
+        self, txn: LoggingTransaction, from_id: int, to_id: int, limit: int
+    ) -> list[QuarantinedMediaUpdate]:
+        txn.execute(
+            f"""
+            SELECT stream_id, origin, media_id, quarantined
+            FROM quarantined_media_changes
+            WHERE ? < stream_id AND stream_id <= ?
+            LIMIT ?
+            """,
+            (from_id, to_id, limit),
+        )
+        return [
+            QuarantinedMediaUpdate(
+                stream_id=stream_id,
+                origin=origin,
+                media_id=media_id,
+                quarantined=quarantined,
+            )
+            for stream_id, origin, media_id, quarantined in txn
+        ]
 
     def _quarantine_local_media_txn(
         self,
