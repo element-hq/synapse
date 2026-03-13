@@ -182,6 +182,13 @@ class ProfileWorkerStore(SQLBaseStore):
 
         return 50
 
+    def process_replication_position(
+        self, stream_name: str, instance_name: str, token: int
+    ) -> None:
+        if stream_name == ProfileUpdatesStream.NAME:
+            self._profile_updates_id_gen.advance(instance_name, token)
+        super().process_replication_position(stream_name, instance_name, token)
+
     async def get_profileinfo(self, user_id: UserID) -> ProfileInfo:
         """
         Fetch the display name and avatar URL of a user.
