@@ -1199,6 +1199,47 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             for stream_id, origin, media_id, quarantined in txn
         ]
 
+    def _insert_quarantine_change_txn(
+        self,
+        txn: LoggingTransaction,
+        origins_and_media_ids: list[tuple[str | None, str]],
+        quarantined: bool,
+    ):
+        """Records media being (un)quarantined in the stream.
+
+        Args:
+            txn (cursor)
+            origins_and_media_ids: The [origin, media_id] tuples to record. The origin
+                may be None if the media is local.
+            quarantined: Whether the media is being quarantined or unquarantined.
+        """
+        medias_with_stream_ids = zip(
+            origins_and_media_ids,
+            self._quarantined_media_changes_id_gen.get_next_mult_txn(txn, len(origins_and_media_ids)),
+            strict=True,
+        )
+        self.db_pool.simple_insert_many_txn(
+            txn,
+            "quarantined_media_changes",
+            keys=(
+                "instance_name",
+                "stream_id",
+                "origin",
+                "media_id",
+                "quarantined",
+            ),
+            values=[
+                (
+                    self._instance_name,
+                    stream_id,
+                    origin,
+                    media_id,
+                    quarantined,
+                )
+                for (origin, media_id), stream_id in medias_with_stream_ids
+            ],
+        )
+
     def _quarantine_local_media_txn(
         self,
         txn: LoggingTransaction,
@@ -1232,9 +1273,18 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             if quarantined_by is not None:
                 sql += " AND safe_from_quarantine = FALSE"
 
+            sql += " RETURNING media_id"
+
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
             # Note that a rowcount of -1 can be used to indicate no rows were affected.
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
+            if txn.rowcount > 0:
+                media_ids_affected = txn.fetchall()
+                self._insert_quarantine_change_txn(
+                    txn,
+                    [(None, media_id) for (media_id,) in media_ids_affected],
+                    quarantined_by is not None,
+                )
 
         # Update any media that was identified via hash.
         if hashes:
@@ -1249,8 +1299,17 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             if quarantined_by is not None:
                 sql += " AND safe_from_quarantine = FALSE"
 
+            sql += " RETURNING media_id"
+
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
+            if txn.rowcount > 0:
+                media_ids_affected = txn.fetchall()
+                self._insert_quarantine_change_txn(
+                    txn,
+                    [(None, media_id) for (media_id,) in media_ids_affected],
+                    quarantined_by is not None,
+                )
 
         return total_media_quarantined
 
@@ -1283,10 +1342,19 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             sql = f"""
                 UPDATE remote_media_cache
                 SET quarantined_by = ?
-                WHERE {sql_in_list_clause}"""
+                WHERE {sql_in_list_clause}
+                RETURNING media_origin, media_id"""
 
             txn.execute(sql, [quarantined_by] + sql_args)
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
+            if txn.rowcount > 0:
+                media_ids_affected = txn.fetchall()
+                self._insert_quarantine_change_txn(
+                    txn,
+                    # make the types happy and convert the tuple types
+                    [(origin, media_id) for (origin, media_id) in media_ids_affected],
+                    quarantined_by is not None,
+                )
 
         total_media_quarantined = 0
         if hashes:
@@ -1296,9 +1364,18 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             sql = f"""
                 UPDATE remote_media_cache
                 SET quarantined_by = ?
-                WHERE {sql_many_clause_sql}"""
+                WHERE {sql_many_clause_sql}
+                RETURNING media_origin, media_id"""
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
+            if txn.rowcount > 0:
+                media_ids_affected = txn.fetchall()
+                self._insert_quarantine_change_txn(
+                    txn,
+                    # make the types happy and convert the tuple types
+                    [(origin, media_id) for (origin, media_id) in media_ids_affected],
+                    quarantined_by is not None,
+                )
 
         return total_media_quarantined
 
