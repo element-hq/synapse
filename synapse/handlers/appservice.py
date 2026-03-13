@@ -19,14 +19,17 @@
 #
 #
 import logging
+from sys import exc_info
 from typing import (
     TYPE_CHECKING,
+    Any,
     Collection,
     Iterable,
     Mapping,
 )
 
 from prometheus_client import Counter
+from pydantic import model_validator
 
 from twisted.internet import defer
 
@@ -57,6 +60,7 @@ from synapse.types import (
 )
 from synapse.util.async_helpers import Linearizer
 from synapse.util.metrics import Measure
+from synapse.util.pydantic_models import ParseModel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -66,6 +70,48 @@ logger = logging.getLogger(__name__)
 events_processed_counter = Counter(
     "synapse_handlers_appservice_events_processed", "", labelnames=[SERVER_NAME_LABEL]
 )
+
+url_previews_counter = Counter(
+    "synapse_handlers_appservice_url_previews",
+    "",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+
+class ApplicationServiceUrlPreviewResult(ParseModel):
+    """
+    The response from a request for an appservice to generate a URL preview.
+    """
+
+    # Is the preview request exclusive to this appservice. If so, no requests should be made
+    # and the result should be treated as final.
+    exclusive: bool
+
+    # The OpenGraph response. If None then the preview request did not complete sucessfully.
+    result: dict[str, Any] | None
+
+    @model_validator(mode="after")
+    def check_basic_fields(self) -> Self:
+        def check_str(key):
+            if self.result:
+                v = self.result.get(key)
+                if v is not None and not isinstance(v, str):
+                    raise ValueError(f"'{key}' must be a string if defined")
+
+        # Non-exhaustive list of keys that should be strings based on https://ogp.me/.
+        # The spec does not set a hard requirement on return types all possible values,
+        # but these should be checked for consistency.
+        check_str("og:audio")
+        check_str("og:description")
+        check_str("og:determiner")
+        check_str("og:image")
+        check_str("og:locale")
+        check_str("og:site_name")
+        check_str("og:title")
+        check_str("og:type")
+        check_str("og:url")
+        check_str("og:video")
+        return self
 
 
 class ApplicationServicesHandler:
@@ -714,6 +760,62 @@ class ApplicationServicesHandler:
 
         return False
 
+    async def query_preview_url(
+        self, url: str, user_id: UserID
+    ) -> ApplicationServiceUrlPreviewResult:
+        """Query application services for url previews.
+
+        Args:
+            url: The url to query on the AS.
+            user_id: The user making the query.
+        Returns:
+            A response containing a possible response and whether the homeserver
+            should attempt to fetch it's own preview.
+        """
+        exclusive_appservice = self._get_exclusive_service_for_preview_url(url)
+        if exclusive_appservice:
+            result = await self.appservice_api.query_preview_url(
+                exclusive_appservice, url, user_id
+            )
+            url_previews_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(1)
+            try:
+                return ApplicationServiceUrlPreviewResult(exclusive=True, result=result)
+            except Exception:
+                logger.warning(
+                    "exclusive appservice preview from %s was not valid",
+                    exclusive_appservice.id,
+                    exc_info=True,
+                )
+                return ApplicationServiceUrlPreviewResult(exclusive=True, result=None)
+
+        for appservice in self._get_services_for_preview_url(url=url):
+            result = await self.appservice_api.query_preview_url(
+                appservice, url, user_id
+            )
+            if result:
+                url_previews_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc(1)
+
+                try:
+                    return ApplicationServiceUrlPreviewResult(
+                        exclusive=False,
+                        result=result,
+                    )
+                except Exception:
+                    logger.warning(
+                        "appservice preview from %s was not valid",
+                        appservice.id,
+                        exc_info=True,
+                    )
+                    return ApplicationServiceUrlPreviewResult(
+                        exclusive=True, result=None
+                    )
+        return ApplicationServiceUrlPreviewResult(
+            exclusive=False,
+            result=None,
+        )
+
     async def query_user_exists(self, user_id: str) -> bool:
         """Check if any application service knows this user_id exists.
 
@@ -844,6 +946,22 @@ class ApplicationServicesHandler:
     def _get_services_for_3pn(self, protocol: str) -> list[ApplicationService]:
         services = self.store.get_app_services()
         return [s for s in services if s.is_interested_in_protocol(protocol)]
+
+    def _get_exclusive_service_for_preview_url(
+        self, url: str
+    ) -> ApplicationService | None:
+        return next(
+            (
+                service
+                for service in self.store.get_app_services()
+                if service.is_exclusive_preview_url(url)
+            ),
+            None,
+        )
+
+    def _get_services_for_preview_url(self, url: str) -> list[ApplicationService]:
+        services = self.store.get_app_services()
+        return [s for s in services if s.is_preview_url_in_namespace(url)]
 
     async def _is_unknown_user(self, user_id: str) -> bool:
         if not self.is_mine_id(user_id):

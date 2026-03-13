@@ -19,10 +19,14 @@
 #
 #
 import os
+from unittest.mock import AsyncMock
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import SynapseError
+from synapse.handlers.appservice import ApplicationServiceUrlPreviewResult
 from synapse.server import HomeServer
+from synapse.types import UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -32,6 +36,8 @@ try:
     import lxml
 except ImportError:
     lxml = None  # type: ignore[assignment]
+
+PREVIEW_USER = UserID("a", "b")
 
 
 class URLPreviewTests(unittest.HomeserverTestCase):
@@ -118,3 +124,60 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # The TLD is not blocked.
         self.assertFalse(self.url_previewer._is_url_blocked("https://example.com"))
+
+    @override_config({"experimental_features": {"msc4417_enabled": True}})
+    def test_msc4417_forward_to_appservice_no_result_exclusive(self) -> None:
+        """
+        Tests that previews fail if the appservice returns an empty response and is exclusive.
+        """
+        # We assign to a method, which mypy doesn't like.
+        query_preview_url = self.url_previewer.as_services.query_preview_url = (  # type: ignore[method-assign]
+            AsyncMock()
+        )
+        query_preview_url.return_value = ApplicationServiceUrlPreviewResult(
+            result=None, exclusive=True
+        )
+        result = self.get_failure(
+            self.url_previewer.preview("https://matrix.org", PREVIEW_USER, 1),
+            SynapseError,
+        )
+        self.assertEquals(result.value.code, 404)
+
+    @override_config({"experimental_features": {"msc4417_enabled": True}})
+    def test_msc4417_forward_to_appservice_result(self) -> None:
+        """
+        Tests that previews succeed with an appservice provided result.
+        """
+        # We assign to a method, which mypy doesn't like.
+        query_preview_url = self.url_previewer.as_services.query_preview_url = (  # type: ignore[method-assign]
+            AsyncMock()
+        )
+        query_preview_url.return_value = ApplicationServiceUrlPreviewResult(
+            result={"og:title": "The home of the best protocol in the universe!"},
+            exclusive=False,
+        )
+        result = self.get_success(
+            self.url_previewer.preview("https://matrix.org", PREVIEW_USER, 1)
+        )
+        self.assertEquals(
+            result, b'{"og:title":"The home of the best protocol in the universe!"}'
+        )
+
+    @override_config({"experimental_features": {"msc4417_enabled": True}})
+    def test_msc4417_forward_to_appservice_no_result_non_exclusive(self) -> None:
+        """
+        Tests that previews fall through to the homeserver when the empty result is non-exclusive.
+        """
+        # We assign to a method, which mypy doesn't like.
+        do_preview_mock = self.url_previewer._do_preview = AsyncMock()  # type: ignore[method-assign]
+        do_preview_mock.return_value = b"HS provided bytes"
+        query_preview_url = self.url_previewer.as_services.query_preview_url = (  # type: ignore[method-assign]
+            AsyncMock()
+        )
+        query_preview_url.return_value = ApplicationServiceUrlPreviewResult(
+            result=None, exclusive=False
+        )
+        result = self.get_success(
+            self.url_previewer.preview("https://matrix.org", PREVIEW_USER, 1),
+        )
+        self.assertEquals(result, b"HS provided bytes")
