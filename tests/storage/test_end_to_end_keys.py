@@ -21,6 +21,7 @@
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import StoreError
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
@@ -64,6 +65,20 @@ class EndToEndKeyStoreTestCase(HomeserverTestCase):
             self.store.set_e2e_device_keys("user", "device", now, json)
         )
         self.assertFalse(changed)
+
+    def test_change_key_rejected(self) -> None:
+        now = 1470174257070
+        json = {"key": "value"}
+        json2 = {"key": "other"}
+
+        self.get_success(self.store.store_device("user", "device", None))
+
+        self.get_success(self.store.set_e2e_device_keys("user", "device", now, json))
+
+        self.get_failure(
+            self.store.set_e2e_device_keys("user", "device", now, json2),
+            StoreError,
+        )
 
     def test_get_key_with_device_name(self) -> None:
         now = 1470174257070
