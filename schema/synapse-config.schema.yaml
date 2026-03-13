@@ -4609,11 +4609,15 @@ properties:
         type: boolean
         description: >-
           Use this setting to keep a user's profile fields in sync with
-          information from the identity provider. Currently only syncing the
-          displayname is supported. Fields are checked on every SSO login, and
-          are updated if necessary. Note that enabling this option will override
-          user profile information, regardless of whether users have opted-out
-          of syncing that information when first signing in.
+          information from the identity provider. Fields are checked on every 
+          SSO login, and are updated if necessary. Note that enabling this 
+          option will override user profile information, regardless of whether 
+          users have opted-out of syncing that information when first signing 
+          in.
+          Fields that will be synced:
+            * displayname
+            * picture - only if Synapse media repository is running in the main
+               process (i.e. not workerized) and media is stored locally
         default: false
     examples:
       - client_whitelist:
