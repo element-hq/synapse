@@ -21,6 +21,7 @@
 
 import logging
 import platform
+from unittest.mock import patch
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
@@ -48,13 +49,47 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         self.get_success(lock1.__aenter__())
 
         lock2 = self.worker_lock_handler.acquire_lock("name", "key")
-        d2 = defer.ensureDeferred(lock2.__aenter__())
-        self.assertNoResult(d2)
+        # Wrap the WaitingLock object, so we can detect if the timeouts are being hit
+        with patch.object(
+            lock2,
+            "_increment_timeout_interval",
+            wraps=lock2._increment_timeout_interval,
+        ) as wrapped_lock2_increment_timeout_interval_method:
+            d2 = defer.ensureDeferred(lock2.__aenter__())
+            self.assertNoResult(d2)
 
-        self.get_success(lock1.__aexit__(None, None, None))
+            # The lock should not time out here
+            wrapped_lock2_increment_timeout_interval_method.assert_not_called()
+            self.get_success(lock1.__aexit__(None, None, None))
 
-        self.get_success(d2)
-        self.get_success(lock2.__aexit__(None, None, None))
+            self.get_success(d2)
+            self.get_success(lock2.__aexit__(None, None, None))
+
+    def test_timeouts_for_lock_locally(self) -> None:
+        """Test timeouts are incremented for a lock on a single worker"""
+        lock1 = self.worker_lock_handler.acquire_lock("name", "key")
+        self.get_success(lock1.__aenter__())
+
+        lock2 = self.worker_lock_handler.acquire_lock("name", "key")
+        # Wrap the WaitingLock object, so we can detect if the timeouts are being hit
+        with patch.object(
+            lock2,
+            "_increment_timeout_interval",
+            wraps=lock2._increment_timeout_interval,
+        ) as wrapped_lock2_increment_timeout_interval_method:
+            d2 = defer.ensureDeferred(lock2.__aenter__())
+            self.assertNoResult(d2)
+
+            # Recall that pump() will advance time of the given amount 100 times, this
+            # amounts to about 10 seconds passing
+            self.pump(0.1)
+
+            # Should be timed out 6 times, but do not fail on that exact count
+            wrapped_lock2_increment_timeout_interval_method.assert_called()
+            self.get_success(lock1.__aexit__(None, None, None))
+
+            self.get_success(d2)
+            self.get_success(lock2.__aexit__(None, None, None))
 
     def test_lock_contention(self) -> None:
         """Test lock contention when a lot of locks wait on a single worker"""
@@ -117,10 +152,52 @@ class WorkerLockWorkersTestCase(BaseMultiWorkerStreamTestCase):
         self.get_success(lock1.__aenter__())
 
         lock2 = worker_lock_handler.acquire_lock("name", "key")
-        d2 = defer.ensureDeferred(lock2.__aenter__())
-        self.assertNoResult(d2)
+        # Wrap the WaitingLock object, so we can detect if the timeouts are being hit
+        with patch.object(
+            lock2,
+            "_increment_timeout_interval",
+            wraps=lock2._increment_timeout_interval,
+        ) as wrapped_lock2_increment_timeout_interval_method:
+            d2 = defer.ensureDeferred(lock2.__aenter__())
+            self.assertNoResult(d2)
 
-        self.get_success(lock1.__aexit__(None, None, None))
+            # The lock should not time out here
+            wrapped_lock2_increment_timeout_interval_method.assert_not_called()
+            self.get_success(lock1.__aexit__(None, None, None))
 
-        self.get_success(d2)
-        self.get_success(lock2.__aexit__(None, None, None))
+            self.get_success(d2)
+            self.get_success(lock2.__aexit__(None, None, None))
+
+    def test_timeouts_for_lock_worker(self) -> None:
+        """Test timeouts are incremented for a lock on another worker"""
+        worker = self.make_worker_hs(
+            "synapse.app.generic_worker",
+            extra_config={
+                "redis": {"enabled": True},
+            },
+        )
+        worker_lock_handler = worker.get_worker_locks_handler()
+
+        lock1 = self.main_worker_lock_handler.acquire_lock("name", "key")
+        self.get_success(lock1.__aenter__())
+
+        lock2 = worker_lock_handler.acquire_lock("name", "key")
+        # Wrap the WaitingLock object, so we can detect if the timeouts are being hit
+        with patch.object(
+            lock2,
+            "_increment_timeout_interval",
+            wraps=lock2._increment_timeout_interval,
+        ) as wrapped_lock2_increment_timeout_interval_method:
+            d2 = defer.ensureDeferred(lock2.__aenter__())
+            self.assertNoResult(d2)
+
+            # Recall that pump() will advance time of the given amount 100 times, this
+            # amounts to about 10 seconds passing
+            self.pump(0.1)
+
+            # Should be timed out 6 times, but do not fail on that exact count
+            wrapped_lock2_increment_timeout_interval_method.assert_called()
+            self.get_success(lock1.__aexit__(None, None, None))
+
+            self.get_success(d2)
+            self.get_success(lock2.__aexit__(None, None, None))

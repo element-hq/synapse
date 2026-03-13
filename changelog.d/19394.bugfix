@@ -1,0 +1,1 @@
+Capped the `WorkerLock` time out interval to a maximum of 15 minutes to prevent dealing with excessively long numbers and prevent logging when the retry is not an actual time out. Contributed by Famedly.
