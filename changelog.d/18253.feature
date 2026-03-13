@@ -1,0 +1,1 @@
+Add admin API for fetching (paginated) room reports.
