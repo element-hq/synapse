@@ -1,0 +1,105 @@
+# This workflow scans PRs against some custom rules.
+#
+# Depending on the rule, it can either block CI altogether,
+# or post review warnings to the PR.
+
+name: Semgrep Static Code Checks
+
+on:
+  pull_request:
+    paths:
+      # For the time being, only apply to main-application Python changes
+      # Feel free to expand as desired.
+      - "synapse/**"
+
+permissions: {}
+
+jobs:
+  # Use semgrep to scan the code for custom rules
+  # Use reviewdog to upload the diagnostics to GitHub.
+  #
+  # Two severities:
+  # - review warnings: produces a PR review (intended for manual dismissal), but no CI failure
+  # - strict: produces a CI failure
+  semgrep:
+    name: "Semgrep"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Needed to write PR reviews
+      pull-requests: write
+      # Needed to write status checks/diagnostics
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and unpack reviewdog
+        env:
+          # Find new amd64 builds at https://github.com/reviewdog/reviewdog/releases/
+          # Pin using the SHA256 digest for safety
+          REVIEWDOG_VERSION: 0.21.0
+          REVIEWDOG_SHA256: ad5ce7d5ffa52aaa7ec8710a8fa764181b6cecaab843cc791e1cce1680381569
+        run: |
+          mkdir -p "${HOME}/.local/bin"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+          wget -q https://github.com/reviewdog/reviewdog/releases/download/v${REVIEWDOG_VERSION}/reviewdog_${REVIEWDOG_VERSION}_Linux_x86_64.tar.gz \
+            -O reviewdog.tar.gz
+          echo "${REVIEWDOG_SHA256}  reviewdog.tar.gz" \
+            | sha256sum -c
+          tar -xzf reviewdog.tar.gz -C "${HOME}/.local/bin" reviewdog
+          rm reviewdog.tar.gz
+
+      - name: Check for review warnings
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            docker.io/semgrep/semgrep:1.155.0@sha256:3dab091ee3247fce7e4ed3df9f92b3bd72692c083295f53cec3f135b86404db1 \
+            semgrep --config=/workspace/.config/semgrep/review-warnings.yaml --json /workspace/ \
+          > semgrep-review-warnings.json
+
+          # jq transform taken from https://github.com/g-wilson/action-semgrep/blob/17b8bb7e7e42395cac39548fe732df3a816351bc/entrypoint.sh
+          # (MIT)
+          # But we want a pinned version of the tools for security
+          # given that we need to give GitHub API access
+          #
+          # Use `github-pr-review` reporter here so that review warnings have to be manually
+          # dismissed, since that's the only way they won't get accidentally missed,
+          # as we won't fail CI on them.
+          # It's a little noisy but it's not difficult to dismiss entire reviews either.
+          jq -r '.results[] | "E:\(.path):\(.end.line) \(.extra.message)"' semgrep-review-warnings.json \
+          | reviewdog \
+              -efm="%t:%f:%l %m" \
+              -name="semgrep-review-warnings" \
+              -reporter=github-pr-review \
+              -filter-mode=added \
+              -fail-on-error=false \
+              -level=warning
+
+      - name: Check for strict violations
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            docker.io/semgrep/semgrep:1.155.0@sha256:3dab091ee3247fce7e4ed3df9f92b3bd72692c083295f53cec3f135b86404db1 \
+            semgrep --config=/workspace/.config/semgrep/strict.yaml --json /workspace/ \
+          > semgrep-strict.json
+
+          # jq transform taken from https://github.com/g-wilson/action-semgrep/blob/17b8bb7e7e42395cac39548fe732df3a816351bc/entrypoint.sh
+          # (MIT)
+          # But we want a pinned version of the tools for security
+          # given that we need to give GitHub API access
+          #
+          # Use `github-pr-check` here AND `fail-on-error`. The CI check stops you from missing
+          # them and the `github-pr-check` is less noisy than emitting a full PR review.
+          jq -r '.results[] | "E:\(.path):\(.end.line) \(.extra.message)"' semgrep-strict.json \
+          | reviewdog \
+              -efm="%t:%f:%l %m" \
+              -name="semgrep-strict" \
+              -reporter=github-pr-check \
+              -filter-mode=added \
+              -fail-on-error=true \
+              -level=error
