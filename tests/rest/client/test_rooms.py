@@ -42,7 +42,7 @@ from synapse.api.constants import (
     PublicRoomsFilterFields,
     RoomTypes,
 )
-from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException, LimitExceededError
 from synapse.api.room_versions import RoomVersions
 from synapse.appservice import ApplicationService
 from synapse.events import EventBase, make_event_from_dict
@@ -2419,7 +2419,10 @@ class RoomDelayedEventTestCase(RoomBase):
             {},
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        self.assertNotIn("org.matrix.msc4140.errcode", channel.json_body)
+        self.assertTrue(
+            channel.json_body.get("errcode", "").startswith("M_"),
+            channel.json_body,
+        )
 
     def test_delayed_event_unsupported_by_default(self) -> None:
         """Test that sending a delayed event is unsupported with the default config."""
@@ -2433,8 +2436,8 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            "M_MAX_DELAY_UNSUPPORTED",
-            channel.json_body.get("org.matrix.msc4140.errcode"),
+            "ORG.MATRIX.MSC4140_MAX_DELAY_EXCEEDED",
+            channel.json_body.get("errcode"),
             channel.json_body,
         )
 
@@ -2451,8 +2454,41 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            "M_MAX_DELAY_EXCEEDED",
-            channel.json_body.get("org.matrix.msc4140.errcode"),
+            "ORG.MATRIX.MSC4140_MAX_DELAY_EXCEEDED",
+            channel.json_body.get("errcode"),
+            channel.json_body,
+        )
+
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 0,
+            },
+        }
+    )
+    def test_delayed_event_user_limit_exceeded(self) -> None:
+        """Test that users cannot have more delayed events scheduled at once than allowed."""
+        self.assertEqual(self.hs.config.server.max_delayed_events_per_user, 0)
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+        self.assertEqual(
+            Codes.LIMIT_EXCEEDED,
+            channel.json_body["errcode"],
+            channel.json_body,
+        )
+        # Want a custom error message to have been set
+        default_limit_exceeded_error_msg = LimitExceededError("").msg
+        self.assertNotEqual(
+            default_limit_exceeded_error_msg,
+            channel.json_body["error"],
             channel.json_body,
         )
 
@@ -2472,7 +2508,14 @@ class RoomDelayedEventTestCase(RoomBase):
             Codes.INVALID_PARAM, channel.json_body["errcode"], channel.json_body
         )
 
-    @unittest.override_config({"max_event_delay_duration": "24h"})
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 1,
+            },
+        }
+    )
     def test_send_delayed_message_event(self) -> None:
         """Test sending a valid delayed message event."""
         channel = self.make_request(

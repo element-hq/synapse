@@ -539,19 +539,18 @@ def _parse_request_delay(
         raise SynapseError(
             HTTPStatus.BAD_REQUEST,
             "Delayed events are not supported on this server",
-            Codes.UNKNOWN,
+            "ORG.MATRIX.MSC4140_MAX_DELAY_EXCEEDED",
             {
-                "org.matrix.msc4140.errcode": "M_MAX_DELAY_UNSUPPORTED",
+                "max_delay": 0,
             },
         )
     if delay > max_delay:
         raise SynapseError(
             HTTPStatus.BAD_REQUEST,
             "The requested delay exceeds the allowed maximum.",
-            Codes.UNKNOWN,
+            "ORG.MATRIX.MSC4140_MAX_DELAY_EXCEEDED",
             {
-                "org.matrix.msc4140.errcode": "M_MAX_DELAY_EXCEEDED",
-                "org.matrix.msc4140.max_delay": max_delay,
+                "max_delay": max_delay,
             },
         )
     return delay
