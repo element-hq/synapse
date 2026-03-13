@@ -45,6 +45,7 @@ from synapse.replication.tcp.streams._base import (
     ThreadSubscriptionsStream,
     ToDeviceStream,
     TypingStream,
+    QuarantinedMediaStream,
 )
 from synapse.replication.tcp.streams.events import EventsStream
 from synapse.replication.tcp.streams.federation import FederationStream
@@ -73,6 +74,7 @@ STREAMS_MAP = {
         ThreadSubscriptionsStream,
         UnPartialStatedRoomStream,
         UnPartialStatedEventStream,
+        QuarantinedMediaStream,
     )
 }
 
@@ -96,4 +98,5 @@ __all__ = [
     "ThreadSubscriptionsStream",
     "UnPartialStatedRoomStream",
     "UnPartialStatedEventStream",
+    "QuarantinedMediaStream",
 ]
