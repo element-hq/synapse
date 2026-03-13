@@ -2511,7 +2511,7 @@ class RoomDelayedEventTestCase(RoomBase):
         """
 
         # Test that new delayed events are correctly ratelimited.
-        def make_args(txn_id: str):
+        def make_args(txn_id: str) -> tuple[str, str, JsonDict]:
             return (
                 "PUT",
                 f"rooms/{self.room_id}/send/m.room.message/{txn_id}?org.matrix.msc4140.delay=2000",
