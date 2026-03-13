@@ -922,10 +922,7 @@ class ServerConfig(Config):
         # (Defined here despite being experimental to be near the other MSC4140 config)
         self.max_delayed_events_per_user: int = config.get(
             "experimental_features", {}
-        ).get(
-            "msc4140_max_delayed_events_per_user",
-            config.get("max_delayed_events_per_user", 100),
-        )
+        ).get("msc4140_max_delayed_events_per_user", 100)
 
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)
