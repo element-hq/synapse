@@ -1007,6 +1007,7 @@ class StreamKeyType(Enum):
     UN_PARTIAL_STATED_ROOMS = "un_partial_stated_rooms_key"
     THREAD_SUBSCRIPTIONS = "thread_subscriptions_key"
     STICKY_EVENTS = "sticky_events_key"
+    PROFILE_UPDATES = "profile_updates_key"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1014,7 +1015,7 @@ class StreamToken:
     """A collection of keys joined together by underscores in the following
     order and which represent the position in their respective streams.
 
-    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242`
+    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242_4141_101`
         1. `room_key`: `s2633508` which is a `RoomStreamToken`
            - `RoomStreamToken`'s can also look like `t426-2633508` or `m56~2.58~3.59`
            - See the docstring for `RoomStreamToken` for more details.
@@ -1029,6 +1030,7 @@ class StreamToken:
         10. `un_partial_stated_rooms_key`: `379`
         11. `thread_subscriptions_key`: 4242
         12. `sticky_events_key`: 4141
+        13. `profile_updates_key`: 101
 
     You can see how many of these keys correspond to the various
     fields in a "/sync" response:
@@ -1089,6 +1091,7 @@ class StreamToken:
     un_partial_stated_rooms_key: int
     thread_subscriptions_key: int
     sticky_events_key: int
+    profile_updates_key: int
 
     _SEPARATOR = "_"
     START: ClassVar["StreamToken"]
@@ -1118,6 +1121,7 @@ class StreamToken:
                 un_partial_stated_rooms_key,
                 thread_subscriptions_key,
                 sticky_events_key,
+                profile_updates_key,
             ) = keys
 
             return cls(
@@ -1135,6 +1139,7 @@ class StreamToken:
                 un_partial_stated_rooms_key=int(un_partial_stated_rooms_key),
                 thread_subscriptions_key=int(thread_subscriptions_key),
                 sticky_events_key=int(sticky_events_key),
+                profile_updates_key=int(profile_updates_key),
             )
         except CancelledError:
             raise
@@ -1159,6 +1164,7 @@ class StreamToken:
                 str(self.un_partial_stated_rooms_key),
                 str(self.thread_subscriptions_key),
                 str(self.sticky_events_key),
+                str(self.profile_updates_key),
             ]
         )
 
@@ -1225,6 +1231,7 @@ class StreamToken:
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
             StreamKeyType.STICKY_EVENTS,
+            StreamKeyType.PROFILE_UPDATES,
         ],
     ) -> int: ...
 
@@ -1281,7 +1288,8 @@ class StreamToken:
             f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
             f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
             f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key},"
-            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key})"
+            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key}, "
+            f"profile_updates: {self.profile_updates_key})"
         )
 
 
@@ -1298,6 +1306,7 @@ StreamToken.START = StreamToken(
     un_partial_stated_rooms_key=0,
     thread_subscriptions_key=0,
     sticky_events_key=0,
+    profile_updates_key=0,
 )
 
 

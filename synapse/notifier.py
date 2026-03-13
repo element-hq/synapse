@@ -527,6 +527,7 @@ class Notifier:
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
             StreamKeyType.STICKY_EVENTS,
+            StreamKeyType.PROFILE_UPDATES,
         ],
         new_token: int,
         users: Collection[str | UserID] | None = None,
