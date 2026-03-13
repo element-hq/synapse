@@ -1,0 +1,13 @@
+rules:
+  - id: function-with-profiles-and-user-id
+    patterns:
+      - pattern-inside: |
+          def $FUNC(...):
+            ...
+      - pattern: |
+          "...profiles..."
+      - pattern: |
+          "...user_id..."
+    message: "Function '$FUNC' references both 'profiles' and 'user_id'"
+    languages: [python]
+    severity: WARNING

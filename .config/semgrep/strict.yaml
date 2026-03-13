@@ -1,0 +1,11 @@
+rules:
+  - id: function-with-evil
+    patterns:
+      - pattern-inside: |
+          def $FUNC(...):
+            ...
+      - pattern: |
+          "...evil..."
+    message: "Function '$FUNC' contains evil"
+    languages: [python]
+    severity: ERROR
