@@ -600,7 +600,7 @@ Fetches the number of invites sent by the provided user ID across all rooms
 after the given timestamp.
 
 ```
-GET /_synapse/admin/v1/users/$user_id/sent_invite_count
+GET /_synapse/admin/v1/users/<user_id>/sent_invite_count
 ```
 
 **Parameters**
@@ -634,7 +634,7 @@ Fetches the number of rooms that the user joined after the given timestamp, even
 if they have subsequently left/been banned from those rooms.
 
 ```
-GET /_synapse/admin/v1/users/$<user_id/cumulative_joined_room_count
+GET /_synapse/admin/v1/users/<user_id>/cumulative_joined_room_count
 ```
 
 **Parameters**
@@ -1439,7 +1439,7 @@ The request and response format is the same as the
 The API is:
 
 ```
-GET /_synapse/admin/v1/auth_providers/$provider/users/$external_id
+GET /_synapse/admin/v1/auth_providers/<provider>/users/<external_id>
 ```
 
 When a user matched the given ID for the given provider, an HTTP code `200` with a response body like the following is returned:
@@ -1478,7 +1478,7 @@ _Added in Synapse 1.68.0._
 The API is:
 
 ```
-GET /_synapse/admin/v1/threepid/$medium/users/$address
+GET /_synapse/admin/v1/threepid/<medium>/users/<address>
 ```
 
 When a user matched the given address for the given medium, an HTTP code `200` with a response body like the following is returned:
@@ -1522,7 +1522,7 @@ is provided to override the default and allow the admin to issue the redactions 
 
 The API is 
 ```
-POST /_synapse/admin/v1/user/$user_id/redact
+POST /_synapse/admin/v1/user/<user_id>/redact
 
 {
   "rooms": ["!roomid1", "!roomid2"]
@@ -1571,7 +1571,7 @@ or until Synapse is restarted (whichever happens first).
 The API is:
 
 ```
-GET /_synapse/admin/v1/user/redact_status/$redact_id
+GET /_synapse/admin/v1/user/redact_status/<redact_id>
 ```
 
 A response body like the following is returned:
