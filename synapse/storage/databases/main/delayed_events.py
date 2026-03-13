@@ -85,32 +85,6 @@ class DelayedEventsStore(SQLBaseStore):
             unique=True,
         )
 
-    async def get_delayed_events_stream_pos(self) -> int:
-        """
-        Gets the stream position of the background process to watch for state events
-        that target the same piece of state as any pending delayed events.
-        """
-        return await self.db_pool.simple_select_one_onecol(
-            table="delayed_events_stream_pos",
-            keyvalues={},
-            retcol="stream_id",
-            desc="get_delayed_events_stream_pos",
-        )
-
-    async def update_delayed_events_stream_pos(self, stream_id: int | None) -> None:
-        """
-        Updates the stream position of the background process to watch for state events
-        that target the same piece of state as any pending delayed events.
-
-        Must only be used by the worker running the background process.
-        """
-        await self.db_pool.simple_update_one(
-            table="delayed_events_stream_pos",
-            keyvalues={},
-            updatevalues={"stream_id": stream_id},
-            desc="update_delayed_events_stream_pos",
-        )
-
     async def add_delayed_event(
         self,
         *,
@@ -456,50 +430,6 @@ class DelayedEventsStore(SQLBaseStore):
 
         return await self.db_pool.runInteraction(
             "cancel_delayed_event", cancel_delayed_event_txn
-        )
-
-    async def cancel_delayed_state_events(
-        self,
-        *,
-        room_id: str,
-        event_type: str,
-        state_key: str,
-        not_from_localpart: str,
-    ) -> Timestamp | None:
-        """
-        Cancels all matching delayed state events, i.e. remove them as long as they haven't been processed.
-
-        Args:
-            room_id: The room ID to match against.
-            event_type: The event type to match against.
-            state_key: The state key to match against.
-            not_from_localpart: The localpart of a user whose delayed events to not cancel.
-                If set to the empty string, any users' delayed events may be cancelled.
-
-        Returns: The send time of the next delayed event to be sent, if any.
-        """
-
-        def cancel_delayed_state_events_txn(
-            txn: LoggingTransaction,
-        ) -> Timestamp | None:
-            txn.execute(
-                """
-                DELETE FROM delayed_events
-                WHERE room_id = ? AND event_type = ? AND state_key = ?
-                    AND user_localpart <> ?
-                    AND NOT is_processed
-                """,
-                (
-                    room_id,
-                    event_type,
-                    state_key,
-                    not_from_localpart,
-                ),
-            )
-            return self._get_next_delayed_event_send_ts_txn(txn)
-
-        return await self.db_pool.runInteraction(
-            "cancel_delayed_state_events", cancel_delayed_state_events_txn
         )
 
     async def delete_processed_delayed_event(self, delay_id: DelayID) -> None:
