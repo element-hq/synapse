@@ -230,6 +230,37 @@ class UnquarantineMediaByID(RestServlet):
         return HTTPStatus.OK, {}
 
 
+class ListQuarantineChanges(RestServlet):
+    """Lists the quarantine changes to media."""
+
+    PATTERNS = admin_patterns("/media/quarantine_changes$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        self.auth = hs.get_auth()
+        self.server_name = hs.hostname
+
+    async def on_GET(
+        self, request: SynapseRequest
+    ) -> tuple[int, JsonDict]:
+        await assert_requester_is_admin(self.auth, request)
+
+        from_id = parse_integer(request, "from", default=0)
+        limit = 100  # arbitrary; not enough to cause problems (hopefully)
+        to_id = from_id + limit  # somewhat implied, but makes our call to the store easier
+
+        changes = await self.store.get_quarantined_media_changes(
+            from_id=from_id,
+            to_id=to_id,
+            limit=limit,
+        )
+
+        rows = [{"origin": c.origin if c.origin is not None else self.server_name, "media_id": c.media_id, "quarantined": c.quarantined} for c in changes]
+        next_batch = from_id + len(rows)
+
+        return HTTPStatus.OK, {"next_batch": next_batch, "rows": rows}
+
+
 class ProtectMediaByID(RestServlet):
     """Protect local media from being quarantined."""
 
@@ -529,6 +560,7 @@ def register_servlets_for_media_repo(hs: "HomeServer", http_server: HttpServer) 
     QuarantineMediaByID(hs).register(http_server)
     UnquarantineMediaByID(hs).register(http_server)
     QuarantineMediaByUser(hs).register(http_server)
+    ListQuarantineChanges(hs).register(http_server)
     ProtectMediaByID(hs).register(http_server)
     UnprotectMediaByID(hs).register(http_server)
     ListMediaInRoom(hs).register(http_server)
