@@ -585,6 +585,7 @@ class EventCreationHandler:
         state_map: StateMap[str] | None = None,
         for_batch: bool = False,
         current_state_group: int | None = None,
+        delay_id: str | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """
         Given a dict from a client, create a new event. If bool for_batch is true, will
@@ -600,7 +601,7 @@ class EventCreationHandler:
         Args:
             requester
             event_dict: An entire event
-            txn_id
+            txn_id: The transaction ID.
             prev_event_ids:
                 the forward extremities to use as the prev_events for the
                 new event.
@@ -638,6 +639,8 @@ class EventCreationHandler:
 
             current_state_group: the current state group, used only for creating events for
                 batch persisting
+
+            delay_id: The delay ID of this event, if it was a delayed event.
 
         Raises:
             ResourceLimitError if server is blocked to some resource being
@@ -725,6 +728,9 @@ class EventCreationHandler:
 
         if txn_id is not None:
             builder.internal_metadata.txn_id = txn_id
+
+        if delay_id is not None:
+            builder.internal_metadata.delay_id = delay_id
 
         builder.internal_metadata.outlier = outlier
 
@@ -966,6 +972,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: int | None = None,
+        delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         """
         Creates an event, then sends it.
@@ -994,6 +1001,7 @@ class EventCreationHandler:
             depth: Override the depth used to order the event in the DAG.
                 Should normally be set to None, which will cause the depth to be calculated
                 based on the prev_events.
+            delay_id: The delay ID of this event, if it was a delayed event.
 
         Returns:
             The event, and its stream ordering (if deduplication happened,
@@ -1090,6 +1098,7 @@ class EventCreationHandler:
                 ignore_shadow_ban=ignore_shadow_ban,
                 outlier=outlier,
                 depth=depth,
+                delay_id=delay_id,
             )
 
     async def _create_and_send_nonmember_event_locked(
@@ -1103,6 +1112,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: int | None = None,
+        delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         room_id = event_dict["room_id"]
 
@@ -1131,6 +1141,7 @@ class EventCreationHandler:
                     state_event_ids=state_event_ids,
                     outlier=outlier,
                     depth=depth,
+                    delay_id=delay_id,
                 )
                 context = await unpersisted_context.persist(event)
 
