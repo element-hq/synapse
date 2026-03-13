@@ -250,6 +250,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
                 prev_event_ids: list[str],
                 auth_event_ids: list[str] | None,
                 depth: int | None = None,
+                prev_state_events: list[str] | None = None,
             ) -> EventBase:
                 built_event = await self._base_builder.build(
                     prev_event_ids=prev_event_ids, auth_event_ids=auth_event_ids

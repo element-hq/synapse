@@ -62,7 +62,7 @@ from synapse.api.room_versions import (
     RoomVersion,
     RoomVersions,
 )
-from synapse.events import is_creator
+from synapse.events import FrozenEventVMSC4242, is_creator
 from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
@@ -186,6 +186,73 @@ async def check_state_independent_auth_rules(
 
         # 1.5 Otherwise, allow
         return
+
+    # State DAGs 2. Considering the event's prev_state_events:
+    if event.room_version.msc4242_state_dags:
+        prev_state_events_ids = set(cast(FrozenEventVMSC4242, event).prev_state_events)
+        needed_prev_state_event_ids = {
+            event_id
+            for event_id in prev_state_events_ids
+            if not batched_auth_events or event_id not in batched_auth_events
+        }
+        # We need to do some checks on the events provided as prev_state_events, so we need to load them.
+        # Try to load the `prev_state_events` from `batched_auth_events` initially as that can save us
+        # a database hit.
+        prev_state_events = (
+            {}
+            if not batched_auth_events
+            else {
+                e: batched_auth_events[e]
+                for e in prev_state_events_ids - needed_prev_state_event_ids
+            }
+        )
+        if len(needed_prev_state_event_ids) > 0:
+            needed_prev_state_events = await store.get_events(
+                needed_prev_state_event_ids,
+                redact_behaviour=EventRedactBehaviour.as_is,
+                allow_rejected=True,
+            )
+            prev_state_events.update(needed_prev_state_events)
+        if len(prev_state_events) != len(prev_state_events_ids):
+            # we should have all the prev state events by now, so if we do not, that suggests
+            # a synapse programming error
+            known_prev_state_event_ids = set(prev_state_events)
+            raise AssertionError(
+                f"Event {event.event_id} has unknown prev_state_events "
+                + f"{len(prev_state_events)} != {len(prev_state_events_ids)} "
+                + f"{prev_state_events_ids - known_prev_state_event_ids} missing "
+                + f"out of {prev_state_events_ids}"
+            )
+        for prev_state_event in prev_state_events.values():
+            # 2.1 If there are entries which do not belong in the same room, reject.
+            if prev_state_event.room_id != event.room_id:
+                raise AuthError(
+                    403,
+                    "During auth for event %s in room %s, found event %s in prev_state_events "
+                    "which belongs to a different room %s"
+                    % (
+                        event.event_id,
+                        event.room_id,
+                        prev_state_event.event_id,
+                        prev_state_event.room_id,
+                    ),
+                )
+            # 2.2 If there are entries which do not have a state_key, reject.
+            if not prev_state_event.is_state():
+                raise AuthError(
+                    403,
+                    f"During auth for event {event.event_id} in room {event.room_id}, event has a "
+                    + f"prev_state_event which is not state: {prev_state_event.event_id}",
+                )
+            # 2.3 If there are entries which were themselves rejected under the checks performed on
+            # receipt of a PDU, reject.
+            if prev_state_event.rejected_reason is not None:
+                raise AuthError(
+                    403,
+                    f"During auth for event {event.event_id} in room {event.room_id}, event has a "
+                    + f"prev_state_event which is rejected ({prev_state_event.rejected_reason}): "
+                    + f"{prev_state_event.event_id}",
+                )
 
     # 2. Reject if event has auth_events that: ...
     auth_events: ChainMap[str, EventBase] = ChainMap()
@@ -471,6 +538,12 @@ def _check_create(event: "EventBase") -> None:
     #  1.1 If it has any previous events, reject.
     if event.prev_event_ids():
         raise AuthError(403, "Create event has prev events")
+
+    # State DAGs 1.2 If it has any prev_state_events, reject.
+    if event.room_version.msc4242_state_dags:
+        assert isinstance(event, FrozenEventVMSC4242)
+        if len(event.prev_state_events) > 0:
+            raise AuthError(403, "Create event has prev state events")
 
     if event.room_version.msc4291_room_ids_as_hashes:
         # 1.2 If the create event has a room_id, reject

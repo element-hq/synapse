@@ -153,6 +153,10 @@ def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDic
     # Earlier room versions from had additional allowed keys.
     if not room_version.updated_redaction_rules:
         allowed_keys.extend(["prev_state", "membership", "origin"])
+    # Custom room versions add new allowed keys and remove others
+    if room_version.msc4242_state_dags:
+        allowed_keys.extend(["prev_state_events"])
+        allowed_keys.remove("auth_events")
 
     event_type = event_dict["type"]
 

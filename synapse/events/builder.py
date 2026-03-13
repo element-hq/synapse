@@ -132,6 +132,7 @@ class EventBuilder:
         prev_event_ids: list[str],
         auth_event_ids: list[str] | None,
         depth: int | None = None,
+        prev_state_events: list[str] | None = None,
     ) -> EventBase:
         """Transform into a fully signed and hashed event
 
@@ -143,18 +144,61 @@ class EventBuilder:
             depth: Override the depth used to order the event in the DAG.
                 Should normally be set to None, which will cause the depth to be calculated
                 based on the prev_events.
-
+            prev_state_events: The event IDs to use as prev_state_events.
+                Only applicable on MSC4242 state DAG rooms. If this is supplied, auth_event_ids
+                must not be specified unless this event is part of a batch such that the builder
+                will be unable to compute the auth_event_ids due to the events not being persisted
+                yet.
         Returns:
             The signed and hashed event.
         """
+        # If the caller specifies this, make sure the room version supports it.
+        if prev_state_events:
+            assert self.room_version.msc4242_state_dags
+        if self.room_version.msc4242_state_dags:
+            assert prev_state_events is not None
+            if self.room_id:
+                state_ids = await self._state.compute_state_after_events(
+                    self.room_id,
+                    prev_state_events,
+                    state_filter=StateFilter.from_types(
+                        auth_types_for_event(self.room_version, self)
+                    ),
+                    await_full_state=False,
+                )
+                # When we create rooms we only insert the create+member events, and batch the rest.
+                # Therefore, we may not have state_ids from compute_state_after_events as the
+                # prev_state_events are unknown. If this happens, the caller provides the auth events
+                # to use instead.
+                calculated_auth_event_ids: list[
+                    str
+                ] = []  # assume it's the create event which has []
+                if len(state_ids) == 0 and len(prev_state_events) > 0:
+                    # it's a batched event, so we should have been provided the auth_events
+                    assert auth_event_ids and len(auth_event_ids) > 0
+                    calculated_auth_event_ids = auth_event_ids
+                else:
+                    calculated_auth_event_ids = (
+                        self._event_auth_handler.compute_auth_events(self, state_ids)
+                    )
+            else:
+                # event is a state DAG event and is the create event (room_id is not provided),
+                # therefore there are no auth_events.
+                calculated_auth_event_ids = []
+                assert self.type == EventTypes.Create and self.state_key == ""
+            self.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
+            auth_event_ids = calculated_auth_event_ids
+
         # Create events always have empty auth_events.
         if self.type == EventTypes.Create and self.is_state() and self.state_key == "":
             auth_event_ids = []
 
         # Calculate auth_events for non-create events
+        # this block must not be hit for MSC4242 rooms as it resolves state with prev_events
         if auth_event_ids is None:
             # Every non-create event must have a room ID
             assert self.room_id is not None
+            assert not self.room_version.msc4242_state_dags
             state_ids = await self._state.compute_state_after_events(
                 self.room_id,
                 prev_event_ids,
@@ -231,7 +275,6 @@ class EventBuilder:
         # rejected by other servers (and so that they can be persisted in
         # the db)
         depth = min(depth, MAX_DEPTH)
-
         event_dict: dict[str, Any] = {
             "auth_events": auth_events,
             "prev_events": prev_events,
@@ -241,8 +284,6 @@ class EventBuilder:
             "unsigned": self.unsigned,
             "depth": depth,
         }
-        if self.room_id is not None:
-            event_dict["room_id"] = self.room_id
 
         if self.room_version.msc4291_room_ids_as_hashes:
             # In MSC4291: the create event has no room ID as the create event ID /is/ the room ID.
@@ -261,6 +302,14 @@ class EventBuilder:
                 create_event_id = "$" + self.room_id[1:]
                 auth_event_ids.remove(create_event_id)
                 event_dict["auth_events"] = auth_event_ids
+
+        if self.room_version.msc4242_state_dags:
+            # Auth events are removed entirely on state DAG rooms
+            event_dict.pop("auth_events")
+            assert prev_state_events is not None
+            event_dict["prev_state_events"] = prev_state_events
+        if self.room_id is not None:
+            event_dict["room_id"] = self.room_id
 
         if self.is_state():
             event_dict["state_key"] = self._state_key
