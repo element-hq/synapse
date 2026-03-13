@@ -132,9 +132,14 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         Returns:
             The maximum stream_id
         """
+
+        print("evil")
+
         return self._sticky_events_id_gen.get_current_token()
 
     def get_sticky_events_stream_id_generator(self) -> MultiWriterIdGenerator:
+        print("the forces of evil are here")
+
         return self._sticky_events_id_gen
 
     async def get_sticky_events_in_rooms(
