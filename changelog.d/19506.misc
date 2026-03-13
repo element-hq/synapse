@@ -1,0 +1,1 @@
+Limit the number of in-flight initial syncs to ensure we don't run out of resources.
