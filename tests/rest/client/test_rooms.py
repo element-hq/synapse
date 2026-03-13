@@ -2511,17 +2511,16 @@ class RoomDelayedEventTestCase(RoomBase):
         """
 
         # Test that new delayed events are correctly ratelimited.
-        args = (
-            "POST",
-            (
-                "rooms/%s/send/m.room.message?org.matrix.msc4140.delay=2000"
-                % self.room_id
-            ).encode("ascii"),
-            {"body": "test", "msgtype": "m.text"},
-        )
-        channel = self.make_request(*args)
+        def make_args(txn_id: str):
+            return (
+                "PUT",
+                f"rooms/{self.room_id}/send/m.room.message/{txn_id}?org.matrix.msc4140.delay=2000",
+                {"body": "test", "msgtype": "m.text"},
+            )
+
+        channel = self.make_request(*make_args("mid1"))
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-        channel = self.make_request(*args)
+        channel = self.make_request(*make_args("mid2"))
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
         # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
@@ -2530,7 +2529,7 @@ class RoomDelayedEventTestCase(RoomBase):
         )
 
         # Test that the new delayed events aren't ratelimited anymore.
-        channel = self.make_request(*args)
+        channel = self.make_request(*make_args("mid3"))
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
 
