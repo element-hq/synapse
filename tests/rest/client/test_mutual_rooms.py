@@ -56,7 +56,7 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
     ) -> FakeChannel:
         return self.make_request(
             "GET",
-            "/_matrix/client/v1/user/mutual_rooms"
+            "/_matrix/client/v1/mutual_rooms"
             f"?user_id={quote(other_user)}"
             + (f"&from={quote(since_token)}" if since_token else ""),
             access_token=token,

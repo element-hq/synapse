@@ -65,10 +65,10 @@ def _parse_mutual_rooms_batch_token_args(args: dict[bytes, list[bytes]]) -> str 
 
 class UserMutualRoomsServlet(RestServlet):
     """
-    GET /user/mutual_rooms?user_id={user_id}&from={token} HTTP/1.1
+    GET /mutual_rooms?user_id={user_id}&from={token} HTTP/1.1
     """
 
-    PATTERNS = [*client_patterns("/user/mutual_rooms$", releases=("v1",))]
+    PATTERNS = [*client_patterns("/mutual_rooms$", releases=("v1",))]
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
