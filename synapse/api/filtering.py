@@ -123,6 +123,13 @@ USER_FILTER_SCHEMA = {
         "filter": FILTER_SCHEMA,
         "room_filter": ROOM_FILTER_SCHEMA,
         "room_event_filter": ROOM_EVENT_FILTER_SCHEMA,
+        "profile_fields_filter": {
+            "type": "object",
+            "properties": {
+                "ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": True,
+        },
     },
     "properties": {
         "presence": {"$ref": "#/definitions/filter"},
@@ -130,6 +137,10 @@ USER_FILTER_SCHEMA = {
         "room": {"$ref": "#/definitions/room_filter"},
         "event_format": {"type": "string", "enum": ["client", "federation"]},
         "event_fields": {"type": "array", "items": {"type": "string"}},
+        "profile_fields": {"$ref": "#/definitions/profile_fields_filter"},
+        "org.matrix.msc4429.profile_fields": {
+            "$ref": "#/definitions/profile_fields_filter"
+        },
     },
     "additionalProperties": True,  # Allow new fields for forward compatibility
 }
@@ -216,6 +227,20 @@ class FilterCollection:
         self.include_leave = filter_json.get("room", {}).get("include_leave", False)
         self.event_fields = filter_json.get("event_fields", [])
         self.event_format = filter_json.get("event_format", "client")
+
+        self.profile_fields: list[str] = []
+        if hs.config.experimental.msc4429_enabled:
+            profile_fields_filter = filter_json.get("profile_fields")
+            if profile_fields_filter is None:
+                profile_fields_filter = filter_json.get(
+                    "org.matrix.msc4429.profile_fields"
+                )
+
+            if isinstance(profile_fields_filter, Mapping):
+                ids = profile_fields_filter.get("ids", [])
+                if ids is None:
+                    ids = []
+                self.profile_fields = list(ids)
 
     def __repr__(self) -> str:
         return "<FilterCollection %s>" % (json.dumps(self._filter_json),)
