@@ -91,14 +91,18 @@ class RedactionsTestCase(HomeserverTestCase):
 
         Returns the json body.
         """
-        path = "/_matrix/client/r0/rooms/%s/redact/%s" % (room_id, event_id)
+        path = "/_matrix/client/r0/rooms/%s/redact/%s/%s" % (
+            room_id,
+            event_id,
+            event_id,
+        )
 
         request_content = content or {}
         if with_relations:
             request_content["org.matrix.msc3912.with_relations"] = with_relations
 
         channel = self.make_request(
-            "POST", path, request_content, access_token=access_token
+            "PUT", path, request_content, access_token=access_token
         )
         self.assertEqual(channel.code, expect_code)
         return channel.json_body

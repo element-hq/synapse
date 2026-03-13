@@ -1,0 +1,1 @@
+Remove support for undocumented variants of `/send` and `/redact` without a transaction ID, and `/createRoom`, `/forget` and the membership endpoints (join, invite, leave, ban, unban, kick) with a transaction ID. Contributed by @tulir @ Beeper.

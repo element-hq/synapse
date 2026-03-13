@@ -260,10 +260,12 @@ class DelayedEventsTestCase(HomeserverTestCase):
     )
     def test_cancel_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
-        for _ in range(2):
+        for i in range(2):
             channel = self.make_request(
-                "POST",
-                _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
+                "PUT",
+                _get_path_for_delayed_send(
+                    self.room_id, _EVENT_TYPE, 100000, f"txn{i}"
+                ),
                 {},
                 self.user1_access_token,
             )
@@ -331,10 +333,12 @@ class DelayedEventsTestCase(HomeserverTestCase):
     @unittest.override_config({"rc_message": {"per_second": 2.5, "burst_count": 3}})
     def test_send_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
-        for _ in range(2):
+        for i in range(2):
             channel = self.make_request(
-                "POST",
-                _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
+                "PUT",
+                _get_path_for_delayed_send(
+                    self.room_id, _EVENT_TYPE, 100000, f"txn{i}"
+                ),
                 {},
                 self.user1_access_token,
             )
@@ -412,10 +416,12 @@ class DelayedEventsTestCase(HomeserverTestCase):
     )
     def test_restart_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
-        for _ in range(2):
+        for i in range(2):
             channel = self.make_request(
-                "POST",
-                _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
+                "PUT",
+                _get_path_for_delayed_send(
+                    self.room_id, _EVENT_TYPE, 100000, f"txn{i}"
+                ),
                 {},
                 self.user1_access_token,
             )
@@ -556,5 +562,7 @@ def _get_path_for_delayed_state(
     return f"rooms/{room_id}/state/{event_type}/{state_key}?org.matrix.msc4140.delay={delay_ms}"
 
 
-def _get_path_for_delayed_send(room_id: str, event_type: str, delay_ms: int) -> str:
-    return f"rooms/{room_id}/send/{event_type}?org.matrix.msc4140.delay={delay_ms}"
+def _get_path_for_delayed_send(
+    room_id: str, event_type: str, delay_ms: int, txn_id: str
+) -> str:
+    return f"rooms/{room_id}/send/{event_type}/{txn_id}?org.matrix.msc4140.delay={delay_ms}"
