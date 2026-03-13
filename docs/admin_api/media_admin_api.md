@@ -247,6 +247,32 @@ Response:
 {}
 ```
 
+## Listing quarantined media changes
+
+When media is quarantined or unquarantined, a change record is created in the 
+database. This API returns those change records.
+
+Request:
+
+```
+GET /_synapse/admin/v1/media/quarantine_changes?from=2
+```
+
+Where `from` is the `next_batch` value from a previous request. It is optional.
+
+Response:
+
+```json
+{
+  "next_batch": 4,
+  "rows": [
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": true },
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": false },
+    { "origin": "another.example.org", "media_id": "abcdefg12345...", "quarantined": true }
+  ]
+}
+```
+
 # Delete local media
 This API deletes the *local* media from the disk of your own server.
 This includes any local thumbnails and copies of media downloaded from
