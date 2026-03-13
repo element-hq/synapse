@@ -2485,8 +2485,9 @@ class RoomDelayedEventTestCase(RoomBase):
             channel.json_body,
         )
         # Want a custom error message to have been set
+        default_limit_exceeded_error_msg = LimitExceededError("").msg
         self.assertNotEqual(
-            LimitExceededError("test_delayed_event_user_limit_exceeded").msg,
+            default_limit_exceeded_error_msg,
             channel.json_body["error"],
             channel.json_body,
         )
