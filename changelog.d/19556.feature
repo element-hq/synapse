@@ -1,0 +1,1 @@
+Implement experimental support for [MSC4429: Profile Updates for Legacy Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4429).

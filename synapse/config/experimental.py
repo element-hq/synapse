@@ -563,6 +563,9 @@ class ExperimentalConfig(Config):
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
+        # MSC4429: Profile updates for legacy /sync
+        self.msc4429_enabled: bool = experimental.get("msc4429_enabled", False)
+
         # MSC4143: Matrix RTC Transport using Livekit Backend
         self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
 

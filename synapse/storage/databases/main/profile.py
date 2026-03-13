@@ -19,13 +19,15 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Collection, Iterable, Sequence, cast
 
+import attr
 from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, StoreError
-from synapse.storage._base import SQLBaseStore
+from synapse.replication.tcp.streams._base import ProfileUpdatesStream
+from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
@@ -33,6 +35,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
+from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonValue, UserID
 
 if TYPE_CHECKING:
@@ -41,6 +44,15 @@ if TYPE_CHECKING:
 
 # The number of bytes that the serialized profile can have.
 MAX_PROFILE_SIZE = 65536
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class ProfileUpdate:
+    """An update to a user's profile."""
+
+    stream_id: int
+    user_id: str
+    field_name: str
 
 
 class ProfileWorkerStore(SQLBaseStore):
@@ -52,6 +64,7 @@ class ProfileWorkerStore(SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
         self.server_name: str = hs.hostname
+        self._instance_name: str = hs.get_instance_name()
         self.database_engine = database.engine
         self.db_pool.updates.register_background_index_update(
             "profiles_full_user_id_key_idx",
@@ -63,6 +76,23 @@ class ProfileWorkerStore(SQLBaseStore):
 
         self.db_pool.updates.register_background_update_handler(
             "populate_full_user_id_profiles", self.populate_full_user_id_profiles
+        )
+
+        self._can_write_to_profile_updates = (
+            self._instance_name in hs.config.worker.writers.events
+        )
+        self._profile_updates_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="profile_updates",
+            server_name=self.server_name,
+            instance_name=self._instance_name,
+            tables=[
+                ("profile_updates", "instance_name", "stream_id"),
+            ],
+            sequence_name="profile_updates_sequence",
+            writers=hs.config.worker.writers.events,
         )
 
     async def populate_full_user_id_profiles(
@@ -151,6 +181,13 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
         return 50
+
+    def process_replication_position(
+        self, stream_name: str, instance_name: str, token: int
+    ) -> None:
+        if stream_name == ProfileUpdatesStream.NAME:
+            self._profile_updates_id_gen.advance(instance_name, token)
+        super().process_replication_position(stream_name, instance_name, token)
 
     async def get_profileinfo(self, user_id: UserID) -> ProfileInfo:
         """
@@ -290,6 +327,146 @@ class ProfileWorkerStore(SQLBaseStore):
         if isinstance(self.database_engine, Sqlite3Engine) and result:
             result = json.loads(result)
         return result or {}
+
+    def get_max_profile_updates_stream_id(self) -> int:
+        """Get the current maximum stream_id for profile updates."""
+        return self._profile_updates_id_gen.get_current_token()
+
+    def get_profile_updates_stream_id_generator(self) -> MultiWriterIdGenerator:
+        return self._profile_updates_id_gen
+
+    async def get_updated_profile_updates(
+        self, from_id: int, to_id: int, limit: int
+    ) -> list[tuple[int, str, str]]:
+        """Get profile updates that have changed, for the profile_updates stream."""
+        if from_id == to_id:
+            return []
+
+        def _get_updated_profile_updates_txn(
+            txn: LoggingTransaction,
+        ) -> list[tuple[int, str, str]]:
+            sql = (
+                "SELECT stream_id, user_id, field_name"
+                " FROM profile_updates"
+                " WHERE ? < stream_id AND stream_id <= ?"
+                " ORDER BY stream_id ASC LIMIT ?"
+            )
+            txn.execute(sql, (from_id, to_id, limit))
+            return cast(list[tuple[int, str, str]], txn.fetchall())
+
+        return await self.db_pool.runInteraction(
+            "get_updated_profile_updates", _get_updated_profile_updates_txn
+        )
+
+    async def get_profile_updates_for_fields(
+        self,
+        *,
+        from_id: int,
+        to_id: int,
+        field_names: Iterable[str],
+    ) -> list[ProfileUpdate]:
+        """Get profile update markers for the given fields in a stream range."""
+        if from_id == to_id:
+            return []
+
+        field_names = list(field_names)
+        if not field_names:
+            return []
+
+        def _get_profile_updates_for_fields_txn(
+            txn: LoggingTransaction,
+        ) -> list[ProfileUpdate]:
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "field_name", field_names
+            )
+            sql = (
+                "SELECT stream_id, user_id, field_name"
+                " FROM profile_updates"
+                f" WHERE ? < stream_id AND stream_id <= ? AND {clause}"
+                " ORDER BY stream_id ASC"
+            )
+            txn.execute(sql, (from_id, to_id, *args))
+            rows = cast(list[tuple[int, str, str]], txn.fetchall())
+
+            updates: list[ProfileUpdate] = []
+            for stream_id, user_id, field_name in rows:
+                updates.append(
+                    ProfileUpdate(
+                        stream_id=stream_id,
+                        user_id=user_id,
+                        field_name=field_name,
+                    )
+                )
+
+            return updates
+
+        return await self.db_pool.runInteraction(
+            "get_profile_updates_for_fields", _get_profile_updates_for_fields_txn
+        )
+
+    async def get_profile_data_for_users(
+        self, user_ids: Collection[str]
+    ) -> dict[str, tuple[str | None, str | None, JsonDict]]:
+        """Fetch displayname/avatar_url/custom fields for a list of users."""
+        if not user_ids:
+            return {}
+
+        rows = cast(
+            list[tuple[str, str | None, str | None, object | None]],
+            await self.db_pool.simple_select_many_batch(
+                table="profiles",
+                column="full_user_id",
+                iterable=user_ids,
+                retcols=("full_user_id", "displayname", "avatar_url", "fields"),
+                desc="get_profile_data_for_users",
+            ),
+        )
+
+        results: dict[str, tuple[str | None, str | None, JsonDict]] = {}
+        for full_user_id, displayname, avatar_url, fields in rows:
+            if fields is None:
+                fields_dict: JsonDict = {}
+            elif isinstance(fields, (str, bytes, bytearray, memoryview)):
+                fields_dict = cast(JsonDict, db_to_json(fields))
+            else:
+                fields_dict = cast(JsonDict, fields)
+
+            results[full_user_id] = (displayname, avatar_url, fields_dict)
+
+        return results
+
+    async def add_profile_updates(
+        self, user_id: UserID, updates: Sequence[tuple[str, JsonValue | None]]
+    ) -> int:
+        """Persist profile update markers and return the last stream ID."""
+        assert self._can_write_to_profile_updates
+
+        if not updates:
+            return self._profile_updates_id_gen.get_current_token()
+
+        user_id_str = user_id.to_string()
+
+        def _add_profile_updates_txn(txn: LoggingTransaction) -> int:
+            stream_ids = self._profile_updates_id_gen.get_next_mult_txn(
+                txn, len(updates)
+            )
+            for stream_id, (field_name, _value) in zip(stream_ids, updates):
+                self.db_pool.simple_insert_txn(
+                    txn,
+                    table="profile_updates",
+                    values={
+                        "stream_id": stream_id,
+                        "instance_name": self._instance_name,
+                        "user_id": user_id_str,
+                        "field_name": field_name,
+                    },
+                )
+
+            return stream_ids[-1]
+
+        return await self.db_pool.runInteraction(
+            "add_profile_updates", _add_profile_updates_txn
+        )
 
     async def create_profile(self, user_id: UserID) -> None:
         """

@@ -44,6 +44,7 @@ from synapse.replication.tcp.streams import (
     UnPartialStatedRoomStream,
 )
 from synapse.replication.tcp.streams._base import (
+    ProfileUpdatesStream,
     StickyEventsStream,
     ThreadSubscriptionsStream,
 )
@@ -265,6 +266,19 @@ class ReplicationDataHandler:
                 token,
                 users=[row.user_id for row in rows],
             )
+        elif stream_name == ProfileUpdatesStream.NAME:
+            updated_user_ids = {row.user_id for row in rows}
+            if updated_user_ids:
+                room_ids: set[str] = set()
+                for user_id in updated_user_ids:
+                    room_ids.update(await self.store.get_rooms_for_user(user_id))
+
+                if room_ids:
+                    self.notifier.on_new_event(
+                        StreamKeyType.PROFILE_UPDATES,
+                        token,
+                        rooms=room_ids,
+                    )
         elif stream_name == StickyEventsStream.NAME:
             self.notifier.on_new_event(
                 StreamKeyType.STICKY_EVENTS,
