@@ -659,13 +659,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         cross_signing_keys_by_user: dict[str, dict[str, object]] = {}
         for user_id, device_id, update_stream_id, update_context in updates:
             # Calculate the remaining length budget.
-            # Note that, for now, each entry in `cross_signing_keys_by_user`
-            # gives rise to two device updates in the result, so those cost twice
-            # as much (and are the whole reason we need to separately calculate
-            # the budget; we know len(updates) <= limit otherwise!)
             # N.B. len() on dicts is cheap since they store their size.
             remaining_length_budget = limit - (
-                len(query_map) + 2 * len(cross_signing_keys_by_user)
+                len(query_map) + len(cross_signing_keys_by_user)
             )
             assert remaining_length_budget >= 0
 
@@ -737,10 +733,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         for user_id, result in cross_signing_keys_by_user.items():
             result["user_id"] = user_id
             results.append((EduTypes.SIGNING_KEY_UPDATE, result))
-            # also send the unstable version
-            # FIXME: remove this when enough servers have upgraded
-            #        and remove the length budgeting above.
-            results.append(("org.matrix.signing_key_update", result))
 
         if issue_8631_logger.isEnabledFor(logging.DEBUG):
             for user_id, edu in results:
