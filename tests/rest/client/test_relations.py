@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
+import random
 import urllib.parse
 from typing import Any, Callable
 from unittest.mock import AsyncMock, patch
@@ -114,9 +114,10 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         if key is not None:
             content["m.relates_to"]["key"] = key
 
+        txn_id = random.randbytes(16).hex()
         channel = self.make_request(
-            "POST",
-            f"/_matrix/client/v3/rooms/{self.room}/send/{event_type}",
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room}/send/{event_type}/{txn_id}",
             content,
             access_token=access_token,
         )
@@ -1593,8 +1594,8 @@ class RelationRedactionTestCase(BaseRelationsTestCase):
 
     def _redact(self, event_id: str) -> None:
         channel = self.make_request(
-            "POST",
-            f"/_matrix/client/r0/rooms/{self.room}/redact/{event_id}",
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room}/redact/{event_id}/{event_id}",
             access_token=self.user_token,
             content={},
         )
