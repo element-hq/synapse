@@ -703,7 +703,8 @@ The parameters and response values have the same format as
 
 ## Version 2 (new version)
 
-**Note**: This API is new, experimental and "subject to change".
+> [!NOTE]
+> This API is new, experimental and "subject to change".
 
 This version works asynchronously, meaning you get the response from server immediately
 while the server works on that task in background. You can then request the status of the action
@@ -770,7 +771,8 @@ The JSON body must not be empty. The body must be at least `{}`.
 
 ## Status of deleting rooms
 
-**Note**: This API is new, experimental and "subject to change".
+> [!NOTE]
+> This API is new, experimental and "subject to change".
 
 It is possible to query the status of the background task for deleting rooms.
 The status can be queried up to 24 hours after completion of the task,
@@ -883,8 +885,9 @@ The following fields are returned in the JSON response body:
   - `error` - A string that shows an error message if `status` is `failed`.
     Otherwise this field is hidden.
   - `shutdown_room` - An object containing information about the result of shutting down the room.
-    *Note:* The result is shown after removing the room members.
-    The delete process can still be running. Please pay attention to the `status`.
+    > [!NOTE]
+    > The result is shown after removing the room members.
+    > The delete process can still be running. Please pay attention to the `status`.
     - `kicked_users` - An array of users (`user_id`) that were kicked.
     - `failed_to_kick_users` - An array of users (`user_id`) that that were not kicked.
     - `local_aliases` - An array of strings representing the local aliases that were
@@ -894,8 +897,9 @@ The following fields are returned in the JSON response body:
 
 ## Undoing room deletions
 
-*Note*: This guide may be outdated by the time you read it. By nature of room deletions being performed at the database level,
-the structure can and does change without notice.
+> [!NOTE]
+> This guide may be outdated by the time you read it. By nature of room deletions being performed at the database level,
+> the structure can and does change without notice.
 
 First, it's important to understand that a room deletion is very destructive. Undoing a deletion is not as simple as pretending it
 never happened - work has to be done to move forward instead of resetting the past. In fact, in some cases it might not be possible
@@ -978,9 +982,10 @@ A response as follows will be returned:
 
 ## Deleting forward extremities
 
-**WARNING**: Please ensure you know what you're doing and have read
-the related issue [#1760](https://github.com/matrix-org/synapse/issues/1760).
-Under no situations should this API be executed as an automated maintenance task!
+> [!WARNING]
+> Please ensure you know what you're doing and have read
+> the related issue [#1760](https://github.com/matrix-org/synapse/issues/1760).
+> Under no situations should this API be executed as an automated maintenance task!
 
 If a room has lots of forward extremities, the extra can be
 deleted as follows:

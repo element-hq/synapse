@@ -2301,10 +2301,11 @@ default templates, see
 
 ## 3pid verification changes
 
-**Note: As of this release, users will be unable to add phone numbers or
-email addresses to their accounts, without changes to the Synapse
-configuration. This includes adding an email address during
-registration.**
+> [!NOTE]
+> As of this release, users will be unable to add phone numbers or
+> email addresses to their accounts, without changes to the Synapse
+> configuration. This includes adding an email address during
+> registration.
 
 It is possible for a user to associate an email address or phone number
 with their account, for a number of reasons:

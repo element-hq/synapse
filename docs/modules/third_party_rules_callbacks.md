@@ -19,10 +19,9 @@ async def check_event_allowed(
 ) -> tuple[bool, dict | None]
 ```
 
-**<span style="color:red">
-This callback is very experimental and can and will break without notice. Module developers
-are encouraged to implement `check_event_for_spam` from the spam checker category instead.
-</span>**
+> [!WARNING]
+> This callback is very experimental and can and will break without notice. Module developers
+> are encouraged to implement `check_event_for_spam` from the spam checker category instead.
 
 Called when processing any incoming event, with the event and a `StateMap`
 representing the current state of the room the event is being sent into. A `StateMap` is
@@ -258,10 +257,9 @@ If multiple modules implement this callback, Synapse runs them all in order.
 
 _First introduced in Synapse v1.56.0_
 
-**<span style="color:red">
-This callback is deprecated in favour of the `on_add_user_third_party_identifier` callback, which
-features the same functionality. The only difference is in name.
-</span>**
+> [!WARNING]
+> This callback is deprecated in favour of the `on_add_user_third_party_identifier` callback, which
+> features the same functionality. The only difference is in name.
 
 ```python
 async def on_threepid_bind(user_id: str, medium: str, address: str) -> None:

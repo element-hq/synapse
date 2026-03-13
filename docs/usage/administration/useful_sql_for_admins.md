@@ -130,7 +130,8 @@ SELECT e.room_id, r.name, COUNT(e.event_id) cnt
 ```
 
 ## Show top 20 users on homeserver by sent events (messages) at last month:
-Caution. This query does not use any indexes, can be slow and create load on the database.
+> [!CAUTION]
+> This query does not use any indexes, can be slow and create load on the database.
 ```sql
 SELECT COUNT(*), sender
   FROM events

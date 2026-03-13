@@ -164,8 +164,9 @@ await user_may_send_3pid_invite(
 )
 ```
 
-**Note**: If the third-party identifier is already associated with a matrix user ID,
-[`user_may_invite`](#user_may_invite) will be used instead.
+> [!NOTE]
+> If the third-party identifier is already associated with a matrix user ID,
+> [`user_may_invite`](#user_may_invite) will be used instead.
 
 The callback must return one of:
   - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
@@ -287,10 +288,9 @@ _First introduced in Synapse v1.132.0_
 async def user_may_send_state_event(user_id: str, room_id: str, event_type: str, state_key: str, content: JsonDict) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]
 ```
 
-**<span style="color:red">
-Caution: This callback is currently experimental . The method signature or behaviour
-may change without notice.
-</span>**
+> [!CAUTION]
+> This callback is currently experimental. The method signature or behaviour
+> may change without notice.
 
 Called when processing a request to [send state events](https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3roomsroomidstateeventtypestatekey) to a room.
 
@@ -463,7 +463,8 @@ The value of the first callback that does not return `synapse.module_api.NOT_SPA
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
 
-*Note:* This will not be called when a user registers.
+> [!NOTE]
+> This will not be called when a user registers.
 
 
 ## Example
