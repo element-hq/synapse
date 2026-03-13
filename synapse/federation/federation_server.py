@@ -771,6 +771,10 @@ class FederationServer(FederationBase):
         event, context = await self._on_send_membership_event(
             origin, content, Membership.JOIN, room_id
         )
+        # Collect this now, the internal metadata of event(which should have it) doesn't
+        stream_ordering_of_join = (
+            await self.store.get_current_room_stream_token_for_room_id(room_id)
+        )
 
         prev_state_ids = await context.get_prev_state_ids()
 
@@ -810,6 +814,28 @@ class FederationServer(FederationBase):
             "auth_chain": serialize_and_filter_pdus(auth_chain_events, time_now),
             "members_omitted": caller_supports_partial_state,
         }
+
+        # Check the forward extremities for the room here. If there is more than one, it
+        # is likely that another event was created in the room during the
+        # make_join/send_join handshake. The joining server is likely to thus miss this event
+        # until a second event is created when references it - which could be some time.
+        # In that case, we proactively send a dummy extensible event that ties these
+        # forward extremities together. The remote server will then attempt to backfill
+        # the missing event on its own.
+        #
+        # By not sending the 'missing event' directly, but instead having the joining
+        # homeserver backfill it, the stream ordering for the missing event will be
+        # "before" the join (which is what we expect).
+
+        forward_extremities = await self.store._get_forward_extremeties_for_room(
+            room_id, stream_ordering_of_join.get_max_stream_pos()
+        )
+
+        if len(forward_extremities) > 1:
+            # The likelihood of this being used is extremely low, thus only build the handler
+            # when necessary.
+            _creation_handler = self.hs.get_event_creation_handler()
+            await _creation_handler._send_dummy_event_after_room_join(room_id)
 
         if servers_in_room is not None:
             resp["servers_in_room"] = list(servers_in_room)
