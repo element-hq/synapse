@@ -1,0 +1,1 @@
+Fix bug in sync that could prevent user avatars from showing if the room had an empty name.
