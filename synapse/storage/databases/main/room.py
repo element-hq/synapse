@@ -1276,10 +1276,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             sql += " RETURNING media_id"
 
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
-            # Note that a rowcount of -1 can be used to indicate no rows were affected.
-            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
-            if txn.rowcount > 0:
-                media_ids_affected = txn.fetchall()
+            media_ids_affected = txn.fetchall()
+            total_media_quarantined += len(media_ids_affected)
+            if len(media_ids_affected) > 0:
                 self._insert_quarantine_change_txn(
                     txn,
                     [(None, media_id) for (media_id,) in media_ids_affected],
@@ -1302,9 +1301,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             sql += " RETURNING media_id"
 
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
-            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
-            if txn.rowcount > 0:
-                media_ids_affected = txn.fetchall()
+            media_ids_affected = txn.fetchall()
+            total_media_quarantined += len(media_ids_affected)
+            if len(media_ids_affected) > 0:
                 self._insert_quarantine_change_txn(
                     txn,
                     [(None, media_id) for (media_id,) in media_ids_affected],
@@ -1346,9 +1345,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 RETURNING media_origin, media_id"""
 
             txn.execute(sql, [quarantined_by] + sql_args)
-            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
-            if txn.rowcount > 0:
-                media_ids_affected = txn.fetchall()
+            media_ids_affected = txn.fetchall()
+            total_media_quarantined += len(media_ids_affected)
+            if len(media_ids_affected) > 0:
                 self._insert_quarantine_change_txn(
                     txn,
                     # make the types happy and convert the tuple types
@@ -1367,9 +1366,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 WHERE {sql_many_clause_sql}
                 RETURNING media_origin, media_id"""
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
-            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
-            if txn.rowcount > 0:
-                media_ids_affected = txn.fetchall()
+            media_ids_affected = txn.fetchall()
+            total_media_quarantined += len(media_ids_affected)
+            if len(media_ids_affected) > 0:
                 self._insert_quarantine_change_txn(
                     txn,
                     # make the types happy and convert the tuple types
