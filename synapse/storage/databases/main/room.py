@@ -1256,7 +1256,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         txn: LoggingTransaction,
         origins_and_media_ids: list[tuple[str | None, str]],
         quarantined: bool,
-    ):
+    ) -> None:
         """Records media being (un)quarantined in the stream.
 
         Args:
