@@ -27,3 +27,6 @@ CREATE TABLE quarantined_media_changes (
     -- True if quarantined at this position, false otherwise.
     quarantined BOOLEAN NOT NULL
 );
+
+INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
+    (9305, 'flag_existing_quarantined_media', '{}');

@@ -186,6 +186,57 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             writers=[], # we don't use `get_current_token` or `get_positions`, per docs
         )
 
+        self.db_pool.updates.register_background_update_handler(
+            "flag_existing_quarantined_media", self._flag_existing_quarantined_media
+        )
+
+    async def _flag_existing_quarantined_media(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        last_row_num: int = progress.get("last_row_num", 0)
+
+        # The `ORDER BY` here would normally miss records if the admin (un)quarantined a
+        # record, but that doesn't affect the background update because we also insert
+        # into the stream table upon quarantine status changing. Worst case is the admin
+        # newly quarantines some media, adding a row to the stream table, then we run
+        # over it again in the background update, adding a second row. Duplicate rows are
+        # non-issues for us.
+        def flag_quarantined(txn: LoggingTransaction) -> int:
+            txn.execute(
+                """
+                SELECT NULL AS media_origin, media_id
+                FROM local_media_repository
+                WHERE quarantined_by IS NOT NULL
+                
+                UNION
+                
+                SELECT media_origin, media_id
+                FROM remote_media_cache
+                WHERE quarantined_by IS NOT NULL
+                
+                ORDER BY media_origin, media_id
+                LIMIT ? OFFSET ?
+                """,
+                (batch_size, last_row_num),
+            )
+            res = cast(list[tuple[str | None, str]], txn.fetchall())
+            if len(res) > 0:
+                self._insert_quarantine_change_txn(txn, res, True)
+                self.db_pool.updates._background_update_progress_txn(
+                    txn,
+                    "flag_existing_quarantined_media",
+                    {"last_row_num": last_row_num + len(res)},
+                )
+            return len(res)
+
+        logger.info("Flagging existing quarantined media with offset %s", last_row_num)
+        num_flagged = await self.db_pool.runInteraction(
+            "_flag_existing_quarantined_media", flag_quarantined,
+        )
+        if num_flagged <= 0:  # probably never negative, but why trust computers?
+            await self.db_pool.updates._end_background_update("flag_existing_quarantined_media")
+        return num_flagged
+
     def process_replication_position(
         self, stream_name: str, instance_name: str, token: int
     ) -> None:
@@ -1345,13 +1396,12 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 RETURNING media_origin, media_id"""
 
             txn.execute(sql, [quarantined_by] + sql_args)
-            media_ids_affected = txn.fetchall()
+            media_ids_affected = cast(list[tuple[str, str]], txn.fetchall())
             total_media_quarantined += len(media_ids_affected)
             if len(media_ids_affected) > 0:
                 self._insert_quarantine_change_txn(
                     txn,
-                    # make the types happy and convert the tuple types
-                    [(origin, media_id) for (origin, media_id) in media_ids_affected],
+                    media_ids_affected,
                     quarantined_by is not None,
                 )
 
@@ -1366,13 +1416,12 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 WHERE {sql_many_clause_sql}
                 RETURNING media_origin, media_id"""
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
-            media_ids_affected = txn.fetchall()
+            media_ids_affected = cast(list[tuple[str, str]], txn.fetchall())
             total_media_quarantined += len(media_ids_affected)
             if len(media_ids_affected) > 0:
                 self._insert_quarantine_change_txn(
                     txn,
-                    # make the types happy and convert the tuple types
-                    [(origin, media_id) for (origin, media_id) in media_ids_affected],
+                    media_ids_affected,
                     quarantined_by is not None,
                 )
 
