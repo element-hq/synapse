@@ -1,0 +1,1 @@
+Add a ["Listing quarantined media changes" Admin API](https://element-hq.github.io/synapse/latest/admin_api/media_admin_api.html#listing-quarantined-media-changes) for retrieving a paginated record of when media became (un)quarantined.
