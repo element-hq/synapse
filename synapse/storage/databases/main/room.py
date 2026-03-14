@@ -1399,7 +1399,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 RETURNING media_origin, media_id"""
 
             txn.execute(sql, [quarantined_by] + sql_args)
-            media_ids_affected = cast(list[tuple[str, str]], txn.fetchall())
+            media_ids_affected = cast(list[tuple[str | None, str]], txn.fetchall())
             total_media_quarantined += len(media_ids_affected)
             if len(media_ids_affected) > 0:
                 self._insert_quarantine_change_txn(
@@ -1419,7 +1419,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 WHERE {sql_many_clause_sql}
                 RETURNING media_origin, media_id"""
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
-            media_ids_affected = cast(list[tuple[str, str]], txn.fetchall())
+            media_ids_affected = cast(list[tuple[str | None, str]], txn.fetchall())
             total_media_quarantined += len(media_ids_affected)
             if len(media_ids_affected) > 0:
                 self._insert_quarantine_change_txn(
