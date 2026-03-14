@@ -808,3 +808,47 @@ class StickyEventsStream(_StreamFromIdGen):
             return [], to_token, False
 
         return rows, rows[-1][0], len(updates) == limit
+
+
+@attr.s(slots=True, auto_attribs=True)
+class QuarantinedMediaStreamRow:
+    """Row for QuarantinedMediaStream"""
+
+    origin: str
+    media_id: str
+    quarantined: bool
+
+
+class QuarantinedMediaStream(_StreamFromIdGen):
+    """Stream to track changes to (un)quarantined media."""
+
+    NAME = "quarantined_media"
+    ROW_TYPE = QuarantinedMediaStreamRow
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        super().__init__(
+            hs.get_instance_name(),
+            self._update_function,
+            self.store._quarantined_media_changes_id_gen,
+        )
+
+    async def _update_function(
+        self, instance_name: str, from_token: int, to_token: int, limit: int
+    ) -> StreamUpdateResult:
+        updates = await self.store.get_quarantined_media_changes(
+            from_id=from_token, to_id=to_token, limit=limit
+        )
+        rows = [
+            (
+                update.stream_id,
+                # Args to `QuarantinedMediaStreamRow`
+                (update.origin, update.media_id, update.quarantined),
+            )
+            for update in updates
+        ]
+
+        if not rows:
+            return [], to_token, False
+
+        return rows, rows[-1][0], len(updates) == limit
