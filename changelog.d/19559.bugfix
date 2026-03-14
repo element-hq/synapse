@@ -1,0 +1,1 @@
+Fix quarantine media admin APIs sometimes returning inaccurate counts for remote media.
