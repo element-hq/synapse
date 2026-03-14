@@ -1217,7 +1217,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             txn.execute(sql, [quarantined_by] + sql_args)
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
-        total_media_quarantined = 0
         if hashes:
             sql_many_clause_sql, sql_many_clause_args = make_in_list_sql_clause(
                 txn.database_engine, "sha256", hashes
