@@ -179,11 +179,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             stream_name=QuarantinedMediaStream.NAME,
             server_name=self.server_name,
             instance_name=self._instance_name,
-            tables=[
-                ("quarantined_media_changes", "instance_name", "stream_id")
-            ],
+            tables=[("quarantined_media_changes", "instance_name", "stream_id")],
             sequence_name="quarantined_media_id_seq",
-            writers=[], # we don't use `get_current_token` or `get_positions`, per docs
+            writers=[],  # we don't use `get_current_token` or `get_positions`, per docs
         )
 
         self.db_pool.updates.register_background_update_handler(
@@ -207,13 +205,13 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 SELECT NULL AS media_origin, media_id
                 FROM local_media_repository
                 WHERE quarantined_by IS NOT NULL
-                
+
                 UNION
-                
+
                 SELECT media_origin, media_id
                 FROM remote_media_cache
                 WHERE quarantined_by IS NOT NULL
-                
+
                 ORDER BY media_origin, media_id
                 LIMIT ? OFFSET ?
                 """,
@@ -231,10 +229,13 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         logger.info("Flagging existing quarantined media with offset %s", last_row_num)
         num_flagged = await self.db_pool.runInteraction(
-            "_flag_existing_quarantined_media", flag_quarantined,
+            "_flag_existing_quarantined_media",
+            flag_quarantined,
         )
         if num_flagged <= 0:  # probably never negative, but why trust computers?
-            await self.db_pool.updates._end_background_update("flag_existing_quarantined_media")
+            await self.db_pool.updates._end_background_update(
+                "flag_existing_quarantined_media"
+            )
         return num_flagged
 
     def process_replication_position(
@@ -1232,7 +1233,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         self, txn: LoggingTransaction, from_id: int, to_id: int, limit: int
     ) -> list[QuarantinedMediaUpdate]:
         txn.execute(
-            f"""
+            """
             SELECT stream_id, origin, media_id, quarantined
             FROM quarantined_media_changes
             WHERE ? < stream_id AND stream_id <= ?
@@ -1266,7 +1267,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """
         medias_with_stream_ids = zip(
             origins_and_media_ids,
-            self._quarantined_media_changes_id_gen.get_next_mult_txn(txn, len(origins_and_media_ids)),
+            self._quarantined_media_changes_id_gen.get_next_mult_txn(
+                txn, len(origins_and_media_ids)
+            ),
             strict=True,
         )
         self.db_pool.simple_insert_many_txn(

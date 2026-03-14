@@ -240,14 +240,14 @@ class ListQuarantineChanges(RestServlet):
         self.auth = hs.get_auth()
         self.server_name = hs.hostname
 
-    async def on_GET(
-        self, request: SynapseRequest
-    ) -> tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         from_id = parse_integer(request, "from", default=0)
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
-        to_id = from_id + limit  # somewhat implied, but makes our call to the store easier
+        to_id = (
+            from_id + limit
+        )  # somewhat implied, but makes our call to the store easier
 
         changes = await self.store.get_quarantined_media_changes(
             from_id=from_id,
@@ -255,7 +255,14 @@ class ListQuarantineChanges(RestServlet):
             limit=limit,
         )
 
-        rows = [{"origin": c.origin if c.origin is not None else self.server_name, "media_id": c.media_id, "quarantined": c.quarantined} for c in changes]
+        rows = [
+            {
+                "origin": c.origin if c.origin is not None else self.server_name,
+                "media_id": c.media_id,
+                "quarantined": c.quarantined,
+            }
+            for c in changes
+        ]
         next_batch = from_id + len(rows)
 
         return HTTPStatus.OK, {"next_batch": next_batch, "rows": rows}

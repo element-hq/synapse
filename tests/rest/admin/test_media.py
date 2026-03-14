@@ -834,7 +834,9 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(3, len(channel.json_body["rows"]))
         for row in channel.json_body["rows"]:
-            self.assertIn(row["media_id"], (self.media_id_1, self.media_id_2, self.media_id_3))
+            self.assertIn(
+                row["media_id"], (self.media_id_1, self.media_id_2, self.media_id_3)
+            )
             self.assertEqual(row["origin"], self.server_name)
             self.assertEqual(row["quarantined"], True)
 

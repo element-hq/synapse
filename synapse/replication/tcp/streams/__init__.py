@@ -39,13 +39,13 @@ from synapse.replication.tcp.streams._base import (
     PresenceStream,
     PushersStream,
     PushRulesStream,
+    QuarantinedMediaStream,
     ReceiptsStream,
     StickyEventsStream,
     Stream,
     ThreadSubscriptionsStream,
     ToDeviceStream,
     TypingStream,
-    QuarantinedMediaStream,
 )
 from synapse.replication.tcp.streams.events import EventsStream
 from synapse.replication.tcp.streams.federation import FederationStream
