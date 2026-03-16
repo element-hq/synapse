@@ -1,0 +1,1 @@
+Unprefix room_version & encryption from hierarchy API.
