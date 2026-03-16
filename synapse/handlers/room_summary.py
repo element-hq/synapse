@@ -790,6 +790,7 @@ class RoomSummaryHandler:
 
         entry: JsonDict = {
             "room_id": stats.room_id,
+            "room_version": stats.version,
             "name": stats.name,
             "topic": stats.topic,
             "canonical_alias": stats.canonical_alias,
@@ -801,10 +802,8 @@ class RoomSummaryHandler:
             ),
             "guest_can_join": stats.guest_access == "can_join",
             "room_type": stats.room_type,
+            "encryption": stats.encryption,
         }
-
-        entry.room_version = stats.version
-        entry.encryption = stats.encryption
 
         # Federation requests need to provide additional information so the
         # requested server is able to filter the response appropriately.
