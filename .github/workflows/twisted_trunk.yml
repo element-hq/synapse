@@ -54,7 +54,7 @@ jobs:
         with:
           python-version: "3.x"
           extras: "all"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
       - run: |
           poetry remove twisted
           poetry add --extras tls git+https://github.com/twisted/twisted.git#${{ inputs.twisted_ref || 'trunk' }}
@@ -82,7 +82,7 @@ jobs:
         with:
           python-version: "3.x"
           extras: "all test"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
       - run: |
           poetry remove twisted
           poetry add --extras tls git+https://github.com/twisted/twisted.git#trunk
