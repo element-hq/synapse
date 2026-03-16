@@ -93,7 +93,7 @@ jobs:
           # But we want a pinned version of the tools for security
           # given that we need to give GitHub API access
           #
-          # Use `github-pr-check` here AND `fail-on-error`. The CI check stops you from missing
+          # Use `github-pr-check` here AND `fail-level=any` (fail). The CI check stops you from missing
           # them and the `github-pr-check` is less noisy than emitting a full PR review.
           jq -r '.results[] | "E:\(.path):\(.end.line) \(.extra.message)"' semgrep-strict.json \
           | reviewdog \
@@ -101,5 +101,5 @@ jobs:
               -name="semgrep-strict" \
               -reporter=github-pr-check \
               -filter-mode=added \
-              -fail-on-error=true \
+              -fail-level=any \
               -level=error
