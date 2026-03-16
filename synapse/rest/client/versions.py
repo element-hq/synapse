@@ -189,8 +189,6 @@ class VersionsRestServlet(RestServlet):
                             is not None
                         )
                     ),
-                    # MSC4388: Secure out-of-band channel for sign in with QR
-                    "io.element.msc4388": (self.config.experimental.msc4388_enabled),
                     # MSC4140: Delayed events
                     "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
                     # Simplified sliding sync
