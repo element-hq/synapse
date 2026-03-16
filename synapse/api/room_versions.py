@@ -86,9 +86,9 @@ class RoomVersion:
     # MSC2209: Check 'notifications' key while verifying
     # m.room.power_levels auth rules.
     limit_notifications_power_levels: bool
-    # No longer include the creator in m.room.create events.
+    # MSC3820: No longer include the creator in m.room.create events (room version 11)
     implicit_room_creator: bool
-    # Apply updated redaction rules algorithm from room version 11.
+    # MSC3820: Apply updated redaction rules algorithm from room version 11
     updated_redaction_rules: bool
     # Support the 'restricted' join rule.
     restricted_join_rule: bool
