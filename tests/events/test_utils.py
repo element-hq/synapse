@@ -779,11 +779,16 @@ class SerializeEventTestCase(HomeserverTestCase):
         )
 
     def test_event_fields_fail_if_fields_not_str(self) -> None:
-        with self.assertRaises(TypeError):
-            self.serialize(
+        self.get_failure(
+            self._event_serializer.serialize_event(
                 MockEvent(room_id="!foo:bar", content={"foo": "bar"}),
-                ["room_id", 4],  # type: ignore[list-item]
-            )
+                1479807801915,
+                config=SerializeEventConfig(
+                    only_event_fields=["room_id", 4],  # type: ignore[list-item]
+                ),
+            ),
+            TypeError,
+        )
 
     def test_default_serialize_config_excludes_admin_metadata(self) -> None:
         # We just really don't want this to be set to True accidentally

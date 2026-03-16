@@ -4746,10 +4746,10 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             original = self.get_success(self.store.get_event(message.event_id))
             if not original:
                 self.fail("Expected to find remote message in DB")
-            redacted_because = original.unsigned.get("redacted_because")
-            if not redacted_because:
-                self.fail("Did not find redacted_because field")
-            self.assertEqual(redacted_because.event_id, ban_event_id)
+            redacted_by = original.unsigned.get("redacted_by")
+            if not redacted_by:
+                self.fail("Did not find redacted_by field")
+            self.assertEqual(redacted_by, ban_event_id)
 
     def test_unbanning_remote_user_stops_redaction_action(self) -> None:
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME

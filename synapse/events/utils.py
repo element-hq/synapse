@@ -476,13 +476,6 @@ def _serialize_event(
         d["unsigned"]["age"] = time_now_ms - d["unsigned"]["age_ts"]
         del d["unsigned"]["age_ts"]
 
-    if "redacted_because" in e.unsigned:
-        d["unsigned"]["redacted_because"] = _serialize_event(
-            e.unsigned["redacted_because"],
-            time_now_ms,
-            config=config,
-        )
-
     # If we have applicable fields saved in the internal_metadata, include them in the
     # unsigned section of the event if the event was sent by the same session (or when
     # appropriate, just the same sender) as the one requesting the event.
@@ -618,6 +611,29 @@ class EventClientSerializer:
             config = make_config_for_admin(config)
 
         serialized_event = _serialize_event(event, time_now, config=config)
+
+        # If the event was redacted, fetch the redaction event from the database
+        # and include it in the serialized event's unsigned section.
+        redacted_by = event.unsigned.get("redacted_by")
+        if redacted_by is not None:
+            redaction_event = await self._store.get_event(
+                redacted_by,
+                allow_none=True,
+            )
+            if redaction_event is not None:
+                serialized_redaction = _serialize_event(
+                    redaction_event, time_now, config=config
+                )
+                serialized_event.setdefault("unsigned", {})["redacted_because"] = (
+                    serialized_redaction
+                )
+                # format_event_for_client_v1 copies redacted_because to the
+                # top level, but since we add it after that runs, do it here.
+                if (
+                    config.as_client_event
+                    and config.event_format is format_event_for_client_v1
+                ):
+                    serialized_event["redacted_because"] = serialized_redaction
 
         new_unsigned = {}
         for callback in self._add_extra_fields_to_unsigned_client_event_callbacks:

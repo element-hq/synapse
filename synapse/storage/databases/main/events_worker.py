@@ -1765,10 +1765,6 @@ class EventsWorkerStore(SQLBaseStore):
             redacted_event = prune_event(original_ev)
             redacted_event.unsigned["redacted_by"] = redaction_id
 
-            # It's fine to add the event directly, since get_pdu_json
-            # will serialise this field correctly
-            redacted_event.unsigned["redacted_because"] = redaction_event
-
             return redacted_event
 
         # no valid redaction found for this event
