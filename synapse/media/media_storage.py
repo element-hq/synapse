@@ -463,6 +463,16 @@ class MediaStorage:
             )
         return self.filepaths.local_media_filepath_rel(file_info.file_id)
 
+    async def remove_file(self, file_info: FileInfo) -> None:
+        """Removes the file described by file_info from the configured storage providers.
+
+        Args:
+            file_info: Metadata about the media file
+        """
+        paths = self._file_info_to_path(file_info)
+        for provider in filter(None, [self.local_provider, *self.storage_providers]):
+            await provider.delete(paths, file_info)
+
 
 @trace
 def _write_file_synchronously(source: IO, dest: IO) -> None:

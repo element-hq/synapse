@@ -1542,11 +1542,11 @@ class MediaRepository:
             # TODO: Should we delete from the backup store
 
             async with self.remote_media_linearizer.queue(key):
-                full_path = self.filepaths.remote_media_filepath(origin, file_id)
+                file_info = FileInfo(origin, file_id)
                 try:
-                    os.remove(full_path)
+                    await self.media_storage.remove_file(file_info)
                 except OSError as e:
-                    logger.warning("Failed to remove file: %r", full_path)
+                    logger.warning("Failed to remove file: %r", file_info)
                     if e.errno == errno.ENOENT:
                         pass
                     else:
@@ -1622,12 +1622,12 @@ class MediaRepository:
         """
         removed_media = []
         for media_id in media_ids:
+            file_info = FileInfo(None, media_id)
             logger.info("Deleting media with ID '%s'", media_id)
-            full_path = self.filepaths.local_media_filepath(media_id)
             try:
-                os.remove(full_path)
+                await self.media_storage.remove_file(file_info)
             except OSError as e:
-                logger.warning("Failed to remove file: %r: %s", full_path, e)
+                logger.warning("Failed to remove file: %r: %s", file_info, e)
                 if e.errno == errno.ENOENT:
                     pass
                 else:
