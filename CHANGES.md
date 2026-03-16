@@ -1,3 +1,19 @@
+# Synapse 1.149.1 (2026-03-11)
+
+## Internal Changes
+
+- Bump `matrix-synapse-ldap3` to `0.4.0` to support `setuptools>=82.0.0`. Fixes [\#19541](https://github.com/element-hq/synapse/issues/19541). ([\#19543](https://github.com/element-hq/synapse/issues/19543))
+
+
+
+
+# Synapse 1.149.0 (2026-03-10)
+
+No significant changes since 1.149.0rc1.
+
+
+
+
 # Synapse 1.149.0rc1 (2026-03-03)
 
 ## Features

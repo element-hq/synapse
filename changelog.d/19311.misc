@@ -1,0 +1,1 @@
+Put membership updates in a background resumable task when changing the avatar or the display name.

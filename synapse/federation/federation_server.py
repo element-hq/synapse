@@ -4,6 +4,7 @@
 # Copyright 2019-2021 Matrix.org Federation C.I.C
 # Copyright 2015, 2016 OpenMarket Ltd
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -682,6 +683,18 @@ class FederationServer(FederationBase):
         ).inc()
         resp = await self.registry.on_query(query_type, args)
         return 200, resp
+
+    async def on_get_extremities_request(self, origin: str, room_id: str) -> JsonDict:
+        # Assert host in room first to hide contents of the ACL from the caller
+        await self._event_auth_handler.assert_host_in_room(room_id, origin)
+        origin_host, _ = parse_server_name(origin)
+        await self.check_server_matches_acl(origin_host, room_id)
+
+        extremities = await self.store.get_forward_extremities_for_room(room_id)
+        prev_event_ids = [event_id for event_id, _, _, _ in extremities]
+        if len(prev_event_ids) == 0:
+            raise SynapseError(500, "Room has no forward extremities")
+        return {"prev_events": prev_event_ids}
 
     async def on_make_join_request(
         self, origin: str, room_id: str, user_id: str, supported_versions: list[str]

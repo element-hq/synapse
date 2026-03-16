@@ -215,11 +215,17 @@ main() {
       $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
 
     else
+      # We remove the `egg-info` as it can contain outdated information which won't line
+      # up with our current reality.
+      rm -rf matrix_synapse.egg-info/
+      # Figure out the Synapse version string in our current checkout
+      synapse_version_string="$(poetry run python -c 'from synapse.util import SYNAPSE_VERSION; print(SYNAPSE_VERSION)')"
 
       # Build the base Synapse image from the local checkout
       echo_if_github "::group::Build Docker image: matrixdotorg/synapse"
       $CONTAINER_RUNTIME build \
         -t "$SYNAPSE_IMAGE_PATH" \
+        --build-arg SYNAPSE_VERSION_STRING="$synapse_version_string" \
         --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
         --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
         -f "docker/Dockerfile" .
