@@ -20,7 +20,7 @@
 #
 
 import unittest as stdlib_unittest
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 import attr
 from parameterized import parameterized
@@ -38,10 +38,14 @@ from synapse.events.utils import (
     make_config_for_admin,
     maybe_upsert_event_field,
     prune_event,
-    serialize_event,
 )
 from synapse.types import JsonDict, create_requester
 from synapse.util.frozenutils import freeze
+
+from tests.unittest import HomeserverTestCase
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 
 def MockEvent(**kwargs: Any) -> EventBase:
@@ -644,19 +648,25 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
         self.assertEqual(cloned.internal_metadata.txn_id, "txn")
 
 
-class SerializeEventTestCase(stdlib_unittest.TestCase):
+class SerializeEventTestCase(HomeserverTestCase):
+    def prepare(self, reactor: Any, clock: Any, hs: "HomeServer") -> None:
+        self._event_serializer = hs.get_event_client_serializer()
+
     def serialize(
         self,
         ev: EventBase,
         fields: list[str] | None,
         include_admin_metadata: bool = False,
     ) -> JsonDict:
-        return serialize_event(
-            ev,
-            1479807801915,
-            config=SerializeEventConfig(
-                only_event_fields=fields, include_admin_metadata=include_admin_metadata
-            ),
+        return self.get_success(
+            self._event_serializer.serialize_event(
+                ev,
+                1479807801915,
+                config=SerializeEventConfig(
+                    only_event_fields=fields,
+                    include_admin_metadata=include_admin_metadata,
+                ),
+            )
         )
 
     def test_event_fields_works_with_keys(self) -> None:

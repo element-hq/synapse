@@ -444,7 +444,7 @@ def make_config_for_admin(existing: SerializeEventConfig) -> SerializeEventConfi
     return attr.evolve(existing, include_admin_metadata=True)
 
 
-def serialize_event(
+def _serialize_event(
     e: JsonDict | EventBase,
     time_now_ms: int,
     *,
@@ -477,7 +477,7 @@ def serialize_event(
         del d["unsigned"]["age_ts"]
 
     if "redacted_because" in e.unsigned:
-        d["unsigned"]["redacted_because"] = serialize_event(
+        d["unsigned"]["redacted_because"] = _serialize_event(
             e.unsigned["redacted_because"],
             time_now_ms,
             config=config,
@@ -617,7 +617,7 @@ class EventClientSerializer:
         ):
             config = make_config_for_admin(config)
 
-        serialized_event = serialize_event(event, time_now, config=config)
+        serialized_event = _serialize_event(event, time_now, config=config)
 
         new_unsigned = {}
         for callback in self._add_extra_fields_to_unsigned_client_event_callbacks:
