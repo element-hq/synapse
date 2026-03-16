@@ -265,9 +265,7 @@ class ListQuarantineChanges(RestServlet):
         ]
 
         # `from` is exclusive, so don't +1
-        next_batch = max(
-            c.stream_id for c in changes
-        ) if changes else from_id
+        next_batch = max(c.stream_id for c in changes) if changes else from_id
 
         return HTTPStatus.OK, {"next_batch": next_batch, "rows": rows}
 
