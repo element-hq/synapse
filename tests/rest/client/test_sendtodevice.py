@@ -136,10 +136,57 @@ class SendToDeviceTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, 413, channel.result)
         self.assertEqual(Codes.TOO_LARGE, channel.json_body["errcode"])
 
-    def test_edu_splitting(self) -> None:
+    def test_edu_large_messages_splitting(self) -> None:
         """
         Test that a bunch of to-device messages are split over multiple EDUs if they are
         collectively too large to fit into a single EDU
+        """
+        # FIXME: Because huge log line is triggered in this test,
+        # trial breaks, sometimes (flakily) failing the test run.
+        # ref: https://github.com/twisted/twisted/issues/12482
+        # To remove this, we would need to fix the above issue and
+        # update, including in olddeps (so several years' wait).
+        sql_logger = logging.getLogger("synapse.storage.SQL")
+        sql_logger_was_disabled = sql_logger.disabled
+        sql_logger.disabled = True
+        try:
+            mock_send_transaction: AsyncMock = (
+                self.federation_transport_client.send_transaction
+            )
+            mock_send_transaction.return_value = {}
+
+            sender = self.hs.get_federation_sender()
+
+            _ = self.register_user("u1", "pass")
+            user1_tok = self.login("u1", "pass", "d1")
+            destination = "secondserver"
+            messages = {}
+
+            # 2 messages, each just big enough to fit into their own EDU
+            for i in range(2):
+                messages[f"@remote_user{i}:" + destination] = {
+                    "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
+                }
+
+            channel = self.make_request(
+                "PUT",
+                "/_matrix/client/r0/sendToDevice/m.test/1234567",
+                content={"messages": messages},
+                access_token=user1_tok,
+            )
+            self.assertEqual(channel.code, 200, channel.result)
+
+            self.get_success(sender.send_device_messages([destination]))
+
+            json_cb = mock_send_transaction.call_args[0][1]
+            data = json_cb()
+            self.assertEqual(len(data["edus"]), 2)
+        finally:
+            sql_logger.disabled = sql_logger_was_disabled
+
+    def test_edu_small_messages_not_splitting(self) -> None:
+        """
+        Test that a couple of small messages do not get split into multiple EDUs
         """
         # FIXME: Because huge log line is triggered in this test,
         # trial breaks, sometimes (flakily) failing the test run.
@@ -178,35 +225,9 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
             self.get_success(sender.send_device_messages([destination]))
 
-            self.pump()
-
             json_cb = mock_send_transaction.call_args[0][1]
             data = json_cb()
             self.assertEqual(len(data["edus"]), 1)
-
-            mock_send_transaction.reset_mock()
-
-            # 2 messages, each just big enough to fit into their own EDU
-            for i in range(2):
-                messages[f"@remote_user{i}:" + destination] = {
-                    "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
-                }
-
-            channel = self.make_request(
-                "PUT",
-                "/_matrix/client/r0/sendToDevice/m.test/1234567",
-                content={"messages": messages},
-                access_token=user1_tok,
-            )
-            self.assertEqual(channel.code, 200, channel.result)
-
-            self.get_success(sender.send_device_messages([destination]))
-
-            self.pump()
-
-            json_cb = mock_send_transaction.call_args[0][1]
-            data = json_cb()
-            self.assertEqual(len(data["edus"]), 2)
         finally:
             sql_logger.disabled = sql_logger_was_disabled
 
@@ -233,7 +254,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
             destination = "secondserver"
             messages = {}
 
-            for i in range(101):
+            for i in range(MAX_EDUS_PER_TRANSACTION + 1):
                 messages[f"@remote_user{i}:" + destination] = {
                     "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
                 }
