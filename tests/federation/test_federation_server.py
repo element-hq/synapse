@@ -433,7 +433,13 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
 
     # Exclude MSC4242 room versions whilst it lacks federation support
-    @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys() if k != RoomVersions.MSC4242v12.identifier])
+    @parameterized.expand(
+        [
+            (k,)
+            for k in KNOWN_ROOM_VERSIONS.keys()
+            if k != RoomVersions.MSC4242v12.identifier
+        ]
+    )
     @override_config(
         {"use_frozen_dicts": True, "experimental_features": {"msc4370_enabled": True}}
     )
@@ -442,7 +448,13 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
         self._test_get_extremities_common(room_version)
 
     # Exclude MSC4242 room versions whilst it lacks federation support
-    @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys() if k != RoomVersions.MSC4242v12.identifier])
+    @parameterized.expand(
+        [
+            (k,)
+            for k in KNOWN_ROOM_VERSIONS.keys()
+            if k != RoomVersions.MSC4242v12.identifier
+        ]
+    )
     @override_config(
         {"use_frozen_dicts": False, "experimental_features": {"msc4370_enabled": True}}
     )
