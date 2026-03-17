@@ -290,7 +290,7 @@ class DeviceMessageHandler:
             local_messages, {}
         )
         for destination, messages in remote_messages.items():
-            split_edus = get_split_device_message_edus(
+            split_edus = split_device_messages_into_edus(
                 sender_user_id, message_type, messages
             )
             for edu in split_edus:
@@ -407,7 +407,7 @@ class DeviceMessageHandler:
         }
 
 
-def get_split_device_message_edus(
+def split_device_messages_into_edus(
     sender_user_id: str,
     message_type: str,
     messages: dict[str, dict[str, JsonDict]],
