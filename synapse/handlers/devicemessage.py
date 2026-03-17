@@ -229,6 +229,7 @@ class DeviceMessageHandler:
         set_tag(SynapseTags.TO_DEVICE_TYPE, message_type)
         set_tag(SynapseTags.TO_DEVICE_SENDER, sender_user_id)
         local_messages = {}
+        # Map from destination (server) -> recipient (user ID) -> device_id -> JSON message content
         remote_messages: dict[str, dict[str, dict[str, JsonDict]]] = {}
         for user_id, by_device in messages.items():
             if not UserID.is_valid(user_id):
