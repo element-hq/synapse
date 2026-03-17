@@ -74,6 +74,6 @@ jobs:
           for TAG in ${{ join(fromJson(steps.meta.outputs.json).tags, ' ') }}; do 
             echo "tag and push $TAG"
             # `localhost/complement-synapse` should match the image created by `scripts-dev/complement.sh`
-            docker tag complement-synapse $TAG
+            docker tag localhost/complement-synapse $TAG
             docker push $TAG
           done
