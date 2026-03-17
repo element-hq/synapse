@@ -1,1 +1,0 @@
-Unpin the version of Rust we use to build Synapse wheels (was 1.82.0) now that MacOS support has been dropped.

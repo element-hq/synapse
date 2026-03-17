@@ -353,6 +353,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
     ]
 
     OIDC_ADMIN_TOKEN = "_oidc_admin_token"
+    ACCOUNT_MANAGEMENT_URL = "https://my-account.issuer"
 
     @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
@@ -362,7 +363,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                 "msc3861": {
                     "enabled": True,
                     "issuer": "https://issuer",
-                    "account_management_url": "https://my-account.issuer",
+                    "account_management_url": ACCOUNT_MANAGEMENT_URL,
                     "client_id": "id",
                     "client_auth_method": "client_secret_post",
                     "client_secret": "secret",
@@ -457,6 +458,33 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                 },
             )
             self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
+            # Ensure that the response contains the expected UIA flows from https://spec.matrix.org/v1.17/client-server-api/#oauth-authentication
+            self.assertIn(
+                {"stages": ["m.oauth"]},
+                channel.json_body["flows"],
+                "m.oauth flow not found",
+            )
+            self.assertSubstring(
+                self.ACCOUNT_MANAGEMENT_URL,
+                channel.json_body["params"]["m.oauth"]["url"],
+                "m.oauth url does not match account management URL",
+            )
+            self.assertSubstring(
+                "action=org.matrix.cross_signing_reset",
+                channel.json_body["params"]["m.oauth"]["url"],
+                "m.oauth url does not include expected action",
+            )
+            # Unstable version of the flow
+            self.assertIn(
+                {"stages": ["org.matrix.cross_signing_reset"]},
+                channel.json_body["flows"],
+                "unstable org.matrix.cross_signing_reset flow not found",
+            )
+            self.assertEqual(
+                channel.json_body["params"]["org.matrix.cross_signing_reset"]["url"],
+                channel.json_body["params"]["m.oauth"]["url"],
+                "unstable org.matrix.cross_signing_reset url does not match m.oauth url",
+            )
 
         # Pretend that MAS did UIA and allowed us to replace the master key.
         channel = self.make_request(

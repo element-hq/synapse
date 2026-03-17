@@ -534,6 +534,18 @@ class ProfileWorkerStore(SQLBaseStore):
 
         await self.db_pool.runInteraction("delete_profile_field", delete_profile_field)
 
+    async def delete_profile(self, user_id: UserID) -> None:
+        """
+        Deletes an entire user profile, including displayname, avatar_url and all custom fields.
+        Used at user deactivation when erasure is requested.
+        """
+
+        await self.db_pool.simple_delete(
+            desc="delete_profile",
+            table="profiles",
+            keyvalues={"full_user_id": user_id.to_string()},
+        )
+
 
 class ProfileStore(ProfileWorkerStore):
     pass

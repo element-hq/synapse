@@ -171,6 +171,24 @@ class HttpClientTestCase(HomeserverTestCase):
         self.get_success(self.till_deferred_has_result(do_request()))
         self.assertEqual(self.server.calls, 1)
 
+    def test_request_response_limit_exceeded(self) -> None:
+        """
+        Test to make sure we handle the response limit being exceeded
+        """
+
+        async def do_request() -> None:
+            await self._rust_http_client.get(
+                url=self.server.endpoint,
+                # Small limit so we hit the limit
+                response_limit=1,
+            )
+
+        self.assertFailure(
+            self.till_deferred_has_result(do_request()),
+            RuntimeError,
+        )
+        self.assertEqual(self.server.calls, 1)
+
     async def test_logging_context(self) -> None:
         """
         Test to make sure the `LoggingContext` (logcontext) is handled correctly

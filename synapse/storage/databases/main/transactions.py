@@ -381,7 +381,7 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
     ) -> list[str]:
         """
         Returns at most 50 event IDs and their corresponding stream_orderings
-        that correspond to the oldest events that have not yet been sent to
+        that correspond to the newest events that have not yet been sent to
         the destination.
 
         Args:

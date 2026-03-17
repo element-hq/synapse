@@ -95,7 +95,7 @@ from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.stringutils import parse_and_validate_server_name
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -185,7 +185,7 @@ class RoomCreationHandler:
             clock=hs.get_clock(),
             name="room_upgrade",
             server_name=self.server_name,
-            timeout_ms=FIVE_MINUTES_IN_MS,
+            timeout=Duration(minutes=5),
         )
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
 
@@ -1919,7 +1919,7 @@ class RoomContextHandler:
         async def filter_evts(events: list[EventBase]) -> list[EventBase]:
             if use_admin_priviledge:
                 return events
-            return await filter_events_for_client(
+            return await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user.to_string(),
                 events,

@@ -20,12 +20,13 @@
 #
 #
 
+import collections
 import collections.abc
 import logging
 import typing
+from collections import ChainMap
 from typing import (
     Any,
-    ChainMap,
     Iterable,
     Mapping,
     MutableMapping,
@@ -66,6 +67,7 @@ from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
     MutableStateMap,
+    StateKey,
     StateMap,
     StrCollection,
     UserID,
@@ -1200,8 +1202,8 @@ def get_public_keys(invite_event: "EventBase") -> list[dict[str, Any]]:
 
 def auth_types_for_event(
     room_version: RoomVersion, event: Union["EventBase", "EventBuilder"]
-) -> set[tuple[str, str]]:
-    """Given an event, return a list of (EventType, StateKey) that may be
+) -> set[StateKey]:
+    """Given an event, return a list of (state event type, state key) that may be
     needed to auth the event. The returned list may be a superset of what
     would actually be required depending on the full state of the room.
 

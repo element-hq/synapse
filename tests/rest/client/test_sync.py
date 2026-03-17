@@ -41,6 +41,7 @@ from tests import unittest
 from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
+from tests.rest.client.test_rooms import make_request_with_cancellation_test
 from tests.server import TimedOutException
 
 logger = logging.getLogger(__name__)
@@ -1145,3 +1146,65 @@ class ExcludeRoomTestCase(unittest.HomeserverTestCase):
 
         self.assertNotIn(self.excluded_room_id, channel.json_body["rooms"]["join"])
         self.assertIn(self.included_room_id, channel.json_body["rooms"]["join"])
+
+
+class SyncCancellationTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+        room.register_servlets,
+    ]
+
+    def test_initial_sync(self) -> None:
+        """Tests that an initial sync request can be cancelled."""
+        user_id = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Populate the account with a few rooms
+        for _ in range(5):
+            room_id = self.helper.create_room_as(user_id, tok=tok)
+            self.helper.send(room_id, tok=tok)
+
+        channel = make_request_with_cancellation_test(
+            "test_initial_sync",
+            self.reactor,
+            self.site,
+            "GET",
+            "/_matrix/client/v3/sync",
+            token=tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+    def test_incremental_sync(self) -> None:
+        """Tests that an incremental sync request can be cancelled."""
+        user_id = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Populate the account with a few rooms
+        room_ids = []
+        for _ in range(5):
+            room_id = self.helper.create_room_as(user_id, tok=tok)
+            self.helper.send(room_id, tok=tok)
+            room_ids.append(room_id)
+
+        # Do an initial sync to get a since token.
+        channel = self.make_request("GET", "/sync", access_token=tok)
+        self.assertEqual(200, channel.code, msg=channel.result)
+        since = channel.json_body["next_batch"]
+
+        # Send some more messages to generate activity in the rooms.
+        for room_id in room_ids:
+            self.helper.send(room_id, tok=tok)
+
+        channel = make_request_with_cancellation_test(
+            "test_incremental_sync",
+            self.reactor,
+            self.site,
+            "GET",
+            f"/_matrix/client/v3/sync?since={since}&timeout=10000",
+            token=tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.result["body"])

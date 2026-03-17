@@ -171,6 +171,14 @@ FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
 
 ARG TARGETARCH
 
+# If specified, Synapse will use this as the version string in the app.
+#
+# This can be useful to capture the git info of the build as `.git/` won't be
+# available in the Docker image for Synapse to generate from.
+ARG SYNAPSE_VERSION_STRING
+# Pass it through to Synapse as an environment variable.
+ENV SYNAPSE_VERSION_STRING=${SYNAPSE_VERSION_STRING}
+
 LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
 LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'
 LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
@@ -192,8 +200,7 @@ COPY ./docker/conf /conf
 # 8448: SS Matrix API port from Synapse
 EXPOSE 8008/tcp 8448/tcp
 # 19090: Metrics listener port for the main process (metrics must be enabled with
-# SYNAPSE_ENABLE_METRICS=1). Metrics for workers are on ports starting from 19091 but
-# since these are dynamic we don't expose them by default.
+# SYNAPSE_ENABLE_METRICS=1).
 EXPOSE 19090/tcp
 
 ENTRYPOINT ["/start.py"]

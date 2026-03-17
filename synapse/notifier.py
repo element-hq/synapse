@@ -63,7 +63,7 @@ from synapse.util.async_helpers import (
 )
 from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -526,6 +526,7 @@ class Notifier:
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
+            StreamKeyType.STICKY_EVENTS,
         ],
         new_token: int,
         users: Collection[str | UserID] | None = None,
@@ -783,7 +784,7 @@ class Notifier:
                 )
 
                 if keyname == StreamKeyType.ROOM:
-                    new_events = await filter_events_for_client(
+                    new_events = await filter_and_transform_events_for_client(
                         self._storage_controllers,
                         user.to_string(),
                         new_events,

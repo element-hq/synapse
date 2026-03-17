@@ -776,6 +776,11 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
         #
         # PyPy does not (yet?) implement gc.freeze()
         if hasattr(gc, "freeze"):
+            logger.info(
+                "garbage collector: Freezing all allocated objects in the hopes that (almost) "
+                "everything currently allocated are things that will be used by the homeserver "
+                "for the rest of time. Doing so means less work each GC (hopefully)."
+            )
             gc.collect()
             gc.freeze()
 

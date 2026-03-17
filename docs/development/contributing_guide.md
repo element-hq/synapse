@@ -334,46 +334,9 @@ For more details about other configurations, see the [Docker-specific documentat
 
 ## Run the integration tests ([Complement](https://github.com/matrix-org/complement)).
 
-[Complement](https://github.com/matrix-org/complement) is a suite of black box tests that can be run on any homeserver implementation. It can also be thought of as end-to-end (e2e) tests.
+See our [Complement docs](https://github.com/element-hq/synapse/tree/develop/complement)
+for how to use the `./scripts-dev/complement.sh` test runner script.
 
-It's often nice to develop on Synapse and write Complement tests at the same time.
-Here is how to run your local Synapse checkout against your local Complement checkout.
-
-(checkout [`complement`](https://github.com/matrix-org/complement) alongside your `synapse` checkout)
-```sh
-COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh
-```
-
-To run a specific test file, you can pass the test name at the end of the command. The name passed comes from the naming structure in your Complement tests. If you're unsure of the name, you can do a full run and copy it from the test output:
-
-```sh
-COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh -run TestImportHistoricalMessages
-```
-
-To run a specific test, you can specify the whole name structure:
-
-```sh
-COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh -run TestImportHistoricalMessages/parallel/Historical_events_resolve_in_the_correct_order
-```
-
-The above will run a monolithic (single-process) Synapse with SQLite as the database. For other configurations, try:
-
-- Passing `POSTGRES=1` as an environment variable to use the Postgres database instead.
-- Passing `WORKERS=1` as an environment variable to use a workerised setup instead. This option implies the use of Postgres.
-  - If setting `WORKERS=1`, optionally set `WORKER_TYPES=` to declare which worker
-    types you wish to test. A simple comma-delimited string containing the worker types
-    defined from the `WORKERS_CONFIG` template in
-    [here](https://github.com/element-hq/synapse/blob/develop/docker/configure_workers_and_start.py#L54).
-    A safe example would be `WORKER_TYPES="federation_inbound, federation_sender, synchrotron"`.
-    See the [worker documentation](../workers.md) for additional information on workers.
-- Passing `ASYNCIO_REACTOR=1` as an environment variable to use the Twisted asyncio reactor instead of the default one.
-- Passing `PODMAN=1` will use the [podman](https://podman.io/) container runtime, instead of docker.
-- Passing `UNIX_SOCKETS=1` will utilise Unix socket functionality for Synapse, Redis, and Postgres(when applicable).
-
-To increase the log level for the tests, set `SYNAPSE_TEST_LOG_LEVEL`, e.g:
-```sh
-SYNAPSE_TEST_LOG_LEVEL=DEBUG COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh -run TestImportHistoricalMessages
-```
 
 ### Prettier formatting with `gotestfmt`
 
@@ -387,18 +350,6 @@ COMPLEMENT_DIR=../complement ./scripts-dev/complement.sh -json | gotestfmt -hide
 ```
 
 (Remove `-hide successful-tests` if you don't want to hide successful tests.)
-
-
-### Access database for homeserver after Complement test runs.
-
-If you're curious what the database looks like after you run some tests, here are some steps to get you going in Synapse:
-
-1. In your Complement test comment out `defer deployment.Destroy(t)` and replace with `defer time.Sleep(2 * time.Hour)` to keep the homeserver running after the tests complete
-1. Start the Complement tests
-1. Find the name of the container, `docker ps -f name=complement_` (this will filter for just the Compelement related Docker containers)
-1. Access the container replacing the name with what you found in the previous step: `docker exec -it complement_1_hs_with_application_service.hs1_2 /bin/bash`
-1. Install sqlite (database driver), `apt-get update && apt-get install -y sqlite3`
-1. Then run `sqlite3` and open the database `.open /conf/homeserver.db` (this db path comes from the Synapse homeserver.yaml)
 
 
 # 9. Submit your patch.

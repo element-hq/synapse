@@ -46,6 +46,7 @@ from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID
 from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -132,7 +133,7 @@ class ApplicationServiceApi(SimpleHttpClient):
             clock=hs.get_clock(),
             name="as_protocol_meta",
             server_name=self.server_name,
-            timeout_ms=HOUR_IN_MS,
+            timeout=Duration(hours=1),
         )
 
     def _get_headers(self, service: "ApplicationService") -> dict[bytes, list[bytes]]:

@@ -44,7 +44,7 @@ from synapse.types import (
     UserInfo,
     create_requester,
 )
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -251,7 +251,7 @@ class AdminHandler:
                     topological=last_event.depth,
                 )
 
-                events = await filter_events_for_client(
+                events = await filter_and_transform_events_for_client(
                     self._storage_controllers,
                     user_id,
                     events,

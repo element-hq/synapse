@@ -81,6 +81,26 @@ class VersionsRestServlet(RestServlet):
             msc3575_enabled = await self.store.is_feature_enabled(
                 user_id, ExperimentalFeature.MSC3575
             )
+        else:
+            # Allow caching of unauthenticated responses, as they only depend
+            # on server configuration which rarely changes.
+            #
+            # - `public` means it can be cached both in the browser and in caching proxies
+            # - `max-age` controls how long we cache on the browser side. 10m is sane enough
+            # - `s-maxage` controls how long we cache on the proxy side. Since caching
+            #   proxies usually have a way to purge caches, it is fine to cache there for
+            #   longer (1h), and issue cache invalidations in case we need it
+            # - `stale-while-revalidate` allows caching proxies to serve stale content while
+            #   revalidating in the background. This is useful for making this request always
+            #   'snappy' to end users whilst still keeping it fresh
+            request.setHeader(
+                b"Cache-Control",
+                b"public, max-age=600, s-maxage=3600, stale-while-revalidate=600",
+            )
+
+        # Tell caches to vary on the Authorization header, so that
+        # authenticated responses are not served from cache.
+        request.setHeader(b"Vary", b"Authorization")
 
         return (
             200,
@@ -161,7 +181,7 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4069": self.config.experimental.msc4069_profile_inhibit_propagation,
                     # Allows clients to handle push for encrypted events.
                     "org.matrix.msc4028": self.config.experimental.msc4028_push_encrypted_events,
-                    # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+                    # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version
                     "org.matrix.msc4108": (
                         self.config.experimental.msc4108_enabled
                         or (
@@ -169,6 +189,8 @@ class VersionsRestServlet(RestServlet):
                             is not None
                         )
                     ),
+                    # MSC4388: Secure out-of-band channel for sign in with QR
+                    "io.element.msc4388": (self.config.experimental.msc4388_enabled),
                     # MSC4140: Delayed events
                     "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
                     # Simplified sliding sync
@@ -182,8 +204,10 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4306": self.config.experimental.msc4306_enabled,
                     # MSC4169: Backwards-compatible redaction sending using `/send`
                     "com.beeper.msc4169": self.config.experimental.msc4169_enabled,
+                    # MSC4354: Sticky events
+                    "org.matrix.msc4354": self.config.experimental.msc4354_enabled,
                     # MSC4380: Invite blocking
-                    "org.matrix.msc4380": self.config.experimental.msc4380_enabled,
+                    "org.matrix.msc4380.stable": True,
                 },
             },
         )

@@ -31,7 +31,10 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import create_requester
 from synapse.util.clock import Clock
-from synapse.visibility import filter_events_for_client, filter_events_for_server
+from synapse.visibility import (
+    filter_and_transform_events_for_client,
+    filter_events_for_server,
+)
 
 from tests import unittest
 from tests.test_utils.event_injection import inject_event, inject_member_event
@@ -330,7 +333,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
 
         # Do filter & assert
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@admin:test",
                 events_to_filter,
@@ -369,7 +372,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
 
         # Do filter & assert
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@admin:test",
                 events_to_filter,
@@ -416,7 +419,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
 
         # Do filter & assert
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@admin:test",
                 events_to_filter,
@@ -463,7 +466,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
 
         # Do filter & assert
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@admin:test",
                 events_to_filter,
@@ -538,14 +541,14 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
         # accidentally serving the same event object (with the same unsigned.membership
         # property) to both users.
         joiner_filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@joiner:test",
                 events_to_filter,
             )
         )
         resident_filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@resident:test",
                 events_to_filter,
@@ -641,7 +644,7 @@ class FilterEventsOutOfBandEventsForClientTestCase(
 
         # the invited user should be able to see both the invite and the rejection
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@user:test",
                 [invite_event, reject_event],
@@ -662,7 +665,7 @@ class FilterEventsOutOfBandEventsForClientTestCase(
         # other users should see neither
         self.assertEqual(
             self.get_success(
-                filter_events_for_client(
+                filter_and_transform_events_for_client(
                     self.hs.get_storage_controllers(),
                     "@other:test",
                     [invite_event, reject_event],

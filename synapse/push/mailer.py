@@ -49,7 +49,7 @@ from synapse.storage.databases.main.event_push_actions import EmailPushAction
 from synapse.types import StateMap, UserID
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -537,12 +537,11 @@ class Mailer:
             "messages": [],
         }
 
-        the_events = await filter_events_for_client(
+        the_events = await filter_and_transform_events_for_client(
             self._storage_controllers,
             user_id,
-            results.events_before,
+            results.events_before + [notif_event],
         )
-        the_events.append(notif_event)
 
         for event in the_events:
             messagevars = await self._get_message_vars(notif, event, room_state_ids)

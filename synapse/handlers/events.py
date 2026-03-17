@@ -31,7 +31,7 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, UserID
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -156,7 +156,9 @@ class EventHandler:
         event_id: str,
         show_redacted: bool = False,
     ) -> EventBase | None:
-        """Retrieve a single specified event.
+        """Retrieve a single specified event on behalf of a user.
+        The event will be transformed in a user-specific and time-specific way,
+        e.g. having unsigned metadata added or being erased depending on who is accessing.
 
         Args:
             user: The local user requesting the event
@@ -188,7 +190,7 @@ class EventHandler:
         # The user is peeking if they aren't in the room already
         is_peeking = not is_user_in_room
 
-        filtered = await filter_events_for_client(
+        filtered = await filter_and_transform_events_for_client(
             self._storage_controllers,
             user.to_string(),
             [event],
@@ -198,4 +200,4 @@ class EventHandler:
         if not filtered:
             raise AuthError(403, "You don't have permission to access that event.")
 
-        return event
+        return filtered[0]

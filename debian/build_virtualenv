@@ -39,8 +39,10 @@ pip install poetry==2.1.1 poetry-plugin-export==1.9.0
 poetry export \
     --extras all \
     --extras test \
-    --extras systemd \
     -o exported_requirements.txt
+# Keep journald logging support in the packaged virtualenv when using
+# systemd.journal.JournalHandler in /etc/matrix-synapse/log.yaml.
+echo "systemd-python==235 --hash=sha256:4e57f39797fd5d9e2d22b8806a252d7c0106c936039d1e71c8c6b8008e695c0a" >> exported_requirements.txt
 deactivate
 rm -rf "$TEMP_VENV"
 
@@ -57,7 +59,7 @@ dh_virtualenv \
     --extra-pip-arg="--no-deps" \
     --extra-pip-arg="--no-cache-dir" \
     --extra-pip-arg="--compile" \
-    --extras="all,systemd,test" \
+    --extras="all,test" \
     --requirements="exported_requirements.txt"
 
 PACKAGE_BUILD_DIR="$(pwd)/debian/matrix-synapse-py3"

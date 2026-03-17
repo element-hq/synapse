@@ -1482,33 +1482,29 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         device_id: str,
         device_data: str,
         time: int,
-        keys: JsonDict | None = None,
+        keys: JsonDict,
     ) -> str | None:
-        # TODO: make keys non-optional once support for msc2697 is dropped
-        if keys:
-            device_keys = keys.get("device_keys", None)
-            if device_keys:
-                self._set_e2e_device_keys_txn(
-                    txn, user_id, device_id, time, device_keys
-                )
+        device_keys = keys.get("device_keys", None)
+        if device_keys:
+            self._set_e2e_device_keys_txn(txn, user_id, device_id, time, device_keys)
 
-            one_time_keys = keys.get("one_time_keys", None)
-            if one_time_keys:
-                key_list = []
-                for key_id, key_obj in one_time_keys.items():
-                    algorithm, key_id = key_id.split(":")
-                    key_list.append(
-                        (
-                            algorithm,
-                            key_id,
-                            encode_canonical_json(key_obj).decode("ascii"),
-                        )
+        one_time_keys = keys.get("one_time_keys", None)
+        if one_time_keys:
+            key_list = []
+            for key_id, key_obj in one_time_keys.items():
+                algorithm, key_id = key_id.split(":")
+                key_list.append(
+                    (
+                        algorithm,
+                        key_id,
+                        encode_canonical_json(key_obj).decode("ascii"),
                     )
-                self._add_e2e_one_time_keys_txn(txn, user_id, device_id, time, key_list)
+                )
+            self._add_e2e_one_time_keys_txn(txn, user_id, device_id, time, key_list)
 
-            fallback_keys = keys.get("fallback_keys", None)
-            if fallback_keys:
-                self._set_e2e_fallback_keys_txn(txn, user_id, device_id, fallback_keys)
+        fallback_keys = keys.get("fallback_keys", None)
+        if fallback_keys:
+            self._set_e2e_fallback_keys_txn(txn, user_id, device_id, fallback_keys)
 
         old_device_id = self.db_pool.simple_select_one_onecol_txn(
             txn,
@@ -1532,7 +1528,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         device_id: str,
         device_data: JsonDict,
         time_now: int,
-        keys: dict | None = None,
+        keys: dict,
     ) -> str | None:
         """Store a dehydrated device for a user.
 

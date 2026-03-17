@@ -33,7 +33,7 @@ from synapse.events import EventBase
 from synapse.events.utils import SerializeEventConfig
 from synapse.types import JsonDict, Requester, StrCollection, StreamKeyType, UserID
 from synapse.types.state import StateFilter
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -479,7 +479,7 @@ class SearchHandler:
 
         filtered_events = await search_filter.filter([r["event"] for r in results])
 
-        events = await filter_events_for_client(
+        events = await filter_and_transform_events_for_client(
             self._storage_controllers,
             user.to_string(),
             filtered_events,
@@ -580,7 +580,7 @@ class SearchHandler:
 
             filtered_events = await search_filter.filter([r["event"] for r in results])
 
-            events = await filter_events_for_client(
+            events = await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user.to_string(),
                 filtered_events,
@@ -667,13 +667,13 @@ class SearchHandler:
                 len(res.events_after),
             )
 
-            events_before = await filter_events_for_client(
+            events_before = await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user.to_string(),
                 res.events_before,
             )
 
-            events_after = await filter_events_for_client(
+            events_after = await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user.to_string(),
                 res.events_after,

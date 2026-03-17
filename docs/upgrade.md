@@ -117,6 +117,51 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.150.0
+
+## Removal of the `systemd` pip extra
+
+The `matrix-synapse[systemd]` pip extra has been removed.
+If you use `systemd.journal.JournalHandler` in your logging configuration
+(e.g. `contrib/systemd/log_config.yaml`), you must now install
+`systemd-python` manually in Synapse's runtime environment:
+
+```bash
+pip install systemd-python
+```
+
+No action is needed if you do not use journal logging, or if you installed
+Synapse from the Debian packages (which handle this automatically).
+
+## Module API: Deprecation of the `deactivation` parameter in the `set_displayname` method
+
+If you have Synapse modules installed that use the `set_displayname` method to change
+the display name of your users, please ensure that it doesn't pass the optional
+`deactivation` parameter.
+
+This parameter is now deprecated and it is intended to be removed in 2027.
+No immediate change is necessary, however once the parameter is removed, modules passing it will produce errors.
+[Issue #19546](https://github.com/element-hq/synapse/issues/19546) tracks this removal.
+
+From this version, when the parameter is passed, an error such as
+``Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: False). This will break in 2027.`` will be logged. The method will otherwise continue to work.
+
+# Upgrading to v1.146.0
+
+## Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka
+
+Ubuntu 25.04 Plucky Puffin [is end-of-life as of 17 Jan
+2026](https://endoflife.date/ubuntu). This release drops support for Ubuntu
+25.04, and in its place adds support for Ubuntu 25.10 Questing Quokka.
+
+## Removal of MSC2697 (Legacy) Dehydrated devices
+
+The endpoints for
+[MSC2697](https://github.com/matrix-org/matrix-spec-proposals/pull/2697) have now
+been removed, since the MSC is closed. Developers who rely on this feature should
+migrate to [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814)
+which introduces support for a newer version of dehydrated devices.
+
 # Upgrading to v1.144.0
 
 ## Worker support for unstable MSC4140 `/restart` endpoint
@@ -828,7 +873,7 @@ the names of Prometheus metrics.
 If you want to test your changes before legacy names are disabled by default,
 you may specify `enable_legacy_metrics: false` in your homeserver configuration.
 
-A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html?highlight=metrics%20deprecated#renaming-of-metrics--deprecation-of-old-names-in-12).
+A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12).
 
 
 ## Deprecation of the `generate_short_term_login_token` module API method
@@ -2423,7 +2468,7 @@ back to v1.3.1, subject to the following:
 
 Some counter metrics have been renamed, with the old names deprecated.
 See [the metrics
-documentation](metrics-howto.md#renaming-of-metrics--deprecation-of-old-names-in-12)
+documentation](https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12)
 for details.
 
 # Upgrading to v1.1.0
