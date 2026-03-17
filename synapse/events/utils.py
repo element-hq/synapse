@@ -584,6 +584,7 @@ class EventClientSerializer:
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
         bundle_aggregations: dict[str, "BundledAggregations"] | None = None,
+        redaction_map: dict[str, "EventBase"] | None = None,
     ) -> JsonDict:
         """Serializes a single event.
 
@@ -593,6 +594,8 @@ class EventClientSerializer:
             config: Event serialization config
             bundle_aggregations: A map from event_id to the aggregations to be bundled
                into the event.
+            redaction_map: Optional pre-fetched map from redaction event_id to event,
+               used to avoid per-event DB lookups when serializing many events.
 
         Returns:
             The serialized event
@@ -614,12 +617,15 @@ class EventClientSerializer:
 
         # If the event was redacted, fetch the redaction event from the database
         # and include it in the serialized event's unsigned section.
-        redacted_by = event.unsigned.get("redacted_by")
+        redacted_by: str | None = event.unsigned.get("redacted_by")
         if redacted_by is not None:
-            redaction_event = await self._store.get_event(
-                redacted_by,
-                allow_none=True,
-            )
+            if redaction_map is not None:
+                redaction_event: EventBase | None = redaction_map.get(redacted_by)
+            else:
+                redaction_event = await self._store.get_event(
+                    redacted_by,
+                    allow_none=True,
+                )
             if redaction_event is not None:
                 serialized_redaction = _serialize_event(
                     redaction_event, time_now, config=config
@@ -761,12 +767,23 @@ class EventClientSerializer:
             str(len(events)),
         )
 
+        # Batch-fetch all redaction events in one go rather than one per event.
+        redaction_ids = {
+            e.unsigned["redacted_by"]
+            for e in events
+            if isinstance(e, EventBase) and "redacted_by" in e.unsigned
+        }
+        redaction_map = (
+            await self._store.get_events(redaction_ids) if redaction_ids else {}
+        )
+
         return [
             await self.serialize_event(
                 event,
                 time_now,
                 config=config,
                 bundle_aggregations=bundle_aggregations,
+                redaction_map=redaction_map,
             )
             for event in events
         ]
