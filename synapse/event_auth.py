@@ -190,29 +190,26 @@ async def check_state_independent_auth_rules(
     # State DAGs 2. Considering the event's prev_state_events:
     if event.room_version.msc4242_state_dags:
         prev_state_events_ids = set(cast(FrozenEventVMSC4242, event).prev_state_events)
-        needed_prev_state_event_ids = {
-            event_id
-            for event_id in prev_state_events_ids
-            if not batched_auth_events or event_id not in batched_auth_events
-        }
-        # We need to do some checks on the events provided as prev_state_events, so we need to load them.
-        # Try to load the `prev_state_events` from `batched_auth_events` initially as that can save us
-        # a database hit.
-        prev_state_events = (
-            {}
-            if not batched_auth_events
-            else {
-                e: batched_auth_events[e]
-                for e in prev_state_events_ids - needed_prev_state_event_ids
+        # Fetch all of the `prev_state_events`
+        prev_state_events = {}
+        # Try to load the `prev_state_events` from `batched_auth_events` initially as
+        # that can save us a database hit.
+        if batched_auth_events is not None:
+            prev_state_events = {
+                event_id: value
+                for event_id in prev_state_events_ids
+                if (value := batched_auth_events.get(event_id)) is not None
             }
+        # Fetch the rest of the `prev_state_events`
+        missing_prev_state_events_ids = prev_state_events_ids - set(
+            prev_state_events.keys()
         )
-        if len(needed_prev_state_event_ids) > 0:
-            needed_prev_state_events = await store.get_events(
-                needed_prev_state_event_ids,
-                redact_behaviour=EventRedactBehaviour.as_is,
-                allow_rejected=True,
-            )
-            prev_state_events.update(needed_prev_state_events)
+        fetched_prev_state_events = await store.get_events(
+            missing_prev_state_events_ids,
+            redact_behaviour=EventRedactBehaviour.as_is,
+            allow_rejected=True,
+        )
+        prev_state_events.update(fetched_prev_state_events)
         if len(prev_state_events) != len(prev_state_events_ids):
             # we should have all the prev state events by now, so if we do not, that suggests
             # a synapse programming error
