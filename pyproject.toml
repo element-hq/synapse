@@ -224,6 +224,9 @@ update_synapse_database = "synapse._scripts.update_synapse_database:main"
 [tool.poetry]
 packages = [{ include = "synapse" }]
 
+# We're using PEP 735 dependency groups, which requires Poetry 2.2.0+
+requires-poetry = ">=2.2.0"
+
 [tool.poetry.build]
 # Compile our rust module when using `poetry install`. This is still required
 # while using `poetry` as the build frontend. Saves the developer from needing
