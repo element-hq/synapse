@@ -1,3 +1,36 @@
+# Synapse 1.150.0rc1 (2026-03-17)
+
+## Features
+
+- Add experimental support for the [MSC4370](https://github.com/matrix-org/matrix-spec-proposals/pull/4370) Federation API `GET /extremities` endpoint. ([\#19314](https://github.com/element-hq/synapse/issues/19314))
+- [MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): When persisting a delayed event to the timeline, include its `delay_id` in the event's `unsigned` section in `/sync` responses to the event sender. ([\#19479](https://github.com/element-hq/synapse/issues/19479))
+- Expose [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) over the legacy (v3) /sync API. ([\#19487](https://github.com/element-hq/synapse/issues/19487))
+- When Matrix Authentication Service (MAS) integration is enabled, allow MAS to set the user locked status in Synapse. ([\#19554](https://github.com/element-hq/synapse/issues/19554))
+
+## Bugfixes
+
+- Fix `Build and push complement image` CI job pointing to non-existent image. ([\#19523](https://github.com/element-hq/synapse/issues/19523))
+- Fix a bug introduced in v1.26.0 that caused deactivated, erased users to not be removed from the user directory. ([\#19542](https://github.com/element-hq/synapse/issues/19542))
+
+## Improved Documentation
+
+- In the Admin API documentation, always express path parameters as `/<param>` instead of as `/$param`. ([\#19307](https://github.com/element-hq/synapse/issues/19307))
+- Update docs to clarify `outbound_federation_restricted_to` can also be used with the [Secure Border Gateway (SBG)](https://element.io/en/server-suite/secure-border-gateways). ([\#19517](https://github.com/element-hq/synapse/issues/19517))
+- Unify Complement developer docs. ([\#19518](https://github.com/element-hq/synapse/issues/19518))
+
+## Internal Changes
+
+- Put membership updates in a background resumable task when changing the avatar or the display name. ([\#19311](https://github.com/element-hq/synapse/issues/19311))
+- Add in-repo Complement test to sanity check Synapse version matches git checkout (testing what we think we are). ([\#19476](https://github.com/element-hq/synapse/issues/19476))
+- Migrate `dev` dependencies to [PEP 735](https://peps.python.org/pep-0735/) dependency groups. ([\#19490](https://github.com/element-hq/synapse/issues/19490))
+- Remove the optional `systemd-python` dependency and the `systemd` extra on the `synapse` package. ([\#19491](https://github.com/element-hq/synapse/issues/19491))
+- Avoid re-computing the event ID when cloning events. ([\#19527](https://github.com/element-hq/synapse/issues/19527))
+- Allow caching of the `/versions` and `/auth_metadata` public endpoints. ([\#19530](https://github.com/element-hq/synapse/issues/19530))
+- Add a few labels to the number groupings in the `Processed request` logs. ([\#19548](https://github.com/element-hq/synapse/issues/19548))
+
+
+
+
 # Synapse 1.149.1 (2026-03-11)
 
 ## Internal Changes

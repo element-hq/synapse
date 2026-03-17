@@ -22,7 +22,7 @@
 
 ARG DEBIAN_VERSION=trixie
 ARG PYTHON_VERSION=3.13
-ARG POETRY_VERSION=2.1.1
+ARG POETRY_VERSION=2.2.1
 
 ###
 ### Stage 0: generate requirements.txt

@@ -408,6 +408,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         require_consent: bool = True,
         outlier: bool = False,
         origin_server_ts: int | None = None,
+        delay_id: str | None = None,
     ) -> tuple[str, int]:
         """
         Internal membership update function to get an existing event or create
@@ -440,6 +441,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 opposed to being inline with the current DAG.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            delay_id: The delay ID of this event, if it was a delayed event.
 
         Returns:
             Tuple of event ID and stream ordering position
@@ -492,6 +494,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     depth=depth,
                     require_consent=require_consent,
                     outlier=outlier,
+                    delay_id=delay_id,
                 )
                 context = await unpersisted_context.persist(event)
                 prev_state_ids = await context.get_prev_state_ids(
@@ -587,6 +590,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         state_event_ids: list[str] | None = None,
         depth: int | None = None,
         origin_server_ts: int | None = None,
+        delay_id: str | None = None,
     ) -> tuple[str, int]:
         """Update a user's membership in a room.
 
@@ -617,6 +621,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 based on the prev_events.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            delay_id: The delay ID of this event, if it was a delayed event.
 
         Returns:
             A tuple of the new event ID and stream ID.
@@ -679,6 +684,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             state_event_ids=state_event_ids,
                             depth=depth,
                             origin_server_ts=origin_server_ts,
+                            delay_id=delay_id,
                         )
 
         return result
@@ -701,6 +707,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         state_event_ids: list[str] | None = None,
         depth: int | None = None,
         origin_server_ts: int | None = None,
+        delay_id: str | None = None,
     ) -> tuple[str, int]:
         """Helper for update_membership.
 
@@ -733,6 +740,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 based on the prev_events.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            delay_id: The delay ID of this event, if it was a delayed event.
 
         Returns:
             A tuple of the new event ID and stream ID.
@@ -943,6 +951,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 require_consent=require_consent,
                 outlier=outlier,
                 origin_server_ts=origin_server_ts,
+                delay_id=delay_id,
             )
 
         latest_event_ids = await self.store.get_prev_events_for_room(room_id)
@@ -1201,6 +1210,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             require_consent=require_consent,
             outlier=outlier,
             origin_server_ts=origin_server_ts,
+            delay_id=delay_id,
         )
 
     async def check_for_any_membership_in_room(

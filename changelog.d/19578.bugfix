@@ -1,0 +1,1 @@
+Fix `Build and push complement image` CI job not having `poetry` available for the Complement runner script.
