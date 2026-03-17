@@ -308,6 +308,15 @@ WORKERS_CONFIG: dict[str, dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
+    "profile_updates": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [
+            "^/_matrix/client/(unstable/uk.tcpip.msc4133|api/v1|r0|v3|unstable)/profile/.*/"
+        ],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
     "device_lists": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -517,6 +526,7 @@ def add_worker_roles_to_shared_config(
         "typing",
         "push_rules",
         "thread_subscriptions",
+        "profile_updates",
     }
 
     # Worker-type specific sharding config. Now a single worker can fulfill multiple

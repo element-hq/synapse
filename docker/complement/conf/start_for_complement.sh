@@ -60,12 +60,13 @@ if [[ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]]; then
       federation_inbound, \
       federation_reader, \
       federation_sender, \
+      profile_updates, \
       synchrotron, \
       client_reader, \
       appservice, \
       pusher, \
       device_lists:2, \
-      stream_writers=account_data+presence+receipts+to_device+typing"
+      stream_writers=account_data+presence+profile_updates+receipts+to_device+typing"
 
   fi
   log "Workers requested: $SYNAPSE_WORKER_TYPES"

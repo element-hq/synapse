@@ -284,8 +284,17 @@ class UnstableProfileFieldRestServlet(ProfileFieldRestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    # The specific field endpoint *must* appear before the generic profile endpoint.
-    ProfileFieldRestServlet(hs).register(http_server)
+    # Updating user profiles requires the ability to write to the
+    # `profile_updates` stream.
+    if hs.get_instance_name() in hs.config.worker.writers.profile_updates:
+        # The specific field endpoint *must* appear before the generic profile
+        # endpoint (below).
+
+        # TODO: Is it possible to still allow any generic_worker to handle the
+        # `GET` endpoint?
+        ProfileFieldRestServlet(hs).register(http_server)
+
+        if hs.config.experimental.msc4133_enabled:
+            UnstableProfileFieldRestServlet(hs).register(http_server)
+
     ProfileRestServlet(hs).register(http_server)
-    if hs.config.experimental.msc4133_enabled:
-        UnstableProfileFieldRestServlet(hs).register(http_server)

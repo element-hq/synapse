@@ -5522,6 +5522,9 @@ properties:
       device_lists:
         type: string
         description: Name of a worker assigned to the `device_lists` stream.
+      profile_updates:
+        type: string
+        description: Name of a worker assigned to the `profile_updates` stream.
     default: {}
     examples:
       - events: worker1

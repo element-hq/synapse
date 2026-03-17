@@ -4475,6 +4475,8 @@ This setting has the following sub-options:
 
 * `device_lists` (string): Name of a worker assigned to the `device_lists` stream.
 
+* `profile_updates` (string): Name of a worker assigned to the `profile_updates` stream.
+
 Example configuration:
 ```yaml
 stream_writers:
