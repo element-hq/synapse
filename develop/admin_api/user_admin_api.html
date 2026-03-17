@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b0425d12.js";
+            window.path_to_searchindex_js = "../searchindex-2e0eabf2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-4dc10a98.js"></script>
@@ -732,7 +732,7 @@ member are returned.</p>
 <h2 id="get-the-number-of-invites-sent-by-the-user"><a class="header" href="#get-the-number-of-invites-sent-by-the-user">Get the number of invites sent by the user</a></h2>
 <p>Fetches the number of invites sent by the provided user ID across all rooms
 after the given timestamp.</p>
-<pre><code>GET /_synapse/admin/v1/users/$user_id/sent_invite_count
+<pre><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/sent_invite_count
 </code></pre>
 <p><strong>Parameters</strong></p>
 <p>The following parameters should be set in the URL:</p>
@@ -757,7 +757,7 @@ into timestamps and vice versa.</li>
 <h2 id="get-the-cumulative-number-of-rooms-a-user-has-joined-after-a-given-timestamp"><a class="header" href="#get-the-cumulative-number-of-rooms-a-user-has-joined-after-a-given-timestamp">Get the cumulative number of rooms a user has joined after a given timestamp</a></h2>
 <p>Fetches the number of rooms that the user joined after the given timestamp, even
 if they have subsequently left/been banned from those rooms.</p>
-<pre><code>GET /_synapse/admin/v1/users/$&lt;user_id/cumulative_joined_room_count
+<pre><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/cumulative_joined_room_count
 </code></pre>
 <p><strong>Parameters</strong></p>
 <p>The following parameters should be set in the URL:</p>
@@ -1431,7 +1431,7 @@ for more information.</p>
 <a href="https://matrix.org/docs/spec/client_server/r0.6.0#get-matrix-client-r0-register-available">/_matrix/client/r0/register/available</a> API.</p>
 <h2 id="find-a-user-based-on-their-id-in-an-auth-provider"><a class="header" href="#find-a-user-based-on-their-id-in-an-auth-provider">Find a user based on their ID in an auth provider</a></h2>
 <p>The API is:</p>
-<pre><code>GET /_synapse/admin/v1/auth_providers/$provider/users/$external_id
+<pre><code>GET /_synapse/admin/v1/auth_providers/&lt;provider&gt;/users/&lt;external_id&gt;
 </code></pre>
 <p>When a user matched the given ID for the given provider, an HTTP code <code>200</code> with a response body like the following is returned:</p>
 <pre><code class="language-json">{
@@ -1455,7 +1455,7 @@ for more information.</p>
 <p><em>Added in Synapse 1.68.0.</em></p>
 <h2 id="find-a-user-based-on-their-third-party-id-threepid-or-3pid"><a class="header" href="#find-a-user-based-on-their-third-party-id-threepid-or-3pid">Find a user based on their Third Party ID (ThreePID or 3PID)</a></h2>
 <p>The API is:</p>
-<pre><code>GET /_synapse/admin/v1/threepid/$medium/users/$address
+<pre><code>GET /_synapse/admin/v1/threepid/&lt;medium&gt;/users/&lt;address&gt;
 </code></pre>
 <p>When a user matched the given address for the given medium, an HTTP code <code>200</code> with a response body like the following is returned:</p>
 <pre><code class="language-json">{
@@ -1484,7 +1484,7 @@ Redactions for non-local users are issued using the admin user, and will fail in
 admin user is not admin/does not have the specified power level to issue redactions. An option
 is provided to override the default and allow the admin to issue the redactions in all cases.</p>
 <p>The API is</p>
-<pre><code>POST /_synapse/admin/v1/user/$user_id/redact
+<pre><code>POST /_synapse/admin/v1/user/&lt;user_id&gt;/redact
 
 {
   "rooms": ["!roomid1", "!roomid2"]
@@ -1522,7 +1522,7 @@ where the admin does not have the sufficient power level to issue the redactions
 The status can be queried up to 24 hours after completion of the task,
 or until Synapse is restarted (whichever happens first).</p>
 <p>The API is:</p>
-<pre><code>GET /_synapse/admin/v1/user/redact_status/$redact_id
+<pre><code>GET /_synapse/admin/v1/user/redact_status/&lt;redact_id&gt;
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code>{
