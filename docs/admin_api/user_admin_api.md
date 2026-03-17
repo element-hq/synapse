@@ -403,6 +403,7 @@ is set to `true`:
 
 - Remove the user's display name
 - Remove the user's avatar URL
+- Remove the user's custom profile fields
 - Mark the user as erased
 
 The following actions are **NOT** performed. The list may be incomplete.

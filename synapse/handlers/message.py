@@ -586,6 +586,7 @@ class EventCreationHandler:
         for_batch: bool = False,
         current_state_group: int | None = None,
         prev_state_events: list[str] | None = None,
+        delay_id: str | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """
         Given a dict from a client, create a new event. If bool for_batch is true, will
@@ -601,7 +602,7 @@ class EventCreationHandler:
         Args:
             requester
             event_dict: An entire event
-            txn_id
+            txn_id: The transaction ID.
             prev_event_ids:
                 the forward extremities to use as the prev_events for the
                 new event.
@@ -643,6 +644,8 @@ class EventCreationHandler:
             prev_state_events:
                 The state event IDs which represent the current forward extremities of the state DAG.
                 Only applicable on room versions which use a state DAG (MSC4242).
+
+            delay_id: The delay ID of this event, if it was a delayed event.
 
         Raises:
             ResourceLimitError if server is blocked to some resource being
@@ -730,6 +733,9 @@ class EventCreationHandler:
 
         if txn_id is not None:
             builder.internal_metadata.txn_id = txn_id
+
+        if delay_id is not None:
+            builder.internal_metadata.delay_id = delay_id
 
         builder.internal_metadata.outlier = outlier
 
@@ -973,6 +979,7 @@ class EventCreationHandler:
         outlier: bool = False,
         depth: int | None = None,
         prev_state_events: list[str] | None = None,
+        delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         """
         Creates an event, then sends it.
@@ -1004,6 +1011,8 @@ class EventCreationHandler:
             prev_state_events:
                 The state event IDs which represent the current forward extremities of the state DAG.
                 Only applicable on room versions which use a state DAG (MSC4242).
+            delay_id: The delay ID of this event, if it was a delayed event.
+
         Returns:
             The event, and its stream ordering (if deduplication happened,
             the previous, duplicate event).
@@ -1100,6 +1109,7 @@ class EventCreationHandler:
                 outlier=outlier,
                 depth=depth,
                 prev_state_events=prev_state_events,
+                delay_id=delay_id,
             )
 
     async def _create_and_send_nonmember_event_locked(
@@ -1114,6 +1124,7 @@ class EventCreationHandler:
         outlier: bool = False,
         depth: int | None = None,
         prev_state_events: list[str] | None = None,
+        delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         room_id = event_dict["room_id"]
 
@@ -1143,6 +1154,7 @@ class EventCreationHandler:
                     outlier=outlier,
                     depth=depth,
                     prev_state_events=prev_state_events,
+                    delay_id=delay_id,
                 )
                 context = await unpersisted_context.persist(event)
 

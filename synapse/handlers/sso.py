@@ -522,7 +522,10 @@ class SsoHandler:
                             authenticated_entity=user_id,
                         )
                         await self._profile_handler.set_displayname(
-                            user_id_obj, requester, attributes.display_name, True
+                            user_id_obj,
+                            requester,
+                            attributes.display_name,
+                            by_admin=True,
                         )
                 if attributes.picture:
                     await self.set_avatar(user_id, attributes.picture)

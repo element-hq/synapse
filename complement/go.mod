@@ -31,6 +31,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/matrix-org/gomatrix v0.0.0-20220926102614-ceba4d9f7530 // indirect
 	github.com/matrix-org/util v0.0.0-20221111132719-399730281e66 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/term v0.5.2 // indirect

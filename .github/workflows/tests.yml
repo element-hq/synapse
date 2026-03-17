@@ -705,6 +705,13 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
+      # We use `poetry` in `complement.sh`
+      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        with:
+          poetry-version: "2.1.1"
+          # Matches the `path` where we checkout Synapse above
+          working-directory: "synapse"
+
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
 
@@ -712,6 +719,32 @@ jobs:
         with:
           cache-dependency-path: complement/go.sum
           go-version-file: complement/go.mod
+
+      # Run the image sanity check test first as this is the first thing we want to know
+      # about (are we actually testing what we expect?) and we don't want to debug
+      # downstream failures (wild goose chase).
+      - name: Sanity check Complement image
+        id: run_sanity_check_complement_image_test
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
+          set -o pipefail
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 | tee /tmp/gotest-sanity-check-complement.log
+        shell: bash
+        env:
+          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+
+      - name: Formatted sanity check Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_sanity_check_complement_image_test.outcome != 'skipped'
+        run: cat /tmp/gotest-sanity-check-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
 
       - name: Run Complement Tests
         id: run_complement_tests

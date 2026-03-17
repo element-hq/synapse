@@ -1,0 +1,1 @@
+Fix a bug introduced in v1.26.0 that caused deactivated, erased users to not be removed from the user directory.
