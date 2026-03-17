@@ -58,7 +58,7 @@ def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
 
 
 class ProfileRestServlet(RestServlet):
-    PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)", v1=True)
+    PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)$", v1=True)
     CATEGORY = "Event sending requests"
 
     def __init__(self, hs: "HomeServer"):
