@@ -42,7 +42,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, get_domain_from_id
 from synapse.util.json import json_encoder
-from synapse.util.stringutils import random_string
+from synapse.util.stringutils import random_string_insecure_fast
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -414,7 +414,7 @@ class DeviceMessageHandler:
 def split_device_messages_into_edus(
     sender_user_id: str,
     message_type: str,
-    messages: dict[str, dict[str, JsonDict]],
+    messages_by_user_then_device: dict[str, dict[str, JsonDict]],
 ) -> list[JsonDict]:
     """
     This function takes many to-device messages and fits/splits them into several EDUs
@@ -425,19 +425,18 @@ def split_device_messages_into_edus(
     Args:
         sender_user_id: The user that is sending the to-device messages.
         message_type: The type of to-device messages that are being sent.
-        messages: A dictionary containing recipients mapped to messages intended for them.
+        messages_by_user_then_device: Dictionary of recipient user_id to recipient device_id to message.
 
     Returns:
-        A list of dictionary containing the EDUs of to-device messages
+        Bin-packed list of EDU JSON content for the given to_device messages
 
     Raises:
-        EventSizeError: If a single to-device message is too large to fit into an
-            EDU.
+        EventSizeError: If a single to-device message is too large to fit into an EDU.
     """
     split_edus_content: list[JsonDict] = []
 
     # Convert messages dict to a list of (recipient, messages_by_device) pairs
-    message_items = list(messages.items())
+    message_items = list(messages_by_user_then_device.items())
 
     while message_items:
         edu_messages = {}
@@ -487,21 +486,16 @@ def split_device_messages_into_edus(
 def create_new_to_device_edu_content(
     sender_user_id: str,
     message_type: str,
-    messages: dict[str, Any] | None = None,
-    message_id: str | None = None,
+    messages_by_user_then_device: dict[str, dict[str, JsonDict]],
 ) -> JsonDict:
     """
     Create a new `m.direct_to_device` EDU `content` object with a unique message ID.
     """
-    if messages is None:
-        messages = {}
-    if message_id is None:
-        message_id = random_string(16)
-
+    message_id = random_string_insecure_fast(16)
     content = {
         "sender": sender_user_id,
         "type": message_type,
         "message_id": message_id,
-        "messages": messages,
+        "messages": messages_by_user_then_device,
     }
     return content
