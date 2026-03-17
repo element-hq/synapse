@@ -856,7 +856,9 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
 
         # Seed the device_inbox table with our fake messages
         self.get_success(
-            self.hs.get_datastores().main.add_messages_to_device_inbox(messages, {})
+            self.hs.get_datastores().main.add_local_messages_from_client_to_device_inbox(
+                messages
+            )
         )
 
         # Now have local_user send a final to-device message to exclusive_as_user. All unsent

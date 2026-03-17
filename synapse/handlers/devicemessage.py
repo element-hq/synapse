@@ -286,8 +286,10 @@ class DeviceMessageHandler:
 
         # Add local messages to the database.
         # Retrieve the stream id of the last-processed to-device message.
-        last_stream_id = await self.store.add_messages_to_device_inbox(
-            local_messages, {}
+        last_stream_id = (
+            await self.store.add_local_messages_from_client_to_device_inbox(
+                local_messages
+            )
         )
         for destination, messages in remote_messages.items():
             split_edus = split_device_messages_into_edus(
@@ -298,8 +300,10 @@ class DeviceMessageHandler:
                     get_active_span_text_map()
                 )
                 # Add remote messages to the database.
-                last_stream_id = await self.store.add_messages_to_device_inbox(
-                    {}, {destination: edu}
+                last_stream_id = (
+                    await self.store.add_remote_messages_from_client_to_device_inbox(
+                        {destination: edu}
+                    )
                 )
                 log_kv(
                     {
