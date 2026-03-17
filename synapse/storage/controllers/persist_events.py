@@ -966,7 +966,8 @@ class EventsPersistenceStorageController:
             ev for ev, ctx in new_state_events_contexts if not ctx.rejected
         ]
         # We want to check that we are not missing any prev_state_events.
-        # To do this, we include rejected events in this check.
+        # To do this, we include rejected events in this check because other events may point to them.
+        # If we didn't include them, we might incorrectly say we are missing events when we are not.
         all_new_state_events = set(rejected_events + new_state_events)
 
         # First, verify that we know all prev_state_events. If we fail this check then we don't have

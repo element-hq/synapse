@@ -114,6 +114,12 @@ class RoomVersion:
     # MSC3757: Restricting who can overwrite a state event
     msc3757_enabled: bool
     # MSC4242: Creates events with prev_state_events instead of auth_events and derives state from it.
+    # Events are always processed in causal order without any gaps in the DAG
+    # (prev_state_events are always known), guaranteeing that processed events have a path to the
+    # create event. This is an emergent property of state DAGs as asserting that there is a path
+    # to the create event every time we insert an event would be prohibitively expensive.
+    # This is similar to how doubly-linked lists can potentially not refer to previous items correctly
+    # without verifying the list's integrity, but doing it on every insert is too expensive.
     msc4242_state_dags: bool
     # MSC4289: Creator power enabled
     msc4289_creator_power_enabled: bool

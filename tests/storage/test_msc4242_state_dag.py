@@ -58,12 +58,12 @@ class MSC4242StateDagsTests(HomeserverTestCase):
         """
         # they don't change for messages
         first_event_id = self.helper.send(self.room_id, body="test1")["event_id"]
-        first_prev_state_event = self._get_prev_state_events(first_event_id)
-        assert len(first_prev_state_event) == 1
+        first_prev_state_events = self._get_prev_state_events(first_event_id)
+        assert len(first_prev_state_events) == 1
         second_id = self.helper.send(self.room_id, body="test2")["event_id"]
-        second_prev_state_event = self._get_prev_state_events(second_id)
-        assert len(second_prev_state_event) == 1
-        self.assertEquals(first_prev_state_event, second_prev_state_event)
+        second_prev_state_events = self._get_prev_state_events(second_id)
+        assert len(second_prev_state_events) == 1
+        self.assertEquals(first_prev_state_events, second_prev_state_events)
 
         # send an auth event, which should change the prev_state_events on *subsequent* events
         join_rule_state_event_id = self.helper.send_state(
@@ -77,12 +77,12 @@ class MSC4242StateDagsTests(HomeserverTestCase):
         join_rule_prev_state_event_ids = self._get_prev_state_events(
             join_rule_state_event_id
         )
-        self.assertEquals(second_prev_state_event, join_rule_prev_state_event_ids)
+        self.assertEquals(second_prev_state_events, join_rule_prev_state_event_ids)
 
         # prev_state_events should always point to the join rule now
         third_event_id = self.helper.send(self.room_id, body="test3")["event_id"]
-        third_prev_state_event = self._get_prev_state_events(third_event_id)
-        self.assertEquals(third_prev_state_event, [join_rule_state_event_id])
+        third_prev_state_events = self._get_prev_state_events(third_event_id)
+        self.assertEquals(third_prev_state_events, [join_rule_state_event_id])
         # and non-auth state should also update prev_state_events
         name_state_event_id = self.helper.send_state(
             self.room_id,
@@ -95,11 +95,11 @@ class MSC4242StateDagsTests(HomeserverTestCase):
         name_prev_state_event_ids = self._get_prev_state_events(name_state_event_id)
         self.assertEquals(name_prev_state_event_ids, [join_rule_state_event_id])
         fourth_event_id = self.helper.send(self.room_id, body="test4")["event_id"]
-        fourth_prev_state_event = self._get_prev_state_events(fourth_event_id)
-        self.assertEquals(fourth_prev_state_event, [name_state_event_id])
+        fourth_prev_state_events = self._get_prev_state_events(fourth_event_id)
+        self.assertEquals(fourth_prev_state_events, [name_state_event_id])
 
 
-class MSC4242EventPersistenceAuthDagsStoreTestCase(HomeserverTestCase):
+class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
     servlets = [
         room.register_servlets,
     ]
@@ -139,7 +139,6 @@ class MSC4242EventPersistenceAuthDagsStoreTestCase(HomeserverTestCase):
         id: str,
         prev_state_events: list[str],
         rejected: bool = False,
-        soft_failed: bool = False,
     ) -> tuple[FrozenEventVMSC4242, EventContext]:
         ev = make_event_from_dict(
             {
@@ -154,8 +153,6 @@ class MSC4242EventPersistenceAuthDagsStoreTestCase(HomeserverTestCase):
             },
             room_version=RoomVersions.MSC4242v12,
         )
-        if soft_failed:
-            ev.internal_metadata.soft_failed = True
         assert isinstance(ev, FrozenEventVMSC4242)
         ev._event_id = id
         ctx = Mock()

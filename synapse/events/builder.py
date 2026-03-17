@@ -194,10 +194,10 @@ class EventBuilder:
             auth_event_ids = []
 
         # Calculate auth_events for non-create events
-        # this block must not be hit for MSC4242 rooms as it resolves state with prev_events
         if auth_event_ids is None:
             # Every non-create event must have a room ID
             assert self.room_id is not None
+            # this block must not be hit for MSC4242 rooms as it resolves state with prev_events
             assert not self.room_version.msc4242_state_dags
             state_ids = await self._state.compute_state_after_events(
                 self.room_id,

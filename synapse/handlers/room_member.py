@@ -2131,6 +2131,8 @@ class RoomMemberMasterHandler(RoomMemberHandler):
                 list(previous_membership_event.auth_event_ids()) + prev_event_ids
             )
 
+        # Either one is set or the other
+        assert prev_state_events or auth_event_ids
         # Try several times, it could fail with PartialStateConflictError
         # in handle_new_client_event, cf comment in except block.
         max_retries = 5
