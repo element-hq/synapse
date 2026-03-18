@@ -255,8 +255,14 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
         self._add_policy_server_to_room(public_key=verify_key_str)
 
+        # Explicitly configure the policy server mock to refuse to sign the event.
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event.return_value = False
+
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, False)
+
+        # Ensure we actually contacted the policy server once for this event.
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event.assert_awaited_once()
 
     def test_signed_event_is_not_spam(self) -> None:
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))

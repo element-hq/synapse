@@ -80,9 +80,11 @@ class RoomPolicyHandler:
             public_key = policy_event.content.get("public_key", None)
         else:
             # Stable configured, grab its public key
-            public_keys = policy_event.content.get("public_keys", None)
-            if public_keys is not None:
-                public_key = public_keys.get("ed25519", None)
+            public_keys = policy_event.content.get("public_keys")
+            if isinstance(public_keys, dict):
+                ed25519_key = public_keys.get("ed25519")
+                if isinstance(ed25519_key, str):
+                    public_key = ed25519_key
 
         if public_key is None or not isinstance(public_key, str):
             return None  # no public key means no policy server
@@ -145,9 +147,9 @@ class RoomPolicyHandler:
         # We couldn't save the HTTP hit, so do that hit.
         try:
             await self.ask_policy_server_to_sign_event(event, verify=True)
-        except SynapseError as ex:
+        except Exception as ex:
             # We probably caught either a refusal to sign, an invalid signature, or
-            # some other transient error. These are all rejection cases.
+            # some other transient or network error. These are all rejection cases.
             logger.warning("Failed to get a signature from the policy server: %s", ex)
             return False
 
