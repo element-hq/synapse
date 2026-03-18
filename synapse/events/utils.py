@@ -41,6 +41,7 @@ from synapse.api.constants import (
     MAX_PDU_SIZE,
     EventContentFields,
     EventTypes,
+    EventUnsignedContentFields,
     RelationTypes,
 )
 from synapse.api.errors import Codes, SynapseError
@@ -435,6 +436,9 @@ class SerializeEventConfig:
     # only server admins can see through other configuration. For example,
     # whether an event was soft failed by the server.
     include_admin_metadata: bool = False
+    # Whether MSC4354 (sticky events) is enabled. When True, the sticky TTL
+    # will be computed and included in the unsigned section of sticky events.
+    msc4354_enabled: bool = False
 
     @only_event_fields.validator
     def _validate_only_event_fields(
@@ -564,6 +568,20 @@ def _serialize_event(
         if e.internal_metadata.policy_server_spammy:
             d["unsigned"]["io.element.synapse.policy_server_spammy"] = True
 
+    if config.msc4354_enabled:
+        sticky_duration = e.sticky_duration()
+        if sticky_duration:
+            expires_at = (
+                # min() ensures that the origin server can't lie about the time and
+                # send the event 'in the future', as that would allow them to exceed
+                # the 1 hour limit on stickiness duration.
+                min(e.origin_server_ts, time_now_ms) + sticky_duration.as_millis()
+            )
+            if expires_at > time_now_ms:
+                d["unsigned"][EventUnsignedContentFields.STICKY_TTL] = (
+                    expires_at - time_now_ms
+                )
+
     return d
 
 
@@ -577,6 +595,8 @@ class EventClientSerializer:
     def __init__(self, hs: "HomeServer") -> None:
         self._store = hs.get_datastores().main
         self._auth = hs.get_auth()
+        self._config = hs.config
+        self._clock = hs.get_clock()
         self._add_extra_fields_to_unsigned_client_event_callbacks: list[
             ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
         ] = []
@@ -616,6 +636,9 @@ class EventClientSerializer:
             config.requester
         ):
             config = make_config_for_admin(config)
+
+        if self._config.experimental.msc4354_enabled:
+            config = attr.evolve(config, msc4354_enabled=True)
 
         serialized_event = _serialize_event(event, time_now, config=config)
 
