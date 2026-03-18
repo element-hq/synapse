@@ -86,7 +86,7 @@ class MSC4388CreateRendezvousServlet(RestServlet):
         if self.require_authentication:
             # This will raise if the user is not authenticated
             await self.auth.get_user_by_req(request)
-        return HTTPStatus.OK, {}
+        return HTTPStatus.OK, {"create_available": True}
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, Any]:
         if self.require_authentication:

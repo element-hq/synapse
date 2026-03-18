@@ -163,6 +163,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         # Discovery should return 200
         channel = self.make_request("GET", rz_endpoint, {}, access_token=None)
         self.assertEqual(channel.code, 200)
+        self.assertTrue(channel.json_body.get("create_available"))
 
         # We can post arbitrary data to the endpoint
         channel = self.make_request(
@@ -292,6 +293,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         # Discovery should succeed with authentication
         channel = self.make_request("GET", rz_endpoint, {}, access_token=alice_token)
         self.assertEqual(channel.code, 200)
+        self.assertTrue(channel.json_body.get("create_available"))
 
         # This should work as we are now authenticated
         channel = self.make_request(
