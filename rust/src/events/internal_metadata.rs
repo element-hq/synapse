@@ -261,6 +261,11 @@ pub struct EventInternalMetadata {
     #[pyo3(get, set)]
     instance_name: Option<String>,
 
+    /// The event ID of the redaction event, if this event has been redacted.
+    /// This is set dynamically at load time and is not persisted to the database.
+    #[pyo3(get, set)]
+    redacted_by: Option<String>,
+
     /// whether this event is an outlier (ie, whether we have the state at that
     /// point in the DAG)
     #[pyo3(get, set)]
@@ -289,6 +294,7 @@ impl EventInternalMetadata {
             data,
             stream_ordering: None,
             instance_name: None,
+            redacted_by: None,
             outlier: false,
         })
     }

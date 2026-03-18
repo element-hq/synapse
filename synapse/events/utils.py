@@ -88,6 +88,7 @@ def prune_event(event: EventBase) -> EventBase:
     )
     pruned_event.internal_metadata.instance_name = event.internal_metadata.instance_name
     pruned_event.internal_metadata.outlier = event.internal_metadata.outlier
+    pruned_event.internal_metadata.redacted_by = event.internal_metadata.redacted_by
 
     # Mark the event as redacted
     pruned_event.internal_metadata.redacted = True
@@ -123,6 +124,7 @@ def clone_event(event: EventBase) -> EventBase:
     )
     new_event.internal_metadata.instance_name = event.internal_metadata.instance_name
     new_event.internal_metadata.outlier = event.internal_metadata.outlier
+    new_event.internal_metadata.redacted_by = event.internal_metadata.redacted_by
 
     return new_event
 
@@ -617,8 +619,9 @@ class EventClientSerializer:
 
         # If the event was redacted, fetch the redaction event from the database
         # and include it in the serialized event's unsigned section.
-        redacted_by: str | None = event.unsigned.get("redacted_by")
+        redacted_by: str | None = event.internal_metadata.redacted_by
         if redacted_by is not None:
+            serialized_event.setdefault("unsigned", {})["redacted_by"] = redacted_by
             if redaction_map is not None:
                 redaction_event: EventBase | None = redaction_map.get(redacted_by)
             else:
@@ -769,9 +772,9 @@ class EventClientSerializer:
 
         # Batch-fetch all redaction events in one go rather than one per event.
         redaction_ids = {
-            e.unsigned["redacted_by"]
+            e.internal_metadata.redacted_by
             for e in events
-            if isinstance(e, EventBase) and "redacted_by" in e.unsigned
+            if isinstance(e, EventBase) and e.internal_metadata.redacted_by is not None
         }
         redaction_map = (
             await self._store.get_events(redaction_ids) if redaction_ids else {}

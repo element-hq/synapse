@@ -21,6 +21,8 @@ class EventInternalMetadata:
     """the stream ordering of this event. None, until it has been persisted."""
     instance_name: str | None
     """the instance name of the server that persisted this event. None, until it has been persisted."""
+    redacted_by: str | None
+    """the event ID of the redaction event, if this event has been redacted. Set dynamically at load time, not persisted."""
 
     outlier: bool
     """whether this event is an outlier (ie, whether we have the state at that

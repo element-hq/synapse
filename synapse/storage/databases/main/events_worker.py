@@ -1719,7 +1719,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         for redaction_id in confirmed_redactions:
             redacted_event = prune_event(original_ev)
-            redacted_event.unsigned["redacted_by"] = redaction_id
+            redacted_event.internal_metadata.redacted_by = redaction_id
             return redacted_event
 
         for redaction_id in unconfirmed_redactions:
@@ -1763,7 +1763,7 @@ class EventsWorkerStore(SQLBaseStore):
 
             # we found a good redaction event. Redact!
             redacted_event = prune_event(original_ev)
-            redacted_event.unsigned["redacted_by"] = redaction_id
+            redacted_event.internal_metadata.redacted_by = redaction_id
 
             return redacted_event
 
