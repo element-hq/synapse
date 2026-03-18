@@ -102,7 +102,6 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         msg_dict = msg.get_dict()
         msg_dict["content"] = {}
         msg_dict["unsigned"]["redacted_by"] = redaction.event_id
-        msg_dict["unsigned"]["redacted_because"] = redaction
         redacted = make_event_from_dict(
             msg_dict, internal_metadata_dict=msg.internal_metadata.get_dict()
         )
@@ -126,7 +125,6 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         msg_dict = msg.get_dict()
         msg_dict["content"] = {}
         msg_dict["unsigned"]["redacted_by"] = redaction.event_id
-        msg_dict["unsigned"]["redacted_because"] = redaction
         redacted = make_event_from_dict(
             msg_dict, internal_metadata_dict=msg.internal_metadata.get_dict()
         )
