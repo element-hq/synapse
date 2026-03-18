@@ -1408,7 +1408,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                     quarantined_by is not None,
                 )
 
-        total_media_quarantined = 0
         if hashes:
             sql_many_clause_sql, sql_many_clause_args = make_in_list_sql_clause(
                 txn.database_engine, "sha256", hashes

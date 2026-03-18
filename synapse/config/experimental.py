@@ -422,9 +422,6 @@ class ExperimentalConfig(Config):
         # previously calculated push actions.
         self.msc2654_enabled: bool = experimental.get("msc2654_enabled", False)
 
-        # MSC2666: Query mutual rooms between two users.
-        self.msc2666_enabled: bool = experimental.get("msc2666_enabled", False)
-
         # MSC2815 (allow room moderators to view redacted event content)
         self.msc2815_enabled: bool = experimental.get("msc2815_enabled", False)
 
@@ -444,9 +441,6 @@ class ExperimentalConfig(Config):
 
         # MSC3848: Introduce errcodes for specific event sending failures
         self.msc3848_enabled: bool = experimental.get("msc3848_enabled", False)
-
-        # MSC3852: Expose last seen user agent field on /_matrix/client/v3/devices.
-        self.msc3852_enabled: bool = experimental.get("msc3852_enabled", False)
 
         # MSC3866: M_USER_AWAITING_APPROVAL error code
         raw_msc3866_config = experimental.get("msc3866", {})
