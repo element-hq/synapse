@@ -593,6 +593,11 @@
           "description": "The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted.",
           "default": "http://localhost:8080"
         },
+        "force_http2": {
+          "type": "boolean",
+          "description": "Force HTTP/2 over plaintext (H2C) when connecting to MAS. MAS supports this natively, but a reverse proxy between Synapse and MAS may not.",
+          "default": false
+        },
         "secret": {
           "type": [
             "string",
