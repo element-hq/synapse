@@ -418,6 +418,35 @@ def format_event_for_client_v2_without_room_id(d: JsonDict) -> JsonDict:
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
+class FilteredEvent:
+    """An event annotated with per-user data for client serialization.
+
+    Produced by filter_and_transform_events_for_client. Carries the user's
+    membership at the time of the event so serialization can inject it into
+    unsigned.membership (MSC4115) without cloning the underlying event.
+    """
+
+    event: "EventBase"
+    membership: str | None
+
+    @classmethod
+    def state(cls, event: "EventBase") -> "FilteredEvent":
+        """Wrap a state event with no per-user membership annotation.
+
+        The event must be a state event (i.e. have a state_key).
+        """
+        assert event.is_state(), (
+            f"FilteredEvent.state() called with non-state event {event.event_id}"
+        )
+        return cls(event=event, membership=None)
+
+    @classmethod
+    def admin_override(cls, event: "EventBase") -> "FilteredEvent":
+        """Wrap an event that bypasses visibility filtering due to admin privileges."""
+        return cls(event=event, membership=None)
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
 class SerializeEventConfig:
     as_client_event: bool = True
     # Function to convert from federation format to client format
@@ -465,6 +494,7 @@ def _serialize_event(
     time_now_ms: int,
     *,
     config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
+    membership: str | None = None,
 ) -> JsonDict:
     """Serialize event for clients
 
@@ -472,6 +502,8 @@ def _serialize_event(
         e
         time_now_ms
         config: Event serialization config
+        membership: The requesting user's membership at the time of the event,
+            to be injected into unsigned.membership (MSC4115).
 
     Returns:
         The serialized event dictionary.
@@ -582,6 +614,9 @@ def _serialize_event(
                     expires_at - time_now_ms
                 )
 
+    if membership is not None:
+        d.setdefault("unsigned", {})[EventUnsignedContentFields.MEMBERSHIP] = membership
+
     return d
 
 
@@ -603,7 +638,7 @@ class EventClientSerializer:
 
     async def serialize_event(
         self,
-        event: JsonDict | EventBase,
+        event: JsonDict | FilteredEvent,
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
@@ -625,8 +660,11 @@ class EventClientSerializer:
             The serialized event
         """
         # To handle the case of presence events and the like
-        if not isinstance(event, EventBase):
+        if not isinstance(event, FilteredEvent):
             return event
+
+        base_event = event.event
+        membership = event.membership
 
         # Force-enable server admin metadata because the only time an event with
         # relevant metadata will be when the admin requested it via their admin
@@ -640,11 +678,13 @@ class EventClientSerializer:
         if self._config.experimental.msc4354_enabled:
             config = attr.evolve(config, msc4354_enabled=True)
 
-        serialized_event = _serialize_event(event, time_now, config=config)
+        serialized_event = _serialize_event(
+            base_event, time_now, config=config, membership=membership
+        )
 
         # If the event was redacted, fetch the redaction event from the database
         # and include it in the serialized event's unsigned section.
-        redacted_by: str | None = event.internal_metadata.redacted_by
+        redacted_by: str | None = base_event.internal_metadata.redacted_by
         if redacted_by is not None:
             serialized_event.setdefault("unsigned", {})["redacted_by"] = redacted_by
             if redaction_map is not None:
@@ -671,7 +711,7 @@ class EventClientSerializer:
 
         new_unsigned = {}
         for callback in self._add_extra_fields_to_unsigned_client_event_callbacks:
-            u = await callback(event)
+            u = await callback(base_event)
             new_unsigned.update(u)
 
         if new_unsigned:
@@ -689,9 +729,9 @@ class EventClientSerializer:
 
         # Check if there are any bundled aggregations to include with the event.
         if bundle_aggregations:
-            if event.event_id in bundle_aggregations:
+            if base_event.event_id in bundle_aggregations:
                 await self._inject_bundled_aggregations(
-                    event,
+                    base_event,
                     time_now,
                     config,
                     bundle_aggregations,
@@ -743,7 +783,7 @@ class EventClientSerializer:
             # `sender` of the edit; however MSC3925 proposes extending it to the whole
             # of the edit, which is what we do here.
             serialized_aggregations[RelationTypes.REPLACE] = await self.serialize_event(
-                event_aggregations.replace,
+                FilteredEvent(event=event_aggregations.replace, membership=None),
                 time_now,
                 config=config,
             )
@@ -753,7 +793,7 @@ class EventClientSerializer:
             thread = event_aggregations.thread
 
             serialized_latest_event = await self.serialize_event(
-                thread.latest_event,
+                FilteredEvent(event=thread.latest_event, membership=None),
                 time_now,
                 config=config,
                 bundle_aggregations=bundled_aggregations,
@@ -778,7 +818,7 @@ class EventClientSerializer:
     @trace
     async def serialize_events(
         self,
-        events: Collection[JsonDict | EventBase],
+        events: Collection[JsonDict | FilteredEvent],
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
@@ -803,11 +843,13 @@ class EventClientSerializer:
         )
 
         # Batch-fetch all redaction events in one go rather than one per event.
-        redaction_ids = {
-            e.internal_metadata.redacted_by
-            for e in events
-            if isinstance(e, EventBase) and e.internal_metadata.redacted_by is not None
-        }
+        redaction_ids: set[str] = set()
+        for e in events:
+            base = e.event if isinstance(e, FilteredEvent) else e
+            if isinstance(base, EventBase):
+                redacted_by = base.internal_metadata.redacted_by
+                if redacted_by is not None:
+                    redaction_ids.add(redacted_by)
         redaction_map = (
             await self._store.get_events(redaction_ids) if redaction_ids else {}
         )
