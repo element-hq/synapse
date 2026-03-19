@@ -27,7 +27,6 @@ import pymacaroons
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.handlers.oidc import OidcMetadataError
 from synapse.handlers.sso import MappingException
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
