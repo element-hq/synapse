@@ -224,7 +224,7 @@ class RoomPolicyHandler:
                 signature.get(policy_server, {})
             )
         except HttpResponseException as ex:
-            # re-wrap http errors as SynapseErrors so they can be proxied to clients directly
+            # re-wrap HTTP errors as `SynapseError` so they can be proxied to clients directly
             raise ex.to_synapse_error() from ex
 
         if verify:
