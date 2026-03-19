@@ -455,9 +455,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
                     cache_entry.error_bulk(cache, missing, f)
 
                 args_to_call = dict(arg_dict)
-                args_to_call[list_name] = {
-                    cache_key_to_arg(key) for key in missing
-                }
+                args_to_call[list_name] = {cache_key_to_arg(key) for key in missing}
 
                 # dispatch the call, and attach the two handlers
                 missing_d = defer.maybeDeferred(

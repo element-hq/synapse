@@ -943,6 +943,10 @@ def _custom_sync_async_decorator(
         async def _wrapper(
             *args: P.args, **kwargs: P.kwargs
         ) -> Any:  # Return type is RInner
+            # Short-circuit: if opentracing was disabled after decoration time
+            # (init_tracer sets opentracing=None), skip all wrapping overhead.
+            if opentracing is None:
+                return await func(*args, **kwargs)  # type: ignore[unreachable]
             # type-ignore: func() returns R, but mypy doesn't know that R is
             # Awaitable here.
             with wrapping_logic(func, *args, **kwargs):  # type: ignore[arg-type]
@@ -953,6 +957,11 @@ def _custom_sync_async_decorator(
         # `@defer.inlineCallbacks` or that return a `Deferred` or other `Awaitable`.
         @wraps(func)
         def _wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
+            # Short-circuit: if opentracing was disabled after decoration time
+            # (init_tracer sets opentracing=None), skip all wrapping overhead.
+            if opentracing is None:
+                return func(*args, **kwargs)  # type: ignore[unreachable]
+
             scope = wrapping_logic(func, *args, **kwargs)
             scope.__enter__()
 
