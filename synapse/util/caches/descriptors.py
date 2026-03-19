@@ -121,6 +121,10 @@ class _CacheDescriptorBase:
 
         self.num_args = num_args
 
+        # Store all parameter names (including 'self') for fast arg binding
+        # in subclasses that need to reconstruct a full arg_dict at call time.
+        self.all_args = all_args
+
         # list of the names of the args used as the cache key
         self.arg_names = all_args[1 : num_args + 1]
 
@@ -369,15 +373,32 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
                 % (self.num_args, self.cached_method_name, num_args)
             )
 
+        # Precompute signature info once per descriptor bind, rather than
+        # calling inspect.getcallargs on every cache lookup.
+        all_param_names = self.all_args
+        num_params = len(all_param_names)
+        arg_defaults = self.arg_defaults
+        arg_names = self.arg_names
+        list_name = self.list_name
+        list_pos = self.list_pos
+        orig = self.orig
+
         @functools.wraps(self.orig)
         def wrapped(*args: Any, **kwargs: Any) -> "defer.Deferred[dict]":
             # If we're passed a cache_context then we'll want to call its
             # invalidate() whenever we are invalidated
             invalidate_callback = kwargs.pop("on_invalidate", None)
 
-            arg_dict = inspect.getcallargs(self.orig, obj, *args, **kwargs)
-            keyargs = [arg_dict[arg_nm] for arg_nm in self.arg_names]
-            list_args = arg_dict[self.list_name]
+            # Fast arg binding: equivalent to inspect.getcallargs(self.orig, obj, *args, **kwargs)
+            # but without re-introspecting the function signature every time.
+            arg_dict = dict(arg_defaults)
+            all_positional = (obj,) + args
+            for i in range(min(len(all_positional), num_params)):
+                arg_dict[all_param_names[i]] = all_positional[i]
+            arg_dict.update(kwargs)
+
+            keyargs = [arg_dict[arg_nm] for arg_nm in arg_names]
+            list_args = arg_dict[list_name]
 
             # If the cache takes a single arg then that is used as the key,
             # otherwise a tuple is used.
@@ -393,11 +414,11 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
                 keylist = list(keyargs)
 
                 def arg_to_cache_key(arg: Hashable) -> Hashable:
-                    keylist[self.list_pos] = arg
+                    keylist[list_pos] = arg
                     return tuple(keylist)
 
                 def cache_key_to_arg(key: tuple) -> Hashable:
-                    return key[self.list_pos]
+                    return key[list_pos]
 
             cache_keys = [arg_to_cache_key(arg) for arg in list_args]
             immediate_results, pending_deferred, missing = cache.get_bulk(
@@ -434,13 +455,13 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
                     cache_entry.error_bulk(cache, missing, f)
 
                 args_to_call = dict(arg_dict)
-                args_to_call[self.list_name] = {
+                args_to_call[list_name] = {
                     cache_key_to_arg(key) for key in missing
                 }
 
                 # dispatch the call, and attach the two handlers
                 missing_d = defer.maybeDeferred(
-                    preserve_fn(self.orig), **args_to_call
+                    preserve_fn(orig), **args_to_call
                 ).addCallbacks(complete_all, errback_all)
                 cached_defers.append(missing_d)
 
