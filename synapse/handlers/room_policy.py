@@ -136,8 +136,9 @@ class RoomPolicyHandler:
         if policy_server is None:
             return True  # no policy server configured, so allow
 
-        # Check if the event has been signed with the public key in the policy server state event.
-        # If it is, we can save an HTTP hit to get a fresh signature.
+        # Check if the event has been signed with the public key in the policy server
+        # state event. If it is, the event is valid according to the policy server and
+        # we don't need to request a fresh signature.
         valid = await self._verify_policy_server_signature(
             event, policy_server, public_key
         )
@@ -191,7 +192,9 @@ class RoomPolicyHandler:
             signature is invalid.
         """
         if self._is_policy_server_state_event(event):
-            return  # don't sign the policy server change event (it shouldn't be signed)
+            # per spec, policy servers aren't asked to sign `m.room.policy` state events
+            # with empty state keys
+            return
 
         (policy_server, public_key) = await self._get_policy_server(event.room_id)
         if policy_server is None:
@@ -216,9 +219,20 @@ class RoomPolicyHandler:
                     "This event has been rejected as probable spam by the policy server",
                     Codes.FORBIDDEN,
                 )
-            # Note: if the policy server and event sender are the same server, the returned
-            # signatures from the policy server might not contain the actual event signature.
-            # This is why we go out of our way to add defaults.
+
+            # Note: if the policy server and event sender are the same server, the sender
+            # might not have added policy server signatures to the event for whatever reason.
+            # When this happens, we don't want to obliterate the event's existing signatures
+            # because the event will fail authorization. This is why we add defaults rather
+            # than simply `update` the signatures on the event.
+            #
+            # This situation can happen if the homeserver and policy server parts are
+            # logically the same server, but run by different software. For example, Synapse
+            # will not ask "itself" for a policy server signature, even if its server name
+            # is the designated policy server, so it could send an event outwards that other
+            # servers need to manually fetch signatures for. This is the code that allows
+            # those events to continue working (because they're legally sent, even if missing
+            # the policy server signature).
             event.signatures.setdefault(policy_server, {}).update(
                 signature.get(policy_server, {})
             )

@@ -246,6 +246,10 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(ok, True)
 
     def test_missing_public_key_event_set(self) -> None:
+        """
+        Tests that a missing public key in the `m.room.policy` state event is treated
+        as though there is no policy server configured, thus allowing all events.
+        """
         self._add_policy_server_to_room()  # no public_key
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
