@@ -141,6 +141,11 @@ pub struct RoomVersion {
     pub msc4289_creator_power_enabled: bool,
     /// MSC4291: Room IDs as hashes of the create event.
     pub msc4291_room_ids_as_hashes: bool,
+    /// Set of room versions where Synapse strictly enforces event key size limits
+    /// in bytes, rather than in codepoints.
+    ///
+    /// In these room versions, we are stricter with event size validation.
+    pub strict_event_byte_limits_room_versions: bool,
 }
 
 const ROOM_VERSION_V1: RoomVersion = RoomVersion {
@@ -164,6 +169,7 @@ const ROOM_VERSION_V1: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 const ROOM_VERSION_V2: RoomVersion = RoomVersion {
@@ -187,6 +193,7 @@ const ROOM_VERSION_V2: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 const ROOM_VERSION_V3: RoomVersion = RoomVersion {
@@ -210,6 +217,7 @@ const ROOM_VERSION_V3: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 const ROOM_VERSION_V4: RoomVersion = RoomVersion {
@@ -233,6 +241,7 @@ const ROOM_VERSION_V4: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 const ROOM_VERSION_V5: RoomVersion = RoomVersion {
@@ -256,6 +265,7 @@ const ROOM_VERSION_V5: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 const ROOM_VERSION_V6: RoomVersion = RoomVersion {
@@ -279,6 +289,7 @@ const ROOM_VERSION_V6: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 const ROOM_VERSION_V7: RoomVersion = RoomVersion {
@@ -302,6 +313,7 @@ const ROOM_VERSION_V7: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 const ROOM_VERSION_V8: RoomVersion = RoomVersion {
@@ -325,6 +337,7 @@ const ROOM_VERSION_V8: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 const ROOM_VERSION_V9: RoomVersion = RoomVersion {
@@ -348,6 +361,7 @@ const ROOM_VERSION_V9: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 const ROOM_VERSION_V10: RoomVersion = RoomVersion {
@@ -371,6 +385,7 @@ const ROOM_VERSION_V10: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 /// MSC3389 (Redaction changes for events with a relation) based on room version "10".
@@ -395,6 +410,7 @@ const ROOM_VERSION_MSC3389V10: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: true,
 };
 
 /// MSC1767 (Extensible Events) based on room version "10".
@@ -419,6 +435,7 @@ const ROOM_VERSION_MSC1767V10: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 /// MSC3757 (Restricting who can overwrite a state event) based on room version "10".
@@ -443,6 +460,7 @@ const ROOM_VERSION_MSC3757V10: RoomVersion = RoomVersion {
     msc3757_enabled: true,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: false,
 };
 
 const ROOM_VERSION_V11: RoomVersion = RoomVersion {
@@ -466,6 +484,7 @@ const ROOM_VERSION_V11: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: true, // Changed from v10
 };
 
 /// MSC3757 (Restricting who can overwrite a state event) based on room version "11".
@@ -490,6 +509,7 @@ const ROOM_VERSION_MSC3757V11: RoomVersion = RoomVersion {
     msc3757_enabled: true,
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
+    strict_event_byte_limits_room_versions: true,
 };
 
 const ROOM_VERSION_HYDRA_V11: RoomVersion = RoomVersion {
@@ -513,6 +533,7 @@ const ROOM_VERSION_HYDRA_V11: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: true, // Changed from v11
     msc4291_room_ids_as_hashes: true,    // Changed from v11
+    strict_event_byte_limits_room_versions: true,
 };
 
 const ROOM_VERSION_V12: RoomVersion = RoomVersion {
@@ -536,6 +557,7 @@ const ROOM_VERSION_V12: RoomVersion = RoomVersion {
     msc3757_enabled: false,
     msc4289_creator_power_enabled: true, // Changed from v11
     msc4291_room_ids_as_hashes: true,    // Changed from v11
+    strict_event_byte_limits_room_versions: true,
 };
 
 /// Helper class for managing the known room versions, and providing dict-like
