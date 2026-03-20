@@ -99,7 +99,7 @@ class SlidingSyncExtensionHandler:
         Args:
             sync_config: Sync configuration
             new_connection_state: Snapshot of the current per-connection state
-            new_per_connection_state: A mutable copy of the per-connection
+            new_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state during this request.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
