@@ -27,6 +27,7 @@ from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
+    Annotated,
     Any,
     ClassVar,
     Final,
@@ -42,10 +43,11 @@ from typing import (
     overload,
 )
 
+import annotated_types
 import attr
 import pydantic_core.core_schema
 from immutabledict import immutabledict
-from pydantic import GetCoreSchemaHandler
+from pydantic import GetCoreSchemaHandler, StrictInt
 from pydantic_core import CoreSchema
 from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
@@ -171,6 +173,13 @@ for when we really mean 'absent' and not JSON null.
 
 For a Sentinel for internal (non-API-facing) use, instead consider
 `Sentinel.UNSET_SENTINEL`.
+"""
+
+
+NonNegativeStrictInt = Annotated[StrictInt, annotated_types.Ge(0)]
+"""A strict integer that must be greater than or equal to zero.
+
+Should be preferred in place of Pydantic's own (lax) NonNegativeInt.
 """
 
 

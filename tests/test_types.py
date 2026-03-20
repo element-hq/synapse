@@ -31,6 +31,7 @@ from synapse.types import (
     AbsentType,
     AbstractMultiWriterStreamToken,
     MultiWriterStreamToken,
+    NonNegativeStrictInt,
     RoomAlias,
     RoomStreamToken,
     UserID,
@@ -278,3 +279,74 @@ class AbsentTestCase(unittest.TestCase):
 
         self.assertIs(copy.copy(Absent), Absent)
         self.assertIs(a.absent, b.absent)
+
+
+class NonNegativeStrictIntTestCase(unittest.TestCase):
+    """
+    Tests for the `NonNegativeStrictInt` utility.
+    """
+
+    def test_pydantic_jsonschema(self) -> None:
+        """
+        Tests that `NonNegativeStrictInt` produces sensible JSONSchema.
+        """
+
+        class MyModel(BaseModel):
+            limit: NonNegativeStrictInt = 100
+
+        self.assertEqual(
+            MyModel.model_json_schema(),
+            {
+                "properties": {
+                    "limit": {
+                        "default": 100,
+                        "minimum": 0,
+                        "title": "Limit",
+                        "type": "integer",
+                    }
+                },
+                "title": "MyModel",
+                "type": "object",
+            },
+            f"JSONSchema actually is:\n{MyModel.model_json_schema()!r}",
+        )
+
+    def test_pydantic_reject(self) -> None:
+        """
+        Tests that `NonNegativeStrictInt` rejects negative numbers
+        and non-ints.
+        """
+
+        class MyModel(BaseModel):
+            limit: NonNegativeStrictInt = 100
+
+        with self.assertRaises(ValidationError):
+            MyModel.model_validate({"limit": -1})
+
+        with self.assertRaises(ValidationError):
+            MyModel.model_validate_json('{"limit": -1}')
+
+        # StrictInt, so don't accept floats...
+        with self.assertRaises(ValidationError):
+            MyModel.model_validate({"limit": 1.5})
+
+        with self.assertRaises(ValidationError):
+            MyModel.model_validate_json('{"limit": 1.5}')
+
+        # ...and don't accept stringy ints either.
+        with self.assertRaises(ValidationError):
+            MyModel.model_validate({"limit": "42"})
+
+        with self.assertRaises(ValidationError):
+            MyModel.model_validate_json('{"limit": "42"}')
+
+    def test_pydantic_accept(self) -> None:
+        """
+        Tests that `Absent` accepts the absence of a value when used in Pydantic models.
+        """
+
+        class MyModel(BaseModel):
+            limit: NonNegativeStrictInt = 100
+
+        self.assertEqual(MyModel.model_validate_json('{"limit": 0}'), MyModel(limit=0))
+        self.assertEqual(MyModel.model_validate({"limit": 42}), MyModel(limit=42))
