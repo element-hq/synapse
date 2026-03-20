@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import logging
 from unittest.mock import AsyncMock, Mock
 
 from twisted.test.proto_helpers import MemoryReactor
@@ -140,146 +139,113 @@ class SendToDeviceTestCase(HomeserverTestCase):
         Test that a bunch of to-device messages are split over multiple EDUs if they are
         collectively too large to fit into a single EDU
         """
-        # FIXME: Because huge log line is triggered in this test,
-        # trial breaks, sometimes (flakily) failing the test run.
-        # ref: https://github.com/twisted/twisted/issues/12482
-        # To remove this, we would need to fix the above issue and
-        # update, including in olddeps (so several years' wait).
-        # sql_logger = logging.getLogger("synapse.storage.SQL")
-        # sql_logger_was_disabled = sql_logger.disabled
-        # sql_logger.disabled = True
-        # try:
-            mock_send_transaction: AsyncMock = (
-                self.federation_transport_client.send_transaction
-            )
-            mock_send_transaction.return_value = {}
+        mock_send_transaction: AsyncMock = (
+            self.federation_transport_client.send_transaction
+        )
+        mock_send_transaction.return_value = {}
 
-            sender = self.hs.get_federation_sender()
+        sender = self.hs.get_federation_sender()
 
-            _ = self.register_user("u1", "pass")
-            user1_tok = self.login("u1", "pass", "d1")
-            destination = "secondserver"
-            messages = {}
+        _ = self.register_user("u1", "pass")
+        user1_tok = self.login("u1", "pass", "d1")
+        destination = "secondserver"
+        messages = {}
 
-            # 2 messages, each just big enough to fit into their own EDU
-            for i in range(2):
-                messages[f"@remote_user{i}:" + destination] = {
-                    "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
-                }
+        # 2 messages, each just big enough to fit into their own EDU
+        for i in range(2):
+            messages[f"@remote_user{i}:" + destination] = {
+                "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
+            }
 
-            channel = self.make_request(
-                "PUT",
-                "/_matrix/client/r0/sendToDevice/m.test/1234567",
-                content={"messages": messages},
-                access_token=user1_tok,
-            )
-            self.assertEqual(channel.code, 200, channel.result)
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/1234567",
+            content={"messages": messages},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
 
-            self.get_success(sender.send_device_messages([destination]))
+        self.get_success(sender.send_device_messages([destination]))
 
-            json_cb = mock_send_transaction.call_args[0][1]
-            data = json_cb()
-            self.assertEqual(len(data["edus"]), 2)
-        # finally:
-        #     sql_logger.disabled = sql_logger_was_disabled
+        json_cb = mock_send_transaction.call_args[0][1]
+        data = json_cb()
+        self.assertEqual(len(data["edus"]), 2)
 
     def test_edu_small_messages_not_splitting(self) -> None:
         """
         Test that a couple of small messages do not get split into multiple EDUs
         """
-        # FIXME: Because huge log line is triggered in this test,
-        # trial breaks, sometimes (flakily) failing the test run.
-        # ref: https://github.com/twisted/twisted/issues/12482
-        # To remove this, we would need to fix the above issue and
-        # update, including in olddeps (so several years' wait).
-        # sql_logger = logging.getLogger("synapse.storage.SQL")
-        # sql_logger_was_disabled = sql_logger.disabled
-        # sql_logger.disabled = True
-        # try:
-            mock_send_transaction: AsyncMock = (
-                self.federation_transport_client.send_transaction
-            )
-            mock_send_transaction.return_value = {}
+        mock_send_transaction: AsyncMock = (
+            self.federation_transport_client.send_transaction
+        )
+        mock_send_transaction.return_value = {}
 
-            sender = self.hs.get_federation_sender()
+        sender = self.hs.get_federation_sender()
 
-            _ = self.register_user("u1", "pass")
-            user1_tok = self.login("u1", "pass", "d1")
-            destination = "secondserver"
-            messages = {}
+        _ = self.register_user("u1", "pass")
+        user1_tok = self.login("u1", "pass", "d1")
+        destination = "secondserver"
+        messages = {}
 
-            # 2 small messages that should fit in a single EDU
-            for i in range(2):
-                messages[f"@remote_user{i}:" + destination] = {
-                    "device": {"foo": random_string(100)}
-                }
+        # 2 small messages that should fit in a single EDU
+        for i in range(2):
+            messages[f"@remote_user{i}:" + destination] = {
+                "device": {"foo": random_string(100)}
+            }
 
-            channel = self.make_request(
-                "PUT",
-                "/_matrix/client/r0/sendToDevice/m.test/123456",
-                content={"messages": messages},
-                access_token=user1_tok,
-            )
-            self.assertEqual(channel.code, 200, channel.result)
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/123456",
+            content={"messages": messages},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
 
-            self.get_success(sender.send_device_messages([destination]))
+        self.get_success(sender.send_device_messages([destination]))
 
-            json_cb = mock_send_transaction.call_args[0][1]
-            data = json_cb()
-            self.assertEqual(len(data["edus"]), 1)
-        # finally:
-        #     sql_logger.disabled = sql_logger_was_disabled
+        json_cb = mock_send_transaction.call_args[0][1]
+        data = json_cb()
+        self.assertEqual(len(data["edus"]), 1)
 
     def test_transaction_splitting(self) -> None:
         """Test that a bunch of to-device messages are split into multiple transactions if there are too many EDUs"""
-        # FIXME: Because huge log line is triggered in this test,
-        # trial breaks, sometimes (flakily) failing the test run.
-        # ref: https://github.com/twisted/twisted/issues/12482
-        # To remove this, we would need to fix the above issue and
-        # update, including in olddeps (so several years' wait).
-        # sql_logger = logging.getLogger("synapse.storage.SQL")
-        # sql_logger_was_disabled = sql_logger.disabled
-        # sql_logger.disabled = True
-        # try:
-            mock_send_transaction: AsyncMock = (
-                self.federation_transport_client.send_transaction
-            )
-            mock_send_transaction.return_value = {}
+        mock_send_transaction: AsyncMock = (
+            self.federation_transport_client.send_transaction
+        )
+        mock_send_transaction.return_value = {}
 
-            sender = self.hs.get_federation_sender()
+        sender = self.hs.get_federation_sender()
 
-            _ = self.register_user("u1", "pass")
-            user1_tok = self.login("u1", "pass", "d1")
-            destination = "secondserver"
-            messages = {}
+        _ = self.register_user("u1", "pass")
+        user1_tok = self.login("u1", "pass", "d1")
+        destination = "secondserver"
+        messages = {}
 
-            nb_of_edus_to_send = MAX_EDUS_PER_TRANSACTION + 1
+        nb_of_edus_to_send = MAX_EDUS_PER_TRANSACTION + 1
 
-            for i in range(nb_of_edus_to_send):
-                messages[f"@remote_user{i}:" + destination] = {
-                    "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
-                }
+        for i in range(nb_of_edus_to_send):
+            messages[f"@remote_user{i}:" + destination] = {
+                "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
+            }
 
-            channel = self.make_request(
-                "PUT",
-                "/_matrix/client/r0/sendToDevice/m.test/12345678",
-                content={"messages": messages},
-                access_token=user1_tok,
-            )
-            self.assertEqual(channel.code, 200, channel.result)
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/12345678",
+            content={"messages": messages},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
 
-            self.get_success(sender.send_device_messages([destination]))
+        self.get_success(sender.send_device_messages([destination]))
 
-            # At least 2 transactions should be sent since we are over the EDU limit per transaction
-            self.assertGreaterEqual(mock_send_transaction.call_count, 2)
+        # At least 2 transactions should be sent since we are over the EDU limit per transaction
+        self.assertGreaterEqual(mock_send_transaction.call_count, 2)
 
-            first_call = mock_send_transaction.call_args_list[0][0][1]()
-            second_call = mock_send_transaction.call_args_list[1][0][1]()
-            self.assertEqual(
-                len(first_call["edus"]) + len(second_call["edus"]), nb_of_edus_to_send
-            )
-        # finally:
-        #     sql_logger.disabled = sql_logger_was_disabled
+        first_call = mock_send_transaction.call_args_list[0][0][1]()
+        second_call = mock_send_transaction.call_args_list[1][0][1]()
+        self.assertEqual(
+            len(first_call["edus"]) + len(second_call["edus"]), nb_of_edus_to_send
+        )
 
     @override_config({"rc_key_requests": {"per_second": 10, "burst_count": 2}})
     def test_local_room_key_request(self) -> None:
