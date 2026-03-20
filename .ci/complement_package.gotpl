@@ -29,7 +29,7 @@ which is under the Unlicense licence.
     {{- with .TestCases -}}
         {{- /* Passing tests are first */ -}}
         {{- range . -}}
-            {{- if eq .Result "PASS" -}}
+            {{- if and (eq .Result "PASS") (not $settings.HideSuccessfulTests) -}}
                 ::group::{{ "\033" }}[0;32m✅{{ " " }}{{- .Name -}}
                 {{- "\033" -}}[0;37m ({{if $settings.ShowTestStatus}}{{.Result}}; {{end}}{{ .Duration -}}
                 {{- with .Coverage -}}
