@@ -17,6 +17,7 @@
 import logging
 from typing import TYPE_CHECKING
 
+import attr
 from signedjson.key import decode_verify_key_bytes
 from unpaddedbase64 import decode_base64
 
@@ -32,6 +33,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 POLICY_SERVER_KEY_ID = "ed25519:policy_server"
+
+@attr.s(slots=True, auto_attribs=True)
+class PolicyServerInfo:
+    # name of the server.
+    server_name: str
+
+    # the unpadded base64-encoded Ed25519 public key of the server.
+    public_key: str
 
 
 class RoomPolicyHandler:
@@ -51,7 +60,7 @@ class RoomPolicyHandler:
             return event.type in [EventTypes.RoomPolicy, "org.matrix.msc4284.policy"]
         return False
 
-    async def _get_policy_server(self, room_id: str) -> tuple[str | None, str | None]:
+    async def _get_policy_server(self, room_id: str) -> PolicyServerInfo | None:
         """Get the policy server's name and Ed25519 public key for the room, if set.
 
         Args:
@@ -75,7 +84,7 @@ class RoomPolicyHandler:
                 )
             )
             if not policy_event:
-                return None, None  # neither stable or unstable configured
+                return None  # neither stable or unstable configured
 
             # Unstable configured, grab its public key
             public_key = policy_event.content.get("public_key", None)
@@ -88,27 +97,27 @@ class RoomPolicyHandler:
                     public_key = ed25519_key
 
         if public_key is None or not isinstance(public_key, str):
-            return None, None  # no public key means no policy server
+            return None  # no public key means no policy server
 
         policy_server = policy_event.content.get("via", "")
         if policy_server is None or not isinstance(policy_server, str):
-            return None, None  # no policy server
+            return None  # no policy server
 
         if policy_server == self._hs.hostname:
-            return None, None  # Synapse itself can't be a policy server (currently)
+            return None  # Synapse itself can't be a policy server (currently)
 
         try:
             parse_and_validate_server_name(policy_server)
         except ValueError:
-            return None, None  # invalid policy server
+            return None  # invalid policy server
 
         is_in_room = await self._event_auth_handler.is_host_in_room(
             room_id, policy_server
         )
         if not is_in_room:
-            return None, None  # policy server not in room
+            return None  # policy server not in room
 
-        return policy_server, public_key
+        return PolicyServerInfo(policy_server, public_key)
 
     async def is_event_allowed(self, event: EventBase) -> bool:
         """Check if the given event is allowed in the room by the policy server.
@@ -132,15 +141,15 @@ class RoomPolicyHandler:
         if self._is_policy_server_state_event(event):
             return True  # always allow policy server change events
 
-        (policy_server, public_key) = await self._get_policy_server(event.room_id)
-        if policy_server is None or public_key is None:
+        policy_server = await self._get_policy_server(event.room_id)
+        if policy_server is None:
             return True  # no policy server configured, so allow
 
         # Check if the event has been signed with the public key in the policy server
         # state event. If it is, the event is valid according to the policy server and
         # we don't need to request a fresh signature.
         valid = await self._verify_policy_server_signature(
-            event, policy_server, public_key
+            event, policy_server.server_name, policy_server.public_key
         )
         if valid:
             return True  # valid signature == allow
@@ -196,15 +205,15 @@ class RoomPolicyHandler:
             # with empty state keys
             return
 
-        (policy_server, public_key) = await self._get_policy_server(event.room_id)
-        if policy_server is None or public_key is None:
+        policy_server = await self._get_policy_server(event.room_id)
+        if policy_server is None:
             return
 
         # Ask the policy server to sign this event.
         # We set a smallish timeout here as we don't want to block event sending too long.
         try:
             signature = await self._federation_client.ask_policy_server_to_sign_event(
-                policy_server,
+                policy_server.server_name,
                 event,
                 timeout=3000,
             )
@@ -233,8 +242,8 @@ class RoomPolicyHandler:
             # servers need to manually fetch signatures for. This is the code that allows
             # those events to continue working (because they're legally sent, even if missing
             # the policy server signature).
-            event.signatures.setdefault(policy_server, {}).update(
-                signature.get(policy_server, {})
+            event.signatures.setdefault(policy_server.server_name, {}).update(
+                signature.get(policy_server.server_name, {})
             )
         except HttpResponseException as ex:
             # re-wrap HTTP errors as `SynapseError` so they can be proxied to clients directly
@@ -242,10 +251,10 @@ class RoomPolicyHandler:
 
         if verify:
             is_valid = await self._verify_policy_server_signature(
-                event, policy_server, public_key
+                event, policy_server.server_name, policy_server.public_key
             )
             if not is_valid:
                 raise SynapseError(
                     500,
-                    f"policy server {policy_server} failed to sign event correctly",
+                    f"policy server {policy_server.server_name} failed to sign event correctly",
                 )
