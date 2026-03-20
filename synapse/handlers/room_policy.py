@@ -64,7 +64,8 @@ class RoomPolicyHandler:
     async def _get_policy_server(self, room_id: str) -> PolicyServerInfo | None:
         """Get the policy server's name and Ed25519 public key for the room, if set.
 
-        A policy server is *not* set if:
+        If the `m.room.policy` state event is invalid, then a policy server is not set. It
+        can be invalid if:
         - The room doesn't have an `m.room.policy` state event with empty state key.
         - The policy state event is missing the `via` or `public_keys` field.
         - The policy state event's public keys is missing an `ed25519` key.
