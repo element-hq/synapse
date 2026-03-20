@@ -1,0 +1,281 @@
+# syntax=docker/dockerfile:1
+# Dockerfile to build Synapse with PyPy instead of CPython.
+#
+# Based on the upstream matrixdotorg/synapse Dockerfile, modified to:
+#   - Use PyPy 3.11 instead of CPython 3.13 via uv's built-in PyPy support
+#   - Build PyO3 Rust extensions against PyPy via PYO3_PYTHON
+#   - Use a debian slim base for runtime with uv-installed PyPy
+#
+# To build:
+#   DOCKER_BUILDKIT=1 docker build -f Dockerfile.pypy .
+#
+# IMPORTANT CAVEATS:
+#   - This is EXPERIMENTAL. Synapse does not officially support PyPy.
+#   - PyPy currently supports up to Python 3.11; Synapse's default is 3.13.
+#     You may need to patch pyproject.toml if it specifies requires-python >= 3.12.
+#   - The Rust/PyO3 extension compiles against PyPy's cpyext layer.
+#     PyO3 officially supports all actively-maintained PyPy versions, but
+#     this is less battle-tested than CPython for Synapse specifically.
+#   - Some C-extension dependencies may need CFFI alternatives.
+#   - PyPy's GC is non-refcounting; watch for finalizer-order issues.
+
+ARG DEBIAN_VERSION=trixie
+ARG PYPY_VERSION=3.11
+ARG POETRY_VERSION=2.2.1
+
+###
+### Stage 0: generate requirements.txt
+###
+### This stage is platform-agnostic. We keep using the CPython-based uv image
+### here since it only runs poetry export to produce a requirements.txt.
+###
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python3.13-${DEBIAN_VERSION} AS requirements
+
+WORKDIR /synapse
+
+COPY pyproject.toml poetry.lock /synapse/
+
+ARG TEST_ONLY_SKIP_DEP_HASH_VERIFICATION
+ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
+
+ENV UV_LINK_MODE=copy
+
+ARG POETRY_VERSION
+ARG PYPY_VERSION
+# Run poetry export under PyPy so that platform_python_implementation
+# markers resolve for PyPy (e.g. psycopg2cffi instead of psycopg2).
+RUN --mount=type=cache,target=/root/.cache/uv \
+  if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
+    uvx --python pypy@${PYPY_VERSION} --with poetry-plugin-export==1.9.0 \
+        poetry@${POETRY_VERSION} export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
+  else \
+    touch /synapse/requirements.txt; \
+  fi
+
+###
+### Stage 1: builder
+###
+### We start from a debian base with uv installed, then use uv to install
+### PyPy and all dependencies. uv natively supports PyPy as a target.
+###
+FROM docker.io/library/debian:${DEBIAN_VERSION} AS builder
+
+# Install build essentials for compiling C extensions and the Rust toolchain
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    bzip2 \
+    ca-certificates \
+    curl \
+    gcc \
+    g++ \
+    libbz2-dev \
+    libffi-dev \
+    libgdbm-dev \
+    liblzma-dev \
+    libncurses5-dev \
+    libpq-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libssl-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    make \
+    pkg-config \
+    zlib1g-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV UV_LINK_MODE=copy
+
+# Install PyPy to a world-readable location. By default uv puts it under
+# /root/.local/share/uv/python/ which is inaccessible after Synapse drops
+# privileges via gosu to uid 991:991 (since /root is mode 700).
+ENV UV_PYTHON_INSTALL_DIR=/opt/pypy
+
+# Use uv to install PyPy. uv can download and manage PyPy installations
+# natively, so no manual tarball wrangling is needed.
+ARG PYPY_VERSION
+RUN uv python install pypy@${PYPY_VERSION}
+
+# Determine the path to the uv-installed PyPy interpreter and create a
+# stable symlink. uv python find resolves the exact path for us.
+RUN PYPY_BIN=$(uv python find pypy@${PYPY_VERSION}) && \
+    echo "Found PyPy at: ${PYPY_BIN}" && \
+    ln -sf "${PYPY_BIN}" /usr/local/bin/pypy3 && \
+    pypy3 --version
+
+# Install Rust (needed for Synapse's PyO3 extension)
+ENV RUSTUP_HOME=/rust
+ENV CARGO_HOME=/cargo
+ENV PATH=/cargo/bin:/rust/bin:$PATH
+RUN mkdir /rust /cargo
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable --profile minimal
+
+ARG CARGO_NET_GIT_FETCH_WITH_CLI=false
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=$CARGO_NET_GIT_FETCH_WITH_CLI
+
+# Tell PyO3 to build against PyPy, not CPython.
+# PYO3_PYTHON must point to the PyPy interpreter so that pyo3-build-config
+# queries its sysconfig and generates the correct bindings.
+ENV PYO3_PYTHON=/usr/local/bin/pypy3
+
+# Install Python dependencies from the locked requirements.txt.
+# We use uv pip with --python to target the PyPy interpreter.
+COPY --from=requirements /synapse/requirements.txt /synapse/
+
+# PYPY FIX: The poetry lockfile lost the platform_python_implementation
+# marker on psycopg2, so it appears with only a python_version guard that
+# is true on PyPy too. We strip psycopg2 (but NOT psycopg2cffi) lines and
+# their --hash continuations. psycopg2cffi is already in the file with
+# correct PyPy markers and will be installed normally.
+RUN awk ' \
+      /^psycopg2[>=<=! ;]/ && !/^psycopg2cffi/ { skip=1; next } \
+      /^psycopg2==/ && !/^psycopg2cffi/ { skip=1; next } \
+      skip && /^[[:space:]]/ { next } \
+      { skip=0; print } \
+    ' /synapse/requirements.txt > /tmp/req.txt && \
+    mv /tmp/req.txt /synapse/requirements.txt && \
+    echo "=== psycopg entries after patching ===" && \
+    grep -i psycopg /synapse/requirements.txt || echo "(none found)"
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python pypy3 --prefix="/install" --no-deps -r /synapse/requirements.txt
+
+# Copy over the Synapse source code.
+COPY synapse /synapse/synapse/
+COPY rust /synapse/rust/
+COPY pyproject.toml README.rst build_rust.py Cargo.toml Cargo.lock /synapse/
+
+ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
+
+# Install the synapse package itself (including the Rust extension).
+# PyO3 will detect PyPy via PYO3_PYTHON and compile accordingly.
+RUN \
+  --mount=type=cache,target=/synapse/target,sharing=locked \
+  --mount=type=cache,target=${CARGO_HOME}/registry,sharing=locked \
+  --mount=type=cache,target=/root/.cache/uv \
+  if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
+    uv pip install --python pypy3 --prefix="/install" --no-deps /synapse[all]; \
+  else \
+    uv pip install --python pypy3 --prefix="/install" /synapse[all]; \
+  fi
+
+###
+### Stage 2: runtime dependencies download for ARM64 and AMD64
+###
+### Unchanged from upstream — just fetches system .deb packages.
+###
+FROM --platform=$BUILDPLATFORM docker.io/library/debian:${DEBIAN_VERSION} AS runtime-deps
+
+RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
+RUN dpkg --add-architecture arm64
+RUN dpkg --add-architecture amd64
+
+RUN \
+  --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  apt-get update -qq && \
+  apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
+      curl \
+      gosu \
+      libjpeg62-turbo \
+      libpq5 \
+      libwebp7 \
+      xmlsec1 \
+      libjemalloc2 \
+    | grep '^\w' > /tmp/pkg-list && \
+  for arch in arm64 amd64; do \
+    mkdir -p /tmp/debs-${arch} && \
+    chown _apt:root /tmp/debs-${arch} && \
+    cd /tmp/debs-${arch} && \
+    apt-get -o APT::Architecture="${arch}" download $(cat /tmp/pkg-list); \
+  done
+
+RUN \
+  for arch in arm64 amd64; do \
+    mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
+    for deb in /tmp/debs-${arch}/*.deb; do \
+      package_name=$(dpkg-deb -I ${deb} | awk '/^ Package: .*$/ {print $2}'); \
+      echo "Extracting: ${package_name}"; \
+      dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
+      dpkg --extract $deb /install-${arch}; \
+    done; \
+  done
+
+
+###
+### Stage 3: runtime
+###
+### We use a slim debian base and install PyPy via uv at runtime too.
+### This keeps the image small and consistent with the builder.
+###
+
+FROM docker.io/library/debian:${DEBIAN_VERSION}-slim
+
+ARG TARGETARCH
+ARG PYPY_VERSION
+
+# Install minimal runtime dependencies
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    bzip2 \
+    ca-certificates \
+    curl \
+    libexpat1 \
+    libffi8 \
+    libssl3t64 \
+    zlib1g \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install uv and use it to install PyPy into the runtime image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV UV_PYTHON_INSTALL_DIR=/opt/pypy
+RUN uv python install pypy@${PYPY_VERSION}
+
+ARG SYNAPSE_VERSION_STRING
+ENV SYNAPSE_VERSION_STRING=${SYNAPSE_VERSION_STRING}
+
+LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
+LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'
+LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
+LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later OR LicenseRef-Element-Commercial'
+LABEL org.opencontainers.image.description='Synapse (PyPy experimental build)'
+
+# Copy system runtime libraries from the runtime-deps stage.
+# This MUST happen before we create any symlinks in /usr/local/bin,
+# because merging into /usr can clobber files there.
+COPY --from=runtime-deps /install-${TARGETARCH}/etc /etc
+COPY --from=runtime-deps /install-${TARGETARCH}/usr /usr
+COPY --from=runtime-deps /install-${TARGETARCH}/var /var
+
+# Copy the installed Python packages from the builder stage.
+# Use uv python find directly (not a symlink) since we haven't created
+# symlinks yet.
+COPY --from=builder /install/ /tmp/install-overlay/
+RUN PYPY_BIN=$(uv python find pypy@${PYPY_VERSION}) && \
+    PYPY_PREFIX=$(${PYPY_BIN} -c "import sys; print(sys.prefix)") && \
+    echo "PyPy prefix: ${PYPY_PREFIX}" && \
+    cp -a /tmp/install-overlay/lib/. "${PYPY_PREFIX}/lib/" 2>/dev/null || true && \
+    cp -a /tmp/install-overlay/bin/. /usr/local/bin/ 2>/dev/null || true && \
+    rm -rf /tmp/install-overlay
+
+# NOW create symlinks — after all COPY operations that touch /usr are done.
+RUN PYPY_BIN=$(uv python find pypy@${PYPY_VERSION}) && \
+    echo "Found PyPy at: ${PYPY_BIN}" && \
+    ln -sf "${PYPY_BIN}" /usr/local/bin/pypy3 && \
+    ln -sf "${PYPY_BIN}" /usr/local/bin/python3 && \
+    ln -sf "${PYPY_BIN}" /usr/local/bin/python && \
+    pypy3 --version
+
+COPY ./docker/start.py /start.py
+COPY ./docker/conf /conf
+
+EXPOSE 8008/tcp 8448/tcp
+EXPOSE 19090/tcp
+
+ENTRYPOINT ["pypy3", "/start.py"]
+
+HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \
+  CMD curl -fSs http://localhost:8008/health || exit 1
