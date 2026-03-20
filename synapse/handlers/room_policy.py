@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 POLICY_SERVER_KEY_ID = "ed25519:policy_server"
 
+
 @attr.s(slots=True, auto_attribs=True)
 class PolicyServerInfo:
     # name of the server.
