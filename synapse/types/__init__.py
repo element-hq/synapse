@@ -20,21 +20,26 @@
 #
 #
 import abc
+import asyncio
 import logging
 import re
 import string
+from concurrent.futures import Executor
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
     Any,
+    Callable,
     ClassVar,
+    Coroutine,
     Literal,
     Mapping,
     Match,
     MutableMapping,
     NoReturn,
     Optional,
+    Protocol,
     TypedDict,
     TypeVar,
     Union,
@@ -136,6 +141,47 @@ class ISynapseReactor(
     Interface,
 ):
     """The interfaces necessary for Synapse to function."""
+
+
+_ELT = TypeVar("_ELT")
+
+
+class ISynapseEventLoop(Protocol):
+    """Protocol abstracting event loop operations.
+
+    This allows Clock and other code to be parameterized over either a Twisted
+    reactor or a native asyncio event loop. Added in Phase 0 of the
+    Twisted → asyncio migration; will be used starting in Phase 2 (Clock).
+    """
+
+    def call_later(
+        self, delay: float, callback: Callable[..., Any], *args: Any
+    ) -> Any:
+        """Schedule callback to be called after delay seconds."""
+        ...
+
+    def call_soon(self, callback: Callable[..., Any], *args: Any) -> Any:
+        """Schedule callback to be called on the next event loop iteration."""
+        ...
+
+    def run_in_executor(
+        self,
+        executor: Executor | None,
+        func: Callable[..., _ELT],
+        *args: Any,
+    ) -> "asyncio.Future[_ELT]":
+        """Run a function in an executor (thread pool)."""
+        ...
+
+    def create_task(
+        self, coro: Coroutine[Any, Any, _ELT]
+    ) -> "asyncio.Task[_ELT]":
+        """Schedule a coroutine as a Task."""
+        ...
+
+    def time(self) -> float:
+        """Return the current time as a float (seconds since epoch)."""
+        ...
 
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)

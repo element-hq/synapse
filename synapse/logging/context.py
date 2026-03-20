@@ -30,6 +30,8 @@ them.
 See doc/log_contexts.rst for details on how this works.
 """
 
+import asyncio
+import contextvars
 import logging
 import threading
 import typing
@@ -1207,3 +1209,166 @@ def defer_to_threadpool(
             return f(*args, **kwargs)
 
     return make_deferred_yieldable(threads.deferToThreadPool(reactor, threadpool, g))
+
+
+# ===========================================================================
+# Phase 0: asyncio-native parallel implementations
+#
+# These provide asyncio-native equivalents of the Twisted-based context
+# tracking and utility functions above. They are unused until Phase 1+
+# switches the active implementation. Adding them here in Phase 0 ensures
+# the new code paths can be tested without changing any existing behavior.
+# ===========================================================================
+
+# A ContextVar that can replace _thread_local for context tracking.
+# In Phase 1, current_context()/set_current_context() will switch to using this.
+_current_context_var: contextvars.ContextVar[
+    "LoggingContextOrSentinel"
+] = contextvars.ContextVar("synapse_logging_context", default=SENTINEL_CONTEXT)
+
+
+def current_context_contextvar() -> "LoggingContextOrSentinel":
+    """Get the current logging context from contextvars.
+
+    This is the asyncio-native equivalent of current_context().
+    It will become the primary implementation in Phase 1.
+    """
+    return _current_context_var.get()
+
+
+def set_current_context_contextvar(
+    context: "LoggingContextOrSentinel",
+) -> "LoggingContextOrSentinel":
+    """Set the current logging context using contextvars.
+
+    This is the asyncio-native equivalent of set_current_context().
+    It will become the primary implementation in Phase 1.
+
+    Args:
+        context: The context to activate.
+
+    Returns:
+        The context that was previously active.
+    """
+    if context is None:
+        raise TypeError("'context' argument may not be None")
+
+    current = _current_context_var.get()
+
+    if current is not context:
+        rusage = get_thread_resource_usage()
+        current.stop(rusage)
+        _current_context_var.set(context)
+        context.start(rusage)
+
+    return current
+
+
+_NativeT = TypeVar("_NativeT")
+
+
+async def make_future_yieldable(
+    future: "asyncio.Future[_NativeT]",
+) -> _NativeT:
+    """Given an asyncio.Future, make it follow the Synapse logcontext rules.
+
+    This is the asyncio-native equivalent of make_deferred_yieldable().
+
+    - If the future has completed, awaits it directly (logcontext unchanged).
+    - If the future has not yet completed, resets the logcontext to SENTINEL
+      before awaiting, and restores the calling logcontext when the future
+      completes.
+
+    The returned coroutine can be awaited without leaking the current logcontext
+    into the event loop.
+    """
+    if future.done():
+        return future.result()
+
+    # Save and clear the calling context so we don't leak it into the loop
+    calling_context = set_current_context_contextvar(SENTINEL_CONTEXT)
+
+    try:
+        result = await future
+    except BaseException:
+        # Restore context before propagating the exception
+        set_current_context_contextvar(calling_context)
+        raise
+    else:
+        set_current_context_contextvar(calling_context)
+        return result
+
+
+def run_coroutine_in_background_native(
+    coroutine: "typing.Coroutine[Any, Any, _NativeT]",
+) -> "asyncio.Task[_NativeT]":
+    """Schedule a coroutine as a background asyncio.Task, preserving logcontext.
+
+    This is the asyncio-native equivalent of run_coroutine_in_background().
+
+    The calling logcontext is restored after the task is created. When the
+    background task completes, the logcontext is reset to SENTINEL to avoid
+    leaking into the event loop.
+
+    Returns:
+        The asyncio.Task running the coroutine (does NOT follow logcontext rules;
+        callers should use make_future_yieldable if they want to await it).
+    """
+    calling_context = current_context_contextvar()
+
+    async def _wrapper() -> _NativeT:
+        try:
+            return await coroutine
+        finally:
+            # Reset to sentinel so we don't leak context into the event loop
+            set_current_context_contextvar(SENTINEL_CONTEXT)
+
+    task = asyncio.create_task(_wrapper())
+    # Restore the calling context (create_task may have changed it)
+    set_current_context_contextvar(calling_context)
+    return task
+
+
+def run_in_background_native(
+    f: "Callable[P, Awaitable[_NativeT]] | Callable[P, _NativeT]",
+    *args: "P.args",
+    **kwargs: "P.kwargs",
+) -> "asyncio.Task[_NativeT]":
+    """Call a function and schedule any resulting coroutine as a background task.
+
+    This is the asyncio-native equivalent of run_in_background().
+
+    Preserves the calling logcontext. When the background task completes,
+    resets to SENTINEL context.
+    """
+    calling_context = current_context_contextvar()
+    try:
+        res = f(*args, **kwargs)
+    except Exception:
+        # Return a future that contains the exception
+        loop = asyncio.get_running_loop()
+        future: "asyncio.Future[_NativeT]" = loop.create_future()
+        import sys
+
+        future.set_exception(sys.exc_info()[1])  # type: ignore[arg-type]
+        return future  # type: ignore[return-value]
+
+    if isinstance(res, typing.Coroutine):
+        return run_coroutine_in_background_native(res)
+
+    if isinstance(res, asyncio.Task) or isinstance(res, asyncio.Future):
+        # Already scheduled; add sentinel-reset callback if not done
+        if not res.done():
+            set_current_context_contextvar(calling_context)
+
+            def _reset_context(f: "asyncio.Future[Any]") -> None:
+                set_current_context_contextvar(SENTINEL_CONTEXT)
+
+            res.add_done_callback(_reset_context)
+        return res  # type: ignore[return-value]
+
+    # Plain value — wrap in a completed future
+    loop = asyncio.get_running_loop()
+    future2: "asyncio.Future[_NativeT]" = loop.create_future()
+    future2.set_result(res)  # type: ignore[arg-type]
+    return future2  # type: ignore[return-value]

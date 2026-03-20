@@ -1030,6 +1030,246 @@ def observe_deferred(d: "defer.Deferred[T]") -> "defer.Deferred[T]":
     return new_deferred
 
 
+# ===========================================================================
+# Phase 0: asyncio-native parallel implementations
+#
+# These provide asyncio-native equivalents of the Twisted/Deferred-based
+# primitives above. They are unused until later migration phases swap them
+# in. Adding them here ensures they can be tested without affecting existing
+# behavior.
+# ===========================================================================
+
+
+class ObservableFuture(Generic[_T]):
+    """asyncio.Future-based equivalent of ObservableDeferred.
+
+    Wraps an asyncio.Future so that multiple observers can await the same
+    result without interfering with each other or the original future.
+
+    If consumeErrors is True, exceptions from the original future are
+    suppressed (not re-raised to the original future's awaiter).
+    """
+
+    __slots__ = ["_future", "_observers", "_result"]
+
+    def __init__(
+        self, future: "asyncio.Future[_T]", consumeErrors: bool = False
+    ) -> None:
+        self._future = future
+        self._result: (
+            None | tuple[Literal[True], _T] | tuple[Literal[False], BaseException]
+        ) = None
+        self._observers: list["asyncio.Future[_T]"] | tuple[()] = []
+
+        def _on_done(f: "asyncio.Future[_T]") -> None:
+            result: tuple[Literal[True], _T] | tuple[Literal[False], BaseException]
+            if f.cancelled():
+                result = (False, asyncio.CancelledError())
+            else:
+                real_exc = f.exception()
+                if real_exc is not None:
+                    result = (False, real_exc)
+                else:
+                    result = (True, f.result())
+
+            object.__setattr__(self, "_result", result)
+            observers = self._observers
+            object.__setattr__(self, "_observers", ())
+
+            for obs in observers:
+                if obs.done():
+                    continue
+                if result[0]:
+                    obs.set_result(result[1])
+                else:
+                    obs.set_exception(result[1])
+
+        future.add_done_callback(_on_done)
+
+    def observe(self) -> "asyncio.Future[_T]":
+        """Return a new Future that resolves with the same result."""
+        if self._result is not None:
+            loop = self._future.get_loop()
+            f: "asyncio.Future[_T]" = loop.create_future()
+            if self._result[0]:
+                f.set_result(self._result[1])
+            else:
+                f.set_exception(self._result[1])
+            return f
+
+        assert isinstance(self._observers, list)
+        loop = self._future.get_loop()
+        f = loop.create_future()
+        self._observers.append(f)
+        return f
+
+    def has_observers(self) -> bool:
+        return bool(self._observers)
+
+    def has_called(self) -> bool:
+        return self._result is not None
+
+    def has_succeeded(self) -> bool:
+        return self._result is not None and self._result[0] is True
+
+    def get_result(self) -> "_T | BaseException":
+        if self._result is None:
+            raise ValueError(f"{self!r} has no result yet")
+        return self._result[1]
+
+
+class NativeLinearizer:
+    """asyncio-native equivalent of Linearizer.
+
+    Limits concurrent access to resources based on a key using asyncio
+    primitives (asyncio.Event) instead of Deferred.
+
+    Example:
+        async with linearizer.queue("key"):
+            # do work
+    """
+
+    def __init__(self, name: str, max_count: int = 1) -> None:
+        self.name = name
+        self.max_count = max_count
+        self._key_to_entry: dict[Hashable, _NativeLinearizerEntry] = {}
+
+    def is_queued(self, key: Hashable) -> bool:
+        entry = self._key_to_entry.get(key)
+        if not entry:
+            return False
+        return bool(entry.waiters)
+
+    def queue(self, key: Hashable) -> AsyncContextManager[None]:
+        @asynccontextmanager
+        async def _ctx_manager() -> AsyncIterator[None]:
+            entry = await self._acquire_lock(key)
+            try:
+                yield
+            finally:
+                self._release_lock(key, entry)
+
+        return _ctx_manager()
+
+    async def _acquire_lock(
+        self, key: Hashable
+    ) -> "_NativeLinearizerEntry":
+        entry = self._key_to_entry.setdefault(
+            key, _NativeLinearizerEntry(0, [])
+        )
+
+        if entry.count < self.max_count:
+            entry.count += 1
+            return entry
+
+        event = asyncio.Event()
+        entry.waiters.append(event)
+        try:
+            await event.wait()
+        except asyncio.CancelledError:
+            try:
+                entry.waiters.remove(event)
+            except ValueError:
+                pass
+            raise
+
+        entry.count += 1
+
+        # Break potential synchronous recursion (equivalent to sleep(0)
+        # in the Deferred-based Linearizer)
+        try:
+            await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            self._release_lock(key, entry)
+            raise
+
+        return entry
+
+    def _release_lock(
+        self, key: Hashable, entry: "_NativeLinearizerEntry"
+    ) -> None:
+        entry.count -= 1
+
+        if entry.waiters:
+            next_event = entry.waiters.pop(0)
+            next_event.set()
+        elif entry.count == 0:
+            self._key_to_entry.pop(key, None)
+
+
+@attr.s(slots=True, auto_attribs=True)
+class _NativeLinearizerEntry:
+    count: int
+    waiters: list[asyncio.Event]
+
+
+class NativeReadWriteLock:
+    """asyncio-native equivalent of ReadWriteLock.
+
+    Example:
+        async with lock.read("key"):
+            # readers can overlap
+        async with lock.write("key"):
+            # writers are exclusive
+    """
+
+    def __init__(self) -> None:
+        self.key_to_current_readers: dict[str, set[asyncio.Event]] = {}
+        self.key_to_current_writer: dict[str, asyncio.Event] = {}
+
+    def read(self, key: str) -> AsyncContextManager[None]:
+        @asynccontextmanager
+        async def _ctx_manager() -> AsyncIterator[None]:
+            new_event = asyncio.Event()
+            curr_readers = self.key_to_current_readers.setdefault(key, set())
+            curr_writer = self.key_to_current_writer.get(key)
+
+            curr_readers.add(new_event)
+
+            try:
+                if curr_writer:
+                    await asyncio.shield(
+                        self._wait_for_event(curr_writer)
+                    )
+                yield
+            finally:
+                new_event.set()
+                self.key_to_current_readers.get(key, set()).discard(new_event)
+
+        return _ctx_manager()
+
+    def write(self, key: str) -> AsyncContextManager[None]:
+        @asynccontextmanager
+        async def _ctx_manager() -> AsyncIterator[None]:
+            new_event = asyncio.Event()
+            curr_readers = self.key_to_current_readers.get(key, set())
+            curr_writer = self.key_to_current_writer.get(key)
+
+            to_wait_on: list[asyncio.Event] = list(curr_readers)
+            if curr_writer:
+                to_wait_on.append(curr_writer)
+
+            curr_readers.clear()
+            self.key_to_current_writer[key] = new_event
+
+            try:
+                for evt in to_wait_on:
+                    await asyncio.shield(self._wait_for_event(evt))
+                yield
+            finally:
+                new_event.set()
+                if self.key_to_current_writer.get(key) is new_event:
+                    self.key_to_current_writer.pop(key)
+
+        return _ctx_manager()
+
+    @staticmethod
+    async def _wait_for_event(event: asyncio.Event) -> None:
+        """Wait for an event to be set, handling the case where it's already set."""
+        if not event.is_set():
+            await event.wait()
+
+
 class AwakenableSleeper:
     """Allows explicitly waking up deferreds related to an entity that are
     currently sleeping.
