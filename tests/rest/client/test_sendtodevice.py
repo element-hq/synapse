@@ -270,8 +270,6 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
             self.get_success(sender.send_device_messages([destination]))
 
-            self.pump()
-
             # At least 2 transactions should be sent since we are over the EDU limit per transaction
             self.assertGreaterEqual(mock_send_transaction.call_count, 2)
 
