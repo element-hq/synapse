@@ -247,8 +247,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
     def test_missing_public_key_event_set(self) -> None:
         """
-        Tests that a missing public key in the `m.room.policy` state event is treated
-        as though there is no policy server configured, thus allowing all events.
+        Tests that a missing public key in the `m.room.policy` state event (an invalid
+        configuration) is treated as though there is no policy server configured, thus
+        allowing all events.
         """
         self._add_policy_server_to_room()  # no public_key
 

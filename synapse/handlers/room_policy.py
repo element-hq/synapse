@@ -63,6 +63,17 @@ class RoomPolicyHandler:
     async def _get_policy_server(self, room_id: str) -> PolicyServerInfo | None:
         """Get the policy server's name and Ed25519 public key for the room, if set.
 
+        A policy server is *not* set if:
+        - The room doesn't have an `m.room.policy` state event with empty state key.
+        - The policy state event is missing the `via` or `public_keys` field.
+        - The policy state event's public keys is missing an `ed25519` key.
+        - The via server is not a valid server name.
+        - The via server is not in the room.
+        - The via server is Synapse itself.
+
+        TODO: Remove unstable MSC4284 support - https://github.com/element-hq/synapse/issues/19502
+        This function also checks for the unstable `org.matrix.msc4284.policy` state event.
+
         Args:
             room_id: The room ID to get the policy server for.
 
