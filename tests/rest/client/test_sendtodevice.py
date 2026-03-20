@@ -145,10 +145,10 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # ref: https://github.com/twisted/twisted/issues/12482
         # To remove this, we would need to fix the above issue and
         # update, including in olddeps (so several years' wait).
-        sql_logger = logging.getLogger("synapse.storage.SQL")
-        sql_logger_was_disabled = sql_logger.disabled
-        sql_logger.disabled = True
-        try:
+        # sql_logger = logging.getLogger("synapse.storage.SQL")
+        # sql_logger_was_disabled = sql_logger.disabled
+        # sql_logger.disabled = True
+        # try:
             mock_send_transaction: AsyncMock = (
                 self.federation_transport_client.send_transaction
             )
@@ -180,8 +180,8 @@ class SendToDeviceTestCase(HomeserverTestCase):
             json_cb = mock_send_transaction.call_args[0][1]
             data = json_cb()
             self.assertEqual(len(data["edus"]), 2)
-        finally:
-            sql_logger.disabled = sql_logger_was_disabled
+        # finally:
+        #     sql_logger.disabled = sql_logger_was_disabled
 
     def test_edu_small_messages_not_splitting(self) -> None:
         """
@@ -192,10 +192,10 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # ref: https://github.com/twisted/twisted/issues/12482
         # To remove this, we would need to fix the above issue and
         # update, including in olddeps (so several years' wait).
-        sql_logger = logging.getLogger("synapse.storage.SQL")
-        sql_logger_was_disabled = sql_logger.disabled
-        sql_logger.disabled = True
-        try:
+        # sql_logger = logging.getLogger("synapse.storage.SQL")
+        # sql_logger_was_disabled = sql_logger.disabled
+        # sql_logger.disabled = True
+        # try:
             mock_send_transaction: AsyncMock = (
                 self.federation_transport_client.send_transaction
             )
@@ -227,8 +227,8 @@ class SendToDeviceTestCase(HomeserverTestCase):
             json_cb = mock_send_transaction.call_args[0][1]
             data = json_cb()
             self.assertEqual(len(data["edus"]), 1)
-        finally:
-            sql_logger.disabled = sql_logger_was_disabled
+        # finally:
+        #     sql_logger.disabled = sql_logger_was_disabled
 
     def test_transaction_splitting(self) -> None:
         """Test that a bunch of to-device messages are split into multiple transactions if there are too many EDUs"""
@@ -237,10 +237,10 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # ref: https://github.com/twisted/twisted/issues/12482
         # To remove this, we would need to fix the above issue and
         # update, including in olddeps (so several years' wait).
-        sql_logger = logging.getLogger("synapse.storage.SQL")
-        sql_logger_was_disabled = sql_logger.disabled
-        sql_logger.disabled = True
-        try:
+        # sql_logger = logging.getLogger("synapse.storage.SQL")
+        # sql_logger_was_disabled = sql_logger.disabled
+        # sql_logger.disabled = True
+        # try:
             mock_send_transaction: AsyncMock = (
                 self.federation_transport_client.send_transaction
             )
@@ -278,8 +278,8 @@ class SendToDeviceTestCase(HomeserverTestCase):
             self.assertEqual(
                 len(first_call["edus"]) + len(second_call["edus"]), nb_of_edus_to_send
             )
-        finally:
-            sql_logger.disabled = sql_logger_was_disabled
+        # finally:
+        #     sql_logger.disabled = sql_logger_was_disabled
 
     @override_config({"rc_key_requests": {"per_second": 10, "burst_count": 2}})
     def test_local_room_key_request(self) -> None:
