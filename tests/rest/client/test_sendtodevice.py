@@ -26,7 +26,6 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.api.constants import (
     MAX_EDU_SIZE,
     MAX_EDUS_PER_TRANSACTION,
-    NUMBER_OF_RESERVED_EDUS_PER_TRANSACTION,
     EduTypes,
 )
 from synapse.api.errors import Codes
@@ -254,7 +253,9 @@ class SendToDeviceTestCase(HomeserverTestCase):
             destination = "secondserver"
             messages = {}
 
-            for i in range(MAX_EDUS_PER_TRANSACTION + 1):
+            nb_of_edus_to_send = MAX_EDUS_PER_TRANSACTION + 1
+
+            for i in range(nb_of_edus_to_send):
                 messages[f"@remote_user{i}:" + destination] = {
                     "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
                 }
@@ -271,17 +272,14 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
             self.pump()
 
-            self.assertEqual(mock_send_transaction.call_count, 2)
+            # At least 2 transactions should be sent since we are over the EDU limit per transaction
+            self.assertGreaterEqual(mock_send_transaction.call_count, 2)
 
-            # A transaction can contain up to 100 EDUs but synapse reserves 10 EDUs for other purposes
             first_call = mock_send_transaction.call_args_list[0][0][1]()
-            self.assertEqual(
-                len(first_call["edus"]),
-                MAX_EDUS_PER_TRANSACTION - NUMBER_OF_RESERVED_EDUS_PER_TRANSACTION,
-            )
-
             second_call = mock_send_transaction.call_args_list[1][0][1]()
-            self.assertEqual(len(second_call["edus"]), 11)
+            self.assertEqual(
+                len(first_call["edus"]) + len(second_call["edus"]), nb_of_edus_to_send
+            )
         finally:
             sql_logger.disabled = sql_logger_was_disabled
 

@@ -453,7 +453,7 @@ def split_device_messages_into_edus(
             # Let's add the whole EDU structure before testing the size
             edu = {
                 "content": edu_content,
-                "edu_type": "m.direct_to_device",
+                "edu_type": EduTypes.DIRECT_TO_DEVICE,
             }
 
             if len(encode_canonical_json(edu)) <= MAX_EDU_SIZE:
@@ -471,7 +471,8 @@ def split_device_messages_into_edus(
                 break
             else:
                 if target_count == 1:
-                    # Single recipient's messages are too large, let's reject the client call with `M_TOO_LARGE`
+                    # Single recipient's messages are too large, let's reject the client call with `M_TOO_LARGE`,
+                    # we expect this error to reach the client in the case of the /sendToDevice endpoint.
                     recipient = message_items[0][0]
                     raise EventSizeError(
                         f"device message to {recipient} too large to fit in a single EDU",
@@ -492,6 +493,8 @@ def create_new_to_device_edu_content(
     """
     Create a new `m.direct_to_device` EDU `content` object with a unique message ID.
     """
+    # The EDU contains a "message_id" property which is used for
+    # idempotence. Make up a random one.
     message_id = random_string_insecure_fast(16)
     content = {
         "sender": sender_user_id,
