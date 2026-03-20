@@ -51,15 +51,16 @@ class RoomPolicyHandler:
             return event.type in [EventTypes.RoomPolicy, "org.matrix.msc4284.policy"]
         return False
 
-    async def _get_policy_server(self, room_id: str) -> tuple[str, str] | None:
-        """Get the policy server name for a room.
+    async def _get_policy_server(self, room_id: str) -> tuple[str | None, str | None]:
+        """Get the policy server's name and Ed25519 public key for the room, if set.
 
         Args:
             room_id: The room ID to get the policy server for.
 
         Returns:
-            The policy server name, or None if no policy server is configured or the
-            configuration is invalid.
+            A tuple of policy server name and its Ed25519 public key (unpadded base64).
+            Both values will be None if no policy server is configured or the configration
+            is invalid.
         """
         policy_event = await self._storage_controllers.state.get_current_state_event(
             room_id, EventTypes.RoomPolicy, ""
@@ -74,7 +75,7 @@ class RoomPolicyHandler:
                 )
             )
             if not policy_event:
-                return None  # neither stable or unstable configured
+                return None, None  # neither stable or unstable configured
 
             # Unstable configured, grab its public key
             public_key = policy_event.content.get("public_key", None)
@@ -87,25 +88,25 @@ class RoomPolicyHandler:
                     public_key = ed25519_key
 
         if public_key is None or not isinstance(public_key, str):
-            return None  # no public key means no policy server
+            return None, None  # no public key means no policy server
 
         policy_server = policy_event.content.get("via", "")
         if policy_server is None or not isinstance(policy_server, str):
-            return None  # no policy server
+            return None, None  # no policy server
 
         if policy_server == self._hs.hostname:
-            return None  # Synapse itself can't be a policy server (currently)
+            return None, None  # Synapse itself can't be a policy server (currently)
 
         try:
             parse_and_validate_server_name(policy_server)
         except ValueError:
-            return None  # invalid policy server
+            return None, None  # invalid policy server
 
         is_in_room = await self._event_auth_handler.is_host_in_room(
             room_id, policy_server
         )
         if not is_in_room:
-            return None  # policy server not in room
+            return None, None  # policy server not in room
 
         return policy_server, public_key
 
@@ -131,10 +132,9 @@ class RoomPolicyHandler:
         if self._is_policy_server_state_event(event):
             return True  # always allow policy server change events
 
-        tup = await self._get_policy_server(event.room_id)
-        if tup is None:
+        (policy_server, public_key) = await self._get_policy_server(event.room_id)
+        if policy_server is None:
             return True  # no policy server configured, so allow
-        policy_server, public_key = tup
 
         # Check if the event has been signed with the public key in the policy server state event.
         # If it is, we can save an HTTP hit to get a fresh signature.
@@ -193,10 +193,9 @@ class RoomPolicyHandler:
         if self._is_policy_server_state_event(event):
             return  # don't sign the policy server change event (it shouldn't be signed)
 
-        tup = await self._get_policy_server(event.room_id)
-        if tup is None:
+        (policy_server, public_key) = await self._get_policy_server(event.room_id)
+        if policy_server is None:
             return
-        policy_server, public_key = tup
 
         # Ask the policy server to sign this event.
         # We set a smallish timeout here as we don't want to block event sending too long.
