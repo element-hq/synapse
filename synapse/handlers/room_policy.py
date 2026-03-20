@@ -133,7 +133,7 @@ class RoomPolicyHandler:
             return True  # always allow policy server change events
 
         (policy_server, public_key) = await self._get_policy_server(event.room_id)
-        if policy_server is None:
+        if policy_server is None or public_key is None:
             return True  # no policy server configured, so allow
 
         # Check if the event has been signed with the public key in the policy server
@@ -197,7 +197,7 @@ class RoomPolicyHandler:
             return
 
         (policy_server, public_key) = await self._get_policy_server(event.room_id)
-        if policy_server is None:
+        if policy_server is None or public_key is None:
             return
 
         # Ask the policy server to sign this event.
