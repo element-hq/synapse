@@ -422,9 +422,6 @@ class ExperimentalConfig(Config):
         # previously calculated push actions.
         self.msc2654_enabled: bool = experimental.get("msc2654_enabled", False)
 
-        # MSC2666: Query mutual rooms between two users.
-        self.msc2666_enabled: bool = experimental.get("msc2666_enabled", False)
-
         # MSC2815 (allow room moderators to view redacted event content)
         self.msc2815_enabled: bool = experimental.get("msc2815_enabled", False)
 
@@ -541,9 +538,9 @@ class ExperimentalConfig(Config):
         # See: https://github.com/element-hq/synapse/issues/19433
         msc4388_mode = experimental.get("msc4388_mode", "off")
 
-        if msc4388_mode not in ["off", "public", "authenticated"]:
+        if msc4388_mode not in ["off", "open", "authenticated"]:
             raise ConfigError(
-                "msc4388_mode must be one of 'off', 'public' or 'authenticated'",
+                "msc4388_mode must be one of 'off', 'open' or 'authenticated'",
                 ("experimental", "msc4388_mode"),
             )
         self.msc4388_enabled: bool = msc4388_mode != "off"
