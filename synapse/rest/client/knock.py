@@ -101,4 +101,5 @@ class KnockRoomAliasServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    KnockRoomAliasServlet(hs).register(http_server)
+    # KnockRoomAliasServlet(hs).register(http_server)
+    pass
