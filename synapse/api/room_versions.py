@@ -338,6 +338,29 @@ class RoomVersions:
         msc4289_creator_power_enabled=False,
         msc4291_room_ids_as_hashes=False,
     )
+    MSC3389v10 = RoomVersion(
+        # MSC3389 (Relation redactions) based on room version "10"
+        "org.matrix.msc3389.10",
+        RoomDisposition.STABLE,
+        EventFormatVersions.ROOM_V4_PLUS,
+        StateResolutionVersions.V2,
+        enforce_key_validity=True,
+        special_case_aliases_auth=False,
+        strict_canonicaljson=True,
+        limit_notifications_power_levels=True,
+        implicit_room_creator=False,
+        updated_redaction_rules=False,
+        restricted_join_rule=True,
+        restricted_join_rule_fix=True,
+        knock_join_rule=True,
+        msc3389_relation_redactions=False,
+        knock_restricted_join_rule=True,
+        enforce_int_power_levels=True,
+        msc3931_push_features=(),
+        msc3757_enabled=False,
+        msc4289_creator_power_enabled=False,
+        msc4291_room_ids_as_hashes=False,
+    )
     MSC1767v10 = RoomVersion(
         # MSC1767 (Extensible Events) based on room version "10"
         "org.matrix.msc1767.10",

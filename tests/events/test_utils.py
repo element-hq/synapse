@@ -22,7 +22,6 @@
 import unittest as stdlib_unittest
 from typing import Any, Mapping
 
-import attr
 from parameterized import parameterized
 
 from synapse.api.constants import EventContentFields
@@ -553,11 +552,6 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
             room_version=RoomVersions.V10,
         )
 
-        # Create a new room version.
-        msc3389_room_ver = attr.evolve(
-            RoomVersions.V10, msc3389_relation_redactions=True
-        )
-
         self.run_test(
             {
                 "type": "m.room.message",
@@ -581,7 +575,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "signatures": {},
                 "unsigned": {},
             },
-            room_version=msc3389_room_ver,
+            room_version=RoomVersions.MSC3389v10,
         )
 
         # If the field is not an object, redact it.
@@ -599,7 +593,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "signatures": {},
                 "unsigned": {},
             },
-            room_version=msc3389_room_ver,
+            room_version=RoomVersions.MSC3389v10,
         )
 
         # If the m.relates_to property would be empty, redact it.
@@ -614,7 +608,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "signatures": {},
                 "unsigned": {},
             },
-            room_version=msc3389_room_ver,
+            room_version=RoomVersions.MSC3389v10,
         )
 
 
