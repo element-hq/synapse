@@ -33,7 +33,6 @@ from synapse.rest.client import login, sendtodevice, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
-from synapse.util.stringutils import random_string
 
 from tests.unittest import HomeserverTestCase, override_config
 
@@ -154,7 +153,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # 2 messages, each just big enough to fit into their own EDU
         for i in range(2):
             messages[f"@remote_user{i}:" + destination] = {
-                "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
+                "device": {"foo": "a" * (MAX_EDU_SIZE - 1000)}
             }
 
         channel = self.make_request(
@@ -189,9 +188,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
         # 2 small messages that should fit in a single EDU
         for i in range(2):
-            messages[f"@remote_user{i}:" + destination] = {
-                "device": {"foo": random_string(100)}
-            }
+            messages[f"@remote_user{i}:" + destination] = {"device": {"foo": "a" * 100}}
 
         channel = self.make_request(
             "PUT",
@@ -225,7 +222,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
         for i in range(nb_of_edus_to_send):
             messages[f"@remote_user{i}:" + destination] = {
-                "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
+                "device": {"foo": "a" * (MAX_EDU_SIZE - 1000)}
             }
 
         channel = self.make_request(
