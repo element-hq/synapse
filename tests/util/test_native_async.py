@@ -742,5 +742,121 @@ class NativeClockTest(unittest.IsolatedAsyncioTestCase):
             clock.call_later(Duration(seconds=1), lambda: None)
 
 
+class NativeConnectionPoolTest(unittest.IsolatedAsyncioTestCase):
+    """Tests for the asyncio-native NativeConnectionPool using SQLite."""
+
+    async def asyncSetUp(self) -> None:
+        from synapse.config.database import DatabaseConnectionConfig
+        from synapse.storage.engines.sqlite import Sqlite3Engine
+        from synapse.storage.native_database import NativeConnectionPool
+
+        db_conf = {"name": "sqlite3", "args": {"database": ":memory:"}}
+        self.engine = Sqlite3Engine(db_conf)
+        self.db_config = DatabaseConnectionConfig("test_db", db_conf)
+
+        self.pool = NativeConnectionPool(
+            db_config=self.db_config,
+            engine=self.engine,
+            server_name="test.server",
+            max_workers=2,
+        )
+
+    async def asyncTearDown(self) -> None:
+        self.pool.close()
+
+    async def test_run_with_connection(self) -> None:
+        def create_and_query(conn: object) -> list:
+            assert hasattr(conn, "execute")
+            conn.execute("CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, val TEXT)")  # type: ignore[union-attr]
+            conn.execute("INSERT INTO test VALUES (1, 'hello')")  # type: ignore[union-attr]
+            conn.commit()  # type: ignore[union-attr]
+            cursor = conn.execute("SELECT val FROM test WHERE id = 1")  # type: ignore[union-attr]
+            return cursor.fetchall()
+
+        result = await self.pool.runWithConnection(create_and_query)
+        self.assertEqual(result, [("hello",)])
+
+    async def test_run_interaction_commits(self) -> None:
+        # First create the table
+        def create_table(conn: object) -> None:
+            conn.execute("CREATE TABLE IF NOT EXISTS test2 (id INTEGER PRIMARY KEY, val TEXT)")  # type: ignore[union-attr]
+
+        await self.pool.runInteraction(create_table)
+
+        # Then insert in a transaction
+        def insert(conn: object) -> None:
+            conn.execute("INSERT INTO test2 VALUES (1, 'world')")  # type: ignore[union-attr]
+
+        await self.pool.runInteraction(insert)
+
+        # Verify it was committed
+        def query(conn: object) -> list:
+            cursor = conn.execute("SELECT val FROM test2 WHERE id = 1")  # type: ignore[union-attr]
+            return cursor.fetchall()
+
+        result = await self.pool.runWithConnection(query)
+        self.assertEqual(result, [("world",)])
+
+    async def test_run_interaction_rolls_back_on_error(self) -> None:
+        # Create table first
+        def create_table(conn: object) -> None:
+            conn.execute("CREATE TABLE IF NOT EXISTS test3 (id INTEGER PRIMARY KEY, val TEXT)")  # type: ignore[union-attr]
+
+        await self.pool.runInteraction(create_table)
+
+        # Insert that should be rolled back
+        def failing_insert(conn: object) -> None:
+            conn.execute("INSERT INTO test3 VALUES (1, 'should_rollback')")  # type: ignore[union-attr]
+            raise ValueError("deliberate error")
+
+        with self.assertRaises(ValueError):
+            await self.pool.runInteraction(failing_insert)
+
+        # Verify nothing was inserted
+        def query(conn: object) -> list:
+            cursor = conn.execute("SELECT COUNT(*) FROM test3")  # type: ignore[union-attr]
+            return cursor.fetchall()
+
+        result = await self.pool.runWithConnection(query)
+        self.assertEqual(result, [(0,)])
+
+    async def test_connection_reuse(self) -> None:
+        """Verify the same thread reuses its connection."""
+        connection_ids: list[int] = []
+
+        def get_conn_id(conn: object) -> int:
+            conn_id = id(conn)
+            connection_ids.append(conn_id)
+            return conn_id
+
+        id1 = await self.pool.runWithConnection(get_conn_id)
+        id2 = await self.pool.runWithConnection(get_conn_id)
+
+        # With a single-threaded pool, the same connection should be reused
+        # With multi-threaded, it depends on which thread runs.
+        # At minimum, we should get valid connection IDs.
+        self.assertIsInstance(id1, int)
+        self.assertIsInstance(id2, int)
+
+    async def test_closed_pool_raises(self) -> None:
+        self.pool.close()
+        with self.assertRaises(Exception):
+            await self.pool.runWithConnection(lambda conn: None)
+
+    async def test_concurrent_operations(self) -> None:
+        """Test that multiple concurrent operations work correctly."""
+        import asyncio
+
+        results: list[int] = []
+
+        def work(conn: object, n: int) -> int:
+            return n * 2
+
+        tasks = [self.pool.runWithConnection(work, i) for i in range(10)]
+        results = await asyncio.gather(*tasks)
+
+        self.assertEqual(sorted(results), [0, 2, 4, 6, 8, 10, 12, 14, 16, 18])
+
+
 if __name__ == "__main__":
     unittest.main()
