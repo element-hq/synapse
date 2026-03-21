@@ -54,9 +54,12 @@ from prometheus_client.core import (
     GaugeMetricFamily,
 )
 
-from twisted.python.threadpool import ThreadPool
-from twisted.web.resource import Resource
-from twisted.web.server import Request
+try:
+    from twisted.python.threadpool import ThreadPool
+    from twisted.web.resource import Resource
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 # This module is imported for its side effects; flake8 needn't warn that it's unused.
 import synapse.metrics._reactor_metrics  # noqa: F401

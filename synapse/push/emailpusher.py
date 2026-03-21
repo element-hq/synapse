@@ -22,8 +22,11 @@
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from twisted.internet.error import AlreadyCalled, AlreadyCancelled
-from twisted.internet.interfaces import IDelayedCall
+try:
+    from twisted.internet.error import AlreadyCalled, AlreadyCancelled
+    from twisted.internet.interfaces import IDelayedCall
+except ImportError:
+    pass
 
 from synapse.push import Pusher, PusherConfig, PusherConfigException, ThrottleParams
 from synapse.push.mailer import Mailer

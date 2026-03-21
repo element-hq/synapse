@@ -30,11 +30,17 @@ from txredisapi import (
     SubscriberProtocol,
     UnixConnectionHandler,
 )
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet.address import IPv4Address, IPv6Address
-from twisted.internet.interfaces import IAddress, IConnector
-from twisted.python.failure import Failure
+try:
+    from twisted.internet.address import IPv4Address, IPv6Address
+    from twisted.internet.interfaces import IAddress, IConnector
+    from twisted.python.failure import Failure
+except ImportError:
+    pass
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL

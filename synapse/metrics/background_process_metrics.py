@@ -40,7 +40,10 @@ from prometheus_client import Metric
 from prometheus_client.core import REGISTRY, Counter, Gauge
 from typing_extensions import Concatenate, ParamSpec
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.logging.context import (
     ContextResourceUsage,

@@ -40,7 +40,10 @@ from typing import (
 import attr
 from prometheus_client import Counter, Histogram
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase

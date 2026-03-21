@@ -19,7 +19,10 @@
 #
 #
 from OpenSSL.SSL import Context
-from twisted.internet import ssl
+try:
+    from twisted.internet import ssl
+except ImportError:
+    pass
 
 from synapse.config.redis import RedisConfig
 

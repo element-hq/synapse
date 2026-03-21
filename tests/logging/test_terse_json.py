@@ -24,8 +24,11 @@ from io import BytesIO, StringIO
 from typing import cast
 from unittest.mock import Mock, patch
 
-from twisted.web.http import HTTPChannel
-from twisted.web.server import Request
+try:
+    from twisted.web.http import HTTPChannel
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.http.site import SynapseRequest
 from synapse.logging._terse_json import JsonFormatter, TerseJsonFormatter

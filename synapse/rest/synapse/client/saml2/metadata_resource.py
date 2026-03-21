@@ -22,8 +22,11 @@ from typing import TYPE_CHECKING
 
 import saml2.metadata
 
-from twisted.web.resource import Resource
-from twisted.web.server import Request
+try:
+    from twisted.web.resource import Resource
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

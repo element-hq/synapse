@@ -23,7 +23,10 @@ from typing import TYPE_CHECKING
 
 from netaddr import IPAddress
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse import event_auth
 from synapse.api.constants import EventTypes, HistoryVisibility, Membership

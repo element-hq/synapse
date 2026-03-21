@@ -21,21 +21,30 @@ import os.path
 import subprocess
 
 from incremental import Version
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-import twisted
+try:
+    import twisted
+except ImportError:
+    pass
 from OpenSSL import SSL
 from OpenSSL.SSL import Connection
-from twisted.internet.address import IPv4Address
-from twisted.internet.interfaces import (
-    IOpenSSLServerConnectionCreator,
-    IProtocolFactory,
-    IReactorTime,
-)
-from twisted.internet.ssl import Certificate, trustRootFromCertificates
-from twisted.protocols.tls import TLSMemoryBIOFactory, TLSMemoryBIOProtocol
-from twisted.web.client import BrowserLikePolicyForHTTPS  # noqa: F401
-from twisted.web.iweb import IPolicyForHTTPS  # noqa: F401
+try:
+    from twisted.internet.address import IPv4Address
+    from twisted.internet.interfaces import (
+        IOpenSSLServerConnectionCreator,
+        IProtocolFactory,
+        IReactorTime,
+    )
+    from twisted.internet.ssl import Certificate, trustRootFromCertificates
+    from twisted.protocols.tls import TLSMemoryBIOFactory, TLSMemoryBIOProtocol
+    from twisted.web.client import BrowserLikePolicyForHTTPS  # noqa: F401
+    from twisted.web.iweb import IPolicyForHTTPS  # noqa: F401
+except ImportError:
+    pass
 
 
 def get_test_https_policy() -> BrowserLikePolicyForHTTPS:

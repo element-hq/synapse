@@ -25,12 +25,15 @@ import re
 from typing import Any, Sequence
 from urllib.parse import quote, urlencode
 
-from twisted.internet._resolver import HostResolution
-from twisted.internet.address import IPv4Address, IPv6Address
-from twisted.internet.error import DNSLookupError
-from twisted.internet.interfaces import IAddress, IResolutionReceiver
-from twisted.internet.testing import AccumulatingProtocol, MemoryReactor
-from twisted.web.resource import Resource
+try:
+    from twisted.internet._resolver import HostResolution
+    from twisted.internet.address import IPv4Address, IPv6Address
+    from twisted.internet.error import DNSLookupError
+    from twisted.internet.interfaces import IAddress, IResolutionReceiver
+    from twisted.internet.testing import AccumulatingProtocol, MemoryReactor
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS

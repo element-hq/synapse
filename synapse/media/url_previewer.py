@@ -34,8 +34,11 @@ from urllib.request import urlopen
 
 import attr
 
-from twisted.internet.defer import Deferred
-from twisted.internet.error import DNSLookupError
+try:
+    from twisted.internet.defer import Deferred
+    from twisted.internet.error import DNSLookupError
+except ImportError:
+    pass
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.client import SimpleHttpClient

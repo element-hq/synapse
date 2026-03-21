@@ -24,13 +24,19 @@ from unittest.mock import ANY, Mock, create_autospec
 from netaddr import IPSet
 from parameterized import parameterized
 
-from twisted.internet import defer
-from twisted.internet.defer import Deferred, TimeoutError
-from twisted.internet.error import ConnectingCancelledError, DNSLookupError
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import Deferred, TimeoutError
+    from twisted.internet.error import ConnectingCancelledError, DNSLookupError
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted, StringTransport
-from twisted.web.client import Agent, ResponseNeverReceived
-from twisted.web.http import HTTPChannel
-from twisted.web.http_headers import Headers
+try:
+    from twisted.web.client import Agent, ResponseNeverReceived
+    from twisted.web.http import HTTPChannel
+    from twisted.web.http_headers import Headers
+except ImportError:
+    pass
 
 from synapse.api.errors import HttpResponseException, RequestSendFailed
 from synapse.api.ratelimiting import Ratelimiter

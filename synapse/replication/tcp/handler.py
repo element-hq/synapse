@@ -31,7 +31,10 @@ from typing import (
 
 from prometheus_client import Counter
 
-from twisted.internet.protocol import ReconnectingClientFactory
+try:
+    from twisted.internet.protocol import ReconnectingClientFactory
+except ImportError:
+    pass
 
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.replication.tcp.commands import (

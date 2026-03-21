@@ -15,7 +15,10 @@
 
 from unittest.mock import Mock
 
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable

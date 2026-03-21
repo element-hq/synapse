@@ -35,7 +35,10 @@ from prometheus_client.core import (
     Metric,
 )
 
-from twisted.internet import task
+try:
+    from twisted.internet import task
+except ImportError:
+    pass
 
 from synapse.metrics._types import Collector
 

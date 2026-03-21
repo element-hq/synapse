@@ -22,9 +22,15 @@ import re
 from http import HTTPStatus
 from typing import Any
 
-from twisted.internet.defer import succeed
+try:
+    from twisted.internet.defer import succeed
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
-from twisted.web.resource import Resource
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 import synapse.rest.admin
 from synapse.api.constants import ApprovalNoticeMedium, LoginType

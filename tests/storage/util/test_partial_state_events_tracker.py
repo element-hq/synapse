@@ -22,8 +22,11 @@
 from typing import Collection
 from unittest import mock
 
-from twisted.internet.defer import CancelledError
-from twisted.internet.defer import ensureDeferred
+try:
+    from twisted.internet.defer import CancelledError
+    from twisted.internet.defer import ensureDeferred
+except ImportError:
+    pass
 
 from synapse.storage.util.partial_state_events_tracker import (
     PartialCurrentStateTracker,

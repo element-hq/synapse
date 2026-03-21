@@ -28,7 +28,10 @@ from signedjson.sign import sign_json
 from signedjson.types import SigningKey
 
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
-from twisted.web.resource import NoResource, Resource
+try:
+    from twisted.web.resource import NoResource, Resource
+except ImportError:
+    pass
 
 from synapse.crypto.keyring import PerspectivesKeyFetcher
 from synapse.http.site import SynapseRequest

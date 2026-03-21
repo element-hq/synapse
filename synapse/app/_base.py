@@ -44,20 +44,23 @@ from wsgiref.simple_server import WSGIServer
 from cryptography.utils import CryptographyDeprecationWarning
 from typing_extensions import ParamSpec, assert_never
 
-import twisted
-from twisted.internet import defer, error, reactor as _reactor
-from twisted.internet.interfaces import (
-    IOpenSSLContextFactory,
-    IReactorSSL,
-    IReactorTCP,
-    IReactorUNIX,
-)
-from twisted.internet.protocol import ServerFactory
-from twisted.internet.tcp import Port
-from twisted.logger import LoggingFile, LogLevel
-from twisted.protocols.tls import TLSMemoryBIOFactory
-from twisted.python.threadpool import ThreadPool
-from twisted.web.resource import Resource
+try:
+    import twisted
+    from twisted.internet import defer, error, reactor as _reactor
+    from twisted.internet.interfaces import (
+        IOpenSSLContextFactory,
+        IReactorSSL,
+        IReactorTCP,
+        IReactorUNIX,
+    )
+    from twisted.internet.protocol import ServerFactory
+    from twisted.internet.tcp import Port
+    from twisted.logger import LoggingFile, LogLevel
+    from twisted.protocols.tls import TLSMemoryBIOFactory
+    from twisted.python.threadpool import ThreadPool
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 import synapse.util.caches
 from synapse.api.constants import MAX_REQUEST_SIZE

@@ -23,8 +23,11 @@ import logging
 from collections import defaultdict
 from typing import Collection
 
-from twisted.internet import defer
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.logging.opentracing import trace_with_opname

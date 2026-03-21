@@ -25,8 +25,11 @@ from typing import TYPE_CHECKING, Optional
 
 from prometheus_client import Counter
 
-from twisted.internet.error import AlreadyCalled, AlreadyCancelled
-from twisted.internet.interfaces import IDelayedCall
+try:
+    from twisted.internet.error import AlreadyCalled, AlreadyCancelled
+    from twisted.internet.interfaces import IDelayedCall
+except ImportError:
+    pass
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase

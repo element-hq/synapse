@@ -26,7 +26,10 @@ import sys
 import tempfile
 from typing import Mapping, Optional, Sequence
 
-from twisted.internet import defer, task
+try:
+    from twisted.internet import defer, task
+except ImportError:
+    pass
 
 import synapse
 from synapse.app import _base

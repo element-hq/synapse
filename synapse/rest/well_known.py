@@ -20,8 +20,11 @@
 import logging
 from typing import TYPE_CHECKING
 
-from twisted.web.resource import Resource
-from twisted.web.server import Request
+try:
+    from twisted.web.resource import Resource
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import NotFoundError

@@ -26,7 +26,10 @@ from typing import Any, Sequence
 import attr
 from parameterized import parameterized
 
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.rest.admin

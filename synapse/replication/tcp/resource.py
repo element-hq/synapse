@@ -26,8 +26,11 @@ from typing import TYPE_CHECKING
 
 from prometheus_client import Counter
 
-from twisted.internet.interfaces import IAddress
-from twisted.internet.protocol import ServerFactory
+try:
+    from twisted.internet.interfaces import IAddress
+    from twisted.internet.protocol import ServerFactory
+except ImportError:
+    pass
 
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.replication.tcp.commands import PositionCommand

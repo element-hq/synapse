@@ -47,7 +47,10 @@ if py_version < (3, 10):
 if strtobool(os.environ.get("SYNAPSE_ASYNC_IO_REACTOR", "0")):
     import asyncio
 
-    from twisted.internet import asyncioreactor
+    try:
+        from twisted.internet import asyncioreactor
+    except ImportError:
+        pass
 
     asyncioreactor.install(asyncio.get_event_loop())
 
@@ -56,8 +59,11 @@ if strtobool(os.environ.get("SYNAPSE_ASYNC_IO_REACTOR", "0")):
 # actually start Synapse will import these libraries fine.
 try:
     from twisted.internet import protocol
-    from twisted.internet.protocol import Factory
-    from twisted.names.dns import DNSDatagramProtocol
+    try:
+        from twisted.internet.protocol import Factory
+        from twisted.names.dns import DNSDatagramProtocol
+    except ImportError:
+        pass
 
     protocol.Factory.noisy = False
     Factory.noisy = False

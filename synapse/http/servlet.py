@@ -36,7 +36,10 @@ from typing import (
 
 from pydantic import BaseModel, ValidationError
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http import redact_uri

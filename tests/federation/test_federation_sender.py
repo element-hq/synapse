@@ -23,7 +23,10 @@ from unittest.mock import AsyncMock, Mock
 from signedjson import key, sign
 from signedjson.types import BaseKey, SigningKey
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.constants import EduTypes, RoomEncryptionAlgorithms

@@ -32,17 +32,20 @@ from urllib.parse import quote, urlencode
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
 
-from twisted.internet import defer
-from twisted.internet._resolver import HostResolution
-from twisted.internet.address import IPv4Address, IPv6Address
-from twisted.internet.defer import Deferred
-from twisted.internet.error import DNSLookupError
-from twisted.internet.interfaces import IAddress, IResolutionReceiver
-from twisted.internet.testing import AccumulatingProtocol, MemoryReactor
-from twisted.python.failure import Failure
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
-from twisted.web.resource import Resource
+try:
+    from twisted.internet import defer
+    from twisted.internet._resolver import HostResolution
+    from twisted.internet.address import IPv4Address, IPv6Address
+    from twisted.internet.defer import Deferred
+    from twisted.internet.error import DNSLookupError
+    from twisted.internet.interfaces import IAddress, IResolutionReceiver
+    from twisted.internet.testing import AccumulatingProtocol, MemoryReactor
+    from twisted.python.failure import Failure
+    from twisted.web.http_headers import Headers
+    from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.api.errors import HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter

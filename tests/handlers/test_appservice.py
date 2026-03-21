@@ -31,7 +31,10 @@ from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.rest.admin

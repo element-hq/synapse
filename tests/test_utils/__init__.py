@@ -33,12 +33,15 @@ from typing import TYPE_CHECKING, Awaitable, Callable, TypeVar
 import attr
 import zope.interface
 
-from twisted.internet.interfaces import IProtocol
-from twisted.python.failure import Failure
-from twisted.web.client import ResponseDone
-from twisted.web.http import RESPONSES
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import IResponse
+try:
+    from twisted.internet.interfaces import IProtocol
+    from twisted.python.failure import Failure
+    from twisted.web.client import ResponseDone
+    from twisted.web.http import RESPONSES
+    from twisted.web.http_headers import Headers
+    from twisted.web.iweb import IResponse
+except ImportError:
+    pass
 
 from synapse.types import JsonSerializable
 

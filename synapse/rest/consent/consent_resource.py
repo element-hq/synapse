@@ -28,7 +28,10 @@ from typing import TYPE_CHECKING, Any
 import jinja2
 from jinja2 import TemplateNotFound
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.api.errors import NotFoundError, StoreError, SynapseError
 from synapse.config import ConfigError

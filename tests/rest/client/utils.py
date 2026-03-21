@@ -42,7 +42,10 @@ from urllib.parse import urlencode
 import attr
 
 from typing import Any as MemoryReactor  # was: MemoryReactor from TwistedClock
-from twisted.web.server import Site
+try:
+    from twisted.web.server import Site
+except ImportError:
+    pass
 
 from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.api.errors import Codes

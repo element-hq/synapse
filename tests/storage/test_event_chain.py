@@ -24,7 +24,10 @@ from typing import cast
 from parameterized import parameterized
 
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
-from twisted.trial import unittest
+try:
+    from twisted.trial import unittest
+except ImportError:
+    pass
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import RoomVersions

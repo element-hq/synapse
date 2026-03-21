@@ -27,8 +27,11 @@ from typing import Any, Callable, Iterable
 from prometheus_client import Histogram, Metric
 from prometheus_client.core import REGISTRY, GaugeMetricFamily
 
-from twisted.internet import reactor, selectreactor
-from twisted.internet.asyncioreactor import AsyncioSelectorReactor
+try:
+    from twisted.internet import reactor, selectreactor
+    from twisted.internet.asyncioreactor import AsyncioSelectorReactor
+except ImportError:
+    pass
 
 from synapse.app.complement_fork_proxied_reactor import ProxiedReactor
 from synapse.metrics._types import Collector

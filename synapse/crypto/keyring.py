@@ -36,7 +36,10 @@ from signedjson.sign import SignatureVerifyException, signature_ids, verify_sign
 from signedjson.types import VerifyKey
 from unpaddedbase64 import decode_base64
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.api.errors import (
     Codes,

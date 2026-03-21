@@ -37,41 +37,47 @@ import treq
 from canonicaljson import encode_canonical_json
 from netaddr import AddrFormatError, IPAddress, IPSet
 from prometheus_client import Counter
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
 from OpenSSL import SSL
 from OpenSSL.SSL import VERIFY_NONE
-from twisted.internet import defer, error as twisted_error, protocol, ssl
-from twisted.internet.address import IPv4Address, IPv6Address
-from twisted.internet.interfaces import (
-    IAddress,
-    IDelayedCall,
-    IHostResolution,
-    IOpenSSLContextFactory,
-    IReactorCore,
-    IReactorPluggableNameResolver,
-    IResolutionReceiver,
-    ITCPTransport,
-)
-from twisted.internet.protocol import connectionDone
-from twisted.internet.task import Cooperator
-from twisted.python.failure import Failure
-from twisted.web._newclient import ResponseDone
-from twisted.web.client import (
-    Agent,
-    HTTPConnectionPool,
-    ResponseNeverReceived,
-    readBody,
-)
-from twisted.web.http import PotentialDataLoss
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import (
-    UNKNOWN_LENGTH,
-    IAgent,
-    IBodyProducer,
-    IPolicyForHTTPS,
-    IResponse,
-)
+try:
+    from twisted.internet import defer, error as twisted_error, protocol, ssl
+    from twisted.internet.address import IPv4Address, IPv6Address
+    from twisted.internet.interfaces import (
+        IAddress,
+        IDelayedCall,
+        IHostResolution,
+        IOpenSSLContextFactory,
+        IReactorCore,
+        IReactorPluggableNameResolver,
+        IResolutionReceiver,
+        ITCPTransport,
+    )
+    from twisted.internet.protocol import connectionDone
+    from twisted.internet.task import Cooperator
+    from twisted.python.failure import Failure
+    from twisted.web._newclient import ResponseDone
+    from twisted.web.client import (
+        Agent,
+        HTTPConnectionPool,
+        ResponseNeverReceived,
+        readBody,
+    )
+    from twisted.web.http import PotentialDataLoss
+    from twisted.web.http_headers import Headers
+    from twisted.web.iweb import (
+        UNKNOWN_LENGTH,
+        IAgent,
+        IBodyProducer,
+        IPolicyForHTTPS,
+        IResponse,
+    )
+except ImportError:
+    pass
 
 from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.http import QuieterFileBodyProducer, RequestTimedOutError, redact_uri

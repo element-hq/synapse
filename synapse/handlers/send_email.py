@@ -26,12 +26,15 @@ from email.mime.text import MIMEText
 from io import BytesIO
 from typing import TYPE_CHECKING
 
-from twisted.internet.defer import Deferred
-from twisted.internet.endpoints import HostnameEndpoint
-from twisted.internet.interfaces import IProtocolFactory
-from twisted.internet.ssl import optionsForClientTLS
-from twisted.mail.smtp import ESMTPSenderFactory
-from twisted.protocols.tls import TLSMemoryBIOFactory
+try:
+    from twisted.internet.defer import Deferred
+    from twisted.internet.endpoints import HostnameEndpoint
+    from twisted.internet.interfaces import IProtocolFactory
+    from twisted.internet.ssl import optionsForClientTLS
+    from twisted.mail.smtp import ESMTPSenderFactory
+    from twisted.protocols.tls import TLSMemoryBIOFactory
+except ImportError:
+    pass
 
 from synapse.logging.context import make_deferred_yieldable
 from synapse.types import ISynapseReactor

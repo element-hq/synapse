@@ -29,9 +29,12 @@ from typing import IO, TYPE_CHECKING
 import attr
 from matrix_common.types.mxc_uri import MXCUri
 
-import twisted.internet.error
-import twisted.web.http
-from twisted.internet.defer import Deferred
+try:
+    import twisted.internet.error
+    import twisted.web.http
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 
 from synapse.api.errors import (
     Codes,

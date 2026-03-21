@@ -35,8 +35,11 @@ from typing import (
 import attr
 from prometheus_client import Counter
 
-from twisted.internet import defer
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 
 from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import AuthError
@@ -64,7 +67,10 @@ from synapse.util.async_helpers import (
 from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
 from synapse.visibility import filter_and_transform_events_for_client
-from twisted.internet.defer import CancelledError
+try:
+    from twisted.internet.defer import CancelledError
+except ImportError:
+    pass
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

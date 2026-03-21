@@ -19,8 +19,11 @@
 #
 #
 
-from twisted.internet import defer
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 
 from synapse.config.homeserver import HomeServerConfig
 from synapse.config.ratelimiting import FederationRatelimitSettings

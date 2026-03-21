@@ -36,8 +36,11 @@ from urllib.parse import urlencode
 
 import attr
 
-from twisted.web.iweb import IRequest
-from twisted.web.server import Request
+try:
+    from twisted.web.iweb import IRequest
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.api.constants import LoginType, ProfileFields
 from synapse.api.errors import Codes, NotFoundError, RedirectException, SynapseError

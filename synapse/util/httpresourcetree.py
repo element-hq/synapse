@@ -21,7 +21,10 @@
 
 import logging
 
-from twisted.web.resource import Resource
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.http.server import UnrecognizedRequestResource
 

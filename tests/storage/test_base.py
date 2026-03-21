@@ -23,7 +23,10 @@ from collections import OrderedDict
 from typing import Generator
 from unittest.mock import Mock, call, patch
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import DatabasePool

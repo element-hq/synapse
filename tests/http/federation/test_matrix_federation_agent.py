@@ -26,23 +26,29 @@ from unittest.mock import AsyncMock, call, patch
 import treq
 from netaddr import IPSet
 from service_identity import VerificationError
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet import defer
-from twisted.internet._sslverify import ClientTLSOptions, OpenSSLCertificateOptions
-from twisted.internet.defer import Deferred
-from twisted.internet.endpoints import _WrappingProtocol
-from twisted.internet.interfaces import (
-    IOpenSSLClientConnectionCreator,
-    IProtocolFactory,
-)
-from twisted.internet.protocol import Factory, Protocol
-from twisted.protocols.tls import TLSMemoryBIOProtocol
-from twisted.web._newclient import ResponseNeverReceived
-from twisted.web.client import Agent
-from twisted.web.http import HTTPChannel, Request
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import IPolicyForHTTPS, IResponse
+try:
+    from twisted.internet import defer
+    from twisted.internet._sslverify import ClientTLSOptions, OpenSSLCertificateOptions
+    from twisted.internet.defer import Deferred
+    from twisted.internet.endpoints import _WrappingProtocol
+    from twisted.internet.interfaces import (
+        IOpenSSLClientConnectionCreator,
+        IProtocolFactory,
+    )
+    from twisted.internet.protocol import Factory, Protocol
+    from twisted.protocols.tls import TLSMemoryBIOProtocol
+    from twisted.web._newclient import ResponseNeverReceived
+    from twisted.web.client import Agent
+    from twisted.web.http import HTTPChannel, Request
+    from twisted.web.http_headers import Headers
+    from twisted.web.iweb import IPolicyForHTTPS, IResponse
+except ImportError:
+    pass
 
 from synapse.config.homeserver import HomeServerConfig
 from synapse.config.server import parse_proxy_config

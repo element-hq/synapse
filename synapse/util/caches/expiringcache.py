@@ -33,7 +33,10 @@ from typing import (
 
 import attr
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.config import cache as cache_config
 from synapse.util.caches import EvictionReason, register_cache

@@ -23,15 +23,21 @@
 from typing import Callable
 from unittest.mock import patch
 
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet import defer
-from twisted.internet._sslverify import ClientTLSOptions
-from twisted.internet.address import IPv4Address, IPv6Address
-from twisted.internet.defer import ensureDeferred
-from twisted.internet.interfaces import IProtocolFactory
-from twisted.internet.ssl import ContextFactory
-from twisted.mail import interfaces, smtp
+try:
+    from twisted.internet import defer
+    from twisted.internet._sslverify import ClientTLSOptions
+    from twisted.internet.address import IPv4Address, IPv6Address
+    from twisted.internet.defer import ensureDeferred
+    from twisted.internet.interfaces import IProtocolFactory
+    from twisted.internet.ssl import ContextFactory
+    from twisted.mail import interfaces, smtp
+except ImportError:
+    pass
 
 from tests.server import FakeTransport
 from tests.unittest import HomeserverTestCase, override_config

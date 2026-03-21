@@ -24,7 +24,10 @@ from unittest.mock import AsyncMock, Mock
 
 import yaml
 
-from twisted.internet.defer import Deferred, ensureDeferred
+try:
+    from twisted.internet.defer import Deferred, ensureDeferred
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.server import HomeServer

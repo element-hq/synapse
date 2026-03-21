@@ -26,9 +26,12 @@ from typing import Any, Callable
 
 import attr
 
-from twisted.internet.error import ConnectError
-from twisted.names import client, dns
-from twisted.names.error import DNSNameError, DNSNotImplementedError, DomainError
+try:
+    from twisted.internet.error import ConnectError
+    from twisted.names import client, dns
+    from twisted.names.error import DNSNameError, DNSNotImplementedError, DomainError
+except ImportError:
+    pass
 
 from synapse.logging.context import make_deferred_yieldable
 

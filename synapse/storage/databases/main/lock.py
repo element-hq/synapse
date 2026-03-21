@@ -24,8 +24,11 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Collection, Optional
 from weakref import WeakValueDictionary
 
-from twisted.internet import defer
-from twisted.internet.task import LoopingCall
+try:
+    from twisted.internet import defer
+    from twisted.internet.task import LoopingCall
+except ImportError:
+    pass
 
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,

@@ -26,12 +26,18 @@ from typing import (
 from weakref import WeakSet
 
 from typing_extensions import ParamSpec
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet import defer, task
-from twisted.internet.defer import Deferred
-from twisted.internet.interfaces import IDelayedCall
-from twisted.internet.task import LoopingCall
+try:
+    from twisted.internet import defer, task
+    from twisted.internet.defer import Deferred
+    from twisted.internet.interfaces import IDelayedCall
+    from twisted.internet.task import LoopingCall
+except ImportError:
+    pass
 
 from synapse.logging import context
 from synapse.logging.loggers import ExplicitlyConfiguredLogger

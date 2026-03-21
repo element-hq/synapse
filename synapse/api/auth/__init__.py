@@ -22,7 +22,10 @@ from typing import TYPE_CHECKING, Protocol
 
 from prometheus_client import Histogram
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.appservice import ApplicationService
 from synapse.http.site import SynapseRequest

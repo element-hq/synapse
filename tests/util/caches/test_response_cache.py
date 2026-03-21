@@ -24,7 +24,10 @@ from unittest.mock import Mock
 
 from parameterized import parameterized
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 from synapse.util.cancellation import cancellable
@@ -32,7 +35,10 @@ from synapse.util.duration import Duration
 
 from tests.server import get_clock
 from tests.unittest import TestCase
-from twisted.internet.defer import CancelledError
+try:
+    from twisted.internet.defer import CancelledError
+except ImportError:
+    pass
 
 
 class ResponseCacheTestCase(TestCase):

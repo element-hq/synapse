@@ -21,7 +21,10 @@
 
 from functools import partial
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.util.caches.deferred_cache import DeferredCache
 

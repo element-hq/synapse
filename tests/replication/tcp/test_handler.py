@@ -19,7 +19,10 @@
 #
 #
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.replication.tcp.commands import PositionCommand
 

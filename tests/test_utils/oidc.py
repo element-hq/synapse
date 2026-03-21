@@ -29,8 +29,11 @@ from urllib.parse import parse_qs
 
 import attr
 
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import IResponse
+try:
+    from twisted.web.http_headers import Headers
+    from twisted.web.iweb import IResponse
+except ImportError:
+    pass
 
 from synapse.server import HomeServer
 from synapse.util.clock import Clock

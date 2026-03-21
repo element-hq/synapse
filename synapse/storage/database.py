@@ -45,8 +45,11 @@ import attr
 from prometheus_client import Counter, Histogram
 from typing_extensions import Concatenate, ParamSpec
 
-from twisted.enterprise import adbapi
-from twisted.internet.interfaces import IReactorCore
+try:
+    from twisted.enterprise import adbapi
+    from twisted.internet.interfaces import IReactorCore
+except ImportError:
+    pass
 
 from synapse.api.errors import StoreError
 from synapse.config.database import DatabaseConnectionConfig

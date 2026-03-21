@@ -24,9 +24,12 @@ import os
 import sys
 from typing import Iterable, Optional
 
-from twisted.internet.tcp import Port
-from twisted.web.resource import EncodingResourceWrapper, Resource
-from twisted.web.server import GzipEncoderFactory
+try:
+    from twisted.internet.tcp import Port
+    from twisted.web.resource import EncodingResourceWrapper, Resource
+    from twisted.web.server import GzipEncoderFactory
+except ImportError:
+    pass
 
 import synapse
 from synapse import events

@@ -26,7 +26,10 @@ from http import HTTPStatus
 from typing import Any
 from unittest.mock import Mock
 
-from twisted.internet.interfaces import IReactorTCP
+try:
+    from twisted.internet.interfaces import IReactorTCP
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.rest.admin

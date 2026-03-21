@@ -27,9 +27,12 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Hashable
 
 from typing_extensions import ParamSpec
 
-from twisted.internet.defer import Deferred
-from twisted.python.failure import Failure
-from twisted.web.iweb import IRequest
+try:
+    from twisted.internet.defer import Deferred
+    from twisted.python.failure import Failure
+    from twisted.web.iweb import IRequest
+except ImportError:
+    pass
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import JsonDict, Requester

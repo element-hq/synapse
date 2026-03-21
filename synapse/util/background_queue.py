@@ -24,11 +24,17 @@ from typing import (
     TypeVar,
 )
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.util.async_helpers import DeferredEvent
 from synapse.util.duration import Duration
-from twisted.internet.defer import CancelledError
+try:
+    from twisted.internet.defer import CancelledError
+except ImportError:
+    pass
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

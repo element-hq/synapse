@@ -23,10 +23,16 @@ from io import BytesIO
 from typing import BinaryIO, Generator, cast
 from unittest.mock import NonCallableMock
 
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet import defer, reactor as _reactor
-from twisted.internet.interfaces import IPullProducer
+try:
+    from twisted.internet import defer, reactor as _reactor
+    from twisted.internet.interfaces import IPullProducer
+except ImportError:
+    pass
 
 from synapse.types import ISynapseReactor
 from synapse.util.file_consumer import BackgroundFileConsumer

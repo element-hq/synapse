@@ -28,7 +28,10 @@ import sys
 from types import FrameType
 from typing import Any, Callable
 
-from twisted.internet.main import installReactor
+try:
+    from twisted.internet.main import installReactor
+except ImportError:
+    pass
 
 from synapse.app.complement_fork_proxied_reactor import ProxiedReactor
 
@@ -65,12 +68,18 @@ def _worker_entrypoint(
     ):
         import asyncio
 
-        from twisted.internet.asyncioreactor import AsyncioSelectorReactor
+        try:
+            from twisted.internet.asyncioreactor import AsyncioSelectorReactor
+        except ImportError:
+            pass
 
         reactor = AsyncioSelectorReactor(asyncio.get_event_loop())
         proxy_reactor._install_real_reactor(reactor)
     else:
-        from twisted.internet.epollreactor import EPollReactor
+        try:
+            from twisted.internet.epollreactor import EPollReactor
+        except ImportError:
+            pass
 
         proxy_reactor._install_real_reactor(EPollReactor())
 

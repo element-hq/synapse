@@ -34,13 +34,19 @@ from typing import (
 )
 
 import attr
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet import interfaces
-from twisted.internet.defer import Deferred
-from twisted.internet.interfaces import IConsumer
-from twisted.python.failure import Failure
-from twisted.web.server import Request
+try:
+    from twisted.internet import interfaces
+    from twisted.internet.defer import Deferred
+    from twisted.internet.interfaces import IConsumer
+    from twisted.python.failure import Failure
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.api.errors import Codes, cs_error
 from synapse.http.server import finish_request, respond_with_json

@@ -26,7 +26,10 @@ from typing import TYPE_CHECKING
 from signedjson.sign import sign_json
 from unpaddedbase64 import encode_base64
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.http.servlet import RestServlet
 from synapse.types import JsonDict

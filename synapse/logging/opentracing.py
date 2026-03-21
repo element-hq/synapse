@@ -196,9 +196,12 @@ from typing import (
 import attr
 from typing_extensions import Concatenate, ParamSpec
 
-from twisted.internet import defer
-from twisted.web.http import Request
-from twisted.web.http_headers import Headers
+try:
+    from twisted.internet import defer
+    from twisted.web.http import Request
+    from twisted.web.http_headers import Headers
+except ImportError:
+    pass
 
 from synapse.config import ConfigError
 from synapse.util.json import json_decoder, json_encoder

@@ -31,13 +31,19 @@ import attr
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
 
-from twisted.internet import defer
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
-from twisted.python.failure import Failure
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
-from twisted.web.resource import Resource
+try:
+    from twisted.python.failure import Failure
+    from twisted.web.http_headers import Headers
+    from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.api.errors import Codes, HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter

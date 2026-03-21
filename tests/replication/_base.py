@@ -21,11 +21,17 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from twisted.internet.address import IPv4Address
-from twisted.internet.protocol import Protocol, connectionDone
+try:
+    from twisted.internet.address import IPv4Address
+    from twisted.internet.protocol import Protocol, connectionDone
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
-from twisted.python.failure import Failure
-from twisted.web.resource import Resource
+try:
+    from twisted.python.failure import Failure
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.app.generic_worker import GenericWorkerServer
 from synapse.config.workers import InstanceTcpLocationConfig, InstanceUnixLocationConfig

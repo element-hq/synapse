@@ -32,11 +32,17 @@ from typing import (
 from unittest import mock
 from unittest.mock import Mock
 
-from twisted.internet.defer import Deferred
-from twisted.internet.error import ConnectionDone
+try:
+    from twisted.internet.defer import Deferred
+    from twisted.internet.error import ConnectionDone
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from TwistedClock
-from twisted.python.failure import Failure
-from twisted.web.server import Site
+try:
+    from twisted.python.failure import Failure
+    from twisted.web.server import Site
+except ImportError:
+    pass
 
 from synapse.http.server import (
     HTTP_STATUS_REQUEST_CANCELLED,

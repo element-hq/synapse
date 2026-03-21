@@ -21,7 +21,10 @@
 #
 
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
-from twisted.web.resource import Resource
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 import synapse.rest.admin
 from synapse.api.errors import Codes

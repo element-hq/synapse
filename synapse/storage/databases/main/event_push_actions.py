@@ -90,7 +90,10 @@ from typing import (
 
 import attr
 
-from twisted.internet.task import LoopingCall
+try:
+    from twisted.internet.task import LoopingCall
+except ImportError:
+    pass
 
 from synapse.api.constants import MAIN_TIMELINE, ReceiptTypes
 from synapse.metrics.background_process_metrics import wrap_as_background_process

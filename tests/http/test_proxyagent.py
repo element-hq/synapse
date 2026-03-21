@@ -27,16 +27,19 @@ import treq
 from netaddr import IPSet
 from parameterized import parameterized
 
-from twisted.internet import interfaces  # noqa: F401
-from twisted.internet.endpoints import (
-    HostnameEndpoint,
-    _WrapperEndpoint,
-    _WrappingProtocol,
-)
-from twisted.internet.interfaces import IProtocol, IProtocolFactory
-from twisted.internet.protocol import Factory, Protocol
-from twisted.protocols.tls import TLSMemoryBIOProtocol
-from twisted.web.http import HTTPChannel
+try:
+    from twisted.internet import interfaces  # noqa: F401
+    from twisted.internet.endpoints import (
+        HostnameEndpoint,
+        _WrapperEndpoint,
+        _WrappingProtocol,
+    )
+    from twisted.internet.interfaces import IProtocol, IProtocolFactory
+    from twisted.internet.protocol import Factory, Protocol
+    from twisted.protocols.tls import TLSMemoryBIOProtocol
+    from twisted.web.http import HTTPChannel
+except ImportError:
+    pass
 
 from synapse.config.server import ProxyConfig, parse_proxy_config
 from synapse.http.client import BlocklistingReactorWrapper

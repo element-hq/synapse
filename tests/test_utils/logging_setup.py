@@ -20,7 +20,10 @@
 import logging
 import os
 
-import twisted.logger
+try:
+    import twisted.logger
+except ImportError:
+    pass
 
 from synapse.logging.context import LoggingContextFilter
 from synapse.synapse_rust import reset_logging_config

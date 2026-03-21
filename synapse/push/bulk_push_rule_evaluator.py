@@ -31,7 +31,10 @@ from typing import (
 
 from prometheus_client import Counter
 
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 
 from synapse.api.constants import (
     MAIN_TIMELINE,

@@ -21,7 +21,10 @@
 from typing import Any, Iterable
 from unittest import mock
 
-from twisted.internet.defer import ensureDeferred
+try:
+    from twisted.internet.defer import ensureDeferred
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.constants import (

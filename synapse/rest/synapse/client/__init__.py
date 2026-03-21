@@ -21,7 +21,10 @@
 
 from typing import TYPE_CHECKING, Mapping
 
-from twisted.web.resource import Resource
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.rest.synapse.client.federation_whitelist import FederationWhitelistResource
 from synapse.rest.synapse.client.new_user_consent import NewUserConsentResource

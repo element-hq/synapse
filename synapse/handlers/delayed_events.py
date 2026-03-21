@@ -15,7 +15,10 @@
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from twisted.internet.interfaces import IDelayedCall
+try:
+    from twisted.internet.interfaces import IDelayedCall
+except ImportError:
+    pass
 
 from synapse.api.constants import EventTypes, StickyEvent, StickyEventField
 from synapse.api.errors import ShadowBanError, SynapseError

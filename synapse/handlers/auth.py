@@ -41,8 +41,11 @@ import bcrypt
 import unpaddedbase64
 from prometheus_client import Counter
 
-from twisted.internet.defer import CancelledError
-from twisted.web.server import Request
+try:
+    from twisted.internet.defer import CancelledError
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.api.constants import LoginType
 from synapse.api.errors import (

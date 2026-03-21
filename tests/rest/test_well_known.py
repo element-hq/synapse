@@ -19,7 +19,10 @@
 #
 from unittest.mock import AsyncMock
 
-from twisted.web.resource import Resource
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.rest.well_known import well_known_resource
 

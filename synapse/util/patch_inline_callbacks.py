@@ -25,9 +25,12 @@ from typing import Any, Callable, Generator, TypeVar, cast
 
 from typing_extensions import ParamSpec
 
-from twisted.internet import defer
-from twisted.internet.defer import Deferred
-from twisted.python.failure import Failure
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import Deferred
+    from twisted.python.failure import Failure
+except ImportError:
+    pass
 
 # Tracks if we've already patched inlineCallbacks
 _already_patched = False

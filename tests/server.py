@@ -48,38 +48,44 @@ from unittest.mock import Mock, patch
 import attr
 from incremental import Version
 from typing_extensions import ParamSpec
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-import twisted
-from twisted.enterprise import adbapi
-from twisted.internet import address, defer, tcp, threads, udp
-from twisted.internet._resolver import SimpleResolverComplexifier
-from twisted.internet.address import IPv4Address, IPv6Address
-from twisted.internet.defer import Deferred, fail, maybeDeferred, succeed
-from twisted.internet.error import DNSLookupError
-from twisted.internet.interfaces import (
-    IAddress,
-    IConnector,
-    IConsumer,
-    IHostnameResolver,
-    IListeningPort,
-    IProducer,
-    IProtocol,
-    IPullProducer,
-    IPushProducer,
-    IReactorPluggableNameResolver,
-    IReactorTime,
-    IResolverSimple,
-    ITCPTransport,
-    ITransport,
-)
-from twisted.internet.protocol import ClientFactory, DatagramProtocol, Factory
-from twisted.internet.testing import AccumulatingProtocol, MemoryReactorClock
-from twisted.python import threadpool
-from twisted.python.failure import Failure
-from twisted.web.http_headers import Headers
-from twisted.web.resource import IResource
-from twisted.web.server import Request, Site
+try:
+    import twisted
+    from twisted.enterprise import adbapi
+    from twisted.internet import address, defer, tcp, threads, udp
+    from twisted.internet._resolver import SimpleResolverComplexifier
+    from twisted.internet.address import IPv4Address, IPv6Address
+    from twisted.internet.defer import Deferred, fail, maybeDeferred, succeed
+    from twisted.internet.error import DNSLookupError
+    from twisted.internet.interfaces import (
+        IAddress,
+        IConnector,
+        IConsumer,
+        IHostnameResolver,
+        IListeningPort,
+        IProducer,
+        IProtocol,
+        IPullProducer,
+        IPushProducer,
+        IReactorPluggableNameResolver,
+        IReactorTime,
+        IResolverSimple,
+        ITCPTransport,
+        ITransport,
+    )
+    from twisted.internet.protocol import ClientFactory, DatagramProtocol, Factory
+    from twisted.internet.testing import AccumulatingProtocol, MemoryReactorClock
+    from twisted.python import threadpool
+    from twisted.python.failure import Failure
+    from twisted.web.http_headers import Headers
+    from twisted.web.resource import IResource
+    from twisted.web.server import Request, Site
+except ImportError:
+    pass
 
 from synapse.api.constants import MAX_REQUEST_SIZE
 from synapse.config.database import DatabaseConnectionConfig
@@ -520,7 +526,10 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # This is *super* dirty since it is never undone and relies on the next
         # test to overwrite it.
         if twisted.version > Version("Twisted", 23, 8, 0):
-            from twisted.protocols import tls
+            try:
+                from twisted.protocols import tls
+            except ImportError:
+                pass
 
             tls._get_default_clock = lambda: self
 

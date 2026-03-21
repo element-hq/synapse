@@ -24,12 +24,15 @@ from unittest.mock import Mock
 
 from netaddr import IPSet
 
-from twisted.internet.defer import Deferred
-from twisted.internet.error import DNSLookupError
-from twisted.internet.testing import AccumulatingProtocol
-from twisted.python.failure import Failure
-from twisted.web.client import Agent, ResponseDone
-from twisted.web.iweb import UNKNOWN_LENGTH
+try:
+    from twisted.internet.defer import Deferred
+    from twisted.internet.error import DNSLookupError
+    from twisted.internet.testing import AccumulatingProtocol
+    from twisted.python.failure import Failure
+    from twisted.web.client import Agent, ResponseDone
+    from twisted.web.iweb import UNKNOWN_LENGTH
+except ImportError:
+    pass
 
 from synapse.api.errors import SynapseError
 from synapse.http.client import (

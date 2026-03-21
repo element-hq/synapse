@@ -23,13 +23,16 @@ import sys
 import traceback
 from typing import Any
 
-from twisted.conch import manhole_ssh
-from twisted.conch.insults import insults
-from twisted.conch.manhole import ColoredManhole, ManholeInterpreter
-from twisted.conch.ssh.keys import Key
-from twisted.cred import checkers, portal
-from twisted.internet import defer
-from twisted.internet.protocol import ServerFactory
+try:
+    from twisted.conch import manhole_ssh
+    from twisted.conch.insults import insults
+    from twisted.conch.manhole import ColoredManhole, ManholeInterpreter
+    from twisted.conch.ssh.keys import Key
+    from twisted.cred import checkers, portal
+    from twisted.internet import defer
+    from twisted.internet.protocol import ServerFactory
+except ImportError:
+    pass
 
 from synapse.config.server import ManholeConfig
 

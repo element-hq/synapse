@@ -22,26 +22,32 @@
 import logging
 from typing import Optional
 
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet import defer
-from twisted.internet.endpoints import (
-    HostnameEndpoint,
-    UNIXClientEndpoint,
-    wrapClientTLS,
-)
-from twisted.internet.interfaces import IStreamClientEndpoint
-from twisted.python.failure import Failure
-from twisted.web.client import URI, HTTPConnectionPool, _AgentBase
-from twisted.web.error import SchemeNotSupported
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import (
-    IAgent,
-    IAgentEndpointFactory,
-    IBodyProducer,
-    IPolicyForHTTPS,
-    IResponse,
-)
+try:
+    from twisted.internet import defer
+    from twisted.internet.endpoints import (
+        HostnameEndpoint,
+        UNIXClientEndpoint,
+        wrapClientTLS,
+    )
+    from twisted.internet.interfaces import IStreamClientEndpoint
+    from twisted.python.failure import Failure
+    from twisted.web.client import URI, HTTPConnectionPool, _AgentBase
+    from twisted.web.error import SchemeNotSupported
+    from twisted.web.http_headers import Headers
+    from twisted.web.iweb import (
+        IAgent,
+        IAgentEndpointFactory,
+        IBodyProducer,
+        IPolicyForHTTPS,
+        IResponse,
+    )
+except ImportError:
+    pass
 
 from synapse.config.workers import (
     InstanceLocationConfig,

@@ -25,7 +25,10 @@ from xml.etree import ElementTree as ET
 
 import attr
 
-from twisted.web.client import PartialDownloadError
+try:
+    from twisted.web.client import PartialDownloadError
+except ImportError:
+    pass
 
 from synapse.api.errors import HttpResponseException
 from synapse.handlers.sso import MappingException, UserAttributes

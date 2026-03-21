@@ -29,15 +29,21 @@ from string import Template
 from typing import TYPE_CHECKING, Any
 
 import yaml
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.logger import (
-    ILogObserver,
-    LogBeginner,
-    STDLibLogObserver,
-    eventAsText,
-    globalLogBeginner,
-)
+try:
+    from twisted.logger import (
+        ILogObserver,
+        LogBeginner,
+        STDLibLogObserver,
+        eventAsText,
+        globalLogBeginner,
+    )
+except ImportError:
+    pass
 
 from synapse.logging.context import LoggingContextFilter
 from synapse.synapse_rust import reset_logging_config
@@ -352,7 +358,10 @@ def setup_logging(
         use_worker_options: True to use the 'worker_log_config' option
             instead of 'log_config'.
     """
-    from twisted.internet import reactor
+    try:
+        from twisted.internet import reactor
+    except ImportError:
+        pass
 
     log_config_path = (
         config.worker.worker_log_config

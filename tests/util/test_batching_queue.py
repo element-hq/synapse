@@ -21,7 +21,10 @@
 
 from prometheus_client import Gauge
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.logging.context import make_deferred_yieldable
 from synapse.util.batching_queue import (

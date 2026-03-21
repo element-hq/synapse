@@ -24,7 +24,10 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import StrictStr
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.http.server import HttpServer

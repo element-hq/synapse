@@ -20,9 +20,12 @@
 #
 import re
 
-from twisted.internet import address, task
-from twisted.web.client import FileBodyProducer
-from twisted.web.iweb import IRequest
+try:
+    from twisted.internet import address, task
+    from twisted.web.client import FileBodyProducer
+    from twisted.web.iweb import IRequest
+except ImportError:
+    pass
 
 from synapse.api.errors import SynapseError
 

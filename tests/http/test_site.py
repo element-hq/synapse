@@ -19,7 +19,10 @@
 #
 #
 
-from twisted.internet.address import IPv6Address
+try:
+    from twisted.internet.address import IPv6Address
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted, StringTransport
 
 from synapse.app._base import max_request_body_size

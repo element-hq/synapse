@@ -28,7 +28,10 @@ from typing import (
 
 from prometheus_client import Counter
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 import synapse
 from synapse.api.constants import EduTypes, EventTypes

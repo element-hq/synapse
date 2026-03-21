@@ -28,7 +28,10 @@ from enum import Enum
 from http import HTTPStatus
 from typing import Any, Optional
 
-from twisted.web import http
+try:
+    from twisted.web import http
+except ImportError:
+    pass
 
 from synapse.util.json import json_decoder
 

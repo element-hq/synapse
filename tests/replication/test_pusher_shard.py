@@ -21,7 +21,10 @@
 import logging
 from unittest.mock import Mock
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.rest import admin

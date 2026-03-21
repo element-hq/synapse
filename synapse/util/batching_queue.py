@@ -31,7 +31,10 @@ from typing import (
 
 from prometheus_client import Gauge
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL

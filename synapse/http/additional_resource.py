@@ -20,7 +20,10 @@
 
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.http.server import DirectServeJsonResource
 

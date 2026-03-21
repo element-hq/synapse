@@ -22,8 +22,11 @@ import re
 from http import HTTPStatus
 from typing import Awaitable, Callable, NoReturn
 
-from twisted.internet.defer import Deferred
-from twisted.web.resource import Resource
+try:
+    from twisted.internet.defer import Deferred
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.api.errors import Codes, RedirectException, SynapseError
 from synapse.config.server import parse_listener_def

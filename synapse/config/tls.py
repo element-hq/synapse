@@ -25,7 +25,10 @@ from typing import Any, Pattern
 from matrix_common.regex import glob_to_regex
 
 from OpenSSL import SSL, crypto
-from twisted.internet._sslverify import Certificate, trustRootFromCertificates
+try:
+    from twisted.internet._sslverify import Certificate, trustRootFromCertificates
+except ImportError:
+    pass
 
 from synapse.config._base import Config, ConfigError
 from synapse.types import JsonDict

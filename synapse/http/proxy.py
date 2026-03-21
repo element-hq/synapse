@@ -24,16 +24,19 @@ import logging
 import urllib.parse
 from typing import TYPE_CHECKING, Any, Optional, cast
 
-from twisted.internet import protocol
-from twisted.internet.interfaces import ITCPTransport
-from twisted.internet.protocol import connectionDone
-from twisted.python import failure
-from twisted.python.failure import Failure
-from twisted.web.client import ResponseDone
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import IResponse
-from twisted.web.resource import IResource
-from twisted.web.server import Request, Site
+try:
+    from twisted.internet import protocol
+    from twisted.internet.interfaces import ITCPTransport
+    from twisted.internet.protocol import connectionDone
+    from twisted.python import failure
+    from twisted.python.failure import Failure
+    from twisted.web.client import ResponseDone
+    from twisted.web.http_headers import Headers
+    from twisted.web.iweb import IResponse
+    from twisted.web.resource import IResource
+    from twisted.web.server import Request, Site
+except ImportError:
+    pass
 
 from synapse.api.errors import Codes, InvalidProxyCredentialsError
 from synapse.http import QuieterFileBodyProducer

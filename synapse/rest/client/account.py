@@ -28,7 +28,10 @@ import attr
 from pydantic import StrictBool, StrictStr, StringConstraints
 from typing_extensions import Annotated
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.api.constants import LoginType
 from synapse.api.errors import (

@@ -22,7 +22,10 @@
 from urllib.parse import urlparse
 
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
-from twisted.web.resource import Resource
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.rest.client import rendezvous
 from synapse.rest.synapse.client.rendezvous import MSC4108RendezvousSessionResource

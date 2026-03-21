@@ -19,8 +19,11 @@
 #
 #
 
-from twisted.internet.protocol import Protocol
-from twisted.internet.testing import AccumulatingProtocol, MemoryReactorClock
+try:
+    from twisted.internet.protocol import Protocol
+    from twisted.internet.testing import AccumulatingProtocol, MemoryReactorClock
+except ImportError:
+    pass
 
 from synapse.logging import RemoteHandler
 

@@ -21,26 +21,38 @@ from typing import (
     Sequence,
 )
 
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet.address import IPv4Address, IPv6Address
-from twisted.internet.interfaces import (
-    IAddress,
-    IHostnameResolver,
-    IHostResolution,
-    IReactorThreads,
-    IResolutionReceiver,
-)
-from twisted.internet.threads import deferToThreadPool
+try:
+    from twisted.internet.address import IPv4Address, IPv6Address
+    from twisted.internet.interfaces import (
+        IAddress,
+        IHostnameResolver,
+        IHostResolution,
+        IReactorThreads,
+        IResolutionReceiver,
+    )
+    from twisted.internet.threads import deferToThreadPool
+except ImportError:
+    pass
 
 if TYPE_CHECKING:
     # The types below are copied from
     # https://github.com/twisted/twisted/blob/release-21.2.0-10091/src/twisted/internet/interfaces.py
     # so that the type hints can match the interfaces.
-    from twisted.python.runtime import platform
+    try:
+        from twisted.python.runtime import platform
+    except ImportError:
+        pass
 
     if platform.supportsThreads():
-        from twisted.python.threadpool import ThreadPool
+        try:
+            from twisted.python.threadpool import ThreadPool
+        except ImportError:
+            pass
     else:
         ThreadPool = object  # type: ignore[misc, assignment]
 

@@ -33,7 +33,10 @@ from typing import (
 
 from prometheus_client import Counter, Gauge, Histogram
 
-from twisted.python import failure
+try:
+    from twisted.python import failure
+except ImportError:
+    pass
 
 from synapse.api.constants import (
     Direction,

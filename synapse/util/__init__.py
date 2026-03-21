@@ -33,8 +33,11 @@ from typing import (
 import attr
 from matrix_common.versionstring import get_distribution_version_string
 
-from twisted.internet import defer
-from twisted.python.failure import Failure
+try:
+    from twisted.internet import defer
+    from twisted.python.failure import Failure
+except ImportError:
+    pass
 
 if typing.TYPE_CHECKING:
     pass

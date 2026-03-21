@@ -23,7 +23,10 @@ from typing import TYPE_CHECKING, cast
 
 import attr
 
-from twisted.python.failure import Failure
+try:
+    from twisted.python.failure import Failure
+except ImportError:
+    pass
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError

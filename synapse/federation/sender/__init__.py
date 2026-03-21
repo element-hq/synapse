@@ -143,7 +143,10 @@ from typing import (
 import attr
 from prometheus_client import Counter
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 import synapse.metrics
 from synapse.api.constants import EventTypes, Membership

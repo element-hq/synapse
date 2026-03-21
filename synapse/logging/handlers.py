@@ -5,7 +5,10 @@ from logging.handlers import MemoryHandler
 from threading import Thread
 from typing import Optional, cast
 
-from twisted.internet.interfaces import IReactorCore
+try:
+    from twisted.internet.interfaces import IReactorCore
+except ImportError:
+    pass
 
 
 class PeriodicallyFlushingMemoryHandler(MemoryHandler):
@@ -54,7 +57,10 @@ class PeriodicallyFlushingMemoryHandler(MemoryHandler):
 
         reactor_to_use: IReactorCore
         if reactor is None:
-            from twisted.internet import reactor as global_reactor
+            try:
+                from twisted.internet import reactor as global_reactor
+            except ImportError:
+                pass
 
             reactor_to_use = cast(IReactorCore, global_reactor)
         else:

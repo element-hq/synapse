@@ -21,9 +21,12 @@
 import queue
 from typing import Any, BinaryIO, Optional, Union, cast
 
-from twisted.internet import threads
-from twisted.internet.defer import Deferred
-from twisted.internet.interfaces import IPullProducer, IPushProducer
+try:
+    from twisted.internet import threads
+    from twisted.internet.defer import Deferred
+    from twisted.internet.interfaces import IPullProducer, IPushProducer
+except ImportError:
+    pass
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import ISynapseReactor

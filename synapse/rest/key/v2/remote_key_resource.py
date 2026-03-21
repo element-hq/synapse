@@ -26,7 +26,10 @@ from typing import TYPE_CHECKING, Mapping
 from pydantic import ConfigDict, StrictInt, StrictStr
 from signedjson.sign import sign_json
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.crypto.keyring import ServerKeyFetcher
 from synapse.http.server import HttpServer

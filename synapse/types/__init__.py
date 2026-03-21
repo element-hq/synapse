@@ -52,18 +52,24 @@ from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
 from typing_extensions import Self
 from unpaddedbase64 import decode_base64
-from zope.interface import Interface
+try:
+    from zope.interface import Interface
+except ImportError:
+    pass
 
-from twisted.internet.defer import CancelledError
-from twisted.internet.interfaces import (
-    IReactorCore,
-    IReactorPluggableNameResolver,
-    IReactorSSL,
-    IReactorTCP,
-    IReactorThreads,
-    IReactorTime,
-    IReactorUNIX,
-)
+try:
+    from twisted.internet.defer import CancelledError
+    from twisted.internet.interfaces import (
+        IReactorCore,
+        IReactorPluggableNameResolver,
+        IReactorSSL,
+        IReactorTCP,
+        IReactorThreads,
+        IReactorTime,
+        IReactorUNIX,
+    )
+except ImportError:
+    pass
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.util.cancellation import cancellable

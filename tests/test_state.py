@@ -27,7 +27,10 @@ from typing import (
 )
 from unittest.mock import AsyncMock, Mock
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.constants import EventTypes, Membership

@@ -22,7 +22,10 @@
 import logging
 from typing import Awaitable, Callable
 
-from twisted.web.http import Request
+try:
+    from twisted.web.http import Request
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 

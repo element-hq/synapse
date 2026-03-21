@@ -23,21 +23,27 @@ import logging
 
 from service_identity import VerificationError
 from service_identity.pyopenssl import verify_hostname, verify_ip_address
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
 from OpenSSL import SSL, crypto
-from twisted.internet._sslverify import _defaultCurveName
-from twisted.internet.abstract import isIPAddress, isIPv6Address
-from twisted.internet.interfaces import IOpenSSLClientConnectionCreator
-from twisted.internet.ssl import (
-    CertificateOptions,
-    ContextFactory,
-    TLSVersion,
-    platformTrust,
-)
-from twisted.protocols.tls import TLSMemoryBIOProtocol
-from twisted.python.failure import Failure
-from twisted.web.iweb import IPolicyForHTTPS
+try:
+    from twisted.internet._sslverify import _defaultCurveName
+    from twisted.internet.abstract import isIPAddress, isIPv6Address
+    from twisted.internet.interfaces import IOpenSSLClientConnectionCreator
+    from twisted.internet.ssl import (
+        CertificateOptions,
+        ContextFactory,
+        TLSVersion,
+        platformTrust,
+    )
+    from twisted.protocols.tls import TLSMemoryBIOProtocol
+    from twisted.python.failure import Failure
+    from twisted.web.iweb import IPolicyForHTTPS
+except ImportError:
+    pass
 
 from synapse.config.homeserver import HomeServerConfig
 

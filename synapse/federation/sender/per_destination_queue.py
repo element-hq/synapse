@@ -28,7 +28,10 @@ from typing import TYPE_CHECKING, Hashable, Iterable
 import attr
 from prometheus_client import Counter
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.api.constants import EduTypes
 from synapse.api.errors import (

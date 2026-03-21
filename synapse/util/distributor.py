@@ -30,7 +30,10 @@ from typing import (
 
 from typing_extensions import ParamSpec
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import UserID

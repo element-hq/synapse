@@ -23,7 +23,10 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional
 
-from twisted.internet.interfaces import IDelayedCall
+try:
+    from twisted.internet.interfaces import IDelayedCall
+except ImportError:
+    pass
 
 import synapse.metrics
 from synapse.api.constants import (

@@ -23,7 +23,10 @@ import logging
 import sys
 from typing import Optional
 
-from twisted.web.resource import Resource
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 import synapse
 import synapse.events

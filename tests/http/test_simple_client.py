@@ -22,8 +22,11 @@ from unittest.mock import Mock
 
 from netaddr import IPSet
 
-from twisted.internet import defer
-from twisted.internet.error import DNSLookupError
+try:
+    from twisted.internet import defer
+    from twisted.internet.error import DNSLookupError
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.http import RequestTimedOutError

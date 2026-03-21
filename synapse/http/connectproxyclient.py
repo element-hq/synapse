@@ -25,21 +25,27 @@ import logging
 from typing import Union
 
 import attr
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet import defer, protocol
-from twisted.internet.error import ConnectError
-from twisted.internet.interfaces import (
-    IAddress,
-    IConnector,
-    IProtocol,
-    IProtocolFactory,
-    IReactorCore,
-    IStreamClientEndpoint,
-)
-from twisted.internet.protocol import ClientFactory, connectionDone
-from twisted.python.failure import Failure
-from twisted.web import http
+try:
+    from twisted.internet import defer, protocol
+    from twisted.internet.error import ConnectError
+    from twisted.internet.interfaces import (
+        IAddress,
+        IConnector,
+        IProtocol,
+        IProtocolFactory,
+        IReactorCore,
+        IStreamClientEndpoint,
+    )
+    from twisted.internet.protocol import ClientFactory, connectionDone
+    from twisted.python.failure import Failure
+    from twisted.web import http
+except ImportError:
+    pass
 
 from synapse.logging.context import PreserveLoggingContext
 

@@ -23,7 +23,10 @@ from typing import Collection, cast
 from unittest import TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.constants import EventTypes

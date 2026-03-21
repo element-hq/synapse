@@ -22,7 +22,10 @@ import re
 from typing import Any, Generator
 from unittest.mock import AsyncMock, Mock
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.appservice import ApplicationService, Namespace
 from synapse.types import UserID

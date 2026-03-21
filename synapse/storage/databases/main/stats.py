@@ -30,7 +30,10 @@ from typing import (
     cast,
 )
 
-from twisted.internet.defer import DeferredLock
+try:
+    from twisted.internet.defer import DeferredLock
+except ImportError:
+    pass
 
 from synapse.api.constants import Direction, EventContentFields, EventTypes, Membership
 from synapse.api.errors import StoreError

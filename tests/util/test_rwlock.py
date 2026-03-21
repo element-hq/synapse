@@ -21,9 +21,12 @@
 
 from typing import AsyncContextManager, Callable, Sequence
 
-from twisted.internet import defer
-from twisted.internet.defer import CancelledError
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import CancelledError
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 
 from synapse.util.async_helpers import ReadWriteLock
 

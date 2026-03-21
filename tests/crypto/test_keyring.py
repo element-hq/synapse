@@ -29,8 +29,11 @@ import signedjson.sign
 from signedjson.key import encode_verify_key_base64, get_verify_key
 from signedjson.types import SigningKey, VerifyKey
 
-from twisted.internet import defer
-from twisted.internet.defer import Deferred, ensureDeferred
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import Deferred, ensureDeferred
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.errors import SynapseError

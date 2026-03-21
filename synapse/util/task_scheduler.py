@@ -22,8 +22,11 @@
 import logging
 from typing import TYPE_CHECKING, Awaitable, Callable
 
-from twisted.internet import defer
-from twisted.python.failure import Failure
+try:
+    from twisted.internet import defer
+    from twisted.python.failure import Failure
+except ImportError:
+    pass
 
 from synapse.logging.context import (
     ContextResourceUsage,
@@ -38,7 +41,10 @@ from synapse.metrics.background_process_metrics import (
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
 from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
-from twisted.internet.defer import CancelledError
+try:
+    from twisted.internet.defer import CancelledError
+except ImportError:
+    pass
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

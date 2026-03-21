@@ -23,7 +23,10 @@ from http import HTTPStatus
 from typing import Any, Generator, cast
 from unittest.mock import AsyncMock, Mock, call
 
-from twisted.internet import defer, reactor as _reactor
+try:
+    from twisted.internet import defer, reactor as _reactor
+except ImportError:
+    pass
 
 from synapse.logging.context import SENTINEL_CONTEXT, LoggingContext, current_context
 from synapse.rest.client.transactions import CLEANUP_PERIOD, HttpTransactionCache

@@ -29,10 +29,13 @@ from typing import (
 )
 from unittest import mock
 
-from twisted.internet import defer, reactor
-from twisted.internet.defer import CancelledError
-from twisted.internet.defer import Deferred
-from twisted.internet.interfaces import IReactorTime
+try:
+    from twisted.internet import defer, reactor
+    from twisted.internet.defer import CancelledError
+    from twisted.internet.defer import Deferred
+    from twisted.internet.interfaces import IReactorTime
+except ImportError:
+    pass
 
 from synapse.api.errors import SynapseError
 from synapse.logging.context import (

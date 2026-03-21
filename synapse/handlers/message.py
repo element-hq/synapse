@@ -26,7 +26,10 @@ from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 
 from canonicaljson import encode_canonical_json
 
-from twisted.internet.interfaces import IDelayedCall
+try:
+    from twisted.internet.interfaces import IDelayedCall
+except ImportError:
+    pass
 
 from synapse import event_auth
 from synapse.api.constants import (

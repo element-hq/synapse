@@ -21,10 +21,13 @@
 from typing import Generator, cast
 from unittest.mock import Mock
 
-from twisted.internet import defer
-from twisted.internet.defer import Deferred
-from twisted.internet.error import ConnectError
-from twisted.names import dns, error
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import Deferred
+    from twisted.internet.error import ConnectError
+    from twisted.names import dns, error
+except ImportError:
+    pass
 
 from synapse.http.federation.srv_resolver import Server, SrvResolver
 from synapse.logging.context import LoggingContext, current_context

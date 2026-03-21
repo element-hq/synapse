@@ -26,7 +26,10 @@ from typing import TYPE_CHECKING, Mapping, Sized
 
 from prometheus_client import Gauge
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict

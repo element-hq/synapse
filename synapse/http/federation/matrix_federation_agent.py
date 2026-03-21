@@ -25,19 +25,25 @@ from urllib.request import (  # type: ignore[attr-defined]
 )
 
 from netaddr import AddrFormatError, IPAddress, IPSet
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet import defer
-from twisted.internet.endpoints import HostnameEndpoint, wrapClientTLS
-from twisted.internet.interfaces import (
-    IProtocol,
-    IProtocolFactory,
-    IReactorCore,
-    IStreamClientEndpoint,
-)
-from twisted.web.client import URI, Agent, HTTPConnectionPool
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import IAgent, IAgentEndpointFactory, IBodyProducer, IResponse
+try:
+    from twisted.internet import defer
+    from twisted.internet.endpoints import HostnameEndpoint, wrapClientTLS
+    from twisted.internet.interfaces import (
+        IProtocol,
+        IProtocolFactory,
+        IReactorCore,
+        IStreamClientEndpoint,
+    )
+    from twisted.web.client import URI, Agent, HTTPConnectionPool
+    from twisted.web.http_headers import Headers
+    from twisted.web.iweb import IAgent, IAgentEndpointFactory, IBodyProducer, IResponse
+except ImportError:
+    pass
 
 from synapse.config.server import ProxyConfig
 from synapse.crypto.context_factory import FederationPolicyForHTTPS

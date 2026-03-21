@@ -36,10 +36,13 @@ import attr
 import jinja2
 from typing_extensions import Concatenate, ParamSpec
 
-from twisted.internet import defer
-from twisted.internet.interfaces import IDelayedCall
-from twisted.python.threadpool import ThreadPool
-from twisted.web.resource import Resource
+try:
+    from twisted.internet import defer
+    from twisted.internet.interfaces import IDelayedCall
+    from twisted.python.threadpool import ThreadPool
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.api import errors
 from synapse.api.constants import ProfileFields

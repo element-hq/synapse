@@ -25,7 +25,10 @@ from typing import cast
 
 import yaml
 
-from twisted.internet import defer, reactor as reactor_
+try:
+    from twisted.internet import defer, reactor as reactor_
+except ImportError:
+    pass
 
 from synapse.config.homeserver import HomeServerConfig
 from synapse.server import HomeServer

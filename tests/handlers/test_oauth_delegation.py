@@ -37,7 +37,10 @@ from signedjson.key import (
 )
 from signedjson.sign import sign_json
 
-from twisted.internet.defer import Deferred, ensureDeferred
+try:
+    from twisted.internet.defer import Deferred, ensureDeferred
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.auth.mas import MasDelegatedAuth

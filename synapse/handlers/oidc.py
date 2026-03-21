@@ -49,8 +49,11 @@ from pymacaroons.exceptions import (
     MacaroonInvalidSignatureException,
 )
 
-from twisted.web.client import readBody
-from twisted.web.http_headers import Headers
+try:
+    from twisted.web.client import readBody
+    from twisted.web.http_headers import Headers
+except ImportError:
+    pass
 
 from synapse.api.errors import SynapseError
 from synapse.config import ConfigError

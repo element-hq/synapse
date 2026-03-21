@@ -31,7 +31,10 @@ from urllib import parse as urlparse
 import attr
 from prometheus_client.core import Histogram
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse import event_auth
 from synapse.api.constants import (

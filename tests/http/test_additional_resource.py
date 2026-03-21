@@ -19,7 +19,10 @@
 #
 from typing import Any
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.http.additional_resource import AdditionalResource
 from synapse.http.server import respond_with_json

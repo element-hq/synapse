@@ -28,24 +28,30 @@ from math import floor
 from typing import Callable, Optional
 
 import attr
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.application.internet import ClientService
-from twisted.internet.defer import CancelledError
-from twisted.internet.defer import Deferred
-from twisted.internet.endpoints import (
-    HostnameEndpoint,
-    TCP4ClientEndpoint,
-    TCP6ClientEndpoint,
-)
-from twisted.internet.interfaces import (
-    IPushProducer,
-    IReactorTime,
-    IStreamClientEndpoint,
-)
-from twisted.internet.protocol import Factory, Protocol
-from twisted.internet.tcp import Connection
-from twisted.python.failure import Failure
+try:
+    from twisted.application.internet import ClientService
+    from twisted.internet.defer import CancelledError
+    from twisted.internet.defer import Deferred
+    from twisted.internet.endpoints import (
+        HostnameEndpoint,
+        TCP4ClientEndpoint,
+        TCP6ClientEndpoint,
+    )
+    from twisted.internet.interfaces import (
+        IPushProducer,
+        IReactorTime,
+        IStreamClientEndpoint,
+    )
+    from twisted.internet.protocol import Factory, Protocol
+    from twisted.internet.tcp import Connection
+    from twisted.python.failure import Failure
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +133,10 @@ class RemoteHandler(logging.Handler):
 
         # Connect without DNS lookups if it's a direct IP.
         if _reactor is None:
-            from twisted.internet import reactor
+            try:
+                from twisted.internet import reactor
+            except ImportError:
+                pass
 
             _reactor = reactor  # type: ignore[assignment]
 

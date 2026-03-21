@@ -21,8 +21,11 @@
 import enum
 from typing import Awaitable, Callable, Generic, TypeVar
 
-from twisted.internet.defer import Deferred
-from twisted.python.failure import Failure
+try:
+    from twisted.internet.defer import Deferred
+    from twisted.python.failure import Failure
+except ImportError:
+    pass
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 

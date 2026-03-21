@@ -23,7 +23,10 @@ import logging
 import random
 from typing import TYPE_CHECKING
 
-from twisted.web.server import Request
+try:
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 import synapse
 import synapse.api.auth

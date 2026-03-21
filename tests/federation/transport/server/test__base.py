@@ -21,7 +21,10 @@
 
 from http import HTTPStatus
 
-from twisted.web.resource import Resource
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.api.errors import Codes
 from synapse.federation.transport.server import BaseFederationServlet

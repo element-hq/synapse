@@ -58,7 +58,10 @@ from typing import (
 import attr
 from typing_extensions import assert_never
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.filtering import Filter

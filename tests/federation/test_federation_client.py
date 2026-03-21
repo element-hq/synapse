@@ -21,8 +21,11 @@
 
 from unittest import mock
 
-import twisted.web.client
-from twisted.internet import defer
+try:
+    import twisted.web.client
+    from twisted.internet import defer
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.room_versions import RoomVersions

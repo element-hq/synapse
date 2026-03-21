@@ -38,7 +38,10 @@ from typing import (
 import attr
 from prometheus_client import Gauge
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.api.constants import Direction, EventTypes
 from synapse.api.errors import NotFoundError, SynapseError

@@ -44,7 +44,10 @@ from typing import (
 
 import yaml
 
-from twisted.internet import defer, reactor as reactor_
+try:
+    from twisted.internet import defer, reactor as reactor_
+except ImportError:
+    pass
 
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig

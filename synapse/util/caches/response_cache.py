@@ -31,7 +31,10 @@ from typing import (
 
 import attr
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import (
@@ -48,7 +51,10 @@ from synapse.util.cancellation import cancellable, is_function_cancellable
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.wheel_timer import WheelTimer
-from twisted.internet.defer import CancelledError
+try:
+    from twisted.internet.defer import CancelledError
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 

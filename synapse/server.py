@@ -43,13 +43,16 @@ from wsgiref.simple_server import WSGIServer
 from attr import dataclass
 from typing_extensions import TypeAlias
 
-from twisted.internet import defer
-from twisted.internet.base import _SystemEventID
-from twisted.internet.interfaces import IOpenSSLContextFactory
-from twisted.internet.tcp import Port
-from twisted.python.threadpool import ThreadPool
-from twisted.web.iweb import IPolicyForHTTPS
-from twisted.web.resource import Resource
+try:
+    from twisted.internet import defer
+    from twisted.internet.base import _SystemEventID
+    from twisted.internet.interfaces import IOpenSSLContextFactory
+    from twisted.internet.tcp import Port
+    from twisted.python.threadpool import ThreadPool
+    from twisted.web.iweb import IPolicyForHTTPS
+    from twisted.web.resource import Resource
+except ImportError:
+    pass
 
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
@@ -333,7 +336,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         """
 
         if not reactor:
-            from twisted.internet import reactor as _reactor
+            try:
+                from twisted.internet import reactor as _reactor
+            except ImportError:
+                pass
 
             reactor = cast(ISynapseReactor, _reactor)
 

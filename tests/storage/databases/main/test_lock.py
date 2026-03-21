@@ -20,9 +20,12 @@
 #
 
 
-from twisted.internet import defer, reactor
-from twisted.internet.base import ReactorBase
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet import defer, reactor
+    from twisted.internet.base import ReactorBase
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.server import HomeServer

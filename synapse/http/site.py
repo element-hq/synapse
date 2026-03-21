@@ -26,16 +26,22 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Generator
 
 import attr
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet.address import UNIXAddress
-from twisted.internet.defer import Deferred
-from twisted.internet.interfaces import IAddress
-from twisted.internet.protocol import Protocol
-from twisted.python.failure import Failure
-from twisted.web.http import HTTPChannel
-from twisted.web.resource import IResource, Resource
-from twisted.web.server import Request
+try:
+    from twisted.internet.address import UNIXAddress
+    from twisted.internet.defer import Deferred
+    from twisted.internet.interfaces import IAddress
+    from twisted.internet.protocol import Protocol
+    from twisted.python.failure import Failure
+    from twisted.web.http import HTTPChannel
+    from twisted.web.resource import IResource, Resource
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.config.server import ListenerConfig

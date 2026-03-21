@@ -29,7 +29,10 @@ from typing import (
     cast,
 )
 
-from twisted.internet import defer
+try:
+    from twisted.internet import defer
+except ImportError:
+    pass
 
 from synapse.api.errors import StoreError
 from synapse.config.homeserver import ExperimentalConfig

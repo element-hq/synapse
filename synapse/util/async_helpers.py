@@ -47,9 +47,12 @@ from typing import (
 import attr
 from typing_extensions import Concatenate, ParamSpec, Unpack
 
-from twisted.internet import defer
-from twisted.internet.defer import CancelledError
-from twisted.python.failure import Failure
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import CancelledError
+    from twisted.python.failure import Failure
+except ImportError:
+    pass
 
 from synapse.logging.context import (
     PreserveLoggingContext,

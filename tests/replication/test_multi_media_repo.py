@@ -22,10 +22,16 @@ import logging
 import os
 from typing import Any
 
-from twisted.internet.protocol import Factory
+try:
+    from twisted.internet.protocol import Factory
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
-from twisted.web.http import HTTPChannel
-from twisted.web.server import Request
+try:
+    from twisted.web.http import HTTPChannel
+    from twisted.web.server import Request
+except ImportError:
+    pass
 
 from synapse.rest import admin
 from synapse.rest.client import login, media

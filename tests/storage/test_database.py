@@ -24,9 +24,12 @@ from unittest.mock import Mock, call, patch
 
 import attr
 
-from twisted.internet import defer
-from twisted.internet.defer import CancelledError
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet import defer
+    from twisted.internet.defer import CancelledError
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.server import HomeServer

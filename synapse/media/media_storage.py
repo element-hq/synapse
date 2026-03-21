@@ -41,11 +41,17 @@ from typing import (
 from uuid import uuid4
 
 import attr
-from zope.interface import implementer
+try:
+    from zope.interface import implementer
+except ImportError:
+    pass
 
-from twisted.internet import interfaces
-from twisted.internet.defer import Deferred
-from twisted.internet.interfaces import IConsumer
+try:
+    from twisted.internet import interfaces
+    from twisted.internet.defer import Deferred
+    from twisted.internet.interfaces import IConsumer
+except ImportError:
+    pass
 
 from synapse.api.errors import NotFoundError
 from synapse.logging.context import defer_to_thread, run_in_background

@@ -34,7 +34,10 @@ from typing import (
 import attr
 from netaddr import IPSet
 
-from twisted.internet import reactor
+try:
+    from twisted.internet import reactor
+except ImportError:
+    pass
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase

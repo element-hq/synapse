@@ -15,7 +15,10 @@ import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Collection, cast
 
-from twisted.internet.defer import Deferred
+try:
+    from twisted.internet.defer import Deferred
+except ImportError:
+    pass
 
 from synapse.events import EventBase
 from synapse.replication.tcp.streams._base import StickyEventsStream
