@@ -1437,5 +1437,261 @@ class NativeReplicationProtocolTest(unittest.IsolatedAsyncioTestCase):
         await server.wait_closed()
 
 
+class NativeAsyncUtilitiesTest(unittest.IsolatedAsyncioTestCase):
+    """Tests for Phase 7 native async utility functions."""
+
+    async def test_native_gather_results(self) -> None:
+        from synapse.util.async_helpers import native_gather_results
+
+        async def double(x: int) -> int:
+            return x * 2
+
+        results = await native_gather_results(double, [1, 2, 3])
+        self.assertEqual(results, [2, 4, 6])
+
+    async def test_native_concurrently_execute(self) -> None:
+        from synapse.util.async_helpers import native_concurrently_execute
+
+        results: list[int] = []
+        concurrent = 0
+        max_concurrent = 0
+
+        async def work(x: int) -> None:
+            nonlocal concurrent, max_concurrent
+            concurrent += 1
+            max_concurrent = max(max_concurrent, concurrent)
+            results.append(x)
+            await asyncio.sleep(0.01)
+            concurrent -= 1
+
+        await native_concurrently_execute(work, range(10), limit=3)
+
+        self.assertEqual(sorted(results), list(range(10)))
+        self.assertLessEqual(max_concurrent, 3)
+
+    async def test_native_stop_cancellation(self) -> None:
+        from synapse.util.async_helpers import native_stop_cancellation
+
+        loop = asyncio.get_running_loop()
+        inner: asyncio.Future[str] = loop.create_future()
+        shielded = native_stop_cancellation(inner)
+
+        # Cancel the shielded future
+        shielded.cancel()
+
+        # Inner should NOT be cancelled
+        self.assertFalse(inner.cancelled())
+
+        # Resolve inner
+        inner.set_result("ok")
+        self.assertEqual(inner.result(), "ok")
+
+    async def test_native_awakeable_sleeper(self) -> None:
+        from synapse.util.async_helpers import NativeAwakenableSleeper
+
+        sleeper = NativeAwakenableSleeper()
+
+        woke_early = False
+
+        async def sleeping() -> None:
+            nonlocal woke_early
+            await sleeper.sleep("test", delay_ms=5000)
+            woke_early = True
+
+        task = asyncio.create_task(sleeping())
+        await asyncio.sleep(0.01)
+
+        sleeper.wake("test")
+        await asyncio.sleep(0.01)
+
+        self.assertTrue(woke_early)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def test_native_awakeable_sleeper_timeout(self) -> None:
+        from synapse.util.async_helpers import NativeAwakenableSleeper
+
+        sleeper = NativeAwakenableSleeper()
+
+        # Should return after timeout without wake
+        await sleeper.sleep("test", delay_ms=20)
+
+    async def test_native_event(self) -> None:
+        from synapse.util.async_helpers import NativeEvent
+
+        event = NativeEvent()
+        self.assertFalse(event.is_set())
+
+        event.set()
+        self.assertTrue(event.is_set())
+
+        result = await event.wait(timeout_seconds=1.0)
+        self.assertTrue(result)
+
+        event.clear()
+        self.assertFalse(event.is_set())
+
+    async def test_native_event_timeout(self) -> None:
+        from synapse.util.async_helpers import NativeEvent
+
+        event = NativeEvent()
+        result = await event.wait(timeout_seconds=0.02)
+        self.assertFalse(result)
+
+
+class FutureCacheTest(unittest.IsolatedAsyncioTestCase):
+    """Tests for the asyncio-native FutureCache."""
+
+    async def test_set_and_get(self) -> None:
+        from synapse.util.caches.future_cache import FutureCache
+
+        cache: FutureCache[str] = FutureCache("test", max_entries=100)
+
+        loop = asyncio.get_running_loop()
+        f: asyncio.Future[str] = loop.create_future()
+        cache.set("key1", f)
+
+        # Resolve the future
+        f.set_result("value1")
+        await asyncio.sleep(0)  # Let callbacks run
+
+        # Now get should return the cached value
+        result = await cache.get("key1")
+        self.assertEqual(result, "value1")
+
+    async def test_get_pending(self) -> None:
+        from synapse.util.caches.future_cache import FutureCache
+
+        cache: FutureCache[str] = FutureCache("test")
+
+        loop = asyncio.get_running_loop()
+        f: asyncio.Future[str] = loop.create_future()
+        cache.set("key1", f)
+
+        # Get while still pending — returns observer
+        observer = cache.get("key1")
+        self.assertFalse(observer.done())
+
+        # Resolve
+        f.set_result("hello")
+        await asyncio.sleep(0)
+
+        result = await observer
+        self.assertEqual(result, "hello")
+
+    async def test_get_missing_raises_keyerror(self) -> None:
+        from synapse.util.caches.future_cache import FutureCache
+
+        cache: FutureCache[str] = FutureCache("test")
+
+        with self.assertRaises(KeyError):
+            cache.get("nonexistent")
+
+    async def test_failed_future_not_cached(self) -> None:
+        from synapse.util.caches.future_cache import FutureCache
+
+        cache: FutureCache[str] = FutureCache("test")
+
+        loop = asyncio.get_running_loop()
+        f: asyncio.Future[str] = loop.create_future()
+        cache.set("key1", f)
+
+        f.set_exception(ValueError("boom"))
+        await asyncio.sleep(0)
+
+        # Should not be cached
+        with self.assertRaises(KeyError):
+            cache.get("key1")
+
+    async def test_invalidate(self) -> None:
+        from synapse.util.caches.future_cache import FutureCache
+
+        cache: FutureCache[str] = FutureCache("test")
+
+        loop = asyncio.get_running_loop()
+        f: asyncio.Future[str] = loop.create_future()
+        cache.set("key1", f)
+        f.set_result("value1")
+        await asyncio.sleep(0)
+
+        self.assertIn("key1", cache)
+
+        cache.invalidate("key1")
+        self.assertNotIn("key1", cache)
+
+    async def test_invalidation_callback(self) -> None:
+        from synapse.util.caches.future_cache import FutureCache
+
+        cache: FutureCache[str] = FutureCache("test")
+        callback_called = False
+
+        def on_invalidate() -> None:
+            nonlocal callback_called
+            callback_called = True
+
+        loop = asyncio.get_running_loop()
+        f: asyncio.Future[str] = loop.create_future()
+        cache.set("key1", f, callback=on_invalidate)
+        f.set_result("value1")
+        await asyncio.sleep(0)
+
+        cache.invalidate("key1")
+        self.assertTrue(callback_called)
+
+    async def test_invalidate_all(self) -> None:
+        from synapse.util.caches.future_cache import FutureCache
+
+        cache: FutureCache[str] = FutureCache("test")
+
+        loop = asyncio.get_running_loop()
+        for i in range(5):
+            f: asyncio.Future[str] = loop.create_future()
+            cache.set(f"key{i}", f)
+            f.set_result(f"val{i}")
+        await asyncio.sleep(0)
+
+        self.assertEqual(len(cache), 5)
+        cache.invalidate_all()
+        self.assertEqual(len(cache), 0)
+
+    async def test_max_entries_eviction(self) -> None:
+        from synapse.util.caches.future_cache import FutureCache
+
+        cache: FutureCache[int] = FutureCache("test", max_entries=3)
+
+        loop = asyncio.get_running_loop()
+        for i in range(5):
+            f: asyncio.Future[int] = loop.create_future()
+            cache.set(f"key{i}", f)
+            f.set_result(i)
+            await asyncio.sleep(0)
+
+        # Should have evicted oldest entries
+        self.assertLessEqual(len(cache._completed), 3)
+
+    async def test_multiple_observers(self) -> None:
+        from synapse.util.caches.future_cache import FutureCache
+
+        cache: FutureCache[str] = FutureCache("test")
+
+        loop = asyncio.get_running_loop()
+        f: asyncio.Future[str] = loop.create_future()
+        cache.set("key1", f)
+
+        obs1 = cache.get("key1")
+        obs2 = cache.get("key1")
+
+        f.set_result("shared_value")
+        await asyncio.sleep(0)
+
+        r1 = await obs1
+        r2 = await obs2
+        self.assertEqual(r1, "shared_value")
+        self.assertEqual(r2, "shared_value")
+
+
 if __name__ == "__main__":
     unittest.main()

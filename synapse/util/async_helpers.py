@@ -1270,6 +1270,125 @@ class NativeReadWriteLock:
             await event.wait()
 
 
+async def native_gather_results(
+    func: Callable[..., Awaitable[R]],
+    iter: Iterable[Any],
+    *args: Any,
+    **kwargs: Any,
+) -> list[R]:
+    """asyncio-native equivalent of yieldable_gather_results.
+
+    Executes func with each iterable item concurrently using asyncio.gather.
+    Returns list of results in order.
+    """
+
+    async def _run(item: Any) -> R:
+        return await func(item, *args, **kwargs)
+
+    return list(await asyncio.gather(*[_run(item) for item in iter]))
+
+
+async def native_concurrently_execute(
+    func: Callable[[Any], Awaitable[Any]],
+    args: Iterable[Any],
+    limit: int,
+) -> None:
+    """asyncio-native equivalent of concurrently_execute.
+
+    Executes func on each arg with at most `limit` concurrent executions.
+    """
+    sem = asyncio.Semaphore(limit)
+
+    async def _run(item: Any) -> None:
+        async with sem:
+            await func(item)
+
+    await asyncio.gather(*[_run(item) for item in args])
+
+
+async def native_timeout(
+    awaitable: Awaitable[R],
+    timeout: float,
+) -> R:
+    """asyncio-native equivalent of timeout_deferred.
+
+    Wraps an awaitable with a timeout. Raises asyncio.TimeoutError on timeout.
+    """
+    return await asyncio.wait_for(asyncio.ensure_future(awaitable), timeout)
+
+
+def native_stop_cancellation(future: "asyncio.Future[T]") -> "asyncio.Future[T]":
+    """asyncio-native equivalent of stop_cancellation.
+
+    Wraps a future so that cancelling the returned future does not
+    propagate cancellation to the original. The returned future will
+    fail with CancelledError, but the original keeps running.
+    """
+    return asyncio.shield(future)
+
+
+class NativeAwakenableSleeper:
+    """asyncio-native equivalent of AwakenableSleeper.
+
+    Allows explicit waking of sleeping coroutines by name.
+    """
+
+    def __init__(self) -> None:
+        self._streams: dict[str, set[asyncio.Event]] = {}
+
+    def wake(self, name: str) -> None:
+        """Wake everything sleeping under `name`."""
+        events = self._streams.pop(name, set())
+        for event in events:
+            event.set()
+
+    async def sleep(self, name: str, delay_ms: int) -> None:
+        """Sleep for delay_ms, or return early if wake(name) is called."""
+        event = asyncio.Event()
+        stream_set = self._streams.setdefault(name, set())
+        stream_set.add(event)
+
+        try:
+            await asyncio.wait_for(event.wait(), timeout=delay_ms / 1000)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            curr = self._streams.get(name)
+            if curr is not None:
+                curr.discard(event)
+                if not curr:
+                    self._streams.pop(name, None)
+
+
+class NativeEvent:
+    """asyncio-native equivalent of DeferredEvent.
+
+    Like threading.Event but for asyncio code.
+    """
+
+    def __init__(self) -> None:
+        self._event = asyncio.Event()
+
+    def set(self) -> None:
+        self._event.set()
+
+    def clear(self) -> None:
+        self._event.clear()
+
+    def is_set(self) -> bool:
+        return self._event.is_set()
+
+    async def wait(self, timeout_seconds: float) -> bool:
+        """Wait for the event, returning True if set, False on timeout."""
+        if self._event.is_set():
+            return True
+        try:
+            await asyncio.wait_for(self._event.wait(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            pass
+        return self._event.is_set()
+
+
 class AwakenableSleeper:
     """Allows explicitly waking up deferreds related to an entity that are
     currently sleeping.
