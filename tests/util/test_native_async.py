@@ -1015,5 +1015,238 @@ class NativeSimpleHttpClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body, b"raw bytes here")
 
 
+class NativeJsonResourceTest(unittest.IsolatedAsyncioTestCase):
+    """Tests for the asyncio-native NativeJsonResource and NativeSynapseRequest."""
+
+    async def asyncSetUp(self) -> None:
+        import re
+
+        from aiohttp import web
+        from aiohttp.test_utils import TestServer
+
+        from synapse.http.native_server import NativeJsonResource
+
+        self.resource = NativeJsonResource(server_name="test.server")
+
+        # Register handlers using the same pattern as RestServlet.register()
+        self.resource.register_paths(
+            "GET",
+            [re.compile("^/_test/hello$")],
+            self._handle_hello,
+            "TestHelloServlet",
+        )
+        self.resource.register_paths(
+            "GET",
+            [re.compile("^/_test/user/(?P<user_id>[^/]+)$")],
+            self._handle_user,
+            "TestUserServlet",
+        )
+        self.resource.register_paths(
+            "POST",
+            [re.compile("^/_test/echo$")],
+            self._handle_echo,
+            "TestEchoServlet",
+        )
+        self.resource.register_paths(
+            "GET",
+            [re.compile("^/_test/error$")],
+            self._handle_error,
+            "TestErrorServlet",
+        )
+        self.resource.register_paths(
+            "GET",
+            [re.compile("^/_test/sync$")],
+            self._handle_sync,
+            "TestSyncServlet",
+        )
+
+        app = self.resource.build_app()
+        self.server = TestServer(app)
+        await self.server.start_server()
+        self.base_url = f"http://{self.server.host}:{self.server.port}"
+
+        import aiohttp as aio
+
+        self.session = aio.ClientSession()
+
+    async def asyncTearDown(self) -> None:
+        await self.session.close()
+        await self.server.close()
+
+    # --- Test handlers (mimic servlet pattern) ---
+
+    @staticmethod
+    async def _handle_hello(request: Any) -> tuple[int, dict]:
+        return 200, {"message": "hello world"}
+
+    @staticmethod
+    async def _handle_user(request: Any, user_id: str) -> tuple[int, dict]:
+        return 200, {"user_id": user_id}
+
+    @staticmethod
+    async def _handle_echo(request: Any) -> tuple[int, dict]:
+        from synapse.http.servlet import parse_json_object_from_request
+
+        body = parse_json_object_from_request(request)
+        return 200, {"echo": body}
+
+    @staticmethod
+    async def _handle_error(request: Any) -> tuple[int, dict]:
+        from synapse.api.errors import Codes, SynapseError
+
+        raise SynapseError(403, "Forbidden", Codes.FORBIDDEN)
+
+    @staticmethod
+    def _handle_sync(request: Any) -> tuple[int, dict]:
+        """Synchronous handler (not async)."""
+        return 200, {"sync": True}
+
+    # --- Tests ---
+
+    async def test_get_json(self) -> None:
+        async with self.session.get(f"{self.base_url}/_test/hello") as resp:
+            self.assertEqual(resp.status, 200)
+            data = await resp.json()
+            self.assertEqual(data["message"], "hello world")
+
+    async def test_path_parameters(self) -> None:
+        async with self.session.get(
+            f"{self.base_url}/_test/user/@alice:example.com"
+        ) as resp:
+            self.assertEqual(resp.status, 200)
+            data = await resp.json()
+            self.assertEqual(data["user_id"], "@alice:example.com")
+
+    async def test_url_encoded_path_params(self) -> None:
+        async with self.session.get(
+            f"{self.base_url}/_test/user/%40bob%3Aexample.com"
+        ) as resp:
+            self.assertEqual(resp.status, 200)
+            data = await resp.json()
+            self.assertEqual(data["user_id"], "@bob:example.com")
+
+    async def test_post_json(self) -> None:
+        async with self.session.post(
+            f"{self.base_url}/_test/echo",
+            json={"key": "value"},
+        ) as resp:
+            self.assertEqual(resp.status, 200)
+            data = await resp.json()
+            self.assertEqual(data["echo"]["key"], "value")
+
+    async def test_synapse_error(self) -> None:
+        async with self.session.get(f"{self.base_url}/_test/error") as resp:
+            self.assertEqual(resp.status, 403)
+            data = await resp.json()
+            self.assertEqual(data["errcode"], "M_FORBIDDEN")
+
+    async def test_404_not_found(self) -> None:
+        async with self.session.get(
+            f"{self.base_url}/_test/nonexistent"
+        ) as resp:
+            self.assertEqual(resp.status, 404)
+            data = await resp.json()
+            self.assertEqual(data["errcode"], "M_UNRECOGNIZED")
+
+    async def test_405_method_not_allowed(self) -> None:
+        async with self.session.delete(f"{self.base_url}/_test/hello") as resp:
+            self.assertEqual(resp.status, 405)
+            data = await resp.json()
+            self.assertEqual(data["errcode"], "M_UNRECOGNIZED")
+
+    async def test_options_cors(self) -> None:
+        async with self.session.options(f"{self.base_url}/_test/hello") as resp:
+            self.assertEqual(resp.status, 204)
+            self.assertIn("Access-Control-Allow-Origin", resp.headers)
+            self.assertEqual(resp.headers["Access-Control-Allow-Origin"], "*")
+
+    async def test_sync_handler(self) -> None:
+        async with self.session.get(f"{self.base_url}/_test/sync") as resp:
+            self.assertEqual(resp.status, 200)
+            data = await resp.json()
+            self.assertTrue(data["sync"])
+
+    async def test_cors_on_success(self) -> None:
+        async with self.session.get(f"{self.base_url}/_test/hello") as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("Access-Control-Allow-Origin", resp.headers)
+
+    async def test_json_content_type(self) -> None:
+        async with self.session.get(f"{self.base_url}/_test/hello") as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("application/json", resp.headers["Content-Type"])
+
+
+class NativeSynapseRequestTest(unittest.IsolatedAsyncioTestCase):
+    """Tests for the NativeSynapseRequest compatibility shim."""
+
+    async def test_args_parsing(self) -> None:
+        from aiohttp.test_utils import make_mocked_request
+
+        from synapse.http.native_server import NativeSynapseRequest
+
+        req = make_mocked_request("GET", "/_test?foo=bar&foo=baz&num=42")
+        native_req = NativeSynapseRequest(req, b"")
+
+        self.assertIn(b"foo", native_req.args)
+        self.assertEqual(native_req.args[b"foo"], [b"bar", b"baz"])
+        self.assertEqual(native_req.args[b"num"], [b"42"])
+
+    async def test_method_and_path(self) -> None:
+        from aiohttp.test_utils import make_mocked_request
+
+        from synapse.http.native_server import NativeSynapseRequest
+
+        req = make_mocked_request("POST", "/_test/path")
+        native_req = NativeSynapseRequest(req, b'{"key":"val"}')
+
+        self.assertEqual(native_req.method, b"POST")
+        self.assertEqual(native_req.path, b"/_test/path")
+
+    async def test_content_body(self) -> None:
+        from aiohttp.test_utils import make_mocked_request
+
+        from synapse.http.native_server import NativeSynapseRequest
+
+        body = b'{"hello": "world"}'
+        req = make_mocked_request("POST", "/_test")
+        native_req = NativeSynapseRequest(req, body)
+
+        self.assertEqual(native_req.content.read(), body)
+
+    async def test_request_headers(self) -> None:
+        from aiohttp.test_utils import make_mocked_request
+
+        from synapse.http.native_server import NativeSynapseRequest
+
+        req = make_mocked_request(
+            "GET", "/_test", headers={"Authorization": "Bearer token123"}
+        )
+        native_req = NativeSynapseRequest(req, b"")
+
+        auth = native_req.requestHeaders.getRawHeaders("Authorization")
+        self.assertIsNotNone(auth)
+        self.assertEqual(auth, [b"Bearer token123"])
+
+    async def test_response_building(self) -> None:
+        from aiohttp.test_utils import make_mocked_request
+
+        from synapse.http.native_server import NativeSynapseRequest
+
+        req = make_mocked_request("GET", "/_test")
+        native_req = NativeSynapseRequest(req, b"")
+
+        native_req.setResponseCode(201)
+        native_req.setHeader(b"X-Custom", b"value")
+        native_req.write(b"hello ")
+        native_req.write(b"world")
+        native_req.finish()
+
+        response = native_req.build_response()
+        self.assertEqual(response.status, 201)
+        self.assertEqual(response.headers["X-Custom"], "value")
+        self.assertEqual(response.body, b"hello world")
+
+
 if __name__ == "__main__":
     unittest.main()
