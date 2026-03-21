@@ -50,8 +50,13 @@ from typing import (
 import attr
 from typing_extensions import ParamSpec
 
-from twisted.internet import defer, threads
-from twisted.python.threadpool import ThreadPool
+try:
+    from twisted.internet import defer, threads
+    from twisted.python.threadpool import ThreadPool
+
+    HAS_TWISTED = True
+except ImportError:
+    HAS_TWISTED = False
 
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.util.stringutils import random_string_insecure_fast
@@ -738,34 +743,25 @@ class PreserveLoggingContext:
 _thread_local = threading.local()
 _thread_local.current_context = SENTINEL_CONTEXT
 
-# ContextVar kept in sync with _thread_local. This is used by asyncio-native code
-# paths (make_future_yieldable, run_coroutine_in_background_native, etc.) and will
-# become the sole storage mechanism once all Deferred usage is removed (Phase 7).
-#
-# IMPORTANT: We cannot use ContextVar as the primary storage while Twisted Deferreds
-# are in use, because asyncio's call_later/call_soon run callbacks in context COPIES.
-# The _set_context_cb Deferred callback pattern relies on writes being globally visible
-# on the thread, which threading.local provides but ContextVar with asyncio does not.
 _current_context_var: contextvars.ContextVar[
     "LoggingContextOrSentinel"
 ] = contextvars.ContextVar("synapse_logging_context", default=SENTINEL_CONTEXT)
 
 
 def current_context() -> LoggingContextOrSentinel:
-    """Get the current logging context from thread local storage"""
+    """Get the current logging context."""
     return getattr(_thread_local, "current_context", SENTINEL_CONTEXT)
 
 
 def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSentinel:
-    """Set the current logging context in thread local storage
+    """Set the current logging context.
+
     Args:
         context: The context to activate.
 
     Returns:
         The context that was previously active
     """
-    # everything blows up if we allow current_context to be set to None, so sanity-check
-    # that now.
     if context is None:
         raise TypeError("'context' argument may not be None")
 
@@ -775,7 +771,6 @@ def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSe
         rusage = get_thread_resource_usage()
         current.stop(rusage)
         _thread_local.current_context = context
-        # Keep ContextVar in sync for asyncio-native code paths
         _current_context_var.set(context)
         context.start(rusage)
 
