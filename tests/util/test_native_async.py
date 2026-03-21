@@ -858,5 +858,162 @@ class NativeConnectionPoolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sorted(results), [0, 2, 4, 6, 8, 10, 12, 14, 16, 18])
 
 
+class NativeSimpleHttpClientTest(unittest.IsolatedAsyncioTestCase):
+    """Tests for the asyncio-native NativeSimpleHttpClient."""
+
+    async def asyncSetUp(self) -> None:
+        from aiohttp import web
+
+        # Create a simple test HTTP server
+        self.app = web.Application()
+        self.app.router.add_get("/json", self._handle_json)
+        self.app.router.add_post("/json", self._handle_json_post)
+        self.app.router.add_put("/json", self._handle_json_put)
+        self.app.router.add_get("/raw", self._handle_raw)
+        self.app.router.add_get("/file", self._handle_file)
+        self.app.router.add_get("/error", self._handle_error)
+        self.app.router.add_post("/form", self._handle_form)
+
+        self.runner = web.AppRunner(self.app)
+        await self.runner.setup()
+        self.site = web.TCPSite(self.runner, "127.0.0.1", 0)
+        await self.site.start()
+
+        # Get the actual bound port
+        sock = self.site._server.sockets[0]  # type: ignore[union-attr]
+        self.port = sock.getsockname()[1]
+        self.base_url = f"http://127.0.0.1:{self.port}"
+
+        from synapse.http.native_client import NativeSimpleHttpClient
+
+        self.client = NativeSimpleHttpClient(
+            user_agent="test-agent/1.0",
+        )
+
+    async def asyncTearDown(self) -> None:
+        await self.client.close()
+        await self.runner.cleanup()
+
+    @staticmethod
+    async def _handle_json(request: "aiohttp.web.Request") -> "aiohttp.web.Response":
+        from aiohttp import web
+
+        return web.json_response({"hello": "world"})
+
+    @staticmethod
+    async def _handle_json_post(
+        request: "aiohttp.web.Request",
+    ) -> "aiohttp.web.Response":
+        from aiohttp import web
+
+        body = await request.json()
+        return web.json_response({"received": body})
+
+    @staticmethod
+    async def _handle_json_put(
+        request: "aiohttp.web.Request",
+    ) -> "aiohttp.web.Response":
+        from aiohttp import web
+
+        body = await request.json()
+        return web.json_response({"updated": body})
+
+    @staticmethod
+    async def _handle_raw(request: "aiohttp.web.Request") -> "aiohttp.web.Response":
+        from aiohttp import web
+
+        return web.Response(body=b"raw bytes here")
+
+    @staticmethod
+    async def _handle_file(request: "aiohttp.web.Request") -> "aiohttp.web.Response":
+        from aiohttp import web
+
+        return web.Response(
+            body=b"file content " * 100,
+            content_type="application/octet-stream",
+        )
+
+    @staticmethod
+    async def _handle_error(request: "aiohttp.web.Request") -> "aiohttp.web.Response":
+        from aiohttp import web
+
+        return web.Response(status=500, body=b"Internal Server Error")
+
+    @staticmethod
+    async def _handle_form(request: "aiohttp.web.Request") -> "aiohttp.web.Response":
+        from aiohttp import web
+
+        data = await request.post()
+        return web.json_response({"form_data": dict(data)})
+
+    async def test_get_json(self) -> None:
+        result = await self.client.get_json(f"{self.base_url}/json")
+        self.assertEqual(result, {"hello": "world"})
+
+    async def test_get_json_with_args(self) -> None:
+        result = await self.client.get_json(
+            f"{self.base_url}/json", args={"foo": "bar"}
+        )
+        self.assertEqual(result, {"hello": "world"})
+
+    async def test_post_json_get_json(self) -> None:
+        result = await self.client.post_json_get_json(
+            f"{self.base_url}/json", {"key": "value"}
+        )
+        self.assertEqual(result, {"received": {"key": "value"}})
+
+    async def test_put_json(self) -> None:
+        result = await self.client.put_json(
+            f"{self.base_url}/json", {"key": "updated_value"}
+        )
+        self.assertEqual(result, {"updated": {"key": "updated_value"}})
+
+    async def test_get_raw(self) -> None:
+        result = await self.client.get_raw(f"{self.base_url}/raw")
+        self.assertEqual(result, b"raw bytes here")
+
+    async def test_get_file(self) -> None:
+        from io import BytesIO
+
+        output = BytesIO()
+        length, headers, url, code = await self.client.get_file(
+            f"{self.base_url}/file", output
+        )
+        self.assertEqual(code, 200)
+        self.assertGreater(length, 0)
+        self.assertEqual(len(output.getvalue()), length)
+
+    async def test_get_file_max_size(self) -> None:
+        from io import BytesIO
+
+        from synapse.api.errors import SynapseError
+
+        output = BytesIO()
+        with self.assertRaises(SynapseError) as ctx:
+            await self.client.get_file(
+                f"{self.base_url}/file", output, max_size=10
+            )
+        self.assertIn("too large", str(ctx.exception))
+
+    async def test_error_response(self) -> None:
+        from synapse.api.errors import HttpResponseException
+
+        with self.assertRaises(HttpResponseException) as ctx:
+            await self.client.get_json(f"{self.base_url}/error")
+        self.assertEqual(ctx.exception.code, 500)
+
+    async def test_post_urlencoded_get_json(self) -> None:
+        result = await self.client.post_urlencoded_get_json(
+            f"{self.base_url}/form", args={"username": "test"}
+        )
+        self.assertEqual(result["form_data"]["username"], "test")
+
+    async def test_request_method(self) -> None:
+        response = await self.client.request("GET", f"{self.base_url}/raw")
+        self.assertEqual(response.status, 200)
+        body = await response.read()
+        self.assertEqual(body, b"raw bytes here")
+
+
 if __name__ == "__main__":
     unittest.main()
