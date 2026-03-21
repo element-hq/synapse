@@ -738,6 +738,18 @@ class PreserveLoggingContext:
 _thread_local = threading.local()
 _thread_local.current_context = SENTINEL_CONTEXT
 
+# ContextVar kept in sync with _thread_local. This is used by asyncio-native code
+# paths (make_future_yieldable, run_coroutine_in_background_native, etc.) and will
+# become the sole storage mechanism once all Deferred usage is removed (Phase 7).
+#
+# IMPORTANT: We cannot use ContextVar as the primary storage while Twisted Deferreds
+# are in use, because asyncio's call_later/call_soon run callbacks in context COPIES.
+# The _set_context_cb Deferred callback pattern relies on writes being globally visible
+# on the thread, which threading.local provides but ContextVar with asyncio does not.
+_current_context_var: contextvars.ContextVar[
+    "LoggingContextOrSentinel"
+] = contextvars.ContextVar("synapse_logging_context", default=SENTINEL_CONTEXT)
+
 
 def current_context() -> LoggingContextOrSentinel:
     """Get the current logging context from thread local storage"""
@@ -763,6 +775,8 @@ def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSe
         rusage = get_thread_resource_usage()
         current.stop(rusage)
         _thread_local.current_context = context
+        # Keep ContextVar in sync for asyncio-native code paths
+        _current_context_var.set(context)
         context.start(rusage)
 
     return current
@@ -1212,43 +1226,30 @@ def defer_to_threadpool(
 
 
 # ===========================================================================
-# Phase 0: asyncio-native parallel implementations
+# asyncio-native utility functions
 #
-# These provide asyncio-native equivalents of the Twisted-based context
-# tracking and utility functions above. They are unused until Phase 1+
-# switches the active implementation. Adding them here in Phase 0 ensures
-# the new code paths can be tested without changing any existing behavior.
+# These provide asyncio-native equivalents of the Twisted/Deferred-based
+# utility functions above. They operate on _current_context_var directly
+# (NOT threading.local) because they are designed for pure asyncio code
+# where ContextVar propagation into child Tasks is the desired behavior.
+#
+# These functions should only be used from asyncio-native code paths
+# (running inside asyncio.Task), not from Twisted Deferred chains.
 # ===========================================================================
 
-# A ContextVar that can replace _thread_local for context tracking.
-# In Phase 1, current_context()/set_current_context() will switch to using this.
-_current_context_var: contextvars.ContextVar[
-    "LoggingContextOrSentinel"
-] = contextvars.ContextVar("synapse_logging_context", default=SENTINEL_CONTEXT)
 
-
-def current_context_contextvar() -> "LoggingContextOrSentinel":
-    """Get the current logging context from contextvars.
-
-    This is the asyncio-native equivalent of current_context().
-    It will become the primary implementation in Phase 1.
-    """
+def _native_current_context() -> "LoggingContextOrSentinel":
+    """Read context from ContextVar (for asyncio-native code paths only)."""
     return _current_context_var.get()
 
 
-def set_current_context_contextvar(
+def _native_set_current_context(
     context: "LoggingContextOrSentinel",
 ) -> "LoggingContextOrSentinel":
-    """Set the current logging context using contextvars.
+    """Set context in ContextVar (for asyncio-native code paths only).
 
-    This is the asyncio-native equivalent of set_current_context().
-    It will become the primary implementation in Phase 1.
-
-    Args:
-        context: The context to activate.
-
-    Returns:
-        The context that was previously active.
+    Unlike set_current_context(), this does NOT write to threading.local,
+    since asyncio-native code runs in Tasks with their own ContextVar copy.
     """
     if context is None:
         raise TypeError("'context' argument may not be None")
@@ -1281,21 +1282,24 @@ async def make_future_yieldable(
 
     The returned coroutine can be awaited without leaking the current logcontext
     into the event loop.
+
+    NOTE: This uses ContextVar directly and should only be called from
+    asyncio-native code paths (inside asyncio.Task), not from Twisted code.
     """
     if future.done():
         return future.result()
 
     # Save and clear the calling context so we don't leak it into the loop
-    calling_context = set_current_context_contextvar(SENTINEL_CONTEXT)
+    calling_context = _native_set_current_context(SENTINEL_CONTEXT)
 
     try:
         result = await future
     except BaseException:
         # Restore context before propagating the exception
-        set_current_context_contextvar(calling_context)
+        _native_set_current_context(calling_context)
         raise
     else:
-        set_current_context_contextvar(calling_context)
+        _native_set_current_context(calling_context)
         return result
 
 
@@ -1314,18 +1318,18 @@ def run_coroutine_in_background_native(
         The asyncio.Task running the coroutine (does NOT follow logcontext rules;
         callers should use make_future_yieldable if they want to await it).
     """
-    calling_context = current_context_contextvar()
+    calling_context = _native_current_context()
 
     async def _wrapper() -> _NativeT:
         try:
             return await coroutine
         finally:
             # Reset to sentinel so we don't leak context into the event loop
-            set_current_context_contextvar(SENTINEL_CONTEXT)
+            _native_set_current_context(SENTINEL_CONTEXT)
 
     task = asyncio.create_task(_wrapper())
     # Restore the calling context (create_task may have changed it)
-    set_current_context_contextvar(calling_context)
+    _native_set_current_context(calling_context)
     return task
 
 
@@ -1341,7 +1345,7 @@ def run_in_background_native(
     Preserves the calling logcontext. When the background task completes,
     resets to SENTINEL context.
     """
-    calling_context = current_context_contextvar()
+    calling_context = _native_current_context()
     try:
         res = f(*args, **kwargs)
     except Exception:
@@ -1359,10 +1363,10 @@ def run_in_background_native(
     if isinstance(res, asyncio.Task) or isinstance(res, asyncio.Future):
         # Already scheduled; add sentinel-reset callback if not done
         if not res.done():
-            set_current_context_contextvar(calling_context)
+            _native_set_current_context(calling_context)
 
             def _reset_context(f: "asyncio.Future[Any]") -> None:
-                set_current_context_contextvar(SENTINEL_CONTEXT)
+                _native_set_current_context(SENTINEL_CONTEXT)
 
             res.add_done_callback(_reset_context)
         return res  # type: ignore[return-value]

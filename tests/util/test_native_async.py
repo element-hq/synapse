@@ -26,11 +26,11 @@ from synapse.logging.context import (
     SENTINEL_CONTEXT,
     LoggingContext,
     _current_context_var,
-    current_context_contextvar,
+    _native_current_context,
+    _native_set_current_context,
     make_future_yieldable,
     run_coroutine_in_background_native,
     run_in_background_native,
-    set_current_context_contextvar,
 )
 from synapse.util.async_helpers import (
     NativeLinearizer,
@@ -47,43 +47,43 @@ class ContextVarContextTest(unittest.IsolatedAsyncioTestCase):
         _current_context_var.set(SENTINEL_CONTEXT)
 
     def test_default_is_sentinel(self) -> None:
-        self.assertIs(current_context_contextvar(), SENTINEL_CONTEXT)
+        self.assertIs(_native_current_context(), SENTINEL_CONTEXT)
 
     def test_set_and_get(self) -> None:
         ctx = LoggingContext(name="test", server_name="test.server")
-        old = set_current_context_contextvar(ctx)
+        old = _native_set_current_context(ctx)
         self.assertIs(old, SENTINEL_CONTEXT)
-        self.assertIs(current_context_contextvar(), ctx)
+        self.assertIs(_native_current_context(), ctx)
         # Restore
-        set_current_context_contextvar(SENTINEL_CONTEXT)
+        _native_set_current_context(SENTINEL_CONTEXT)
 
     def test_set_returns_previous(self) -> None:
         ctx1 = LoggingContext(name="ctx1", server_name="test.server")
         ctx2 = LoggingContext(name="ctx2", server_name="test.server")
-        set_current_context_contextvar(ctx1)
-        old = set_current_context_contextvar(ctx2)
+        _native_set_current_context(ctx1)
+        old = _native_set_current_context(ctx2)
         self.assertIs(old, ctx1)
-        set_current_context_contextvar(SENTINEL_CONTEXT)
+        _native_set_current_context(SENTINEL_CONTEXT)
 
     def test_none_raises(self) -> None:
         with self.assertRaises(TypeError):
-            set_current_context_contextvar(None)  # type: ignore[arg-type]
+            _native_set_current_context(None)  # type: ignore[arg-type]
 
     async def test_task_inherits_context(self) -> None:
         """asyncio.Tasks inherit the parent's contextvars by default."""
         ctx = LoggingContext(name="parent", server_name="test.server")
-        set_current_context_contextvar(ctx)
+        _native_set_current_context(ctx)
 
         result = None
 
         async def child() -> None:
             nonlocal result
-            result = current_context_contextvar()
+            result = _native_current_context()
 
         task = asyncio.create_task(child())
         await task
         self.assertIs(result, ctx)
-        set_current_context_contextvar(SENTINEL_CONTEXT)
+        _native_set_current_context(SENTINEL_CONTEXT)
 
 
 class MakeFutureYieldableTest(unittest.IsolatedAsyncioTestCase):
@@ -100,7 +100,7 @@ class MakeFutureYieldableTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_pending_future_preserves_context(self) -> None:
         ctx = LoggingContext(name="test", server_name="test.server")
-        set_current_context_contextvar(ctx)
+        _native_set_current_context(ctx)
 
         loop = asyncio.get_running_loop()
         f: asyncio.Future[str] = loop.create_future()
@@ -110,14 +110,14 @@ class MakeFutureYieldableTest(unittest.IsolatedAsyncioTestCase):
         result = await make_future_yieldable(f)
 
         # Context should be restored after awaiting
-        self.assertIs(current_context_contextvar(), ctx)
+        self.assertIs(_native_current_context(), ctx)
         self.assertEqual(result, "hello")
 
-        set_current_context_contextvar(SENTINEL_CONTEXT)
+        _native_set_current_context(SENTINEL_CONTEXT)
 
     async def test_pending_future_exception(self) -> None:
         ctx = LoggingContext(name="test", server_name="test.server")
-        set_current_context_contextvar(ctx)
+        _native_set_current_context(ctx)
 
         loop = asyncio.get_running_loop()
         f: asyncio.Future[str] = loop.create_future()
@@ -129,8 +129,8 @@ class MakeFutureYieldableTest(unittest.IsolatedAsyncioTestCase):
             await yieldable
 
         # Context should still be restored after exception
-        self.assertIs(current_context_contextvar(), ctx)
-        set_current_context_contextvar(SENTINEL_CONTEXT)
+        self.assertIs(_native_current_context(), ctx)
+        _native_set_current_context(SENTINEL_CONTEXT)
 
 
 class RunCoroutineInBackgroundNativeTest(unittest.IsolatedAsyncioTestCase):
@@ -139,23 +139,23 @@ class RunCoroutineInBackgroundNativeTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_preserves_calling_context(self) -> None:
         ctx = LoggingContext(name="caller", server_name="test.server")
-        set_current_context_contextvar(ctx)
+        _native_set_current_context(ctx)
 
         results: list[object] = []
 
         async def bg_work() -> str:
-            results.append(current_context_contextvar())
+            results.append(_native_current_context())
             return "done"
 
         task = run_coroutine_in_background_native(bg_work())
 
         # Calling context should be preserved
-        self.assertIs(current_context_contextvar(), ctx)
+        self.assertIs(_native_current_context(), ctx)
 
         result = await task
         self.assertEqual(result, "done")
 
-        set_current_context_contextvar(SENTINEL_CONTEXT)
+        _native_set_current_context(SENTINEL_CONTEXT)
 
     async def test_resets_to_sentinel_on_completion(self) -> None:
         post_completion_context = None
