@@ -51,10 +51,7 @@ from synapse.util.cancellation import cancellable, is_function_cancellable
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.wheel_timer import WheelTimer
-try:
-    from twisted.internet.defer import CancelledError
-except ImportError:
-    pass
+from asyncio import CancelledError
 
 logger = logging.getLogger(__name__)
 

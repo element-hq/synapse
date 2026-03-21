@@ -45,15 +45,17 @@ import jinja2
 from canonicaljson import encode_canonical_json
 from zope.interface import implementer
 
-import asyncio as _asyncio
+from asyncio import CancelledError
 
-from twisted.internet import defer, interfaces, reactor
-from twisted.internet.defer import CancelledError
-from twisted.python import failure
-
-# Tuple of CancelledError types for f.check() during transition
-_CancelledErrors = (CancelledError, _asyncio.CancelledError)
-from twisted.web import resource
+try:
+    from twisted.internet import defer, interfaces, reactor
+    from twisted.internet.defer import CancelledError as TwistedCancelledError
+    from twisted.python import failure
+    from twisted.web import resource
+    # Catch both CancelledError types during transition
+    _CancelledErrors = (CancelledError, TwistedCancelledError)
+except ImportError:
+    _CancelledErrors = (CancelledError,)  # type: ignore[assignment]
 
 from synapse.types import ISynapseThreadlessReactor
 

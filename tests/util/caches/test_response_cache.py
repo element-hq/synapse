@@ -36,7 +36,7 @@ from synapse.util.duration import Duration
 from tests.server import get_clock
 from tests.unittest import TestCase
 try:
-    from twisted.internet.defer import CancelledError
+    from asyncio import CancelledError
 except ImportError:
     pass
 

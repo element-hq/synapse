@@ -23,7 +23,7 @@ from typing import AsyncContextManager, Callable, Sequence
 
 try:
     from twisted.internet import defer
-    from twisted.internet.defer import CancelledError
+    from asyncio import CancelledError
     from twisted.internet.defer import Deferred
 except ImportError:
     pass

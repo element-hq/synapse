@@ -30,10 +30,7 @@ from typing import (
 
 from typing_extensions import ParamSpec
 
-try:
-    from twisted.internet.defer import CancelledError
-except ImportError:
-    pass
+from asyncio import CancelledError
 from synapse.api.presence import UserPresenceState
 from synapse.util.async_helpers import delay_cancellation, maybe_awaitable
 

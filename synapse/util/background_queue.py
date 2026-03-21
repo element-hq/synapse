@@ -31,10 +31,7 @@ except ImportError:
 
 from synapse.util.async_helpers import DeferredEvent
 from synapse.util.duration import Duration
-try:
-    from twisted.internet.defer import CancelledError
-except ImportError:
-    pass
+from asyncio import CancelledError
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

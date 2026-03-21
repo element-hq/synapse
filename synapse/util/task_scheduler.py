@@ -41,10 +41,7 @@ from synapse.metrics.background_process_metrics import (
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
 from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
-try:
-    from twisted.internet.defer import CancelledError
-except ImportError:
-    pass
+from asyncio import CancelledError
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

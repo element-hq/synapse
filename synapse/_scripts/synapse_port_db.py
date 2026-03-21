@@ -1580,11 +1580,10 @@ def main() -> None:
             hs=hs,
         )
 
-        @defer.inlineCallbacks
-        def run() -> Generator["defer.Deferred[Any]", Any, None]:
-            yield defer.ensureDeferred(porter.run())
+        async def run() -> None:
+            await porter.run()
 
-        hs.get_clock().call_when_running(run)
+        hs.get_clock().call_when_running(lambda: defer.ensureDeferred(run()))
 
         reactor.run()
 

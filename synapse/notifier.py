@@ -67,10 +67,7 @@ from synapse.util.async_helpers import (
 from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
 from synapse.visibility import filter_and_transform_events_for_client
-try:
-    from twisted.internet.defer import CancelledError
-except ImportError:
-    pass
+from asyncio import CancelledError
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

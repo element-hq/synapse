@@ -25,7 +25,7 @@ from unittest import mock
 
 try:
     from twisted.enterprise.adbapi import ConnectionPool
-    from twisted.internet.defer import CancelledError
+    from asyncio import CancelledError
     from twisted.internet.defer import Deferred, ensureDeferred
 except ImportError:
     pass

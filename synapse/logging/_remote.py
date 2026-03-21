@@ -19,6 +19,7 @@
 #
 #
 
+from asyncio import CancelledError
 import logging
 import sys
 import traceback

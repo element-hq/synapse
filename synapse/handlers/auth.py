@@ -20,6 +20,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from asyncio import CancelledError
 import logging
 import time
 import unicodedata

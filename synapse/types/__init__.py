@@ -21,6 +21,7 @@
 #
 import abc
 import asyncio
+from asyncio import CancelledError
 import logging
 import re
 import string

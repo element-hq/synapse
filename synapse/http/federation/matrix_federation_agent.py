@@ -173,14 +173,13 @@ class MatrixFederationAgent:
 
         self._well_known_resolver = _well_known_resolver
 
-    @defer.inlineCallbacks
-    def request(
+    async def request(
         self,
         method: bytes,
         uri: bytes,
         headers: Headers | None = None,
         bodyProducer: Optional[IBodyProducer] = None,
-    ) -> Generator[defer.Deferred, Any, IResponse]:
+    ) -> IResponse:
         """
         Args:
             method: HTTP method: GET/POST/etc
@@ -193,10 +192,7 @@ class MatrixFederationAgent:
                 a file for a file upload).  Or None if the request is to have
                 no body.
         Returns:
-            A deferred which fires when the header of the response has been received
-            (regardless of the response status code). Fails if there is any problem
-            which prevents that response from being received (including problems that
-            prevent the request from being sent).
+            The response (once headers are received).
         """
         # We use urlparse as that will set `port` to None if there is no
         # explicit port.
@@ -216,8 +212,8 @@ class MatrixFederationAgent:
             and not _is_ip_literal(parsed_uri.hostname)
             and not parsed_uri.port
         ):
-            well_known_result = yield defer.ensureDeferred(
-                self._well_known_resolver.get_well_known(parsed_uri.hostname)
+            well_known_result = await self._well_known_resolver.get_well_known(
+                parsed_uri.hostname
             )
             delegated_server = well_known_result.delegated_server
 
@@ -249,7 +245,7 @@ class MatrixFederationAgent:
         if not request_headers.hasHeader(b"user-agent"):
             request_headers.addRawHeader(b"user-agent", self.user_agent)
 
-        res = yield make_deferred_yieldable(
+        res = await make_deferred_yieldable(
             self._agent.request(method, uri, request_headers, bodyProducer)
         )
 

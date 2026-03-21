@@ -827,7 +827,7 @@ class ModuleApi:
         """
         return [attr.asdict(t) for t in await self._store.user_get_threepids(user_id)]
 
-    def check_user_exists(self, user_id: str) -> "defer.Deferred[str | None]":
+    async def check_user_exists(self, user_id: str) -> str | None:
         """Check if user exists.
 
         Added in Synapse v0.25.0.
@@ -839,15 +839,14 @@ class ModuleApi:
             Canonical (case-corrected) user_id, or None
                if the user is not registered.
         """
-        return defer.ensureDeferred(self._auth_handler.check_user_exists(user_id))
+        return await self._auth_handler.check_user_exists(user_id)
 
-    @defer.inlineCallbacks
-    def register(
+    async def register(
         self,
         localpart: str,
         displayname: str | None = None,
         emails: list[str] | None = None,
-    ) -> Generator["defer.Deferred[Any]", Any, tuple[str, str]]:
+    ) -> tuple[str, str]:
         """Registers a new user with given localpart and optional displayname, emails.
 
         Also returns an access token for the new user.
@@ -869,17 +868,17 @@ class ModuleApi:
         logger.warning(
             "Using deprecated ModuleApi.register which creates a dummy user device."
         )
-        user_id = yield self.register_user(localpart, displayname, emails or [])
-        _, access_token, _, _ = yield self.register_device(user_id)
+        user_id = await self.register_user(localpart, displayname, emails or [])
+        _, access_token, _, _ = await self.register_device(user_id)
         return user_id, access_token
 
-    def register_user(
+    async def register_user(
         self,
         localpart: str,
         displayname: str | None = None,
         emails: list[str] | None = None,
         admin: bool = False,
-    ) -> "defer.Deferred[str]":
+    ) -> str:
         """Registers a new user with given localpart and optional displayname, emails.
 
         Added in Synapse v1.2.0.
@@ -898,21 +897,19 @@ class ModuleApi:
         Returns:
             user_id
         """
-        return defer.ensureDeferred(
-            self._hs.get_registration_handler().register_user(
-                localpart=localpart,
-                default_display_name=displayname,
-                bind_emails=emails or [],
-                admin=admin,
-            )
+        return await self._hs.get_registration_handler().register_user(
+            localpart=localpart,
+            default_display_name=displayname,
+            bind_emails=emails or [],
+            admin=admin,
         )
 
-    def register_device(
+    async def register_device(
         self,
         user_id: str,
         device_id: str | None = None,
         initial_display_name: str | None = None,
-    ) -> "defer.Deferred[tuple[str, str, int | None, str | None]]":
+    ) -> tuple[str, str, int | None, str | None]:
         """Register a device for a user and generate an access token.
 
         Added in Synapse v1.2.0.
@@ -927,17 +924,15 @@ class ModuleApi:
         Returns:
             Tuple of device ID, access token, access token expiration time and refresh token
         """
-        return defer.ensureDeferred(
-            self._hs.get_registration_handler().register_device(
-                user_id=user_id,
-                device_id=device_id,
-                initial_display_name=initial_display_name,
-            )
+        return await self._hs.get_registration_handler().register_device(
+            user_id=user_id,
+            device_id=device_id,
+            initial_display_name=initial_display_name,
         )
 
-    def record_user_external_id(
+    async def record_user_external_id(
         self, auth_provider_id: str, remote_user_id: str, registered_user_id: str
-    ) -> defer.Deferred:
+    ) -> None:
         """Record a mapping between an external user id from a single sign-on provider
         and a mxid.
 
@@ -952,10 +947,8 @@ class ModuleApi:
             external_id: id on that system
             user_id: complete mxid that it is mapped to
         """
-        return defer.ensureDeferred(
-            self._store.record_user_external_id(
-                auth_provider_id, remote_user_id, registered_user_id
-            )
+        await self._store.record_user_external_id(
+            auth_provider_id, remote_user_id, registered_user_id
         )
 
     async def create_login_token(
@@ -988,10 +981,9 @@ class ModuleApi:
             auth_provider_session_id,
         )
 
-    @defer.inlineCallbacks
-    def invalidate_access_token(
+    async def invalidate_access_token(
         self, access_token: str
-    ) -> Generator["defer.Deferred[Any]", Any, None]:
+    ) -> None:
         """Invalidate an access token for a user
 
         Added in Synapse v0.25.0.
@@ -999,37 +991,27 @@ class ModuleApi:
         Args:
             access_token: access token
 
-        Returns:
-            twisted.internet.defer.Deferred - resolves once the access token
-               has been removed.
-
         Raises:
             synapse.api.errors.AuthError: the access token is invalid
         """
         # see if the access token corresponds to a device
-        user_info = yield defer.ensureDeferred(
-            self._auth.get_user_by_access_token(access_token)
-        )
+        user_info = await self._auth.get_user_by_access_token(access_token)
         device_id = user_info.get("device_id")
         user_id = user_info["user"].to_string()
         if device_id:
             # delete the device, which will also delete its access tokens
-            yield defer.ensureDeferred(
-                self._device_handler.delete_devices(user_id, [device_id])
-            )
+            await self._device_handler.delete_devices(user_id, [device_id])
         else:
             # no associated device. Just delete the access token.
-            yield defer.ensureDeferred(
-                self._auth_handler.delete_access_token(access_token)
-            )
+            await self._auth_handler.delete_access_token(access_token)
 
-    def run_db_interaction(
+    async def run_db_interaction(
         self,
         desc: str,
         func: Callable[Concatenate[LoggingTransaction, P], T],
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> "defer.Deferred[T]":
+    ) -> T:
         """Run a function with a database connection
 
         Added in Synapse v0.25.0.
@@ -1045,9 +1027,7 @@ class ModuleApi:
             Result of func
         """
         # type-ignore: See https://github.com/python/mypy/issues/8862
-        return defer.ensureDeferred(
-            self._store.db_pool.runInteraction(desc, func, *args, **kwargs)  # type: ignore[arg-type]
-        )
+        return await self._store.db_pool.runInteraction(desc, func, *args, **kwargs)  # type: ignore[arg-type]
 
     def register_cached_function(self, cached_func: CachedFunction) -> None:
         """Register a cached function that should be invalidated across workers.
@@ -1117,14 +1097,10 @@ class ModuleApi:
             new_user=new_user,
         )
 
-    @defer.inlineCallbacks
-    def get_state_events_in_room(
+    async def get_state_events_in_room(
         self, room_id: str, types: Iterable[tuple[str, str | None]]
-    ) -> Generator[defer.Deferred, Any, Iterable[EventBase]]:
+    ) -> Iterable[EventBase]:
         """Gets current state events for the given room.
-
-        (This is exposed for compatibility with the old SpamCheckerApi. We should
-        probably deprecate it and replace it with an async method in a subclass.)
 
         Added in Synapse v1.22.0.
 
@@ -1136,12 +1112,10 @@ class ModuleApi:
         Returns:
             The filtered state events in the room.
         """
-        state_ids = yield defer.ensureDeferred(
-            self._storage_controllers.state.get_current_state_ids(
-                room_id=room_id, state_filter=StateFilter.from_types(types)
-            )
+        state_ids = await self._storage_controllers.state.get_current_state_ids(
+            room_id=room_id, state_filter=StateFilter.from_types(types)
         )
-        state = yield defer.ensureDeferred(self._store.get_events(state_ids.values()))
+        state = await self._store.get_events(state_ids.values())
         return state.values()
 
     async def update_room_membership(

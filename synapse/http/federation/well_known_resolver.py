@@ -43,10 +43,7 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.json import json_decoder
 from synapse.util.metrics import Measure
-try:
-    from twisted.internet.defer import CancelledError
-except ImportError:
-    pass
+from asyncio import CancelledError
 
 # period to cache .well-known results for by default
 WELL_KNOWN_DEFAULT_CACHE_PERIOD = 24 * 3600

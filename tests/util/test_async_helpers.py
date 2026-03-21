@@ -25,7 +25,7 @@ from parameterized import parameterized_class
 
 try:
     from twisted.internet import defer
-    from twisted.internet.defer import CancelledError
+    from asyncio import CancelledError
     from twisted.internet.defer import Deferred, ensureDeferred
     from twisted.python.failure import Failure
 except ImportError:

@@ -393,10 +393,22 @@ class TestCase(_stdlib_unittest.TestCase):
         result = results[0]
         if not isinstance(result, Failure):
             self.fail(f"Deferred {d!r} succeeded with {result!r}, expected failure")
-        if expected_types and not result.check(*expected_types):
-            self.fail(
-                f"Expected {expected_types}, got {result.type}: {result.value}"
-            )
+        if expected_types:
+            # During transition, check both asyncio and Twisted CancelledError
+            expanded_types = list(expected_types)
+            from asyncio import CancelledError as AsyncCE
+            try:
+                from twisted.internet.defer import CancelledError as TwistedCE
+                if AsyncCE in expanded_types and TwistedCE not in expanded_types:
+                    expanded_types.append(TwistedCE)
+                elif TwistedCE in expanded_types and AsyncCE not in expanded_types:
+                    expanded_types.append(AsyncCE)
+            except ImportError:
+                pass
+            if not result.check(*expanded_types):
+                self.fail(
+                    f"Expected {expected_types}, got {result.type}: {result.value}"
+                )
         return result
 
     def assertObjectHasAttributes(self, attrs: dict[str, object], obj: object) -> None:

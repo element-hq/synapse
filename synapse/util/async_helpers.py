@@ -24,6 +24,7 @@ import asyncio
 import collections
 import inspect
 import itertools
+from asyncio import CancelledError
 import logging
 from collections import OrderedDict
 from contextlib import asynccontextmanager
@@ -47,12 +48,19 @@ from typing import (
 import attr
 from typing_extensions import Concatenate, ParamSpec, Unpack
 
+from asyncio import CancelledError
+
 try:
     from twisted.internet import defer
-    from twisted.internet.defer import CancelledError
+    from twisted.internet.defer import CancelledError as TwistedCancelledError
     from twisted.python.failure import Failure
+
+    # Tuple for catching both CancelledError types during transition
+    AnyCancelledError = (CancelledError, TwistedCancelledError)
 except ImportError:
-    pass
+    defer = None  # type: ignore[assignment]
+    Failure = BaseException  # type: ignore[misc,assignment]
+    AnyCancelledError = (CancelledError,)  # type: ignore[assignment]
 
 from synapse.logging.context import (
     PreserveLoggingContext,
@@ -317,7 +325,7 @@ async def yieldable_gather_results(
     """Executes the function with each argument concurrently.
 
     Args:
-        func: Function to execute that returns a Deferred
+        func: Function to execute that returns an awaitable
         iter: An iterable that yields items that get passed as the first
             argument to the function
         *args: Arguments to be passed to each call to func
@@ -326,28 +334,31 @@ async def yieldable_gather_results(
     Returns
         A list containing the results of the function
     """
+    async def _run(item: T) -> R:
+        return await func(item, *args, **kwargs)
+
     try:
-        return await make_deferred_yieldable(
-            defer.gatherResults(
-                [run_in_background(func, item, *args, **kwargs) for item in iter],
-                consumeErrors=True,
-            )
+        asyncio.get_running_loop()
+        results = await asyncio.gather(
+            *[_run(item) for item in iter],
+            return_exceptions=True,
         )
-    except defer.FirstError as dfe:
-        # unwrap the error from defer.gatherResults.
-
-        # The raised exception's traceback only includes func() etc if
-        # the 'await' happens before the exception is thrown - ie if the failure
-        # happens *asynchronously* - otherwise Twisted throws away the traceback as it
-        # could be large.
-        #
-        # We could maybe reconstruct a fake traceback from Failure.frames. Or maybe
-        # we could throw Twisted into the fires of Mordor.
-
-        # suppress exception chaining, because the FirstError doesn't tell us anything
-        # very interesting.
-        assert isinstance(dfe.subFailure.value, BaseException)
-        raise dfe.subFailure.value from None
+        for r in results:
+            if isinstance(r, BaseException):
+                raise r
+        return results  # type: ignore[return-value]
+    except RuntimeError:
+        # No asyncio loop — use Twisted fallback
+        try:
+            return await make_deferred_yieldable(
+                defer.gatherResults(
+                    [run_in_background(func, item, *args, **kwargs) for item in iter],
+                    consumeErrors=True,
+                )
+            )
+        except defer.FirstError as dfe:
+            assert isinstance(dfe.subFailure.value, BaseException)
+            raise dfe.subFailure.value from None
 
 
 async def yieldable_gather_results_delaying_cancellation(
@@ -362,7 +373,7 @@ async def yieldable_gather_results_delaying_cancellation(
     See `yieldable_gather_results`.
 
     Args:
-        func: Function to execute that returns a Deferred
+        func: Function to execute that returns an awaitable
         iter: An iterable that yields items that get passed as the first
             argument to the function
         *args: Arguments to be passed to each call to func
@@ -371,18 +382,22 @@ async def yieldable_gather_results_delaying_cancellation(
     Returns
         A list containing the results of the function
     """
-    try:
-        return await make_deferred_yieldable(
-            delay_cancellation(
-                defer.gatherResults(
-                    [run_in_background(func, item, *args, **kwargs) for item in iter],
-                    consumeErrors=True,
-                )
-            )
+    # Use asyncio.shield to delay cancellation
+    async def _run(item: T) -> R:
+        return await func(item, *args, **kwargs)
+
+    results = await asyncio.shield(
+        asyncio.gather(
+            *[_run(item) for item in iter],
+            return_exceptions=True,
         )
-    except defer.FirstError as dfe:
-        assert isinstance(dfe.subFailure.value, BaseException)
-        raise dfe.subFailure.value from None
+    )
+
+    for r in results:
+        if isinstance(r, BaseException):
+            raise r
+
+    return results  # type: ignore[return-value]
 
 
 T1 = TypeVar("T1")
@@ -536,7 +551,21 @@ async def gather_optional_coroutines(
     overload above.
     """
 
+    # Use asyncio.gather if an event loop is running, otherwise fall back to
+    # Twisted's defer.gatherResults during transition
     try:
+        asyncio.get_running_loop()
+        tasks = [
+            asyncio.ensure_future(coroutine)
+            for coroutine in coroutines
+            if coroutine is not None
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, BaseException):
+                raise r
+    except RuntimeError:
+        # No asyncio loop — use Twisted
         results = await make_deferred_yieldable(
             defer.gatherResults(
                 [
@@ -548,26 +577,11 @@ async def gather_optional_coroutines(
             )
         )
 
-        results_iter = iter(results)
-        return tuple(
-            next(results_iter) if coroutine is not None else None
-            for coroutine in coroutines
-        )
-    except defer.FirstError as dfe:
-        # unwrap the error from defer.gatherResults.
-
-        # The raised exception's traceback only includes func() etc if
-        # the 'await' happens before the exception is thrown - ie if the failure
-        # happens *asynchronously* - otherwise Twisted throws away the traceback as it
-        # could be large.
-        #
-        # We could maybe reconstruct a fake traceback from Failure.frames. Or maybe
-        # we could throw Twisted into the fires of Mordor.
-
-        # suppress exception chaining, because the FirstError doesn't tell us anything
-        # very interesting.
-        assert isinstance(dfe.subFailure.value, BaseException)
-        raise dfe.subFailure.value from None
+    results_iter = iter(results)
+    return tuple(
+        next(results_iter) if coroutine is not None else None
+        for coroutine in coroutines
+    )
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -692,7 +706,7 @@ class Linearizer:
         # exit path, but that would slow down the uncontended case.
         try:
             await self._clock.sleep(Duration(seconds=0))
-        except CancelledError:
+        except AnyCancelledError:
             self._release_lock(key, entry)
             raise
 

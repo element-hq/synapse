@@ -23,7 +23,7 @@ from typing import Collection
 from unittest import mock
 
 try:
-    from twisted.internet.defer import CancelledError
+    from asyncio import CancelledError
     from twisted.internet.defer import ensureDeferred
 except ImportError:
     pass

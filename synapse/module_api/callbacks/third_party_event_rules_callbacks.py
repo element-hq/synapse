@@ -21,10 +21,7 @@
 import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-try:
-    from twisted.internet.defer import CancelledError
-except ImportError:
-    pass
+from asyncio import CancelledError
 from synapse.api.errors import ModuleFailedException, SynapseError
 from synapse.events import EventBase
 from synapse.events.snapshot import UnpersistedEventContextBase

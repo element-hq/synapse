@@ -31,7 +31,7 @@ from unittest import mock
 
 try:
     from twisted.internet import defer, reactor
-    from twisted.internet.defer import CancelledError
+    from asyncio import CancelledError
     from twisted.internet.defer import Deferred
     from twisted.internet.interfaces import IReactorTime
 except ImportError:
