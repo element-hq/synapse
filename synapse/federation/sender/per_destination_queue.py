@@ -125,7 +125,7 @@ class PerDestinationQueue:
         self._destination = destination
         self.transmission_loop_running = False
         self._transmission_loop_enabled = True
-        self.active_transmission_loop: defer.Deferred | None = None
+        self.active_transmission_loop: Any = None
 
         # Flag to signal to any running transmission loop that there is new data
         # queued up to be sent.

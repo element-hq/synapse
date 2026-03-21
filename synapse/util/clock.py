@@ -127,7 +127,8 @@ class Clock:
         self.cancel_all_delayed_calls()
 
     async def sleep(self, duration: Duration) -> None:
-        d: defer.Deferred[float] = defer.Deferred()
+        from synapse.util.async_helpers import make_awaitable_promise
+        d: Any = make_awaitable_promise()
         # Start task in the `sentinel` logcontext, to avoid leaking the current context
         # into the reactor once it finishes.
         with context.PreserveLoggingContext():

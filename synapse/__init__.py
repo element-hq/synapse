@@ -92,7 +92,7 @@ import synapse.util  # noqa: E402
 
 __version__ = synapse.util.SYNAPSE_VERSION
 
-# patch_inline_callbacks removed — no more @defer.inlineCallbacks usage
+# patch_inline_callbacks removed — no more inlineCallbacks usage
 
 
 check_rust_lib_up_to_date()

@@ -117,7 +117,7 @@ class TaskScheduler:
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
         # A map between a task's ID and a deferred linked to the task
-        self._running_tasks: dict[str, defer.Deferred] = {}
+        self._running_tasks: dict[str, Any] = {}
         # A map between action names and their registered function
         self._actions: dict[
             str,

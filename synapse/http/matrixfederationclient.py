@@ -730,7 +730,7 @@ class MatrixFederationHttpClient:
                             # that treq.request gives: just use the raw Agent.
 
                             # To preserve the logging context, the timeout is treated
-                            # in a similar way to `defer.gatherResults`:
+                            # in a similar way to asyncio.gather:
                             # * Each logging context-preserving fork is wrapped in
                             #   `run_in_background`. In this case there is only one,
                             #   since the timeout fork is not logging-context aware.

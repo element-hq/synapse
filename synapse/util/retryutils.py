@@ -240,7 +240,7 @@ class RetryDestinationLimiter:
             valid_err_code = True
         elif not issubclass(exc_type, Exception):
             # avoid treating exceptions which don't derive from Exception as
-            # failures; this is mostly so as not to catch defer._DefGen.
+            # failures; this is mostly so as not to catch old Twisted _DefGen.
             valid_err_code = True
         elif isinstance(exc_val, CodeMessageException):
             # Some error codes are perfectly fine for some APIs, whereas other

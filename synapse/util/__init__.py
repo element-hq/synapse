@@ -46,10 +46,10 @@ logger = logging.getLogger(__name__)
 
 
 def unwrapFirstError(failure: Failure) -> Failure:
-    # Deprecated: you probably just want to catch defer.FirstError and reraise
+    # Deprecated: you probably just want to catch the error and reraise
     # the subFailure's value, which will do a better job of preserving stacktraces.
     # (actually, you probably want to use yieldable_gather_results anyway)
-    failure.trap(defer.FirstError)
+    failure.trap(defer.FirstError) if hasattr(defer, "FirstError") else None
     return failure.value.subFailure
 
 

@@ -181,7 +181,7 @@ class ReplicationAgent(_AgentBase):
         try:
             endpoint = self._endpointFactory.endpointForURI(parsedURI)
         except SchemeNotSupported:
-            return defer.fail(Failure())
+            raise
 
         worker_name = parsedURI.netloc.decode("utf-8")
         key_scheme = self._endpointFactory.instance_map[worker_name].scheme()

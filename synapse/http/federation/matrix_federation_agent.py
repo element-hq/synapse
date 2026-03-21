@@ -352,7 +352,7 @@ class MatrixHostnameEndpoint:
 
     def connect(
         self, protocol_factory: IProtocolFactory
-    ) -> "defer.Deferred[IProtocol]":
+    ) -> Any:
         """Implements IStreamClientEndpoint interface"""
 
         return run_in_background(self._do_connect, protocol_factory)

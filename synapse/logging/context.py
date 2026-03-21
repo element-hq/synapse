@@ -1012,25 +1012,20 @@ def _set_context_cb(result: ResultT, context: LoggingContextOrSentinel) -> Resul
 def make_deferred_yieldable(deferred: Any) -> Any:
     """Make a Deferred or awaitable follow the Synapse logcontext rules.
 
-    For Twisted Deferreds: adds callbacks to save/restore logcontext
-    (synchronous, returns a Deferred — the classic behavior).
-
-    For native awaitables (asyncio.Future, coroutines): returns an
-    async wrapper that preserves logcontext.
-
+    For Twisted Deferreds: adds callbacks to save/restore logcontext.
+    For native awaitables: returns an async wrapper that preserves logcontext.
     The returned value is always awaitable.
     """
-    # Handle Twisted Deferreds with the classic callback approach
-    if isinstance(deferred, defer.Deferred):
+    # Handle Twisted Deferreds
+    if HAS_TWISTED and isinstance(deferred, defer.Deferred):
         if deferred.called and not deferred.paused:
             return deferred
-
         calling_context = set_current_context(SENTINEL_CONTEXT)
         deferred.addBoth(_set_context_cb, calling_context)
         return deferred
 
     # For native awaitables, wrap in an async function
-    async def _wrap() -> T:
+    async def _wrap() -> Any:
         calling_context = set_current_context(SENTINEL_CONTEXT)
         try:
             return await deferred

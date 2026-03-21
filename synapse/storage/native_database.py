@@ -145,8 +145,18 @@ class NativeConnectionPool:
             conn = self._get_connection()
             return func(conn, *args, **kwargs)
 
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor, _inner)
+        # Submit to thread pool. Use asyncio if available, Twisted otherwise.
+        try:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(self._executor, _inner)
+        except RuntimeError:
+            # No running asyncio loop — use Twisted's thread pool
+            try:
+                from twisted.internet import threads
+                return await threads.deferToThread(_inner)
+            except ImportError:
+                # Last resort: blocking call
+                return self._executor.submit(_inner).result()
 
     async def runInteraction(
         self,
@@ -180,8 +190,18 @@ class NativeConnectionPool:
                 conn.rollback()
                 raise
 
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor, _inner)
+        # Submit to thread pool. Use asyncio if available, Twisted otherwise.
+        try:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(self._executor, _inner)
+        except RuntimeError:
+            # No running asyncio loop — use Twisted's thread pool
+            try:
+                from twisted.internet import threads
+                return await threads.deferToThread(_inner)
+            except ImportError:
+                # Last resort: blocking call
+                return self._executor.submit(_inner).result()
 
     def close(self) -> None:
         """Shut down the connection pool.

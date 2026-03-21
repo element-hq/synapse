@@ -49,6 +49,7 @@ from synapse.logging.context import (
     make_deferred_yieldable,
     run_in_background,
 )
+from synapse.util.async_helpers import make_awaitable_promise
 from synapse.logging.opentracing import start_active_span
 from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGauge
 from synapse.util.clock import Clock
@@ -359,14 +360,14 @@ class _PerHostRatelimiter:
 
             # Queue if too many concurrent
             if len(self.current_processing) >= self.concurrent_requests:
-                queue_event = asyncio.Event()
-                self.ready_request_queue[request_id] = queue_event
+                queue_promise = make_awaitable_promise()
+                self.ready_request_queue[request_id] = queue_promise
                 logger.info(
                     "Ratelimiter(%s): queueing request (queue now %i items)",
                     self.host,
                     len(self.ready_request_queue),
                 )
-                await make_deferred_yieldable(queue_event.wait())
+                await make_deferred_yieldable(queue_promise)
 
             logger.debug(
                 "Ratelimit(%s) [%s]: Processing req", self.host, id(request_id)
@@ -395,9 +396,10 @@ class _PerHostRatelimiter:
                 _, event_or_deferred = self.ready_request_queue.popitem(last=False)
 
                 with PreserveLoggingContext():
-                    # Support both asyncio.Event and Deferred during transition
-                    if hasattr(event_or_deferred, 'set'):
-                        event_or_deferred.set()
+                    # Support both asyncio.Future and Deferred
+                    if hasattr(event_or_deferred, 'set_result'):
+                        if not event_or_deferred.done():
+                            event_or_deferred.set_result(None)
                     elif hasattr(event_or_deferred, 'callback'):
                         event_or_deferred.callback(None)
             except KeyError:

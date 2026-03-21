@@ -72,6 +72,31 @@ from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
+
+def make_awaitable_promise() -> Any:
+    """Create an awaitable promise that can be resolved later.
+
+    Returns an object with:
+    - .set_result(value) or .callback(value) to resolve
+    - .set_exception(exc) or .errback(exc) to reject
+    - Is directly awaitable
+
+    Uses asyncio.Future when a loop is RUNNING, Deferred otherwise.
+    This is critical: asyncio.Future can only be awaited when the asyncio
+    event loop is actually running, not just set.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        return loop.create_future()
+    except RuntimeError:
+        pass
+
+    # No running asyncio loop — use Deferred (works with Twisted reactor)
+    if defer is not None:
+        return defer.Deferred()
+
+    raise RuntimeError("Cannot create promise: no asyncio loop and no Twisted")
+
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")

@@ -228,7 +228,7 @@ class ProxyAgent(_AgentBase):
         uri: bytes,
         headers: Headers | None = None,
         bodyProducer: Optional[IBodyProducer] = None,
-    ) -> "defer.Deferred[IResponse]":
+    ) -> Any:
         """
         Issue a request to the server indicated by the given uri.
 
@@ -357,11 +357,7 @@ class ProxyAgent(_AgentBase):
         ):
             pass
         else:
-            return defer.fail(
-                Failure(
-                    SchemeNotSupported("Unsupported scheme: %r" % (parsed_uri.scheme,))
-                )
-            )
+            raise SchemeNotSupported("Unsupported scheme: %r" % (parsed_uri.scheme,))
 
         return self._requestWithEndpoint(
             pool_key, endpoint, method, parsed_uri, headers, bodyProducer, request_path
@@ -487,7 +483,7 @@ class _RandomSampleEndpoints:
 
     def connect(
         self, protocol_factory: IProtocolFactory
-    ) -> "defer.Deferred[IProtocol]":
+    ) -> Any:
         """Implements IStreamClientEndpoint interface"""
 
         return run_in_background(self._do_connect, protocol_factory)
