@@ -44,8 +44,25 @@ from wsgiref.simple_server import WSGIServer
 from cryptography.utils import CryptographyDeprecationWarning
 from typing_extensions import ParamSpec, assert_never
 
+import asyncio as _asyncio
+
 try:
     import twisted
+    # Install the asyncio reactor BEFORE importing reactor, so that
+    # asyncio.get_running_loop() works inside Twisted callbacks.
+    # This enables native asyncio primitives (Event, create_task, etc.)
+    from twisted.internet import asyncioreactor
+    _asyncio_loop = _asyncio.new_event_loop()
+    try:
+        asyncioreactor.install(_asyncio_loop)
+    except Exception:
+        # Reactor already installed — get the loop from the existing reactor
+        try:
+            from twisted.internet import reactor as _existing_reactor
+            _asyncio_loop = getattr(_existing_reactor, '_asyncioEventloop', None)
+        except Exception:
+            _asyncio_loop = None
+
     from twisted.internet import defer, error, reactor as _reactor
     from twisted.internet.interfaces import (
         IOpenSSLContextFactory,
@@ -315,13 +332,12 @@ def register_start(
             os._exit(1)
 
     clock = hs.get_clock()
-    # Schedule the startup coroutine to run when the event loop starts
-    try:
+    # Schedule via asyncio.ensure_future so that asyncio.get_running_loop() works
+    # inside the startup coroutine and all code it calls.
+    if _asyncio_loop is not None:
+        clock.call_when_running(lambda: _asyncio.ensure_future(wrapper(), loop=_asyncio_loop))
+    else:
         clock.call_when_running(lambda: defer.ensureDeferred(wrapper()))
-    except Exception:
-        # Fallback if defer is not available
-        import asyncio as _asyncio
-        clock.call_when_running(lambda: _asyncio.ensure_future(wrapper()))
 
 
 def listen_metrics(

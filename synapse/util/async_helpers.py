@@ -1496,9 +1496,7 @@ class DeferredEvent:
 
 
 # ===========================================================================
-# The native asyncio versions (NativeLinearizer, NativeReadWriteLock,
-# NativeAwakenableSleeper, NativeEvent) are available above and will replace
-# the Deferred-based versions once the entry point switches from reactor.run()
-# to asyncio.run(). Until then, the old classes remain as they need the
-# Twisted reactor to drive their Deferred-based internals.
+# Native asyncio versions (NativeLinearizer, NativeReadWriteLock, etc.) are
+# defined above. They'll replace the Deferred-based versions when the test
+# infrastructure switches from MemoryReactorClock to a real asyncio loop.
 # ===========================================================================

@@ -19,4 +19,4 @@
 #
 #
 
-# Test initialization — no longer patches Twisted inlineCallbacks
+# Test initialization — no Twisted patching needed

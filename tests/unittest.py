@@ -250,41 +250,36 @@ class TestCase(_stdlib_unittest.TestCase):
         """Override to handle async test methods.
 
         Twisted's trial auto-detected async test methods and wrapped them
-        with ensureDeferred. We replicate that behavior here by running
-        the coroutine in the Twisted reactor.
+        with ensureDeferred. We replicate that behavior here.
         """
         import inspect
 
         result = method()
         if inspect.isawaitable(result):
-            # Use Twisted's reactor to run the async test
             from twisted.internet import defer, reactor
 
             d = defer.ensureDeferred(result)
 
-            # Use blockingCallFromThread-style approach: run reactor until done
             if not d.called:
-                # Drive the reactor until the deferred fires
-                finished = []
+                finished: list[Any] = []
                 d.addBoth(finished.append)
 
-                # If we have a test reactor (HomeserverTestCase), pump it
                 if hasattr(self, "reactor"):
                     for _ in range(1000):
                         if finished:
                             break
                         self.reactor.advance(0.1)
                 else:
-                    # For non-HomeserverTestCase async tests, use the
-                    # Twisted global reactor with iterate()
-                    from twisted.internet import reactor as global_reactor
-
-                    # Install the reactor if not already running
+                    # Drive the global Twisted reactor
                     for _ in range(10000):
                         if finished:
                             break
-                        global_reactor.runUntilCurrent()  # type: ignore[attr-defined]
-                        global_reactor.doIteration(0.001)  # type: ignore[attr-defined]
+                        reactor.runUntilCurrent()  # type: ignore[attr-defined]
+                        try:
+                            reactor.doIteration(0.001)  # type: ignore[attr-defined]
+                        except NotImplementedError:
+                            import time
+                            time.sleep(0.001)
 
                 if not finished:
                     self.fail("Async test method did not complete")

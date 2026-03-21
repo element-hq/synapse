@@ -918,94 +918,54 @@ def run_in_background(
     #
     # Wrapping the value in a deferred has the side effect of executing the coroutine,
     # if it is one. If it's already a deferred, then we can just use that.
-    d: "defer.Deferred[R]"
-    if isinstance(res, typing.Coroutine):
-        # Wrap the coroutine in a `Deferred`.
-        d = defer.ensureDeferred(res)
-    elif isinstance(res, defer.Deferred):
-        d = res
-    elif isinstance(res, Awaitable):
-        # `res` is probably some kind of completed awaitable, such as a `DoneAwaitable`
-        # or `Future` from `make_awaitable`.
-        d = defer.ensureDeferred(_unwrap_awaitable(res))
-    else:
-        # `res` is a plain value. Wrap it in a `Deferred`.
-        d = defer.succeed(res)
-
-    # The deferred has already completed
-    if d.called and not d.paused:
-        # If the function messes with logcontexts, we can assume it follows the Synapse
-        # logcontext rules (Rules for functions returning awaitables: "If the awaitable
-        # is already complete, the function returns with the same logcontext it started
-        # with."). If the function doesn't touch logcontexts at all, we can also assume
-        # the logcontext is unchanged.
-        #
-        # Either way, the function should have maintained the calling logcontext, so we
-        # can avoid messing with it further. Additionally, if the deferred has already
-        # completed, then it would be a mistake to then add a deferred callback (below)
-        # to reset the logcontext to the sentinel logcontext as that would run
-        # immediately (remember our goal is to maintain the calling logcontext when we
-        # return).
-        if current_context() != calling_context:
-            logcontext_error(
-                "run_in_background(%s): deferred already completed but the function did not maintain the calling logcontext %s (found %s)"
-                % (
-                    instance_id,
-                    calling_context,
-                    current_context(),
-                )
-            )
+    # `res` may be a coroutine, `Deferred`, Future, or a plain value.
+    # Try to schedule via asyncio first (enables native asyncio primitives),
+    # fall back to Twisted Deferreds.
+    d: Any
+    try:
+        loop = asyncio.get_running_loop()
+        # asyncio loop is running — use asyncio.ensure_future
+        if isinstance(res, typing.Coroutine):
+            d = asyncio.ensure_future(res)
+        elif isinstance(res, (asyncio.Task, asyncio.Future)):
+            d = res
+        elif HAS_TWISTED and isinstance(res, defer.Deferred):
+            d = res  # Keep Deferreds as-is
+        elif isinstance(res, Awaitable):
+            d = asyncio.ensure_future(_unwrap_awaitable(res))
         else:
-            logcontext_debug_logger.debug(
-                "run_in_background(%s): deferred already completed (maintained the calling logcontext %s)",
-                instance_id,
-                calling_context,
-            )
+            fut: asyncio.Future[R] = loop.create_future()
+            fut.set_result(res)
+            d = fut
+    except RuntimeError:
+        # No asyncio loop running — fall back to Twisted
+        if isinstance(res, typing.Coroutine):
+            d = defer.ensureDeferred(res)
+        elif HAS_TWISTED and isinstance(res, defer.Deferred):
+            d = res
+        elif isinstance(res, Awaitable):
+            d = defer.ensureDeferred(_unwrap_awaitable(res))
+        else:
+            d = defer.succeed(res)
+
+    # Check if already completed
+    is_done = False
+    if isinstance(d, (asyncio.Task, asyncio.Future)):
+        is_done = d.done()
+    elif hasattr(d, 'called'):
+        is_done = d.called and not getattr(d, 'paused', False)
+
+    if is_done:
         return d
 
-    # Since the function we called may follow the Synapse logcontext rules (Rules for
-    # functions returning awaitables: "If the awaitable is incomplete, the function
-    # clears the logcontext before returning"), the function may have reset the
-    # logcontext before returning, so we need to restore the calling logcontext now
-    # before we return ourselves.
-    #
-    # Our goal is to have the caller logcontext unchanged after firing off the
-    # background task and returning.
-    logcontext_debug_logger.debug(
-        "run_in_background(%s): restoring calling logcontext %s",
-        instance_id,
-        calling_context,
-    )
+    # Restore calling context and add sentinel-reset callback
     set_current_context(calling_context)
 
-    # If the function we called is playing nice and following the Synapse logcontext
-    # rules, it will restore original calling logcontext when the deferred completes;
-    # but there is nothing waiting for it, so it will get leaked into the reactor (which
-    # would then get picked up by the next thing the reactor does). We therefore need to
-    # reset the logcontext here (set the `sentinel` logcontext) before yielding control
-    # back to the reactor.
-    #
-    # (If this feels asymmetric, consider it this way: we are
-    # effectively forking a new thread of execution. We are
-    # probably currently within a ``with LoggingContext()`` block,
-    # which is supposed to have a single entry and exit point. But
-    # by spawning off another deferred, we are effectively
-    # adding a new exit point.)
-    if logcontext_debug_logger.isEnabledFor(logging.DEBUG):
-
-        def _log_set_context_cb(
-            result: ResultT, context: LoggingContextOrSentinel
-        ) -> ResultT:
-            logcontext_debug_logger.debug(
-                "run_in_background(%s): resetting logcontext to %s",
-                instance_id,
-                context,
-            )
-            set_current_context(context)
-            return result
-
-        d.addBoth(_log_set_context_cb, SENTINEL_CONTEXT)
-    else:
+    if isinstance(d, (asyncio.Task, asyncio.Future)):
+        def _reset_asyncio(f: "asyncio.Future[Any]") -> None:
+            set_current_context(SENTINEL_CONTEXT)
+        d.add_done_callback(_reset_asyncio)
+    elif hasattr(d, 'addBoth'):
         d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
 
     return d
