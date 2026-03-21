@@ -718,7 +718,7 @@ class Notifier:
                         # Update the prev_token to the current_token since nothing
                         # has happened between the old prev_token and the current_token
                         prev_token = current_token
-                    except defer.TimeoutError:
+                    except asyncio.TimeoutError:
                         log_kv({"wait_for_events": "timeout"})
                         break
                     except CancelledError:

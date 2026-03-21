@@ -843,7 +843,7 @@ def timeout_deferred(
     NOTE: Unlike `Deferred.addTimeout`, this function returns a new deferred.
 
     NOTE: the TimeoutError raised by the resultant deferred is
-    twisted.internet.defer.TimeoutError, which is *different* to the built-in
+    twisted.internet.asyncio.TimeoutError, which is *different* to the built-in
     TimeoutError, as well as various other TimeoutErrors you might have imported.
 
     Args:
@@ -859,7 +859,7 @@ def timeout_deferred(
 
 
     Returns:
-        A new Deferred, which will errback with defer.TimeoutError on timeout.
+        A new Deferred, which will errback with asyncio.TimeoutError on timeout.
     """
     new_d: "defer.Deferred[_T]" = defer.Deferred()
 
@@ -879,7 +879,7 @@ def timeout_deferred(
 
         if not new_d.called:
             with PreserveLoggingContext():
-                new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
+                new_d.errback(asyncio.TimeoutError("Timed out after %gs" % (timeout,)))
 
     # We don't track these calls since they are short.
     delayed_call = clock.call_later(
@@ -893,7 +893,7 @@ def timeout_deferred(
         # the reason it was cancelled was due to our timeout. Turn the CancelledError
         # into a TimeoutError.
         if timed_out[0] and value.check(CancelledError):
-            raise defer.TimeoutError("Timed out after %gs" % (timeout,))
+            raise asyncio.TimeoutError("Timed out after %gs" % (timeout,))
         return value
 
     deferred.addErrback(convert_cancelled)
@@ -1447,7 +1447,7 @@ class AwakenableSleeper:
                     clock=self._clock,
                 )
             )
-        except defer.TimeoutError:
+        except asyncio.TimeoutError:
             pass
         finally:
             # Clean up the state
@@ -1489,7 +1489,7 @@ class DeferredEvent:
                     clock=self._clock,
                 )
             )
-        except defer.TimeoutError:
+        except asyncio.TimeoutError:
             pass
 
         return self.is_set()

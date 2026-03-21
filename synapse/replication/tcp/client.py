@@ -1,3 +1,4 @@
+import asyncio
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
@@ -382,7 +383,7 @@ class ReplicationDataHandler:
             )
             try:
                 await make_deferred_yieldable(deferred)
-            except defer.TimeoutError:
+            except asyncio.TimeoutError:
                 logger.warning(
                     "Timed out waiting for repl stream %r to reach %s (%s)"
                     "; currently at: %s",

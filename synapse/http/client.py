@@ -1,3 +1,4 @@
+import asyncio
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
@@ -786,7 +787,7 @@ class BaseHttpClient:
                 "Requested file is too large > %r bytes" % (max_size,),
                 Codes.TOO_LARGE,
             )
-        except defer.TimeoutError:
+        except asyncio.TimeoutError:
             raise SynapseError(
                 HTTPStatus.BAD_GATEWAY,
                 "Requested file took too long to download",
@@ -1016,7 +1017,7 @@ def _timeout_to_request_timed_out_error(f: Failure) -> Failure:
         # The TCP connection has its own timeout (set by the 'connectTimeout' param
         # on the Agent), which raises twisted_error.TimeoutError exception.
         raise RequestTimedOutError("Timeout connecting to remote server")
-    elif f.check(defer.TimeoutError, ResponseNeverReceived):
+    elif f.check(asyncio.TimeoutError, ResponseNeverReceived):
         # this one means that we hit our overall timeout on the request
         raise RequestTimedOutError("Timeout waiting for response from remote server")
 

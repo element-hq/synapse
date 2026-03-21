@@ -332,10 +332,10 @@ def register_start(
             os._exit(1)
 
     clock = hs.get_clock()
-    # Schedule via asyncio.ensure_future so that asyncio.get_running_loop() works
+    # Schedule via defer.ensureDeferred so that asyncio.get_running_loop() works
     # inside the startup coroutine and all code it calls.
     if _asyncio_loop is not None:
-        clock.call_when_running(lambda: _asyncio.ensure_future(wrapper(), loop=_asyncio_loop))
+        clock.call_when_running(lambda: _defer.ensureDeferred(wrapper(), loop=_asyncio_loop))
     else:
         clock.call_when_running(lambda: defer.ensureDeferred(wrapper()))
 

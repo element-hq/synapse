@@ -1,3 +1,4 @@
+import asyncio
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
@@ -331,7 +332,7 @@ async def _handle_response(
             request.uri.decode("ascii"),
         )
         raise RequestSendFailed(e, can_retry=False) from e
-    except defer.TimeoutError as e:
+    except asyncio.TimeoutError as e:
         logger.warning(
             "{%s} [%s] Timed out reading response - %s %s",
             request.txn_id,
@@ -1588,7 +1589,7 @@ class MatrixFederationHttpClient:
                 msg,
             )
             raise SynapseError(HTTPStatus.BAD_GATEWAY, msg, Codes.TOO_LARGE)
-        except defer.TimeoutError as e:
+        except asyncio.TimeoutError as e:
             logger.warning(
                 "{%s} [%s] Timed out reading response - %s %s",
                 request.txn_id,
@@ -1767,7 +1768,7 @@ class MatrixFederationHttpClient:
                 msg,
             )
             raise SynapseError(HTTPStatus.BAD_GATEWAY, msg, Codes.TOO_LARGE)
-        except defer.TimeoutError as e:
+        except asyncio.TimeoutError as e:
             logger.warning(
                 "{%s} [%s] Timed out reading response - %s %s",
                 request.txn_id,
