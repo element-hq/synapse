@@ -197,7 +197,7 @@ class FederationRateLimiter:
         with _rate_limiter_instances_lock:
             _rate_limiter_instances.add(self)
 
-    def ratelimit(self, host: str) -> "_GeneratorContextManager[defer.Deferred[None]]":
+    def ratelimit(self, host: str) -> "_GeneratorContextManager[Any]":
         """Used to ratelimit an incoming request from a given host
 
         Example usage:
@@ -248,7 +248,7 @@ class _PerHostRatelimiter:
         # map from request_id object to Deferred for requests which are ready
         # for processing but have been queued
         self.ready_request_queue: collections.OrderedDict[
-            object, defer.Deferred[None]
+            object, Any
         ] = collections.OrderedDict()
 
         # request id objects for requests which are in progress
@@ -259,7 +259,7 @@ class _PerHostRatelimiter:
         self.request_times: list[int] = []
 
     @contextlib.contextmanager
-    def ratelimit(self, host: str) -> "Iterator[defer.Deferred[None]]":
+    def ratelimit(self, host: str) -> "Iterator[Any]":
         # `contextlib.contextmanager` takes a generator and turns it into a
         # context manager. The generator should only yield once with a value
         # to be returned by manager.
@@ -268,9 +268,7 @@ class _PerHostRatelimiter:
         self.host = host
 
         request_id = object()
-        # Ideally we'd use `Deferred.fromCoroutine()` here, to save on redundant
-        # type-checking, but we'd need Twisted >= 21.2.
-        ret = defer.ensureDeferred(self._on_enter_with_tracing(request_id))
+        ret = run_in_background(self._on_enter_with_tracing, request_id)
         try:
             yield ret
         finally:
@@ -301,7 +299,9 @@ class _PerHostRatelimiter:
         with start_active_span("ratelimit wait"), maybe_metrics_cm:
             await self._on_enter(request_id)
 
-    def _on_enter(self, request_id: object) -> "defer.Deferred[None]":
+    async def _on_enter(self, request_id: object) -> None:
+        import asyncio
+
         time_now = self.clock.time_msec()
 
         # remove any entries from request_times which aren't within the window
@@ -325,20 +325,6 @@ class _PerHostRatelimiter:
 
         self.request_times.append(time_now)
 
-        def queue_request() -> "defer.Deferred[None]":
-            if len(self.current_processing) >= self.concurrent_requests:
-                queue_defer: defer.Deferred[None] = defer.Deferred()
-                self.ready_request_queue[request_id] = queue_defer
-                logger.info(
-                    "Ratelimiter(%s): queueing request (queue now %i items)",
-                    self.host,
-                    len(self.ready_request_queue),
-                )
-
-                return queue_defer
-            else:
-                return defer.succeed(None)
-
         logger.debug(
             "Ratelimit(%s) [%s]: len(self.request_times)=%d",
             self.host,
@@ -346,59 +332,52 @@ class _PerHostRatelimiter:
             len(self.request_times),
         )
 
-        if self.should_sleep():
-            logger.debug(
-                "Ratelimiter(%s) [%s]: sleeping request for %f sec",
-                self.host,
-                id(request_id),
-                self.sleep_sec,
-            )
-            if self.metrics_name:
-                rate_limit_sleep_counter.labels(
-                    rate_limiter_name=self.metrics_name,
-                    **{SERVER_NAME_LABEL: self.our_server_name},
-                ).inc()
-            ret_defer = run_in_background(
-                self.clock.sleep, Duration(seconds=self.sleep_sec)
-            )
-
-            self.sleeping_requests.add(request_id)
-
-            def on_wait_finished(_: Any) -> "defer.Deferred[None]":
+        try:
+            if self.should_sleep():
                 logger.debug(
-                    "Ratelimit(%s) [%s]: Finished sleeping", self.host, id(request_id)
+                    "Ratelimiter(%s) [%s]: sleeping request for %f sec",
+                    self.host,
+                    id(request_id),
+                    self.sleep_sec,
                 )
-                self.sleeping_requests.discard(request_id)
-                queue_defer = queue_request()
-                return queue_defer
+                if self.metrics_name:
+                    rate_limit_sleep_counter.labels(
+                        rate_limiter_name=self.metrics_name,
+                        **{SERVER_NAME_LABEL: self.our_server_name},
+                    ).inc()
 
-            ret_defer.addBoth(on_wait_finished)
-        else:
-            ret_defer = queue_request()
+                self.sleeping_requests.add(request_id)
+                try:
+                    await self.clock.sleep(Duration(seconds=self.sleep_sec))
+                finally:
+                    logger.debug(
+                        "Ratelimit(%s) [%s]: Finished sleeping",
+                        self.host,
+                        id(request_id),
+                    )
+                    self.sleeping_requests.discard(request_id)
 
-        def on_start(r: object) -> object:
+            # Queue if too many concurrent
+            if len(self.current_processing) >= self.concurrent_requests:
+                queue_event = asyncio.Event()
+                self.ready_request_queue[request_id] = queue_event
+                logger.info(
+                    "Ratelimiter(%s): queueing request (queue now %i items)",
+                    self.host,
+                    len(self.ready_request_queue),
+                )
+                await make_deferred_yieldable(queue_event.wait())
+
             logger.debug(
                 "Ratelimit(%s) [%s]: Processing req", self.host, id(request_id)
             )
             self.current_processing.add(request_id)
-            return r
-
-        def on_err(r: object) -> object:
-            # XXX: why is this necessary? this is called before we start
-            # processing the request so why would the request be in
-            # current_processing?
+        except Exception:
             self.current_processing.discard(request_id)
-            return r
-
-        def on_both(r: object) -> object:
-            # Ensure that we've properly cleaned up.
+            raise
+        finally:
             self.sleeping_requests.discard(request_id)
             self.ready_request_queue.pop(request_id, None)
-            return r
-
-        ret_defer.addCallbacks(on_start, on_err)
-        ret_defer.addBoth(on_both)
-        return make_deferred_yieldable(ret_defer)
 
     def _on_exit(self, request_id: object) -> None:
         logger.debug("Ratelimit(%s) [%s]: Processed req", self.host, id(request_id))
@@ -413,10 +392,14 @@ class _PerHostRatelimiter:
             self.current_processing.discard(request_id)
             try:
                 # start processing the next item on the queue.
-                _, deferred = self.ready_request_queue.popitem(last=False)
+                _, event_or_deferred = self.ready_request_queue.popitem(last=False)
 
                 with PreserveLoggingContext():
-                    deferred.callback(None)
+                    # Support both asyncio.Event and Deferred during transition
+                    if hasattr(event_or_deferred, 'set'):
+                        event_or_deferred.set()
+                    elif hasattr(event_or_deferred, 'callback'):
+                        event_or_deferred.callback(None)
             except KeyError:
                 pass
 

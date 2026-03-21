@@ -234,7 +234,7 @@ def run_as_background_process(
     *args: Any,
     bg_start_span: bool = True,
     **kwargs: Any,
-) -> "defer.Deferred[T | None]":
+) -> Any:
     """
     XXX: Deprecated: use `ModuleApi.run_as_background_process` instead.
 
@@ -1638,7 +1638,7 @@ class ModuleApi:
         *args: Any,
         bg_start_span: bool = True,
         **kwargs: Any,
-    ) -> "defer.Deferred[T | None]":
+    ) -> Any:
         """Run the given function in its own logcontext, with resource metrics
 
         This should be used to wrap processes which are fired off to run in the

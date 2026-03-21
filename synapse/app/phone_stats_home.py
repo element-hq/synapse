@@ -82,7 +82,7 @@ def phone_stats_home(
     hs: "HomeServer",
     stats: JsonDict,
     stats_process: list[tuple[int, "resource.struct_rusage"]] = _stats_process,
-) -> "defer.Deferred[None]":
+) -> Any:
     async def _phone_stats_home(
         hs: "HomeServer",
         stats: JsonDict,
@@ -231,7 +231,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     )
     hs.get_datastores().main.reap_monthly_active_users()
 
-    def generate_monthly_active_users() -> "defer.Deferred[None]":
+    def generate_monthly_active_users() -> Any:
         async def _generate_monthly_active_users() -> None:
             current_mau_count = 0
             current_mau_count_by_service: Mapping[str, int] = {}

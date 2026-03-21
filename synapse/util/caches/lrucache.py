@@ -120,7 +120,7 @@ def _expire_old_entries(
     clock: Clock,
     expiry_seconds: float,
     autotune_config: dict | None,
-) -> "defer.Deferred[None]":
+) -> Any:
     """Walks the global cache list to find cache entries that haven't been
     accessed in the given number of seconds, or if a given memory threshold has been breached.
     """

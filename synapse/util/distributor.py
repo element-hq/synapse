@@ -46,8 +46,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def user_left_room(distributor: "Distributor", user: UserID, room_id: str) -> None:
-    distributor.fire("user_left_room", user=user, room_id=room_id)
+async def user_left_room(distributor: "Distributor", user: UserID, room_id: str) -> None:
+    await distributor.fire("user_left_room", user=user, room_id=room_id)
 
 
 class Distributor:
@@ -130,13 +130,13 @@ class Signal(Generic[P]):
         Each observer callable may return a Deferred."""
         self.observers.append(observer)
 
-    def fire(self, *args: P.args, **kwargs: P.kwargs) -> "defer.Deferred[list[Any]]":
+    async def fire(self, *args: P.args, **kwargs: P.kwargs) -> list[Any]:
         """Invokes every callable in the observer list, passing in the args and
         kwargs. Exceptions thrown by observers are logged but ignored. It is
         not an error to fire a signal with no observers.
 
-        Returns a Deferred that will complete when all the observers have
-        completed."""
+        Returns when all the observers have completed."""
+        import asyncio as _asyncio
 
         async def do(observer: Callable[P, R | Awaitable[R]]) -> R | None:
             try:
@@ -150,11 +150,7 @@ class Signal(Generic[P]):
                 )
                 return None
 
-        deferreds = [run_in_background(do, o) for o in self.observers]
-
-        return make_deferred_yieldable(
-            defer.gatherResults(deferreds, consumeErrors=True)
-        )
+        return await _asyncio.gather(*[do(o) for o in self.observers])
 
     def __repr__(self) -> str:
         return "<Signal name=%r>" % (self.name,)

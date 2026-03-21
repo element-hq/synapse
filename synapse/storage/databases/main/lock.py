@@ -435,7 +435,7 @@ class Lock:
         lock_name: str,
         lock_key: str,
         token: str,
-    ) -> "defer.Deferred[None]":
+    ) -> Any:
         """Renew the lock.
 
         Note: this is a static method, rather than using self.*, so that we

@@ -114,7 +114,7 @@ class BatchingQueue(Generic[V, R]):
 
         # The currently pending batch of values by key, with a Deferred to call
         # with the result of the corresponding `_process_batch_callback` call.
-        self._next_values: dict[Hashable, list[tuple[V, defer.Deferred]]] = {}
+        self._next_values: dict[Hashable, list[tuple[V, Any]]] = {}
 
         # The function to call with batches of values.
         self._process_batch_callback = process_batch_callback
@@ -151,7 +151,13 @@ class BatchingQueue(Generic[V, R]):
 
         # First we create a defer and add it and the value to the list of
         # pending items.
-        d: defer.Deferred[R] = defer.Deferred()
+        import asyncio as _aq
+        try:
+            loop = _aq.get_running_loop()
+            d: Any = loop.create_future()
+        except RuntimeError:
+            # No running loop — use Twisted Deferred as fallback
+            d = defer.Deferred()
         self._next_values.setdefault(key, []).append((value, d))
 
         # If we're not currently processing the key fire off a background

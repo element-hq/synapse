@@ -92,12 +92,7 @@ import synapse.util  # noqa: E402
 
 __version__ = synapse.util.SYNAPSE_VERSION
 
-if bool(os.environ.get("SYNAPSE_TEST_PATCH_LOG_CONTEXTS", False)):
-    # We import here so that we don't have to install a bunch of deps when
-    # running the packaging tox test.
-    from synapse.util.patch_inline_callbacks import do_patch
-
-    do_patch()
+# patch_inline_callbacks removed — no more @defer.inlineCallbacks usage
 
 
 check_rust_lib_up_to_date()

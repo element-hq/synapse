@@ -211,7 +211,7 @@ class ResponseCache(Generic[KV]):
     def _set(
         self,
         context: ResponseCacheContext[KV],
-        deferred: "defer.Deferred[RV]",
+        deferred: Any,
         opentracing_span_context: "opentracing.SpanContext | None",
         cancellable: bool,
     ) -> ResponseCacheEntry:

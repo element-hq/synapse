@@ -209,7 +209,7 @@ class WaitingLock:
     lock_name: str
     lock_key: str
     write: bool | None
-    deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
+    _woken: bool = False
     _inner_lock: Lock | None = None
     _retry_interval: float = 0.1
     _lock_span: "opentracing.Scope" = attr.Factory(
@@ -217,17 +217,15 @@ class WaitingLock:
     )
 
     def release_lock(self) -> None:
-        """Release the lock (by resolving the deferred)"""
-        if not self.deferred.called:
-            with PreserveLoggingContext():
-                self.deferred.callback(None)
+        """Signal that the lock may have been released."""
+        self._woken = True
 
     async def __aenter__(self) -> None:
         self._lock_span.__enter__()
 
         with start_active_span("WaitingLock.waiting_for_lock"):
             while self._inner_lock is None:
-                self.deferred = defer.Deferred()
+                self._woken = False
 
                 if self.write is not None:
                     lock = await self.store.try_acquire_read_write_lock(
@@ -242,18 +240,12 @@ class WaitingLock:
                     self._inner_lock = lock
                     break
 
+                # Wait with periodic polling. We poll rather than using an
+                # async signal because we need to work without a running
+                # asyncio event loop (e.g. in Twisted test environments).
+                timeout = self._get_next_retry_interval()
                 try:
-                    # Wait until the we get notified the lock might have been
-                    # released (by the deferred being resolved). We also
-                    # periodically wake up in case the lock was released but we
-                    # weren't notified.
-                    with PreserveLoggingContext():
-                        timeout = self._get_next_retry_interval()
-                        await timeout_deferred(
-                            deferred=self.deferred,
-                            timeout=timeout,
-                            clock=self.clock,
-                        )
+                    await self.clock.sleep(Duration(seconds=timeout))
                 except Exception:
                     pass
 
@@ -297,7 +289,7 @@ class WaitingMultiLock:
     store: LockStore
     handler: WorkerLocksHandler
 
-    deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
+    _woken: bool = False
 
     _inner_lock_cm: AsyncContextManager | None = None
     _retry_interval: float = 0.1
@@ -306,17 +298,15 @@ class WaitingMultiLock:
     )
 
     def release_lock(self) -> None:
-        """Release the lock (by resolving the deferred)"""
-        if not self.deferred.called:
-            with PreserveLoggingContext():
-                self.deferred.callback(None)
+        """Signal that the lock may have been released."""
+        self._woken = True
 
     async def __aenter__(self) -> None:
         self._lock_span.__enter__()
 
         with start_active_span("WaitingLock.waiting_for_lock"):
             while self._inner_lock_cm is None:
-                self.deferred = defer.Deferred()
+                self._woken = False
 
                 lock_cm = await self.store.try_acquire_multi_read_write_lock(
                     self.lock_names, write=self.write
@@ -326,18 +316,9 @@ class WaitingMultiLock:
                     self._inner_lock_cm = lock_cm
                     break
 
+                timeout = self._get_next_retry_interval()
                 try:
-                    # Wait until the we get notified the lock might have been
-                    # released (by the deferred being resolved). We also
-                    # periodically wake up in case the lock was released but we
-                    # weren't notified.
-                    with PreserveLoggingContext():
-                        timeout = self._get_next_retry_interval()
-                        await timeout_deferred(
-                            deferred=self.deferred,
-                            timeout=timeout,
-                            clock=self.clock,
-                        )
+                    await self.clock.sleep(Duration(seconds=timeout))
                 except Exception:
                     pass
 

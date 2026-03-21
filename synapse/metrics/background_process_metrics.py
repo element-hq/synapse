@@ -50,6 +50,7 @@ from synapse.logging.context import (
     ContextResourceUsage,
     LoggingContext,
     PreserveLoggingContext,
+    run_in_background,
 )
 from synapse.logging.opentracing import (
     SynapseTags,
@@ -411,7 +412,7 @@ def run_as_background_process(
     with PreserveLoggingContext():
         # Note that we return a Deferred here so that it can be used in a
         # looping_call and other places that expect a Deferred.
-        return defer.ensureDeferred(run())
+        return run_in_background(run)
 
 
 P = ParamSpec("P")

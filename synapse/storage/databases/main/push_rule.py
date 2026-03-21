@@ -278,7 +278,7 @@ class PushRulesWorkerStore(
             gather_results(
                 (
                     cast(
-                        "defer.Deferred[list[tuple[str, str, int, int, str, str]]]",
+                        Any,
                         run_in_background(
                             self.db_pool.simple_select_many_batch,
                             table="push_rules",

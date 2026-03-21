@@ -113,7 +113,7 @@ class ExpiringCache(Generic[KT, VT]):
             # Don't bother starting the loop if things never expire
             return
 
-        def f() -> "defer.Deferred[None]":
+        def f() -> Any:
             return hs.run_as_background_process("prune_cache", self._prune_cache)
 
         self._clock.looping_call(f, Duration(milliseconds=self._expiry_ms / 2))

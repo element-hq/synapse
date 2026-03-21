@@ -157,7 +157,7 @@ class ReplicationAgent(_AgentBase):
         uri: bytes,
         headers: Headers | None = None,
         bodyProducer: Optional[IBodyProducer] = None,
-    ) -> "defer.Deferred[IResponse]":
+    ) -> Any:
         """
         Issue a request to the server indicated by the given uri.
 

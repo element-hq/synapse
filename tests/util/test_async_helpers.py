@@ -44,7 +44,6 @@ from synapse.util.async_helpers import (
     concurrently_execute,
     delay_cancellation,
     gather_optional_coroutines,
-    stop_cancellation,
     timeout_deferred,
 )
 

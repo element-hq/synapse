@@ -827,22 +827,22 @@ async def _unwrap_awaitable(awaitable: Awaitable[R]) -> R:
 @overload
 def preserve_fn(
     f: Callable[P, Awaitable[R]],
-) -> Callable[P, "defer.Deferred[R]"]:
+) -> Callable[P, Any]:
     # The `type: ignore[misc]` above suppresses
     # "Overloaded function signatures 1 and 2 overlap with incompatible return types"
     ...
 
 
 @overload
-def preserve_fn(f: Callable[P, R]) -> Callable[P, "defer.Deferred[R]"]: ...
+def preserve_fn(f: Callable[P, R]) -> Callable[P, Any]: ...
 
 
 def preserve_fn(
     f: Callable[P, R] | Callable[P, Awaitable[R]],
-) -> Callable[P, "defer.Deferred[R]"]:
+) -> Callable[P, Any]:
     """Function decorator which wraps the function with run_in_background"""
 
-    def g(*args: P.args, **kwargs: P.kwargs) -> "defer.Deferred[R]":
+    def g(*args: P.args, **kwargs: P.kwargs) -> Any:
         return run_in_background(f, *args, **kwargs)
 
     return g
@@ -851,7 +851,7 @@ def preserve_fn(
 @overload
 def run_in_background(
     f: Callable[P, Awaitable[R]], *args: P.args, **kwargs: P.kwargs
-) -> "defer.Deferred[R]":
+) -> Any:
     # The `type: ignore[misc]` above suppresses
     # "Overloaded function signatures 1 and 2 overlap with incompatible return types"
     ...
@@ -860,14 +860,14 @@ def run_in_background(
 @overload
 def run_in_background(
     f: Callable[P, R], *args: P.args, **kwargs: P.kwargs
-) -> "defer.Deferred[R]": ...
+) -> Any: ...
 
 
 def run_in_background(
     f: Callable[P, R] | Callable[P, Awaitable[R]],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> "defer.Deferred[R]":
+) -> Any:
     """Calls a function, ensuring that the current context is restored after
     return from the function, and that the sentinel context is set once the
     deferred returned by the function completes.
@@ -973,7 +973,7 @@ def run_in_background(
 
 def run_coroutine_in_background(
     coroutine: typing.Coroutine[Any, Any, R],
-) -> "defer.Deferred[R]":
+) -> Any:
     """Run the coroutine, ensuring that the current context is restored after
     return from the function, and that the sentinel context is set once the
     deferred returned by the function completes.
@@ -1009,7 +1009,7 @@ def _set_context_cb(result: ResultT, context: LoggingContextOrSentinel) -> Resul
     return result
 
 
-def make_deferred_yieldable(deferred: "defer.Deferred[T] | Awaitable[T]") -> "defer.Deferred[T] | Awaitable[T]":
+def make_deferred_yieldable(deferred: Any) -> Any:
     """Make a Deferred or awaitable follow the Synapse logcontext rules.
 
     For Twisted Deferreds: adds callbacks to save/restore logcontext
@@ -1042,7 +1042,7 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T] | Awaitable[T]") -> "de
 
 def defer_to_thread(
     reactor: "ISynapseReactor", f: Callable[P, R], *args: P.args, **kwargs: P.kwargs
-) -> "defer.Deferred[R]":
+) -> Any:
     """
     Calls the function `f` using a thread from the reactor's default threadpool and
     returns the result as a Deferred.
@@ -1079,7 +1079,7 @@ def defer_to_threadpool(
     f: Callable[P, R],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> "defer.Deferred[R]":
+) -> Any:
     """
     A wrapper for twisted.internet.threads.deferToThreadpool, which handles
     logcontexts correctly.
