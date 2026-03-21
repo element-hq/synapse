@@ -1045,83 +1045,6 @@ def run_coroutine_in_background(
 T = TypeVar("T")
 
 
-def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]":
-    """
-    Given a deferred, make it follow the Synapse logcontext rules:
-
-    - If the deferred has completed, essentially does nothing (just returns another
-      completed deferred with the result/failure).
-    - If the deferred has not yet completed, resets the logcontext before returning a
-      incomplete deferred. Then, when the deferred completes, restores the current
-      logcontext before running callbacks/errbacks.
-
-    This means the resultant deferred can be awaited without leaking the current
-    logcontext to the reactor (which would then get erroneously picked up by the next
-    thing the reactor does), and also means that the logcontext is preserved when the
-    deferred completes.
-
-    (This is more-or-less the opposite operation to run_in_background in terms of how it
-    handles log contexts.)
-
-    Pretty much equivalent to using `with PreserveLoggingContext():`, i.e. it clears the
-    logcontext before awaiting (and so before execution passes back to the reactor) and
-    restores the old context once the awaitable completes (execution passes from the
-    reactor back to the code).
-    """
-    instance_id = random_string_insecure_fast(5)
-    logcontext_debug_logger.debug(
-        "make_deferred_yieldable(%s): called with logcontext=%s",
-        instance_id,
-        current_context(),
-    )
-
-    # The deferred has already completed
-    if deferred.called and not deferred.paused:
-        # it looks like this deferred is ready to run any callbacks we give it
-        # immediately. We may as well optimise out the logcontext faffery.
-        logcontext_debug_logger.debug(
-            "make_deferred_yieldable(%s): deferred already completed and the function should have maintained the logcontext",
-            instance_id,
-        )
-        return deferred
-
-    # Our goal is to have the caller logcontext unchanged after they yield/await the
-    # returned deferred.
-    #
-    # When the caller yield/await's the returned deferred, it may yield
-    # control back to the reactor. To avoid leaking the current logcontext to the
-    # reactor (which would then get erroneously picked up by the next thing the reactor
-    # does) while the deferred runs in the reactor event loop, we reset the logcontext
-    # and add a callback to the deferred to restore it so the caller's logcontext is
-    # active when the deferred completes.
-
-    logcontext_debug_logger.debug(
-        "make_deferred_yieldable(%s): resetting logcontext to %s",
-        instance_id,
-        SENTINEL_CONTEXT,
-    )
-    calling_context = set_current_context(SENTINEL_CONTEXT)
-
-    if logcontext_debug_logger.isEnabledFor(logging.DEBUG):
-
-        def _log_set_context_cb(
-            result: ResultT, context: LoggingContextOrSentinel
-        ) -> ResultT:
-            logcontext_debug_logger.debug(
-                "make_deferred_yieldable(%s): restoring calling logcontext to %s",
-                instance_id,
-                context,
-            )
-            set_current_context(context)
-            return result
-
-        deferred.addBoth(_log_set_context_cb, calling_context)
-    else:
-        deferred.addBoth(_set_context_cb, calling_context)
-
-    return deferred
-
-
 ResultT = TypeVar("ResultT")
 
 
@@ -1129,6 +1052,37 @@ def _set_context_cb(result: ResultT, context: LoggingContextOrSentinel) -> Resul
     """A callback function which just sets the logging context"""
     set_current_context(context)
     return result
+
+
+def make_deferred_yieldable(deferred: "defer.Deferred[T] | Awaitable[T]") -> "defer.Deferred[T] | Awaitable[T]":
+    """Make a Deferred or awaitable follow the Synapse logcontext rules.
+
+    For Twisted Deferreds: adds callbacks to save/restore logcontext
+    (synchronous, returns a Deferred — the classic behavior).
+
+    For native awaitables (asyncio.Future, coroutines): returns an
+    async wrapper that preserves logcontext.
+
+    The returned value is always awaitable.
+    """
+    # Handle Twisted Deferreds with the classic callback approach
+    if isinstance(deferred, defer.Deferred):
+        if deferred.called and not deferred.paused:
+            return deferred
+
+        calling_context = set_current_context(SENTINEL_CONTEXT)
+        deferred.addBoth(_set_context_cb, calling_context)
+        return deferred
+
+    # For native awaitables, wrap in an async function
+    async def _wrap() -> T:
+        calling_context = set_current_context(SENTINEL_CONTEXT)
+        try:
+            return await deferred
+        finally:
+            set_current_context(calling_context)
+
+    return _wrap()
 
 
 def defer_to_thread(

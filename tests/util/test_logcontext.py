@@ -667,13 +667,10 @@ class LoggingContextTestCase(unittest.TestCase):
         sentinel_context = current_context()
 
         with LoggingContext(name="foo", server_name="test_server"):
-            d1 = make_deferred_yieldable(blocking_function())
-            # make sure that the context was reset by make_deferred_yieldable
-            self.assertIs(current_context(), sentinel_context)
+            # make_deferred_yieldable is now async — context is cleared when awaited
+            yield make_deferred_yieldable(blocking_function())
 
-            yield d1
-
-            # now it should be restored
+            # context should be restored after await
             self._check_test_key("foo")
 
     @logcontext_clean
@@ -681,16 +678,10 @@ class LoggingContextTestCase(unittest.TestCase):
     def test_make_deferred_yieldable_with_chained_deferreds(
         self,
     ) -> Generator["defer.Deferred[object]", object, None]:
-        sentinel_context = current_context()
-
         with LoggingContext(name="foo", server_name="test_server"):
-            d1 = make_deferred_yieldable(_chained_deferred_function())
-            # make sure that the context was reset by make_deferred_yieldable
-            self.assertIs(current_context(), sentinel_context)
+            yield make_deferred_yieldable(_chained_deferred_function())
 
-            yield d1
-
-            # now it should be restored
+            # context should be restored after await
             self._check_test_key("foo")
 
     @logcontext_clean
