@@ -1496,7 +1496,10 @@ class DeferredEvent:
 
 
 # ===========================================================================
-# Native asyncio versions (NativeLinearizer, NativeReadWriteLock, etc.) are
-# defined above. They'll replace the Deferred-based versions when the test
-# infrastructure switches from MemoryReactorClock to a real asyncio loop.
+# Replace old Deferred-based classes with native asyncio versions.
+# Requires asyncio.set_event_loop() to have been called (done in test setUp).
 # ===========================================================================
+Linearizer = NativeLinearizer  # type: ignore[misc]
+ReadWriteLock = NativeReadWriteLock  # type: ignore[misc]
+AwakenableSleeper = NativeAwakenableSleeper  # type: ignore[misc]
+# DeferredEvent kept as-is — used by response_cache with Deferred internals

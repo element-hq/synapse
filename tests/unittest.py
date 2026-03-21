@@ -194,6 +194,11 @@ class TestCase(_stdlib_unittest.TestCase):
 
         @around(self)
         def setUp(orig: Callable[[], R]) -> R:
+            # Set up an asyncio event loop so asyncio primitives work
+            import asyncio as _asyncio
+            self._asyncio_loop = _asyncio.new_event_loop()
+            _asyncio.set_event_loop(self._asyncio_loop)
+
             # if we're not starting in the sentinel logcontext, then to be honest
             # all future bets are off.
             if current_context():
@@ -553,6 +558,12 @@ class HomeserverTestCase(TestCase):
         hijacking the authentication system to return a fixed user, and then
         calling the prepare function.
         """
+        # Set up an asyncio event loop so that asyncio primitives (Future, Event,
+        # create_task, etc.) work even when driven by Twisted's MemoryReactorClock.
+        import asyncio
+        self._asyncio_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._asyncio_loop)
+
         # We need to share the reactor between the homeserver and all of our test utils.
         self.reactor, self.clock = get_clock()
         self.hs = self.make_homeserver(self.reactor, self.clock)

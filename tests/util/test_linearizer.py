@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2025 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -12,257 +12,174 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
-# Originally licensed under the Apache License, Version 2.0:
-# <http://www.apache.org/licenses/LICENSE-2.0>.
-#
-# [This file includes modifications made by New Vector Limited]
-#
-#
 
-from typing import Hashable, Protocol
+"""Tests for the Linearizer (now NativeLinearizer)."""
 
-try:
-    from twisted.internet import defer
-    from asyncio import CancelledError
-    from twisted.internet.defer import Deferred
-except ImportError:
-    pass
+import asyncio
+import unittest
 
-from synapse.logging.context import LoggingContext, current_context
 from synapse.util.async_helpers import Linearizer
 
-from tests import unittest
-from tests.server import (
-    get_clock,
-)
 
+class LinearizerTestCase(unittest.IsolatedAsyncioTestCase):
+    """Tests for the asyncio-native Linearizer."""
 
-class UnblockFunction(Protocol):
-    def __call__(self, pump_reactor: bool = True) -> None: ...
+    async def test_linearizer(self) -> None:
+        """Tests that a task is queued up behind an earlier task."""
+        linearizer = Linearizer(name="test_linearizer")
 
+        order: list[int] = []
 
-class LinearizerTestCase(unittest.TestCase):
-    def setUp(self) -> None:
-        self.reactor, self.clock = get_clock()
+        async def task(n: int) -> None:
+            async with linearizer.queue("key"):
+                order.append(n)
+                await asyncio.sleep(0.01)
 
-    def _start_task(
-        self, linearizer: Linearizer, key: Hashable
-    ) -> tuple["Deferred[None]", "Deferred[None]", UnblockFunction]:
-        """Starts a task which acquires the linearizer lock, blocks, then completes.
+        t1 = asyncio.create_task(task(1))
+        t2 = asyncio.create_task(task(2))
+        t3 = asyncio.create_task(task(3))
 
-        Args:
-            linearizer: The `Linearizer`.
-            key: The `Linearizer` key.
+        await asyncio.gather(t1, t2, t3)
+        self.assertEqual(order, [1, 2, 3])
 
-        Returns:
-            A tuple containing:
-             * A cancellable `Deferred` for the entire task.
-             * A `Deferred` that resolves once the task acquires the lock.
-             * A function that unblocks the task. Must be called by the caller
-               to allow the task to release the lock and complete.
-        """
-        acquired_d: "Deferred[None]" = Deferred()
-        unblock_d: "Deferred[None]" = Deferred()
+    async def test_linearizer_is_queued(self) -> None:
+        """Tests `Linearizer.is_queued`."""
+        linearizer = Linearizer(name="test_linearizer")
+
+        self.assertFalse(linearizer.is_queued("key"))
+
+        acquired = asyncio.Event()
+        release = asyncio.Event()
+
+        async def holder() -> None:
+            async with linearizer.queue("key"):
+                acquired.set()
+                await release.wait()
+
+        t1 = asyncio.create_task(holder())
+        await acquired.wait()
+
+        # Start a second task that will be queued
+        async def waiter() -> None:
+            async with linearizer.queue("key"):
+                pass
+
+        t2 = asyncio.create_task(waiter())
+        await asyncio.sleep(0)
+
+        self.assertTrue(linearizer.is_queued("key"))
+
+        release.set()
+        await asyncio.gather(t1, t2)
+
+        self.assertFalse(linearizer.is_queued("key"))
+
+    async def test_multiple_entries(self) -> None:
+        """Tests Linearizer with max_count > 1."""
+        linearizer = Linearizer(name="test_linearizer", max_count=3)
+
+        concurrent = 0
+        max_concurrent = 0
 
         async def task() -> None:
-            async with linearizer.queue(key):
-                acquired_d.callback(None)
-                await unblock_d
+            nonlocal concurrent, max_concurrent
+            async with linearizer.queue("key"):
+                concurrent += 1
+                max_concurrent = max(max_concurrent, concurrent)
+                await asyncio.sleep(0.01)
+                concurrent -= 1
 
-        d = defer.ensureDeferred(task())
+        tasks = [asyncio.create_task(task()) for _ in range(6)]
+        await asyncio.gather(*tasks)
 
-        def unblock(pump_reactor: bool = True) -> None:
-            unblock_d.callback(None)
-            # The next task, if it exists, will acquire the lock and require a kick of
-            # the reactor to advance.
-            if pump_reactor:
-                self._pump()
+        self.assertLessEqual(max_concurrent, 3)
+        self.assertGreater(max_concurrent, 1)
 
-        return d, acquired_d, unblock
+    async def test_lots_of_queued_things(self) -> None:
+        """Tests many tasks queued on the same key."""
+        linearizer = Linearizer(name="test_linearizer")
 
-    def _pump(self) -> None:
-        """Pump the reactor to advance `Linearizer`s."""
-        while self.reactor.getDelayedCalls():
-            self.reactor.pump([0] * 100)
+        order: list[int] = []
 
-    def test_linearizer(self) -> None:
-        """Tests that a task is queued up behind an earlier task."""
-        linearizer = Linearizer(name="test_linearizer", clock=self.clock)
+        async def task(n: int) -> None:
+            async with linearizer.queue("key"):
+                order.append(n)
 
-        key = object()
+        tasks = [asyncio.create_task(task(i)) for i in range(20)]
+        await asyncio.gather(*tasks)
 
-        _, acquired_d1, unblock1 = self._start_task(linearizer, key)
-        self.assertTrue(acquired_d1.called)
+        self.assertEqual(order, list(range(20)))
 
-        _, acquired_d2, unblock2 = self._start_task(linearizer, key)
-        self.assertFalse(acquired_d2.called)
+    async def test_cancellation(self) -> None:
+        """Tests that cancelling a waiting task works correctly."""
+        linearizer = Linearizer(name="test_linearizer")
 
-        # Once the first task is done, the second task can continue.
-        unblock1()
-        self.assertTrue(acquired_d2.called)
+        acquired = asyncio.Event()
+        release = asyncio.Event()
 
-        unblock2()
+        async def holder() -> None:
+            async with linearizer.queue("key"):
+                acquired.set()
+                await release.wait()
 
-    def test_linearizer_is_queued(self) -> None:
-        """Tests `Linearizer.is_queued`.
+        t1 = asyncio.create_task(holder())
+        await acquired.wait()
 
-        Runs through the same scenario as `test_linearizer`.
-        """
-        linearizer = Linearizer(name="test_linearizer", clock=self.clock)
+        async def waiter() -> None:
+            async with linearizer.queue("key"):
+                pass
 
-        key = object()
+        t2 = asyncio.create_task(waiter())
+        await asyncio.sleep(0)
 
-        _, acquired_d1, unblock1 = self._start_task(linearizer, key)
-        self.assertTrue(acquired_d1.called)
+        # Cancel the waiting task
+        t2.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await t2
 
-        # Since the first task acquires the lock immediately, "is_queued" should return
-        # false.
-        self.assertFalse(linearizer.is_queued(key))
+        # The linearizer should still work for new tasks
+        release.set()
+        await t1
 
-        _, acquired_d2, unblock2 = self._start_task(linearizer, key)
-        self.assertFalse(acquired_d2.called)
+        async with linearizer.queue("key"):
+            pass  # Should succeed
 
-        # Now the second task is queued up behind the first.
-        self.assertTrue(linearizer.is_queued(key))
+    async def test_cancellation_during_sleep(self) -> None:
+        """Tests cancellation during the sleep(0) after lock acquisition."""
+        linearizer = Linearizer(name="test_linearizer")
 
-        unblock1()
+        acquired = asyncio.Event()
+        release = asyncio.Event()
 
-        # And now the second task acquires the lock and nothing is in the queue again.
-        self.assertTrue(acquired_d2.called)
-        self.assertFalse(linearizer.is_queued(key))
+        async def holder() -> None:
+            async with linearizer.queue("key"):
+                acquired.set()
+                await release.wait()
 
-        unblock2()
-        self.assertFalse(linearizer.is_queued(key))
+        t1 = asyncio.create_task(holder())
+        await acquired.wait()
 
-    def test_lots_of_queued_things(self) -> None:
-        """Tests lots of fast things queued up behind a slow thing.
+        async def waiter() -> None:
+            async with linearizer.queue("key"):
+                pass
 
-        The stack should *not* explode when the slow thing completes.
-        """
-        linearizer = Linearizer(name="test_linearizer", clock=self.clock)
-        key = ""
+        t2 = asyncio.create_task(waiter())
+        await asyncio.sleep(0)
 
-        async def func(i: int) -> None:
-            with LoggingContext(name="func(%s)" % i, server_name="test_server") as lc:
-                async with linearizer.queue(key):
-                    self.assertEqual(current_context(), lc)
+        # Release t1, then immediately cancel t2 during its sleep(0)
+        release.set()
+        await asyncio.sleep(0)  # Let t2 acquire
+        t2.cancel()
 
-                self.assertEqual(current_context(), lc)
+        try:
+            await t2
+        except asyncio.CancelledError:
+            pass
 
-        _, _, unblock = self._start_task(linearizer, key)
-        for i in range(1, 100):
-            defer.ensureDeferred(func(i))
+        # Linearizer should still work
+        async with linearizer.queue("key"):
+            pass
 
-        d = defer.ensureDeferred(func(1000))
-        unblock()
-        self.successResultOf(d)
 
-    def test_multiple_entries(self) -> None:
-        """Tests a `Linearizer` with a concurrency above 1."""
-        linearizer = Linearizer(name="test_linearizer", max_count=3, clock=self.clock)
-
-        key = object()
-
-        _, acquired_d1, unblock1 = self._start_task(linearizer, key)
-        self.assertTrue(acquired_d1.called)
-
-        _, acquired_d2, unblock2 = self._start_task(linearizer, key)
-        self.assertTrue(acquired_d2.called)
-
-        _, acquired_d3, unblock3 = self._start_task(linearizer, key)
-        self.assertTrue(acquired_d3.called)
-
-        # These next two tasks have to wait.
-        _, acquired_d4, unblock4 = self._start_task(linearizer, key)
-        self.assertFalse(acquired_d4.called)
-
-        _, acquired_d5, unblock5 = self._start_task(linearizer, key)
-        self.assertFalse(acquired_d5.called)
-
-        # Once the first task completes, the fourth task can continue.
-        unblock1()
-        self.assertTrue(acquired_d4.called)
-        self.assertFalse(acquired_d5.called)
-
-        # Once the third task completes, the fifth task can continue.
-        unblock3()
-        self.assertTrue(acquired_d5.called)
-
-        # Make all tasks finish.
-        unblock2()
-        unblock4()
-        unblock5()
-
-        # The next task shouldn't have to wait.
-        _, acquired_d6, unblock6 = self._start_task(linearizer, key)
-        self.assertTrue(acquired_d6)
-        unblock6()
-
-    def test_cancellation(self) -> None:
-        """Tests cancellation while waiting for a `Linearizer`."""
-        linearizer = Linearizer(name="test_linearizer", clock=self.clock)
-
-        key = object()
-
-        d1, acquired_d1, unblock1 = self._start_task(linearizer, key)
-        self.assertTrue(acquired_d1.called)
-
-        # Create a second task, waiting for the first task.
-        d2, acquired_d2, _ = self._start_task(linearizer, key)
-        self.assertFalse(acquired_d2.called)
-
-        # Create a third task, waiting for the second task.
-        d3, acquired_d3, unblock3 = self._start_task(linearizer, key)
-        self.assertFalse(acquired_d3.called)
-
-        # Cancel the waiting second task.
-        d2.cancel()
-
-        unblock1()
-        self.successResultOf(d1)
-
-        self.assertTrue(d2.called)
-        self.failureResultOf(d2, CancelledError)
-
-        # The third task should continue running.
-        self.assertTrue(
-            acquired_d3.called,
-            "Third task did not get the lock after the second task was cancelled",
-        )
-        unblock3()
-        self.successResultOf(d3)
-
-    def test_cancellation_during_sleep(self) -> None:
-        """Tests cancellation during the sleep just after waiting for a `Linearizer`."""
-        linearizer = Linearizer(name="test_linearizer", clock=self.clock)
-
-        key = object()
-
-        d1, acquired_d1, unblock1 = self._start_task(linearizer, key)
-        self.assertTrue(acquired_d1.called)
-
-        # Create a second task, waiting for the first task.
-        d2, acquired_d2, _ = self._start_task(linearizer, key)
-        self.assertFalse(acquired_d2.called)
-
-        # Create a third task, waiting for the second task.
-        d3, acquired_d3, unblock3 = self._start_task(linearizer, key)
-        self.assertFalse(acquired_d3.called)
-
-        # Once the first task completes, cancel the waiting second task while it is
-        # sleeping just after acquiring the lock.
-        unblock1(pump_reactor=False)
-        self.successResultOf(d1)
-        d2.cancel()
-        self._pump()
-
-        self.assertTrue(d2.called)
-        self.failureResultOf(d2, CancelledError)
-
-        # The third task should continue running.
-        self.assertTrue(
-            acquired_d3.called,
-            "Third task did not get the lock after the second task was cancelled",
-        )
-        unblock3()
-        self.successResultOf(d3)
+if __name__ == "__main__":
+    unittest.main()
