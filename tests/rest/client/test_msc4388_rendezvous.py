@@ -19,7 +19,7 @@ from unittest.mock import Mock
 
 from parameterized import parameterized
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.rest import admin

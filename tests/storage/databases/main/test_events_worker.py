@@ -24,8 +24,9 @@ from typing import Generator
 from unittest import mock
 
 from twisted.enterprise.adbapi import ConnectionPool
-from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
-from twisted.internet.testing import MemoryReactor
+from twisted.internet.defer import CancelledError
+from twisted.internet.defer import Deferred, ensureDeferred
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.room_versions import EventFormatVersions, RoomVersions
 from synapse.events import make_event_from_dict

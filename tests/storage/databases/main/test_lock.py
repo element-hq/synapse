@@ -23,7 +23,7 @@
 from twisted.internet import defer, reactor
 from twisted.internet.base import ReactorBase
 from twisted.internet.defer import Deferred
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.server import HomeServer
 from synapse.storage.databases.main.lock import _LOCK_TIMEOUT_MS, _RENEWAL_INTERVAL

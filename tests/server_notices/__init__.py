@@ -13,7 +13,7 @@
 #
 #
 
-from twisted.test.proto_helpers import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.rest.admin
 from synapse.rest.client import login, room, sync

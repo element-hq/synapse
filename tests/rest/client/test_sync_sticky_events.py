@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from unittest.mock import patch
 from urllib.parse import quote
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.constants import EventTypes, EventUnsignedContentFields, StickyEvent
 from synapse.rest import admin

@@ -25,7 +25,7 @@ from unittest.mock import ANY, AsyncMock, Mock, call
 
 from netaddr import IPSet
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 from twisted.web.resource import Resource
 
 from synapse.api.constants import EduTypes

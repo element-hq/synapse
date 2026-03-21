@@ -27,7 +27,7 @@ from canonicaljson import encode_canonical_json
 from signedjson.sign import sign_json
 from signedjson.types import SigningKey
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 from twisted.web.resource import NoResource, Resource
 
 from synapse.crypto.keyring import PerspectivesKeyFetcher

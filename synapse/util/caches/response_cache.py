@@ -48,6 +48,7 @@ from synapse.util.cancellation import cancellable, is_function_cancellable
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.wheel_timer import WheelTimer
+from twisted.internet.defer import CancelledError
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +349,7 @@ class ResponseCache(Generic[KV]):
             )
             try:
                 return await make_deferred_yieldable(entry.result.observe())
-            except defer.CancelledError:
+            except CancelledError:
                 pass
 
             # We've been cancelled.
@@ -380,7 +381,7 @@ class ResponseCache(Generic[KV]):
                 await make_deferred_yieldable(delay_cancellation(d))
             except Exception:
                 pass
-            raise defer.CancelledError()
+            raise CancelledError()
 
         result = entry.result.observe()
         if self._enable_logging:
@@ -400,7 +401,7 @@ class ResponseCache(Generic[KV]):
         ):
             try:
                 return await make_deferred_yieldable(result)
-            except defer.CancelledError:
+            except CancelledError:
                 # If we're cancelled then we update the
                 # `last_observer_removed_time_ms` so that the pruning mechanism
                 # can kick in if needed.

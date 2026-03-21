@@ -20,7 +20,7 @@
 #
 #
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 from twisted.web.resource import Resource
 
 import synapse.rest.admin

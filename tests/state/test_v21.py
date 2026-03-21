@@ -21,7 +21,7 @@ import itertools
 from typing import Sequence
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.constants import EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions

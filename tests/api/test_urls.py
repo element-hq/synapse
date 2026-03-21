@@ -13,7 +13,7 @@
 #
 
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.urls import LoginSSORedirectURIBuilder
 from synapse.server import HomeServer

@@ -15,7 +15,7 @@ import logging
 from http import HTTPStatus
 from typing import cast
 
-from twisted.test.proto_helpers import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.rest.admin
 from synapse.rest.client import login, room, sync, thread_subscriptions

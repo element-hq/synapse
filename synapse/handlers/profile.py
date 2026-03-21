@@ -24,7 +24,6 @@ from bisect import bisect_right
 from typing import TYPE_CHECKING
 
 from twisted.internet.defer import CancelledError
-
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import (
     AuthError,

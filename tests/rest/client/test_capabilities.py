@@ -19,7 +19,7 @@
 #
 from http import HTTPStatus
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.rest.admin
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS

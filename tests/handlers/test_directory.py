@@ -22,7 +22,7 @@
 from typing import Any, Awaitable, Callable
 from unittest.mock import AsyncMock, Mock
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.api.errors
 import synapse.rest.admin

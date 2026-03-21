@@ -41,7 +41,7 @@ from urllib.parse import urlencode
 
 import attr
 
-from twisted.internet.testing import MemoryReactorClock
+from typing import Any as MemoryReactor  # was: MemoryReactor from TwistedClock
 from twisted.web.server import Site
 
 from synapse.api.constants import EventTypes, Membership, ReceiptTypes

@@ -21,7 +21,7 @@
 
 """Tests REST events for /rooms paths."""
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.constants import EduTypes
 from synapse.rest.client import room

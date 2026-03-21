@@ -20,7 +20,7 @@
 #
 from unittest import mock
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.app.generic_worker import GenericWorkerServer
 from synapse.server import HomeServer

@@ -64,6 +64,7 @@ from synapse.util.async_helpers import (
 from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
 from synapse.visibility import filter_and_transform_events_for_client
+from twisted.internet.defer import CancelledError
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -717,7 +718,7 @@ class Notifier:
                     except defer.TimeoutError:
                         log_kv({"wait_for_events": "timeout"})
                         break
-                    except defer.CancelledError:
+                    except CancelledError:
                         log_kv({"wait_for_events": "cancelled"})
                         break
 

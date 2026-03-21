@@ -21,7 +21,7 @@
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.handlers.cas import CasResponse
 from synapse.server import HomeServer

@@ -22,7 +22,7 @@
 from unittest.mock import patch
 
 from twisted.internet import defer
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.rest import admin
 from synapse.rest.client import devices

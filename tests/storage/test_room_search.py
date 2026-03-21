@@ -21,7 +21,7 @@
 
 from unittest.case import SkipTest
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes

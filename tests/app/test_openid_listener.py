@@ -21,7 +21,7 @@ from unittest.mock import Mock, patch
 
 from parameterized import parameterized
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.app.generic_worker import GenericWorkerServer
 from synapse.app.homeserver import SynapseHomeServer

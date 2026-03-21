@@ -45,9 +45,14 @@ import jinja2
 from canonicaljson import encode_canonical_json
 from zope.interface import implementer
 
+import asyncio as _asyncio
+
 from twisted.internet import defer, interfaces, reactor
 from twisted.internet.defer import CancelledError
 from twisted.python import failure
+
+# Tuple of CancelledError types for f.check() during transition
+_CancelledErrors = (CancelledError, _asyncio.CancelledError)
 from twisted.web import resource
 
 from synapse.types import ISynapseThreadlessReactor
@@ -129,7 +134,7 @@ def return_json_error(
             )
         else:
             logger.info("%s SynapseError: %s - %s", request, error_code, exc.msg)
-    elif f.check(CancelledError):
+    elif f.check(*_CancelledErrors):
         error_code = HTTP_STATUS_REQUEST_CANCELLED
         error_dict = {"error": "Request cancelled", "errcode": Codes.UNKNOWN}
 
@@ -205,7 +210,7 @@ def return_html_error(
                 request,
                 exc_info=(f.type, f.value, f.getTracebackObject()),
             )
-    elif f.check(CancelledError):
+    elif f.check(*_CancelledErrors):
         code = HTTP_STATUS_REQUEST_CANCELLED
         msg = "Request cancelled"
 

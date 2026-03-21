@@ -40,6 +40,7 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.json import json_decoder
 from synapse.util.metrics import Measure
+from twisted.internet.defer import CancelledError
 
 # period to cache .well-known results for by default
 WELL_KNOWN_DEFAULT_CACHE_PERIOD = 24 * 3600
@@ -219,7 +220,7 @@ class WellKnownResolver:
             logger.info("Response from .well-known: %s", parsed_body)
 
             result = parsed_body["m.server"].encode("ascii")
-        except defer.CancelledError:
+        except CancelledError:
             # Bail if we've been cancelled
             raise
         except Exception as e:
@@ -296,7 +297,7 @@ class WellKnownResolver:
                     raise Exception("Non-200 response %s" % (response.code,))
 
                 return response, body
-            except defer.CancelledError:
+            except CancelledError:
                 # Bail if we've been cancelled
                 raise
             except BodyExceededMaxSize:

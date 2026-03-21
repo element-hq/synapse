@@ -23,7 +23,7 @@ from unittest import mock
 
 import twisted.web.client
 from twisted.internet import defer
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase

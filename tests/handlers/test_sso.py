@@ -21,7 +21,7 @@ from http import HTTPStatus
 from typing import BinaryIO, Callable
 from unittest.mock import Mock
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 from twisted.web.http_headers import Headers
 
 from synapse.api.errors import Codes, SynapseError

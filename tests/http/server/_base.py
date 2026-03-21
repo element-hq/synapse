@@ -34,7 +34,7 @@ from unittest.mock import Mock
 
 from twisted.internet.defer import Deferred
 from twisted.internet.error import ConnectionDone
-from twisted.internet.testing import MemoryReactorClock
+from typing import Any as MemoryReactor  # was: MemoryReactor from TwistedClock
 from twisted.python.failure import Failure
 from twisted.web.server import Site
 

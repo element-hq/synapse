@@ -23,7 +23,7 @@ from typing import Any
 
 from twisted.internet.address import IPv4Address
 from twisted.internet.protocol import Protocol, connectionDone
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 from twisted.python.failure import Failure
 from twisted.web.resource import Resource
 

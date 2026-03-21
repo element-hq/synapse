@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Coroutine, Generator, TypeVar, Union
 
 from twisted.internet.defer import Deferred, ensureDeferred
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.logging.context import (
     LoggingContext,

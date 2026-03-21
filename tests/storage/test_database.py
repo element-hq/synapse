@@ -25,8 +25,9 @@ from unittest.mock import Mock, call, patch
 import attr
 
 from twisted.internet import defer
-from twisted.internet.defer import CancelledError, Deferred
-from twisted.internet.testing import MemoryReactor
+from twisted.internet.defer import CancelledError
+from twisted.internet.defer import Deferred
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.server import HomeServer
 from synapse.storage.database import (

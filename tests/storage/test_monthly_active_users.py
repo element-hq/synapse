@@ -20,7 +20,7 @@
 from typing import Any
 from unittest.mock import AsyncMock
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.constants import UserTypes
 from synapse.server import HomeServer

@@ -17,7 +17,7 @@ from unittest import mock
 import signedjson
 from signedjson.key import encode_verify_key_base64, get_verify_key
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.errors import SynapseError
 from synapse.crypto.event_signing import compute_event_signature

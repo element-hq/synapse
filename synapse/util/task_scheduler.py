@@ -38,6 +38,7 @@ from synapse.metrics.background_process_metrics import (
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
 from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
+from twisted.internet.defer import CancelledError
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -475,7 +476,7 @@ class TaskScheduler:
                 error = None
                 try:
                     (status, result, error) = await function(task)
-                except defer.CancelledError:
+                except CancelledError:
                     status = TaskStatus.CANCELLED
                 except Exception:
                     f = Failure()

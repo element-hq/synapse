@@ -28,6 +28,7 @@ from twisted.internet import defer
 
 from synapse.util.async_helpers import DeferredEvent
 from synapse.util.duration import Duration
+from twisted.internet.defer import CancelledError
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -124,7 +125,7 @@ class BackgroundQueue(Generic[T]):
                     item = self._queue.popleft()
                     try:
                         await self._callback(item)
-                    except defer.CancelledError:
+                    except CancelledError:
                         raise
                     except Exception:
                         logger.exception("Error processing background queue item")

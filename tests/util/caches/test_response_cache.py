@@ -32,6 +32,7 @@ from synapse.util.duration import Duration
 
 from tests.server import get_clock
 from tests.unittest import TestCase
+from twisted.internet.defer import CancelledError
 
 
 class ResponseCacheTestCase(TestCase):
@@ -285,7 +286,7 @@ class ResponseCacheTestCase(TestCase):
         self.reactor.advance(2)
 
         # The deferred we're waiting on should now return a cancelled error.
-        self.assertFailure(wrap_d, defer.CancelledError)
+        self.assertFailure(wrap_d, CancelledError)
 
         # However future callers should get the result.
         wrap_d2 = defer.ensureDeferred(
@@ -314,7 +315,7 @@ class ResponseCacheTestCase(TestCase):
 
             try:
                 return await self.delayed_return(o)
-            except defer.CancelledError:
+            except CancelledError:
                 cancelled = True
                 raise
             finally:
@@ -335,7 +336,7 @@ class ResponseCacheTestCase(TestCase):
         self.reactor.advance(0.7)
 
         # The deferred we're waiting on should now return a cancelled error.
-        self.assertFailure(wrap_d, defer.CancelledError)
+        self.assertFailure(wrap_d, CancelledError)
         self.assertTrue(completed, "wrapped function should have completed")
         self.assertTrue(cancelled, "wrapped function should have been cancelled")
 
@@ -359,7 +360,7 @@ class ResponseCacheTestCase(TestCase):
 
             try:
                 return await self.delayed_return(o)
-            except defer.CancelledError:
+            except CancelledError:
                 cancelled = True
                 raise
             finally:
@@ -395,7 +396,7 @@ class ResponseCacheTestCase(TestCase):
         self.assertFalse(cancelled, "wrapped function should not have been cancelled")
 
         # The first deferred we're waiting on should now return a cancelled error.
-        self.assertFailure(wrap_d1, defer.CancelledError)
+        self.assertFailure(wrap_d1, CancelledError)
 
         # The second deferred should return the result.
         self.assertEqual(expected_result, self.successResultOf(wrap_d2))
@@ -419,7 +420,7 @@ class ResponseCacheTestCase(TestCase):
 
             try:
                 return await self.delayed_return(o)
-            except defer.CancelledError:
+            except CancelledError:
                 cancelled = True
                 raise
             finally:
@@ -456,7 +457,7 @@ class ResponseCacheTestCase(TestCase):
 
         # All the deferreds we're waiting on should now return a cancelled error.
         for wrap_d in deferreds:
-            self.assertFailure(wrap_d, defer.CancelledError)
+            self.assertFailure(wrap_d, CancelledError)
 
         # The wrapped function should have completed without cancellation.
         self.assertTrue(completed, "wrapped function should have completed")
@@ -485,7 +486,7 @@ class ResponseCacheTestCase(TestCase):
 
             try:
                 return await self.delayed_return(o)
-            except defer.CancelledError:
+            except CancelledError:
                 cancelled = True
                 raise
             finally:
@@ -507,7 +508,7 @@ class ResponseCacheTestCase(TestCase):
 
         # The deferred we're waiting on should be cancelled, but a new call to
         # the cache should return the result.
-        self.assertFailure(wrap_d, defer.CancelledError)
+        self.assertFailure(wrap_d, CancelledError)
         wrap_d2 = defer.ensureDeferred(cache.wrap(0, wrapped, expected_result))
         self.assertEqual(expected_result, self.successResultOf(wrap_d2))
 
@@ -532,7 +533,7 @@ class ResponseCacheTestCase(TestCase):
             try:
                 await self.delayed_return(o)
                 raise expected_error
-            except defer.CancelledError:
+            except CancelledError:
                 cancelled = True
                 raise
             finally:
@@ -558,7 +559,7 @@ class ResponseCacheTestCase(TestCase):
         self.assertFalse(cancelled, "wrapped function should not have been cancelled")
 
         # The first deferred we're waiting on should now return a cancelled error.
-        self.assertFailure(wrap_d1, defer.CancelledError)
+        self.assertFailure(wrap_d1, CancelledError)
 
         # The second deferred should return the error.
         self.assertFailure(wrap_d2, Exception)

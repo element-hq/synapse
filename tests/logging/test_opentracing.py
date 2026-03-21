@@ -22,7 +22,7 @@
 from typing import Awaitable, cast
 
 from twisted.internet import defer
-from twisted.internet.testing import MemoryReactorClock
+from typing import Any as MemoryReactor  # was: MemoryReactor from TwistedClock
 
 from synapse.logging.context import (
     LoggingContext,

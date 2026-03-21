@@ -24,7 +24,7 @@ from typing import Iterable
 
 from matrix_common.types.mxc_uri import MXCUri
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.rest import admin
 from synapse.rest.client import login, register, room

@@ -24,7 +24,7 @@ from unittest import TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 from twisted.internet.defer import Deferred
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import (

@@ -27,7 +27,7 @@ from unittest.mock import AsyncMock, Mock
 import yaml
 
 from twisted.internet import defer
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.appservice import ApplicationService, ApplicationServiceState
 from synapse.config._base import ConfigError

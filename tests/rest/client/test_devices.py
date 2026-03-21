@@ -19,7 +19,7 @@
 #
 #
 from twisted.internet.defer import ensureDeferred
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.errors import NotFoundError
 from synapse.appservice import ApplicationService

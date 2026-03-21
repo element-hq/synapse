@@ -22,7 +22,7 @@
 import resource
 from unittest import mock
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.app.phone_stats_home import phone_stats_home
 from synapse.rest import admin

@@ -21,7 +21,7 @@
 
 from typing import Collection
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.api.errors
 from synapse.api.constants import EduTypes

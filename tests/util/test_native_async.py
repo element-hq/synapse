@@ -158,18 +158,14 @@ class RunCoroutineInBackgroundNativeTest(unittest.IsolatedAsyncioTestCase):
         _native_set_current_context(SENTINEL_CONTEXT)
 
     async def test_resets_to_sentinel_on_completion(self) -> None:
-        post_completion_context = None
-
-        async def bg_work() -> None:
-            pass
+        async def bg_work() -> str:
+            return "done"
 
         task = run_coroutine_in_background_native(bg_work())
-        await task
+        result = await task
 
-        # The task's internal wrapper resets to sentinel
-        # (We can't easily observe this from outside without hooking the callback,
-        # but at least verify the task completed successfully)
-        self.assertTrue(task.done())
+        # Verify the task completed successfully
+        self.assertEqual(result, "done")
 
 
 class RunInBackgroundNativeTest(unittest.IsolatedAsyncioTestCase):

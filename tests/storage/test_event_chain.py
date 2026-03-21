@@ -23,7 +23,7 @@ from typing import cast
 
 from parameterized import parameterized
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 from twisted.trial import unittest
 
 from synapse.api.constants import EventTypes

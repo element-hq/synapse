@@ -21,7 +21,7 @@
 import logging
 from unittest.mock import AsyncMock, Mock
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.handlers.device import DeviceListUpdater
 from synapse.server import HomeServer

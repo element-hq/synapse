@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 
 from parameterized import parameterized
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.errors import StoreError
 from synapse.appservice import ApplicationService

@@ -23,7 +23,7 @@ import os
 from typing import Any
 
 from twisted.internet.protocol import Factory
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 from twisted.web.http import HTTPChannel
 from twisted.web.server import Request
 

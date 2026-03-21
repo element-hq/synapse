@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pymacaroons
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.handlers.sso import MappingException
 from synapse.http.site import SynapseRequest

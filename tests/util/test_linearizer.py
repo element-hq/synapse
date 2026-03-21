@@ -22,7 +22,8 @@
 from typing import Hashable, Protocol
 
 from twisted.internet import defer
-from twisted.internet.defer import CancelledError, Deferred
+from twisted.internet.defer import CancelledError
+from twisted.internet.defer import Deferred
 
 from synapse.logging.context import LoggingContext, current_context
 from synapse.util.async_helpers import Linearizer

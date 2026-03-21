@@ -22,7 +22,7 @@
 import secrets
 from typing import Generator, cast
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.server import HomeServer
 from synapse.util.clock import Clock

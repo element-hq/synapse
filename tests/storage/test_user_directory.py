@@ -23,7 +23,7 @@ from typing import Any, cast
 from unittest import mock
 from unittest.mock import Mock, patch
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.constants import EventTypes, Membership, UserTypes
 from synapse.appservice import ApplicationService

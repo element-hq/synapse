@@ -24,7 +24,7 @@ from typing import Any, Iterable
 from canonicaljson import encode_canonical_json
 from parameterized import parameterized
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.api.constants import ReceiptTypes
 from synapse.api.room_versions import RoomVersions

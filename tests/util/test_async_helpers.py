@@ -24,7 +24,8 @@ from typing import Any, Coroutine, NoReturn, TypeVar
 from parameterized import parameterized_class
 
 from twisted.internet import defer
-from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
+from twisted.internet.defer import CancelledError
+from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.python.failure import Failure
 
 from synapse.logging.context import (

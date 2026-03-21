@@ -31,7 +31,7 @@ from urllib import parse as urlparse
 
 from parameterized import param, parameterized
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.rest.admin
 from synapse.api.constants import (

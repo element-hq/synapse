@@ -21,7 +21,7 @@
 from typing import Any, Mapping, Sequence
 from unittest.mock import Mock
 
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 from synapse.appservice import ApplicationService
 from synapse.server import HomeServer

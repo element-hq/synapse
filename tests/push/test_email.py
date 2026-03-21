@@ -27,7 +27,7 @@ import attr
 from parameterized import parameterized
 
 from twisted.internet.defer import Deferred
-from twisted.internet.testing import MemoryReactor
+from typing import Any as MemoryReactor  # was: MemoryReactor from Twisted
 
 import synapse.rest.admin
 from synapse.api.errors import Codes, SynapseError
