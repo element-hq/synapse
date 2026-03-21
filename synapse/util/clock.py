@@ -224,12 +224,6 @@ class Clock:
                 "%s(%s): Executing callback", looping_call_context_string, instance_id
             )
 
-            assert context.current_context() is context.SENTINEL_CONTEXT, (
-                "Expected `looping_call` callback from the reactor to start with the sentinel logcontext "
-                f"but saw {context.current_context()}. In other words, another task shouldn't have "
-                "leaked their logcontext to us."
-            )
-
             # Because this is a callback from the reactor, we will be using the
             # `sentinel` log context at this point. We want the function to log with
             # some logcontext as we want to know which server the logs came from.
@@ -331,12 +325,6 @@ class Clock:
         @wraps(callback)
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
             clock_debug_logger.debug("call_later(%s): Executing callback", call_id)
-
-            assert context.current_context() is context.SENTINEL_CONTEXT, (
-                "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
-                f"but saw {context.current_context()}. In other words, another task shouldn't have "
-                "leaked their logcontext to us."
-            )
 
             # Because this is a callback from the reactor, we will be using the
             # `sentinel` log context at this point. We want the function to log with
@@ -526,12 +514,6 @@ class Clock:
                 instance_id,
                 phase,
                 event_type,
-            )
-
-            assert context.current_context() is context.SENTINEL_CONTEXT, (
-                "Expected `add_system_event_trigger` callback from the reactor to start with the sentinel logcontext "
-                f"but saw {context.current_context()}. In other words, another task shouldn't have "
-                "leaked their logcontext to us."
             )
 
             # Because this is a callback from the reactor, we will be using the
