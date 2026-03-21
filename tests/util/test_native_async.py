@@ -1248,5 +1248,194 @@ class NativeSynapseRequestTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.body, b"hello world")
 
 
+class NativeReplicationProtocolTest(unittest.IsolatedAsyncioTestCase):
+    """Tests for the asyncio-native replication protocol."""
+
+    async def _make_pipe(
+        self,
+    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter, asyncio.StreamReader, asyncio.StreamWriter]:
+        """Create a connected pair of (reader, writer) using a TCP loopback server."""
+        connections: list[tuple[asyncio.StreamReader, asyncio.StreamWriter]] = []
+        ready = asyncio.Event()
+
+        async def on_connect(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+            connections.append((r, w))
+            ready.set()
+
+        server = await asyncio.start_server(on_connect, "127.0.0.1", 0)
+        addr = server.sockets[0].getsockname()
+        client_r, client_w = await asyncio.open_connection(addr[0], addr[1])
+        await ready.wait()
+        server_r, server_w = connections[0]
+        self._server_to_close = server
+        return client_r, client_w, server_r, server_w
+
+    async def asyncTearDown(self) -> None:
+        if hasattr(self, "_server_to_close"):
+            self._server_to_close.close()
+            await self._server_to_close.wait_closed()
+
+    async def test_send_and_receive_command(self) -> None:
+        from synapse.replication.tcp.commands import PingCommand
+        from synapse.replication.tcp.native_protocol import NativeReplicationProtocol
+        from synapse.replication.tcp.protocol import (
+            VALID_CLIENT_COMMANDS,
+            VALID_SERVER_COMMANDS,
+        )
+
+        client_r, client_w, server_r, server_w = await self._make_pipe()
+
+        received_commands: list[str] = []
+
+        class TestProtocol(NativeReplicationProtocol):
+            async def on_PING(self, cmd: object) -> None:
+                received_commands.append("PING")
+
+        # Server protocol receives from client
+        server_proto = TestProtocol(
+            server_name="test.server",
+            valid_inbound_commands=VALID_CLIENT_COMMANDS,
+            valid_outbound_commands=VALID_SERVER_COMMANDS,
+        )
+        await server_proto.start(server_r, server_w)
+
+        # Client sends a PING directly via the writer
+        client_w.write(b"PING 12345\n")
+        await client_w.drain()
+
+        # Give time for the read loop to process
+        await asyncio.sleep(0.05)
+
+        # Server should have received the PING (from start's initial ping + our manual one)
+        self.assertIn("PING", received_commands)
+
+        await server_proto.close()
+        client_w.close()
+
+    async def test_protocol_sends_initial_ping(self) -> None:
+        from synapse.replication.tcp.native_protocol import NativeReplicationProtocol
+        from synapse.replication.tcp.protocol import (
+            VALID_CLIENT_COMMANDS,
+            VALID_SERVER_COMMANDS,
+        )
+
+        client_r, client_w, server_r, server_w = await self._make_pipe()
+
+        proto = NativeReplicationProtocol(
+            server_name="test.server",
+            valid_inbound_commands=VALID_CLIENT_COMMANDS,
+            valid_outbound_commands=VALID_SERVER_COMMANDS,
+        )
+        await proto.start(server_r, server_w)
+
+        # Read the initial ping sent by the protocol
+        line = await asyncio.wait_for(client_r.readline(), timeout=2.0)
+        self.assertTrue(line.startswith(b"PING "))
+
+        await proto.close()
+        client_w.close()
+
+    async def test_close_connection(self) -> None:
+        from synapse.replication.tcp.native_protocol import (
+            ConnectionState,
+            NativeReplicationProtocol,
+        )
+        from synapse.replication.tcp.protocol import (
+            VALID_CLIENT_COMMANDS,
+            VALID_SERVER_COMMANDS,
+        )
+
+        client_r, client_w, server_r, server_w = await self._make_pipe()
+
+        closed = asyncio.Event()
+
+        class TestProtocol(NativeReplicationProtocol):
+            async def on_connection_lost(self) -> None:
+                closed.set()
+
+        proto = TestProtocol(
+            server_name="test.server",
+            valid_inbound_commands=VALID_CLIENT_COMMANDS,
+            valid_outbound_commands=VALID_SERVER_COMMANDS,
+        )
+        await proto.start(server_r, server_w)
+
+        await proto.close()
+
+        await asyncio.wait_for(closed.wait(), timeout=2.0)
+        self.assertEqual(proto._state, ConnectionState.CLOSED)
+        client_w.close()
+
+    async def test_eof_triggers_close(self) -> None:
+        from synapse.replication.tcp.native_protocol import (
+            ConnectionState,
+            NativeReplicationProtocol,
+        )
+        from synapse.replication.tcp.protocol import (
+            VALID_CLIENT_COMMANDS,
+            VALID_SERVER_COMMANDS,
+        )
+
+        client_r, client_w, server_r, server_w = await self._make_pipe()
+
+        closed = asyncio.Event()
+
+        class TestProtocol(NativeReplicationProtocol):
+            async def on_connection_lost(self) -> None:
+                closed.set()
+
+        proto = TestProtocol(
+            server_name="test.server",
+            valid_inbound_commands=VALID_CLIENT_COMMANDS,
+            valid_outbound_commands=VALID_SERVER_COMMANDS,
+        )
+        await proto.start(server_r, server_w)
+
+        # Close the client side — server should detect EOF
+        client_w.close()
+
+        await asyncio.wait_for(closed.wait(), timeout=2.0)
+        self.assertEqual(proto._state, ConnectionState.CLOSED)
+
+    async def test_server_and_client_helpers(self) -> None:
+        from synapse.replication.tcp.native_protocol import (
+            NativeReplicationProtocol,
+            start_native_replication_server,
+        )
+        from synapse.replication.tcp.protocol import (
+            VALID_CLIENT_COMMANDS,
+            VALID_SERVER_COMMANDS,
+        )
+
+        server_connected = asyncio.Event()
+
+        def server_factory() -> NativeReplicationProtocol:
+            proto = NativeReplicationProtocol(
+                server_name="test.server",
+                valid_inbound_commands=VALID_CLIENT_COMMANDS,
+                valid_outbound_commands=VALID_SERVER_COMMANDS,
+            )
+            server_connected.set()
+            return proto
+
+        server = await start_native_replication_server(
+            "127.0.0.1", 0, server_factory
+        )
+        addr = server.sockets[0].getsockname()
+
+        # Connect a client
+        reader, writer = await asyncio.open_connection(addr[0], addr[1])
+
+        await asyncio.wait_for(server_connected.wait(), timeout=2.0)
+
+        # Read the server's initial PING
+        line = await asyncio.wait_for(reader.readline(), timeout=2.0)
+        self.assertTrue(line.startswith(b"PING "))
+
+        writer.close()
+        server.close()
+        await server.wait_closed()
+
+
 if __name__ == "__main__":
     unittest.main()
