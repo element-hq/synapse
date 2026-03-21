@@ -315,7 +315,13 @@ def register_start(
             os._exit(1)
 
     clock = hs.get_clock()
-    clock.call_when_running(lambda: defer.ensureDeferred(wrapper()))
+    # Schedule the startup coroutine to run when the event loop starts
+    try:
+        clock.call_when_running(lambda: defer.ensureDeferred(wrapper()))
+    except Exception:
+        # Fallback if defer is not available
+        import asyncio as _asyncio
+        clock.call_when_running(lambda: _asyncio.ensure_future(wrapper()))
 
 
 def listen_metrics(
