@@ -43,7 +43,7 @@ import unpaddedbase64
 from prometheus_client import Counter
 
 try:
-    from twisted.internet.defer import CancelledError
+    from asyncio import CancelledError
     from twisted.web.server import Request
 except ImportError:
     pass

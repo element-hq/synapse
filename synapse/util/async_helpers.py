@@ -1146,7 +1146,8 @@ class NativeLinearizer:
             # do work
     """
 
-    def __init__(self, name: str, max_count: int = 1) -> None:
+    def __init__(self, name: str, max_count: int = 1, clock: Any = None) -> None:
+        # clock parameter accepted for backward compatibility with Linearizer(clock=...)
         self.name = name
         self.max_count = max_count
         self._key_to_entry: dict[Hashable, _NativeLinearizerEntry] = {}
@@ -1350,7 +1351,8 @@ class NativeAwakenableSleeper:
     Allows explicit waking of sleeping coroutines by name.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Any = None) -> None:
+        # clock parameter accepted for backward compatibility
         self._streams: dict[str, set[asyncio.Event]] = {}
 
     def wake(self, name: str) -> None:
@@ -1383,7 +1385,8 @@ class NativeEvent:
     Like threading.Event but for asyncio code.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Any = None) -> None:
+        # clock parameter accepted for backward compatibility
         self._event = asyncio.Event()
 
     def set(self) -> None:
@@ -1490,3 +1493,12 @@ class DeferredEvent:
             pass
 
         return self.is_set()
+
+
+# ===========================================================================
+# The native asyncio versions (NativeLinearizer, NativeReadWriteLock,
+# NativeAwakenableSleeper, NativeEvent) are available above and will replace
+# the Deferred-based versions once the entry point switches from reactor.run()
+# to asyncio.run(). Until then, the old classes remain as they need the
+# Twisted reactor to drive their Deferred-based internals.
+# ===========================================================================

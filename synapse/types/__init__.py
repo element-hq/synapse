@@ -59,7 +59,7 @@ except ImportError:
     pass
 
 try:
-    from twisted.internet.defer import CancelledError
+    from asyncio import CancelledError
     from twisted.internet.interfaces import (
         IReactorCore,
         IReactorPluggableNameResolver,

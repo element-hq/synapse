@@ -36,7 +36,7 @@ except ImportError:
 
 try:
     from twisted.application.internet import ClientService
-    from twisted.internet.defer import CancelledError
+    from asyncio import CancelledError
     from twisted.internet.defer import Deferred
     from twisted.internet.endpoints import (
         HostnameEndpoint,
