@@ -492,5 +492,255 @@ class NativeReadWriteLockTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order, ["reader_start", "reader_end", "writer"])
 
 
+class NativeClockTest(unittest.IsolatedAsyncioTestCase):
+    """Tests for the asyncio-native NativeClock."""
+
+    async def test_time(self) -> None:
+        from synapse.util.clock import NativeClock
+
+        clock = NativeClock(server_name="test.server")
+        t = clock.time()
+        self.assertIsInstance(t, float)
+        self.assertGreater(t, 0)
+
+    async def test_time_msec(self) -> None:
+        from synapse.util.clock import NativeClock
+
+        clock = NativeClock(server_name="test.server")
+        t = clock.time_msec()
+        self.assertIsInstance(t, int)
+        self.assertGreater(t, 0)
+
+    async def test_sleep(self) -> None:
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        before = clock.time()
+        await clock.sleep(Duration(milliseconds=50))
+        after = clock.time()
+        self.assertGreaterEqual(after - before, 0.04)
+
+    async def test_call_later(self) -> None:
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        called = asyncio.Event()
+
+        def callback() -> None:
+            called.set()
+
+        wrapper = clock.call_later(Duration(milliseconds=20), callback)
+        self.assertTrue(wrapper.active())
+
+        await asyncio.wait_for(called.wait(), timeout=1.0)
+        self.assertTrue(called.is_set())
+
+    async def test_call_later_cancel(self) -> None:
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        called = False
+
+        def callback() -> None:
+            nonlocal called
+            called = True
+
+        wrapper = clock.call_later(Duration(milliseconds=50), callback)
+        self.assertTrue(wrapper.active())
+
+        wrapper.cancel()
+        self.assertFalse(wrapper.active())
+
+        await asyncio.sleep(0.1)
+        self.assertFalse(called)
+
+    async def test_call_later_getTime(self) -> None:
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        wrapper = clock.call_later(Duration(seconds=10), lambda: None)
+        # getTime should return a time in the future
+        self.assertGreater(wrapper.getTime(), 0)
+        wrapper.cancel()
+
+    async def test_looping_call(self) -> None:
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        call_count = 0
+
+        def callback() -> None:
+            nonlocal call_count
+            call_count += 1
+
+        call = clock.looping_call(callback, Duration(milliseconds=30))
+
+        # looping_call waits `duration` before first call
+        await asyncio.sleep(0.01)
+        self.assertEqual(call_count, 0)
+
+        await asyncio.sleep(0.05)
+        self.assertGreaterEqual(call_count, 1)
+
+        call.stop()
+
+        old_count = call_count
+        await asyncio.sleep(0.05)
+        self.assertEqual(call_count, old_count)
+
+    async def test_looping_call_now(self) -> None:
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        call_count = 0
+
+        def callback() -> None:
+            nonlocal call_count
+            call_count += 1
+
+        call = clock.looping_call_now(callback, Duration(milliseconds=30))
+
+        # looping_call_now should call immediately
+        await asyncio.sleep(0.01)
+        self.assertGreaterEqual(call_count, 1)
+
+        call.stop()
+
+    async def test_looping_call_waits_for_completion(self) -> None:
+        """Test that the next iteration waits for the previous to complete."""
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        concurrent = 0
+        max_concurrent = 0
+
+        async def slow_callback() -> None:
+            nonlocal concurrent, max_concurrent
+            concurrent += 1
+            max_concurrent = max(max_concurrent, concurrent)
+            await asyncio.sleep(0.04)
+            concurrent -= 1
+
+        call = clock.looping_call_now(slow_callback, Duration(milliseconds=10))
+
+        await asyncio.sleep(0.15)
+        call.stop()
+
+        # Should never have more than 1 concurrent execution
+        self.assertEqual(max_concurrent, 1)
+
+    async def test_looping_call_survives_error(self) -> None:
+        """Test that an error in the callback doesn't stop the loop."""
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        call_count = 0
+
+        def flaky_callback() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ValueError("first call fails")
+
+        call = clock.looping_call_now(flaky_callback, Duration(milliseconds=20))
+
+        await asyncio.sleep(0.08)
+        call.stop()
+
+        # Should have been called more than once despite the error
+        self.assertGreaterEqual(call_count, 2)
+
+    async def test_shutdown(self) -> None:
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        looping_called = False
+        delayed_called = False
+
+        def looping_cb() -> None:
+            nonlocal looping_called
+            looping_called = True
+
+        def delayed_cb() -> None:
+            nonlocal delayed_called
+            delayed_called = True
+
+        clock.looping_call(looping_cb, Duration(seconds=1))
+        clock.call_later(Duration(seconds=1), delayed_cb)
+
+        # Shutdown immediately before any callbacks can fire
+        clock.shutdown()
+
+        await asyncio.sleep(0.05)
+        self.assertFalse(looping_called)
+        self.assertFalse(delayed_called)
+
+    async def test_cancel_all_delayed_calls(self) -> None:
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        called = False
+
+        def callback() -> None:
+            nonlocal called
+            called = True
+
+        clock.call_later(Duration(milliseconds=50), callback)
+        clock.call_later(Duration(milliseconds=50), callback)
+
+        clock.cancel_all_delayed_calls()
+
+        await asyncio.sleep(0.1)
+        self.assertFalse(called)
+
+    async def test_call_when_running(self) -> None:
+        from synapse.util.clock import NativeClock
+
+        clock = NativeClock(server_name="test.server")
+        called = asyncio.Event()
+
+        def callback() -> None:
+            called.set()
+
+        clock.call_when_running(callback)
+
+        await asyncio.wait_for(called.wait(), timeout=1.0)
+        self.assertTrue(called.is_set())
+
+    async def test_add_system_event_trigger(self) -> None:
+        from synapse.util.clock import NativeClock
+
+        clock = NativeClock(server_name="test.server")
+
+        trigger_id = clock.add_system_event_trigger(
+            "before", "shutdown", lambda: None
+        )
+        self.assertIsInstance(trigger_id, int)
+        self.assertEqual(len(clock._shutdown_callbacks), 1)
+
+    async def test_shutdown_prevents_new_calls(self) -> None:
+        from synapse.util.clock import NativeClock
+        from synapse.util.duration import Duration
+
+        clock = NativeClock(server_name="test.server")
+        clock.shutdown()
+
+        with self.assertRaises(Exception):
+            clock.looping_call(lambda: None, Duration(seconds=1))
+
+        with self.assertRaises(Exception):
+            clock.call_later(Duration(seconds=1), lambda: None)
+
+
 if __name__ == "__main__":
     unittest.main()
