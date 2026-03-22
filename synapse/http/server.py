@@ -315,9 +315,7 @@ class _AsyncResource(metaclass=abc.ABCMeta):
                     callback_return = await self._async_render(request)
                 except LimitExceededError as e:
                     if e.pause:
-                        # Use real asyncio.sleep for the anti-hammering pause,
-                        # not fake-time clock.sleep, so tests don't hang.
-                        await asyncio.sleep(e.pause)
+                        await self._clock.sleep(Duration(seconds=e.pause))
                     raise
 
                 if callback_return is not None:

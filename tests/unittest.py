@@ -900,22 +900,20 @@ class HomeserverTestCase(TestCase):
         return hs
 
     def pump(self, by: float = 0.0) -> None:
-        """
-        Pump both the test reactor and the asyncio event loop,
-        advancing fake time on the NativeClock.
+        """Advance fake time and drive the asyncio event loop.
+
+        ``reactor.advance()`` delegates to ``clock.advance()``, so calling
+        either one advances the same fake-time source.
         """
         import asyncio
 
         loop = asyncio.get_event_loop()
 
-        # Advance fake time on the clock (fires pending sleeps)
-        self.clock.advance(by)
-
-        # Advance Twisted's fake clock too (for any Twisted-driven code)
+        # Advance fake time (fires pending sleeps) AND drain callFromThread
         self.reactor.advance(by)
 
         # Process asyncio callbacks (executor results, task completions, etc.)
-        if not loop.is_closed() and not loop.is_running():
+        if not loop.is_closed():
             loop.run_until_complete(asyncio.sleep(0))
 
     def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:

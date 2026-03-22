@@ -354,13 +354,10 @@ class FakeChannel:
             if _time.monotonic() > deadline:
                 raise TimedOutException("Timed out waiting for request to finish.")
 
-            # Advance fake time by 0.01s per pump iteration. This keeps
-            # fake time progressing (matching old Twisted behavior where
-            # reactor.advance(0.1) was called each iteration) and fires
-            # any pending sleeps.
-            if self._clock is not None:
-                self._clock.advance(0.01)
-
+            # Advance fake time by a small amount per iteration.
+            # This fires pending sleeps (e.g., ratelimit pauses) while
+            # keeping time advancement predictable.  The old Twisted
+            # MemoryReactorClock.advance(0.1) did the same.
             self._reactor.advance(0.1)
             # Drive asyncio event loop for DB operations, task completions, etc.
             if not loop.is_closed():
@@ -562,24 +559,26 @@ class ThreadedMemoryReactorClock:
     ``advance()``, ``callFromThread()``, ``getThreadPool()``, ``run()``.
 
     This replaces the Twisted ``MemoryReactorClock`` with a pure-asyncio
-    implementation. Time is NOT managed here — use ``NativeClock`` for
-    fake-time control. This class exists only because some code expects
-    a "reactor" object.
+    implementation. Time advancement is delegated to a ``NativeClock``
+    instance — call ``set_clock()`` after construction (done automatically
+    by ``get_clock()``).
     """
 
     def __init__(self) -> None:
-        from concurrent.futures import ThreadPoolExecutor
-
+        self._clock: Any = None  # will be set to a NativeClock by get_clock()
         self._thread_callbacks: deque[Callable[..., Any]] = deque()
         self.lookups: dict[str, str] = {}
-        self._executor = ThreadPoolExecutor(max_workers=4)
         self.triggers: dict[Any, Any] = {}
-
-        # Provide a threadpool attribute that tests/unittest.py expects
         self.threadpool = _FakeThreadPool()
 
+    def set_clock(self, clock: Any) -> None:
+        """Link this reactor to a NativeClock so advance() delegates to it."""
+        self._clock = clock
+
     def seconds(self) -> float:
-        """Return the current (fake) time. Used by IReactorTime compatibility."""
+        """Return the current (fake) time."""
+        if self._clock is not None:
+            return self._clock.time()
         return time.time()
 
     def run(self) -> None:
@@ -587,11 +586,15 @@ class ThreadedMemoryReactorClock:
         pass
 
     def advance(self, amount: float) -> None:
-        """Process any pending callFromThread callbacks.
+        """Advance fake time by *amount* seconds.
 
-        Note: fake-time advancement is handled by ``NativeClock.advance()``,
-        not here. This method only drains the callFromThread queue.
+        Delegates to ``NativeClock.advance()`` to fire any pending
+        ``clock.sleep()`` calls, then drains the ``callFromThread`` queue.
         """
+        if self._clock is not None:
+            self._clock.advance(amount)
+
+        # Drain callFromThread callbacks
         while True:
             try:
                 callback = self._thread_callbacks.popleft()
@@ -627,9 +630,13 @@ class ThreadedMemoryReactorClock:
     def suggestThreadPoolSize(self, size: int) -> None:
         pass
 
-    # Provide pump() for compatibility with code that calls reactor.pump()
     def pump(self, timings: list[float] | None = None) -> None:
-        self.advance(0)
+        """Pump the reactor — advance time for each timing value."""
+        if timings:
+            for t in timings:
+                self.advance(t)
+        else:
+            self.advance(0)
 
 
 class _FakeThreadPool:
@@ -795,11 +802,26 @@ class ThreadPool:
 
 
 def get_clock() -> tuple[ThreadedMemoryReactorClock, Clock]:
-    # Ignore the linter error since this is an expected usage of creating a `Clock` for
-    # testing purposes.
-    reactor = ThreadedMemoryReactorClock()
+    """Create a linked fake-reactor and clock for tests.
+
+    The reactor and clock share the same fake time source:
+    calling ``reactor.advance(N)`` or ``clock.advance(N)`` both advance
+    the same underlying fake time.  The clock starts in fake-time mode
+    so that ``clock.time()`` returns deterministic values from the start.
+    """
     from synapse.util.clock import NativeClock
+
+    reactor = ThreadedMemoryReactorClock()
     hs_clock = NativeClock(reactor, server_name="test_server")  # type: ignore[multiple-internal-clocks]
+
+    # Link the reactor to the clock so reactor.advance() delegates properly.
+    reactor.set_clock(hs_clock)
+
+    # Put the clock into fake-time mode from the start.
+    # Tests that need deterministic time get it automatically;
+    # advance(0) enables fake time without changing the initial value.
+    hs_clock.advance(0)
+
     return reactor, hs_clock
 
 
