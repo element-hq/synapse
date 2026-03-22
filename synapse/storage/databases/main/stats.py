@@ -19,6 +19,7 @@
 #
 #
 
+import asyncio
 import logging
 from collections import Counter
 from enum import Enum
@@ -124,7 +125,7 @@ class StatsStore(StateDeltasStore):
         self.clock = self.hs.get_clock()
         self.stats_enabled = hs.config.stats.stats_enabled
 
-        self.stats_delta_processing_lock = DeferredLock()
+        self.stats_delta_processing_lock = asyncio.Lock()
 
         self.db_pool.updates.register_background_update_handler(
             "populate_stats_process_rooms", self._populate_stats_process_rooms

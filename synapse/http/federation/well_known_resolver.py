@@ -91,24 +91,13 @@ class WellKnownResolver:
     def __init__(
         self,
         server_name: str,
-        reactor: ISynapseThreadlessReactor,
-        clock: Clock,
-        agent: IAgent,
-        user_agent: bytes,
+        reactor: Any = None,
+        clock: Any = None,
+        agent: Any = None,  # Ignored — kept for backward compat
+        user_agent: bytes | str = b"",
         well_known_cache: TTLCache[bytes, bytes | None] | None = None,
         had_well_known_cache: TTLCache[bytes, bool] | None = None,
     ):
-        """
-        Args:
-            server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
-            reactor
-            clock: Should be the `hs` clock from `hs.get_clock()`
-            agent
-            user_agent
-            well_known_cache
-            had_well_known_cache
-        """
-
         self.server_name = server_name
         self._reactor = reactor
         self._clock = clock
@@ -125,7 +114,6 @@ class WellKnownResolver:
 
         self._well_known_cache = well_known_cache
         self._had_valid_well_known_cache = had_well_known_cache
-        self._well_known_agent = RedirectAgent(agent)
         self.user_agent = user_agent
 
         # Lazily create aiohttp session for well-known lookups

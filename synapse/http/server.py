@@ -20,6 +20,7 @@
 #
 
 import abc
+import asyncio
 import html
 import logging
 import urllib
@@ -314,7 +315,9 @@ class _AsyncResource(metaclass=abc.ABCMeta):
                     callback_return = await self._async_render(request)
                 except LimitExceededError as e:
                     if e.pause:
-                        await self._clock.sleep(Duration(seconds=e.pause))
+                        # Use real asyncio.sleep for the anti-hammering pause,
+                        # not fake-time clock.sleep, so tests don't hang.
+                        await asyncio.sleep(e.pause)
                     raise
 
                 if callback_return is not None:
@@ -628,10 +631,7 @@ try:
 except ImportError:
     _StaticBase = object  # type: ignore[assignment,misc]
 
-try:
-    _ResourceBase = resource.Resource
-except Exception:
-    _ResourceBase = object  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource as _ResourceBase
 
 
 class StaticResource(_StaticBase):

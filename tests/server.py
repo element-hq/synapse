@@ -151,12 +151,27 @@ class FakeChannel:
 
     site: Union[Site, "FakeSite"]
     _reactor: MemoryReactorClock
-    result: dict = attr.Factory(dict)
+    _result: dict = attr.Factory(dict)
     _ip: str = "127.0.0.1"
     _producer: Optional[Union[IPullProducer, IPushProducer]] = None
     resource_usage: ContextResourceUsage | None = None
     _request: Request | None = None
     _clock: Any = None  # NativeClock, for advancing fake time
+
+    @property
+    def result(self) -> dict:
+        """Return the result dict, populating from shim request if available."""
+        if self._request is not None and hasattr(self._request, '_response_buffer'):
+            return {
+                "body": bytes(self._request._response_buffer),
+                "code": self._request.code,
+                "done": self._request.finished,
+            }
+        return self._result
+
+    @result.setter
+    def result(self, value: dict) -> None:
+        self._result = value
 
     @property
     def request(self) -> Request:
@@ -330,13 +345,15 @@ class FakeChannel:
             if _time.monotonic() > deadline:
                 raise TimedOutException("Timed out waiting for request to finish.")
 
-            # Advance NativeClock fake time (fires pending sleeps)
+            # Advance fake time by 0.01s per pump iteration. This keeps
+            # fake time progressing (matching old Twisted behavior where
+            # reactor.advance(0.1) was called each iteration) and fires
+            # any pending sleeps.
             if self._clock is not None:
-                self._clock.advance(0.0)
+                self._clock.advance(0.01)
 
             self._reactor.advance(0.1)
             # Drive asyncio event loop for DB operations, task completions, etc.
-            # Use a small real sleep to allow thread pool callbacks to be delivered.
             if not loop.is_closed():
                 async def _drain() -> None:
                     """Run multiple event loop ticks to drain pending work."""
@@ -476,16 +493,19 @@ def make_request(
     channel.request = req
 
     req.method = method
-    req.path = path
-    # URI includes query string
+    # URI is the full path+query; path is just the path part (no query string).
+    # Twisted's Request.path was always without query string.
     req.uri = path
+    from urllib.parse import parse_qs, urlparse
+    path_str = path.decode("utf-8") if isinstance(path, bytes) else path
+    parsed = urlparse(path_str)
+    req.path = parsed.path.encode("utf-8") if isinstance(path, bytes) else parsed.path.encode("utf-8")
+
     req.content = BytesIO(content)
-    req.content.seek(0, SEEK_END)
+    req.content.seek(0)
     req._client_ip = client_ip
 
     # Parse query string into args
-    from urllib.parse import parse_qs, urlparse
-    parsed = urlparse(path if isinstance(path, str) else path.decode("utf-8"))
     if parsed.query:
         for k, vs in parse_qs(parsed.query, keep_blank_values=True).items():
             bk = k.encode("utf-8") if isinstance(k, str) else k
@@ -528,31 +548,55 @@ def make_request(
     # Initialize request metrics and logcontext before dispatch
     import asyncio
     from synapse.http.request_metrics import RequestMetrics
-    from synapse.logging.context import LoggingContext
+    from synapse.logging.context import ContextRequest, LoggingContext
 
     req.start_time = time.time()
     server_name = getattr(site, 'server_name', 'test')
     req.request_metrics = RequestMetrics(our_server_name=server_name)
     req.request_metrics.start(req.start_time, name="test", method=req.get_method())
+
+    # Create a ContextRequest (NOT the SynapseRequest itself!) for the LoggingContext
+    context_request = ContextRequest(
+        request_id=req.get_request_id(),
+        ip_address=req.getClientIP(),
+        site_tag=getattr(site, 'site_tag', 'test'),
+        requester=None,
+        authenticated_entity=None,
+        method=req.get_method(),
+        url=req.get_redacted_uri(),
+        protocol="HTTP/1.1",
+        user_agent="",
+    )
     req.logcontext = LoggingContext(
         name="test-%s-%s" % (req.get_method(), req.get_redacted_uri()),
         server_name=server_name,
-        request=req,
+        request=context_request,
     )
 
-    # Dispatch the request through the resource
-    resource = getattr(site, 'resource', None) or getattr(site, '_resource', None)
-    if resource is not None and hasattr(resource, '_async_render_wrapper'):
-        req.render_deferred = asyncio.ensure_future(
-            resource._async_render_wrapper(req)
-        )
-    else:
-        # Fallback: try the old Twisted render path for compatibility
-        if resource is not None and hasattr(resource, 'render'):
-            resource.render(req)
+    # Dispatch the request through the resource tree using the same
+    # logic as the production aiohttp handler.
+    from synapse.http.aiohttp_shim import _resolve_resource
+
+    root_resource = getattr(site, 'resource', None) or getattr(site, '_resource', None)
+    if root_resource is not None:
+        target = _resolve_resource(root_resource, path)
+
+        if hasattr(target, '_async_render_wrapper'):
+            req.render_deferred = asyncio.ensure_future(
+                target._async_render_wrapper(req)
+            )
         else:
-            import sys
-            print(f"WARNING: No resource to dispatch to. site={type(site)}, resource={resource}", file=sys.stderr)
+            # Simple resource with render_GET/render_POST etc
+            method_str = req.method.decode('ascii') if isinstance(req.method, bytes) else req.method
+            method_name = 'render_' + method_str
+            handler = getattr(target, method_name, None)
+            if handler:
+                result = handler(req)
+                if asyncio.iscoroutine(result):
+                    req.render_deferred = asyncio.ensure_future(result)
+            else:
+                from synapse.http.server import respond_with_json
+                respond_with_json(req, 404, {"errcode": "M_UNRECOGNIZED", "error": "Unrecognized request"}, send_cors=True)
 
     if await_result:
         channel.await_result()
@@ -562,7 +606,7 @@ def make_request(
 
 # ISynapseReactor implies IReactorPluggableNameResolver, but explicitly
 # marking this as an implementer of the latter seems to keep mypy-zope happier.
-@implementer(IReactorPluggableNameResolver, ISynapseReactor)
+@implementer(IReactorPluggableNameResolver)
 class ThreadedMemoryReactorClock(MemoryReactorClock):
     """
     A MemoryReactorClock that supports callFromThread.

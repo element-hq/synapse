@@ -597,12 +597,17 @@ class DatabasePool:
         self._database_config = database_config
         from synapse.storage.native_database import NativeConnectionPool
 
-        # Check for a pre-prepared connection (used in tests with in-memory SQLite)
+        # Check for a pre-prepared connection (used in tests with in-memory SQLite).
+        # Create a FRESH in-memory copy for each test to ensure isolation.
         prepped_conn = database_config.config.get("_TEST_PREPPED_CONN")
+        initial_conn = None
         if prepped_conn and hasattr(prepped_conn, 'conn'):
-            initial_conn = prepped_conn.conn  # Extract raw connection from LoggingDatabaseConnection
-        else:
-            initial_conn = None
+            import sqlite3
+            source_conn = prepped_conn.conn
+            # Create a new in-memory DB and copy schema+data from the template
+            fresh_conn = sqlite3.connect(":memory:", check_same_thread=False)
+            source_conn.backup(fresh_conn)
+            initial_conn = fresh_conn
 
         self._db_pool = NativeConnectionPool(
             db_config=database_config,

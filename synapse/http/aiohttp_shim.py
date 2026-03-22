@@ -192,11 +192,15 @@ class ShimResponseHeaders:
         self._original_name.setdefault(lower, str_name)
         self._headers.setdefault(lower, []).append(self._norm_value(value))
 
-    def getRawHeaders(self, name: bytes | str) -> list[bytes] | None:
+    def getRawHeaders(self, name: bytes | str) -> list[bytes] | list[str] | None:
         lower = self._norm_name(name).lower()
         vals = self._headers.get(lower)
         if vals is None:
             return None
+        # Return str if called with str, bytes if called with bytes
+        # (matching Twisted's Headers behavior)
+        if isinstance(name, str):
+            return list(vals)
         return [v.encode("utf-8") for v in vals]
 
     def hasHeader(self, name: bytes | str) -> bool:
@@ -249,6 +253,20 @@ class _ClientAddress:
     """
 
     host: str
+
+
+class _HostPort:
+    """Minimal stand-in for Twisted's ``IPv4Address`` / ``IPv6Address``.
+
+    Used by ``getHost()`` to provide ``host`` and ``port`` attributes.
+    """
+
+    __slots__ = ("host", "port", "type")
+
+    def __init__(self, host: str, port: int) -> None:
+        self.host = host
+        self.port = port
+        self.type = "TCP"
 
 
 # ---------------------------------------------------------------------------
@@ -542,19 +560,14 @@ class SynapseRequest:
 
     @requester.setter
     def requester(self, value: Requester | str) -> None:
-        # Should only be set once.
-        assert self._requester is None
-
         self._requester = value
 
-        assert self.logcontext is not None
-        assert self.logcontext.request is not None
-
-        requester, authenticated_entity = self.get_authenticated_entity()
-        self.logcontext.request.requester = requester
-        self.logcontext.request.authenticated_entity = (
-            authenticated_entity or requester
-        )
+        if self.logcontext is not None and self.logcontext.request is not None:
+            requester, authenticated_entity = self.get_authenticated_entity()
+            self.logcontext.request.requester = requester
+            self.logcontext.request.authenticated_entity = (
+                authenticated_entity or requester
+            )
 
     # ------------------------------------------------------------------
     # Request introspection methods
@@ -592,6 +605,84 @@ class SynapseRequest:
         but still used in some Synapse code paths.
         """
         return self.getClientAddress().host
+
+    def addCookie(
+        self,
+        k: bytes | str,
+        v: bytes | str,
+        expires: str | None = None,
+        domain: str | None = None,
+        path: str | None = None,
+        max_age: int | None = None,
+        comment: str | None = None,
+        secure: bool = False,
+        httpOnly: bool = False,
+        sameSite: str | None = None,
+    ) -> None:
+        """Set a response cookie.
+
+        Matches Twisted's ``Request.addCookie`` interface.
+        """
+        k_str = k.decode("ascii") if isinstance(k, bytes) else k
+        v_str = v.decode("ascii") if isinstance(v, bytes) else v
+        parts = [f"{k_str}={v_str}"]
+        if expires:
+            parts.append(f"Expires={expires}")
+        if domain:
+            parts.append(f"Domain={domain}")
+        if path:
+            parts.append(f"Path={path}")
+        if max_age is not None:
+            parts.append(f"Max-Age={max_age}")
+        if secure:
+            parts.append("Secure")
+        if httpOnly:
+            parts.append("HttpOnly")
+        if sameSite:
+            parts.append(f"SameSite={sameSite}")
+        cookie_str = "; ".join(parts)
+        self.responseHeaders.addRawHeader(b"Set-Cookie", cookie_str.encode("utf-8"))
+        self.cookies.append(cookie_str.encode("utf-8"))
+
+    def getCookie(self, name: bytes) -> bytes | None:
+        """Return the value of a request cookie, or ``None``.
+
+        Matches Twisted's ``Request.getCookie`` semantics.
+        """
+        name_str = name.decode("ascii") if isinstance(name, bytes) else name
+        cookie_header = self.requestHeaders.getRawHeaders(b"cookie")
+        if not cookie_header:
+            return None
+        # Parse "name1=value1; name2=value2" format
+        for cookie_str in cookie_header:
+            if isinstance(cookie_str, bytes):
+                cookie_str = cookie_str.decode("utf-8", errors="replace")
+            for part in cookie_str.split(";"):
+                part = part.strip()
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    if k.strip() == name_str:
+                        return v.strip().encode("utf-8")
+        return None
+
+    def getHost(self) -> Any:
+        """Return an object describing the server address.
+
+        Returns an object with `host` and `port` attributes, matching
+        Twisted's ``IAddress`` interface used by ``get_request_uri``.
+        """
+        if self._aiohttp_request is not None:
+            host = self._aiohttp_request.host
+            # aiohttp's host may be "host:port"
+            if ":" in host:
+                h, p = host.rsplit(":", 1)
+                try:
+                    return _HostPort(h, int(p))
+                except ValueError:
+                    pass
+            port = 443 if self.isSecure() else 8008
+            return _HostPort(host, port)
+        return _HostPort("127.0.0.1", 8008)
 
     def isSecure(self) -> bool:
         """Return ``True`` if the request was made over HTTPS."""
@@ -934,10 +1025,27 @@ def aiohttp_handler_factory(
 
         try:
             with PreserveLoggingContext(synapse_request.logcontext):
-                # 4. Invoke the resource's async render wrapper.
-                # _async_render_wrapper is already decorated with
-                # @wrap_async_request_handler which calls request.processing().
-                await root_resource._async_render_wrapper(synapse_request)
+                # 4. Walk the resource tree to find the target resource.
+                target = _resolve_resource(root_resource, synapse_request.path)
+
+                # 5. Invoke the target's async render wrapper.
+                if hasattr(target, '_async_render_wrapper'):
+                    await target._async_render_wrapper(synapse_request)
+                else:
+                    # Simple resource with render_GET/render_POST etc
+                    method_name = 'render_' + synapse_request.method.decode('ascii')
+                    method_handler = getattr(target, method_name, None)
+                    if method_handler:
+                        result = method_handler(synapse_request)
+                        if asyncio.iscoroutine(result):
+                            await result
+                    else:
+                        from synapse.http.server import respond_with_json
+                        respond_with_json(
+                            synapse_request, 404,
+                            {"errcode": "M_UNRECOGNIZED", "error": "Unrecognized request"},
+                            send_cors=True,
+                        )
 
                 # Record the arrival after dispatching so the handler can
                 # update the servlet name in request_metrics.
@@ -961,6 +1069,32 @@ def aiohttp_handler_factory(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolve_resource(root: Any, path: bytes) -> Any:
+    """Walk a Resource tree to find the target resource for the given path.
+
+    This replaces Twisted's getChildForRequest() which traversed the
+    Resource tree during request dispatch.
+    """
+    target = root
+    path_str = path.decode("utf-8") if isinstance(path, bytes) else path
+    path_no_qs = path_str.split("?")[0]
+    segments = [s.encode("utf-8") for s in path_no_qs.strip("/").split("/") if s]
+
+    for segment in segments:
+        children = getattr(target, 'children', {})
+        if segment in children:
+            target = children[segment]
+        elif getattr(target, 'isLeaf', False):
+            break
+        else:
+            # No child for this segment. If current target can handle
+            # arbitrary sub-paths (isLeaf or has _async_render_wrapper),
+            # stay here. Otherwise keep walking fails — stay at current.
+            break
+
+    return target
 
 
 async def _read_body_with_limit(

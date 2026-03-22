@@ -408,47 +408,49 @@ class MatrixFederationHttpClient:
         if hs.config.server.user_agent_suffix:
             user_agent = "%s %s" % (user_agent, hs.config.server.user_agent_suffix)
 
-        outbound_federation_restricted_to = (
-            hs.config.worker.outbound_federation_restricted_to
-        )
-        if hs.get_instance_name() in outbound_federation_restricted_to:
-            # Talk to federation directly
-            federation_agent: IAgent = MatrixFederationAgent(
-                server_name=self.server_name,
-                reactor=self.reactor,
-                clock=self.clock,
-                tls_client_options_factory=tls_client_options_factory,
-                user_agent=user_agent.encode("ascii"),
-                ip_allowlist=hs.config.server.federation_ip_range_allowlist,
-                ip_blocklist=hs.config.server.federation_ip_range_blocklist,
-                proxy_config=hs.config.server.proxy_config,
-            )
-        else:
-            proxy_authorization_secret = hs.config.worker.worker_replication_secret
-            assert proxy_authorization_secret is not None, (
-                "`worker_replication_secret` must be set when using `outbound_federation_restricted_to` (used to authenticate requests across workers)"
-            )
-            federation_proxy_credentials = BearerProxyCredentials(
-                proxy_authorization_secret.encode("ascii")
-            )
+	# TODO: make this work with asyncio
 
-            # We need to talk to federation via the proxy via one of the configured
-            # locations
-            federation_proxy_locations = outbound_federation_restricted_to.locations
-            federation_agent = ProxyAgent(
-                reactor=self.reactor,
-                proxy_reactor=self.reactor,
-                contextFactory=tls_client_options_factory,
-                federation_proxy_locations=federation_proxy_locations,
-                federation_proxy_credentials=federation_proxy_credentials,
-            )
+        # outbound_federation_restricted_to = (
+        #     hs.config.worker.outbound_federation_restricted_to
+        # )
+        # if hs.get_instance_name() in outbound_federation_restricted_to:
+        #     # Talk to federation directly
+        #     federation_agent: IAgent = MatrixFederationAgent(
+        #         server_name=self.server_name,
+        #         reactor=self.reactor,
+        #         clock=self.clock,
+        #         tls_client_options_factory=tls_client_options_factory,
+        #         user_agent=user_agent.encode("ascii"),
+        #         ip_allowlist=hs.config.server.federation_ip_range_allowlist,
+        #         ip_blocklist=hs.config.server.federation_ip_range_blocklist,
+        #         proxy_config=hs.config.server.proxy_config,
+        #     )
+        # else:
+        #     proxy_authorization_secret = hs.config.worker.worker_replication_secret
+        #     assert proxy_authorization_secret is not None, (
+        #         "`worker_replication_secret` must be set when using `outbound_federation_restricted_to` (used to authenticate requests across workers)"
+        #     )
+        #     federation_proxy_credentials = BearerProxyCredentials(
+        #         proxy_authorization_secret.encode("ascii")
+        #     )
+
+        #     # We need to talk to federation via the proxy via one of the configured
+        #     # locations
+        #     federation_proxy_locations = outbound_federation_restricted_to.locations
+        #     federation_agent = ProxyAgent(
+        #         reactor=self.reactor,
+        #         proxy_reactor=self.reactor,
+        #         contextFactory=tls_client_options_factory,
+        #         federation_proxy_locations=federation_proxy_locations,
+        #         federation_proxy_credentials=federation_proxy_credentials,
+        #     )
 
         # Use a BlocklistingAgentWrapper to prevent circumventing the IP
         # blocking via IP literals in server names
-        self.agent: IAgent = BlocklistingAgentWrapper(
-            federation_agent,
-            ip_blocklist=hs.config.server.federation_ip_range_blocklist,
-        )
+        # self.agent: IAgent = BlocklistingAgentWrapper(
+        #     federation_agent,
+        #     ip_blocklist=hs.config.server.federation_ip_range_blocklist,
+        # )
 
         self._store = hs.get_datastores().main
         self.version_string_bytes = hs.version_string.encode("ascii")
@@ -522,15 +524,15 @@ class MatrixFederationHttpClient:
             server_name=self.server_name,
             reactor=self.reactor,
             clock=self.clock,
-            agent=BlocklistingAgentWrapper(
-                ProxyAgent(
-                    reactor=self.reactor,
-                    proxy_reactor=self.reactor,
-                    contextFactory=tls_client_options_factory,
-                    proxy_config=proxy_config,
-                ),
-                ip_blocklist=ip_blocklist,
-            ),
+            # agent=BlocklistingAgentWrapper(
+            #     ProxyAgent(
+            #         reactor=self.reactor,
+            #         proxy_reactor=self.reactor,
+            #         contextFactory=tls_client_options_factory,
+            #         proxy_config=proxy_config,
+            #     ),
+            #     ip_blocklist=ip_blocklist,
+            # ),
             user_agent=user_agent.encode("ascii"),
         )
 

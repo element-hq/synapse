@@ -194,10 +194,12 @@ class TestCase(_stdlib_unittest.TestCase):
 
         @around(self)
         def setUp(orig: Callable[[], R]) -> R:
-            # Set up an asyncio event loop so asyncio primitives work
+            # Set up a fresh asyncio event loop for each test
             import asyncio as _asyncio
+            import nest_asyncio as _nest_asyncio
             self._asyncio_loop = _asyncio.new_event_loop()
             _asyncio.set_event_loop(self._asyncio_loop)
+            _nest_asyncio.apply(self._asyncio_loop)
 
             # if we're not starting in the sentinel logcontext, then to be honest
             # all future bets are off.
@@ -240,6 +242,17 @@ class TestCase(_stdlib_unittest.TestCase):
         @around(self)
         def tearDown(orig: Callable[[], R]) -> R:
             ret = orig()
+
+            # Cancel any remaining asyncio tasks from this test
+            import asyncio as _asyncio
+            loop = _asyncio.get_event_loop()
+            if not loop.is_closed():
+                pending = [t for t in _asyncio.all_tasks(loop) if not t.done()]
+                for t in pending:
+                    t.cancel()
+                if pending:
+                    loop.run_until_complete(_asyncio.sleep(0))
+
             gc.collect(0)
             # Run a full GC every 50 gen-0 GCs.
             gen0_stats = gc.get_stats()[0]

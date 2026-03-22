@@ -172,12 +172,13 @@ class BatchingQueue(Generic[V, R]):
             self._processing_keys.add(key)
 
             while True:
-                # We purposefully wait a reactor tick to allow us to batch
+                # We purposefully wait an event loop tick to allow us to batch
                 # together requests that we're about to receive. A common
                 # pattern is to call `add_to_queue` multiple times at once, and
-                # deferring to the next reactor tick allows us to batch all of
-                # those up.
-                await self._clock.sleep(Duration(seconds=0))
+                # deferring to the next tick allows us to batch all of them up.
+                # Use real asyncio.sleep(0) instead of clock.sleep(0) because
+                # clock.sleep uses fake time which requires explicit advance().
+                await asyncio.sleep(0)
 
                 next_values = self._next_values.pop(key, [])
                 if not next_values:
