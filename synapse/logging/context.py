@@ -840,15 +840,18 @@ def run_in_background(
     calling_context = current_context()
     try:
         res = f(*args, **kwargs)
-    except Exception:
-        import sys
-        loop = asyncio.get_event_loop()
-        fut: asyncio.Future[Any] = loop.create_future()
-        fut.set_exception(sys.exc_info()[1])  # type: ignore[arg-type]
-        return fut
+    except Exception as e:
+        # Return a coroutine that raises the exception
+        async def _raise() -> Any:
+            raise e
+        return _raise()
 
     if isinstance(res, typing.Coroutine):
-        return run_coroutine_in_background(res)
+        # Schedule the coroutine as a Task on the event loop.
+        # This ensures fire-and-forget callers actually run the coroutine.
+        coro = run_coroutine_in_background(res)
+        loop = asyncio.get_event_loop()
+        return loop.create_task(coro)
 
     if isinstance(res, (asyncio.Task, asyncio.Future)):
         if not res.done():
@@ -858,17 +861,20 @@ def run_in_background(
             res.add_done_callback(_reset)
         return res
 
-    # Plain value — wrap in a resolved future
-    loop = asyncio.get_event_loop()
-    fut: asyncio.Future[Any] = loop.create_future()
-    fut.set_result(res)
-    return fut
+    # Plain value — wrap in a coroutine
+    async def _return_value() -> Any:
+        return res
+    return _return_value()
 
 
 def run_coroutine_in_background(
     coroutine: typing.Coroutine[Any, Any, R],
-) -> "asyncio.Task[R]":
-    """Schedule a coroutine as a background asyncio.Task."""
+) -> Any:
+    """Wrap a coroutine so it resets logcontext on completion.
+
+    Returns a coroutine (NOT a Task) so it's compatible with both
+    Twisted's ensureDeferred and asyncio's ensure_future.
+    """
     calling_context = current_context()
 
     async def _wrapper() -> R:
@@ -877,9 +883,10 @@ def run_coroutine_in_background(
         finally:
             set_current_context(SENTINEL_CONTEXT)
 
-    task = asyncio.ensure_future(_wrapper())
+    # Return the coroutine — let the caller decide how to schedule it
+    wrapper_coro = _wrapper()
     set_current_context(calling_context)
-    return task
+    return wrapper_coro
 
 
 async def make_deferred_yieldable(awaitable: Any) -> Any:

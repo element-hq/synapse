@@ -869,30 +869,34 @@ class HomeserverTestCase(TestCase):
 
     def pump(self, by: float = 0.0) -> None:
         """
-        Pump both the test reactor and the asyncio event loop.
+        Pump both the test reactor and the asyncio event loop,
+        advancing fake time on the NativeClock.
         """
         import asyncio
 
-        # Advance Twisted's fake clock
-        self.reactor.pump([by] * 100)
+        loop = asyncio.get_event_loop()
 
-        # Drive the asyncio event loop
-        try:
-            loop = asyncio.get_event_loop()
-            if not loop.is_closed() and not loop.is_running():
-                loop.run_until_complete(asyncio.sleep(0))
-        except RuntimeError:
-            pass
+        # Advance fake time on the clock (fires pending sleeps)
+        self.clock.advance(by)
+
+        # Advance Twisted's fake clock too (for any Twisted-driven code)
+        self.reactor.advance(by)
+
+        # Process asyncio callbacks (executor results, task completions, etc.)
+        if not loop.is_closed() and not loop.is_running():
+            loop.run_until_complete(asyncio.sleep(0))
 
     def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         import asyncio
 
-        # Advance Twisted's fake clock first (for any time-dependent setup)
+        loop = asyncio.get_event_loop()
+
+        # Pump the fake reactor first if time advancement is needed
         if by > 0:
             self.reactor.pump([by] * 100)
 
-        # Drive the coroutine to completion on the global event loop
-        loop = asyncio.get_event_loop()
+        # Run the awaitable to completion on the asyncio loop.
+        # nest_asyncio allows this even if the loop is already running.
         return loop.run_until_complete(d)  # type: ignore[arg-type]
 
     def get_failure(

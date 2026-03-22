@@ -324,7 +324,8 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
 
     def render(self, request: "SynapseRequest") -> int:
         """This gets called by twisted every time someone sends us a request."""
-        request.render_deferred = defer.ensureDeferred(
+        import asyncio
+        request.render_deferred = asyncio.ensure_future(
             self._async_render_wrapper(request)
         )
         return NOT_DONE_YET

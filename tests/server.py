@@ -307,14 +307,22 @@ class FakeChannel:
         """
         Wait until the request is finished.
         """
-        end_time = self._reactor.seconds() + timeout_ms / 1000.0
+        import asyncio
+        import time as _time
+
+        deadline = _time.monotonic() + timeout_ms / 1000.0
         self._reactor.run()
 
+        loop = asyncio.get_event_loop()
+
         while not self.is_finished():
-            if self._reactor.seconds() > end_time:
+            if _time.monotonic() > deadline:
                 raise TimedOutException("Timed out waiting for request to finish.")
 
             self._reactor.advance(0.1)
+            # Drive asyncio event loop for DB operations, task completions, etc.
+            if not loop.is_closed() and not loop.is_running():
+                loop.run_until_complete(asyncio.sleep(0))
 
     def extract_cookies(self, cookies: MutableMapping[str, str]) -> None:
         """Process the contents of any Set-Cookie headers in the response
@@ -833,7 +841,8 @@ def get_clock() -> tuple[ThreadedMemoryReactorClock, Clock]:
     # Ignore the linter error since this is an expected usage of creating a `Clock` for
     # testing purposes.
     reactor = ThreadedMemoryReactorClock()
-    hs_clock = Clock(reactor, server_name="test_server")  # type: ignore[multiple-internal-clocks]
+    from synapse.util.clock import NativeClock
+    hs_clock = NativeClock(reactor, server_name="test_server")  # type: ignore[multiple-internal-clocks]
     return reactor, hs_clock
 
 

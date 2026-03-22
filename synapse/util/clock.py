@@ -710,7 +710,8 @@ class NativeClock:
         server_name: The server name for logging context.
     """
 
-    def __init__(self, server_name: str) -> None:
+    def __init__(self, reactor: Any = None, server_name: str = "") -> None:
+        # reactor arg accepted for backward compatibility but ignored
         self._server_name = server_name
         self._delayed_call_id: int = 0
         self._looping_calls: WeakSet[NativeLoopingCall] = WeakSet()
@@ -720,9 +721,19 @@ class NativeClock:
         # Lazily initialized when first needed
         self._loop: asyncio.AbstractEventLoop | None = None
 
+        # Internal timer system for fake time support.
+        # Pending sleeps: list of (wake_time, future)
+        import heapq
+        self._fake_time: float = time_mod.time()
+        self._pending_sleeps: list[tuple[float, asyncio.Future]] = []
+        self._use_fake_time = False  # Set to True by tests
+
     def _get_loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is None:
-            self._loop = asyncio.get_running_loop()
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._loop = asyncio.get_event_loop()
         return self._loop
 
     def shutdown(self) -> None:
@@ -731,15 +742,41 @@ class NativeClock:
         self.cancel_all_delayed_calls()
 
     def time(self) -> float:
-        """Returns the current system time in seconds since epoch."""
+        """Returns the current time in seconds since epoch."""
+        if self._use_fake_time:
+            return self._fake_time
         return time_mod.time()
 
     def time_msec(self) -> int:
-        """Returns the current system time in milliseconds since epoch."""
+        """Returns the current time in milliseconds since epoch."""
         return int(self.time() * 1000)
 
     async def sleep(self, duration: Duration) -> None:
-        await asyncio.sleep(duration.as_secs())
+        """Sleep for duration, using fake time if enabled."""
+        if self._use_fake_time:
+            import heapq
+            loop = self._get_loop()
+            future: asyncio.Future[None] = loop.create_future()
+            wake_time = self._fake_time + duration.as_secs()
+            heapq.heappush(self._pending_sleeps, (wake_time, future))
+            await future
+        else:
+            await asyncio.sleep(duration.as_secs())
+
+    def advance(self, seconds: float) -> None:
+        """Advance fake time by seconds, firing any due sleeps.
+
+        Used by tests to control time deterministically.
+        """
+        self._use_fake_time = True
+        self._fake_time += seconds
+
+        # Fire any sleeps that are now due
+        while self._pending_sleeps and self._pending_sleeps[0][0] <= self._fake_time:
+            import heapq
+            _, future = heapq.heappop(self._pending_sleeps)
+            if not future.done():
+                future.set_result(None)
 
     def looping_call(
         self,
@@ -777,7 +814,7 @@ class NativeClock:
 
         async def _loop() -> None:
             if not now:
-                await asyncio.sleep(interval)
+                await self.sleep(Duration(seconds=interval))
 
             while True:
                 try:
@@ -797,9 +834,10 @@ class NativeClock:
                 except Exception:
                     logger.exception("Looping call %s died", instance_id)
 
-                await asyncio.sleep(interval)
+                await self.sleep(Duration(seconds=interval))
 
-        task_obj = asyncio.create_task(_loop())
+        loop = asyncio.get_event_loop()
+        task_obj = loop.create_task(_loop())
         call = NativeLoopingCall(task_obj)
         self._looping_calls.add(call)
 

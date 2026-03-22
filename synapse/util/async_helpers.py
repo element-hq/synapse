@@ -91,314 +91,22 @@ def make_awaitable_promise() -> Any:
     except RuntimeError:
         pass
 
-    # No running asyncio loop — use Deferred (works with Twisted reactor)
-    if defer is not None:
-        return defer.Deferred()
+    # No running loop — use get_event_loop (set by tests/__init__.py)
+    try:
+        loop = asyncio.get_event_loop()
+        if not loop.is_closed():
+            return loop.create_future()
+    except RuntimeError:
+        pass
 
-    raise RuntimeError("Cannot create promise: no asyncio loop and no Twisted")
+    raise RuntimeError("Cannot create promise: no asyncio event loop available")
 
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-
-
-class ObservableDeferred(Generic[_T]):
-    """Wraps a deferred object so that we can add observer deferreds. These
-    observer deferreds do not affect the callback chain of the original
-    deferred.
-
-    If consumeErrors is true errors will be captured from the origin deferred.
-
-    Cancelling or otherwise resolving an observer will not affect the original
-    ObservableDeferred.
-
-    NB that it does not attempt to do anything with logcontexts; in general
-    you should probably make_deferred_yieldable the deferreds
-    returned by `observe`, and ensure that the original deferred runs its
-    callbacks in the sentinel logcontext.
-    """
-
-    __slots__ = ["_deferred", "_observers", "_result"]
-
-    _deferred: "defer.Deferred[_T]"
-    _observers: list["defer.Deferred[_T]"] | tuple[()]
-    _result: None | tuple[Literal[True], _T] | tuple[Literal[False], Failure]
-
-    def __init__(self, deferred: "defer.Deferred[_T]", consumeErrors: bool = False):
-        object.__setattr__(self, "_deferred", deferred)
-        object.__setattr__(self, "_result", None)
-        object.__setattr__(self, "_observers", [])
-
-        def callback(r: _T) -> _T:
-            object.__setattr__(self, "_result", (True, r))
-
-            # once we have set _result, no more entries will be added to _observers,
-            # so it's safe to replace it with the empty tuple.
-            observers = self._observers
-            object.__setattr__(self, "_observers", ())
-
-            for observer in observers:
-                try:
-                    observer.callback(r)
-                except defer.CancelledError:
-                    # We do not want to propagate cancellations to the original
-                    # deferred, or to other observers, so we can just ignore
-                    # this.
-                    pass
-                except Exception as e:
-                    logger.exception(
-                        "%r threw an exception on .callback(%r), ignoring...",
-                        observer,
-                        r,
-                        exc_info=e,
-                    )
-            return r
-
-        def errback(f: Failure) -> Failure | None:
-            object.__setattr__(self, "_result", (False, f))
-
-            # once we have set _result, no more entries will be added to _observers,
-            # so it's safe to replace it with the empty tuple.
-            observers = self._observers
-            object.__setattr__(self, "_observers", ())
-
-            for observer in observers:
-                # This is a little bit of magic to correctly propagate stack
-                # traces when we `await` on one of the observer deferreds.
-                f.value.__failure__ = f
-                try:
-                    observer.errback(f)
-                except defer.CancelledError:
-                    # We do not want to propagate cancellations to the original
-                    # deferred, or to other observers, so we can just ignore
-                    # this.
-                    pass
-                except Exception as e:
-                    logger.exception(
-                        "%r threw an exception on .errback(%r), ignoring...",
-                        observer,
-                        f,
-                        exc_info=e,
-                    )
-
-            if consumeErrors:
-                return None
-            else:
-                return f
-
-        deferred.addCallbacks(callback, errback)
-
-    @cancellable
-    def observe(self) -> "defer.Deferred[_T]":
-        """Observe the underlying deferred.
-
-        This returns a brand new deferred that is resolved when the underlying
-        deferred is resolved. Interacting with the returned deferred does not
-        effect the underlying deferred.
-        """
-        if not self._result:
-            assert isinstance(self._observers, list)
-            d: "defer.Deferred[_T]" = defer.Deferred(canceller=self._remove_observer)
-            self._observers.append(d)
-            return d
-        elif self._result[0]:
-            return defer.succeed(self._result[1])
-        else:
-            return defer.fail(self._result[1])
-
-    def observers(self) -> "Collection[defer.Deferred[_T]]":
-        return self._observers
-
-    def has_observers(self) -> bool:
-        """Returns True if there are any observers currently observing this
-        ObservableDeferred.
-        """
-        return bool(self._observers)
-
-    def has_called(self) -> bool:
-        return self._result is not None
-
-    def has_succeeded(self) -> bool:
-        return self._result is not None and self._result[0] is True
-
-    def get_result(self) -> _T | Failure:
-        if self._result is None:
-            raise ValueError(f"{self!r} has no result yet")
-        return self._result[1]
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._deferred, name)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        setattr(self._deferred, name, value)
-
-    def __repr__(self) -> str:
-        return "<ObservableDeferred object at %s, result=%r, _deferred=%r>" % (
-            id(self),
-            self._result,
-            self._deferred,
-        )
-
-    def _remove_observer(self, observer: "defer.Deferred[_T]") -> None:
-        """Removes an observer from the list of observers.
-
-        Used as a canceller for the observer deferreds, so that if an observer
-        is cancelled it is removed from the list of observers.
-        """
-        if self._result is not None:
-            # The underlying deferred has already resolved, so the observer has
-            # already been resolved. Nothing to do.
-            return
-
-        assert isinstance(self._observers, list)
-        try:
-            self._observers.remove(observer)
-        except ValueError:
-            # The observer was not in the list. This can happen if the underlying
-            # deferred resolves at around the same time as we try to remove the
-            # observer. In this case, it's possible that we tried to remove the
-            # observer just after it was added to the list, but before it was
-            # resolved and removed from the list by the callback/errback above.
-            pass
-
-
 T = TypeVar("T")
-
-
-async def concurrently_execute(
-    func: Callable[[T], Any],
-    args: Iterable[T],
-    limit: int,
-    delay_cancellation: bool = False,
-) -> None:
-    """Executes the function with each argument concurrently while limiting
-    the number of concurrent executions.
-
-    Args:
-        func: Function to execute, should return a deferred or coroutine.
-        args: List of arguments to pass to func, each invocation of func
-            gets a single argument.
-        limit: Maximum number of conccurent executions.
-        delay_cancellation: Whether to delay cancellation until after the invocations
-            have finished.
-
-    Returns:
-        None, when all function invocations have finished. The return values
-        from those functions are discarded.
-    """
-    it = iter(args)
-
-    async def _concurrently_execute_inner(value: T) -> None:
-        try:
-            while True:
-                await maybe_awaitable(func(value))
-                value = next(it)
-        except StopIteration:
-            pass
-
-    # We use `itertools.islice` to handle the case where the number of args is
-    # less than the limit, avoiding needlessly spawning unnecessary background
-    # tasks.
-    if delay_cancellation:
-        await yieldable_gather_results_delaying_cancellation(
-            _concurrently_execute_inner,
-            (value for value in itertools.islice(it, limit)),
-        )
-    else:
-        await yieldable_gather_results(
-            _concurrently_execute_inner,
-            (value for value in itertools.islice(it, limit)),
-        )
-
-
-P = ParamSpec("P")
 R = TypeVar("R")
-
-
-async def yieldable_gather_results(
-    func: Callable[Concatenate[T, P], Awaitable[R]],
-    iter: Iterable[T],
-    *args: P.args,
-    **kwargs: P.kwargs,
-) -> list[R]:
-    """Executes the function with each argument concurrently.
-
-    Args:
-        func: Function to execute that returns an awaitable
-        iter: An iterable that yields items that get passed as the first
-            argument to the function
-        *args: Arguments to be passed to each call to func
-        **kwargs: Keyword arguments to be passed to each call to func
-
-    Returns
-        A list containing the results of the function
-    """
-    async def _run(item: T) -> R:
-        return await func(item, *args, **kwargs)
-
-    try:
-        asyncio.get_running_loop()
-        results = await asyncio.gather(
-            *[_run(item) for item in iter],
-            return_exceptions=True,
-        )
-        for r in results:
-            if isinstance(r, BaseException):
-                raise r
-        return results  # type: ignore[return-value]
-    except RuntimeError:
-        # No asyncio loop — use Twisted fallback
-        try:
-            return await make_deferred_yieldable(
-                defer.gatherResults(
-                    [run_in_background(func, item, *args, **kwargs) for item in iter],
-                    consumeErrors=True,
-                )
-            )
-        except defer.FirstError as dfe:
-            assert isinstance(dfe.subFailure.value, BaseException)
-            raise dfe.subFailure.value from None
-
-
-async def yieldable_gather_results_delaying_cancellation(
-    func: Callable[Concatenate[T, P], Awaitable[R]],
-    iter: Iterable[T],
-    *args: P.args,
-    **kwargs: P.kwargs,
-) -> list[R]:
-    """Executes the function with each argument concurrently.
-    Cancellation is delayed until after all the results have been gathered.
-
-    See `yieldable_gather_results`.
-
-    Args:
-        func: Function to execute that returns an awaitable
-        iter: An iterable that yields items that get passed as the first
-            argument to the function
-        *args: Arguments to be passed to each call to func
-        **kwargs: Keyword arguments to be passed to each call to func
-
-    Returns
-        A list containing the results of the function
-    """
-    # Use asyncio.shield to delay cancellation
-    async def _run(item: T) -> R:
-        return await func(item, *args, **kwargs)
-
-    results = await asyncio.shield(
-        asyncio.gather(
-            *[_run(item) for item in iter],
-            return_exceptions=True,
-        )
-    )
-
-    for r in results:
-        if isinstance(r, BaseException):
-            raise r
-
-    return results  # type: ignore[return-value]
-
-
+P = ParamSpec("P")
 T1 = TypeVar("T1")
 T2 = TypeVar("T2")
 T3 = TypeVar("T3")
@@ -407,60 +115,62 @@ T5 = TypeVar("T5")
 T6 = TypeVar("T6")
 
 
-@overload
-def gather_results(
-    deferredList: tuple[()], consumeErrors: bool = ...
-) -> "defer.Deferred[tuple[()]]": ...
-
-
-@overload
-def gather_results(
-    deferredList: tuple["defer.Deferred[T1]"],
-    consumeErrors: bool = ...,
-) -> "defer.Deferred[tuple[T1]]": ...
-
-
-@overload
-def gather_results(
-    deferredList: tuple["defer.Deferred[T1]", "defer.Deferred[T2]"],
-    consumeErrors: bool = ...,
-) -> "defer.Deferred[tuple[T1, T2]]": ...
-
-
-@overload
-def gather_results(
-    deferredList: tuple[
-        "defer.Deferred[T1]", "defer.Deferred[T2]", "defer.Deferred[T3]"
-    ],
-    consumeErrors: bool = ...,
-) -> "defer.Deferred[tuple[T1, T2, T3]]": ...
-
-
-@overload
-def gather_results(
-    deferredList: tuple[
-        "defer.Deferred[T1]",
-        "defer.Deferred[T2]",
-        "defer.Deferred[T3]",
-        "defer.Deferred[T4]",
-    ],
-    consumeErrors: bool = ...,
-) -> "defer.Deferred[tuple[T1, T2, T3, T4]]": ...
-
-
-def gather_results(  # type: ignore[misc]
-    deferredList: tuple["defer.Deferred[T1]", ...],
+async def gather_results(
+    awaitableList: tuple[Any, ...],
     consumeErrors: bool = False,
-) -> "defer.Deferred[tuple[T1, ...]]":
-    """Combines a tuple of `Deferred`s into a single `Deferred`.
+) -> tuple[Any, ...]:
+    """Gather multiple awaitables into a single tuple of results.
 
-    Wraps `defer.gatherResults` to provide type annotations that support heterogenous
-    lists of `Deferred`s.
+    asyncio-native replacement for the old Deferred-based gather_results.
     """
-    # The `type: ignore[misc]` above suppresses
-    # "Overloaded function implementation cannot produce return type of signature 1/2/3"
-    deferred = defer.gatherResults(deferredList, consumeErrors=consumeErrors)
-    return deferred.addCallback(tuple)
+    results = await asyncio.gather(*awaitableList, return_exceptions=consumeErrors)
+    if not consumeErrors:
+        for r in results:
+            if isinstance(r, BaseException):
+                raise r
+    return tuple(results)
+
+
+async def yieldable_gather_results(
+    func: Callable[..., Awaitable[R]],
+    iter: Iterable[Any],
+    *args: Any,
+    **kwargs: Any,
+) -> list[R]:
+    """Execute func with each item concurrently using asyncio.gather."""
+    async def _run(item: Any) -> R:
+        return await func(item, *args, **kwargs)
+
+    results = await asyncio.gather(
+        *[_run(item) for item in iter],
+        return_exceptions=True,
+    )
+    for r in results:
+        if isinstance(r, BaseException):
+            raise r
+    return list(results)
+
+
+async def yieldable_gather_results_delaying_cancellation(
+    func: Callable[..., Awaitable[R]],
+    iter: Iterable[Any],
+    *args: Any,
+    **kwargs: Any,
+) -> list[R]:
+    """Like yieldable_gather_results but shielded from cancellation."""
+    async def _run(item: Any) -> R:
+        return await func(item, *args, **kwargs)
+
+    results = await asyncio.shield(
+        asyncio.gather(
+            *[_run(item) for item in iter],
+            return_exceptions=True,
+        )
+    )
+    for r in results:
+        if isinstance(r, BaseException):
+            raise r
+    return list(results)
 
 
 @overload
@@ -550,31 +260,12 @@ async def gather_optional_coroutines(
     overload above.
     """
 
-    # Use asyncio.gather if an event loop is running, otherwise fall back to
-    # Twisted's defer.gatherResults during transition
-    try:
-        asyncio.get_running_loop()
-        tasks = [
-            asyncio.ensure_future(coroutine)
-            for coroutine in coroutines
-            if coroutine is not None
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for r in results:
-            if isinstance(r, BaseException):
-                raise r
-    except RuntimeError:
-        # No asyncio loop — use Twisted
-        results = await make_deferred_yieldable(
-            defer.gatherResults(
-                [
-                    run_coroutine_in_background(coroutine)
-                    for coroutine in coroutines
-                    if coroutine is not None
-                ],
-                consumeErrors=True,
-            )
-        )
+    tasks = [coroutine for coroutine in coroutines if coroutine is not None]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for r in results:
+        if isinstance(r, BaseException):
+            raise r
 
     results_iter = iter(results)
     return tuple(
@@ -1013,3 +704,5 @@ Linearizer = NativeLinearizer  # type: ignore[misc]
 ReadWriteLock = NativeReadWriteLock  # type: ignore[misc]
 AwakenableSleeper = NativeAwakenableSleeper  # type: ignore[misc]
 DeferredEvent = NativeEvent  # type: ignore[misc]
+ObservableDeferred = ObservableFuture  # type: ignore[misc]
+concurrently_execute = native_concurrently_execute  # type: ignore[misc]
