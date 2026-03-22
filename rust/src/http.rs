@@ -40,17 +40,20 @@ fn read_io_body(body: &Bound<'_, PyAny>, chunk_size: usize) -> PyResult<Bytes> {
     }
 }
 
-/// Transform a Twisted `IRequest` to an [`http::Request`]
+/// Transform a Python request object to an [`http::Request`]
 ///
-/// It uses the following members of `IRequest`:
-///   - `content`, which is expected to be a file-like object with a `read` method
-///   - `uri`, which is expected to be a valid URI as `bytes`
-///   - `method`, which is expected to be a valid HTTP method as `bytes`
-///   - `requestHeaders`, which is expected to have a `getAllRawHeaders` method
+/// Works with any Python object that has the following attributes/methods:
+///   - `content`, a file-like object with a `read` method
+///   - `uri`, a valid URI as `bytes`
+///   - `method`, a valid HTTP method as `bytes`
+///   - `requestHeaders`, with a `getAllRawHeaders` method
+///
+/// Compatible with both the aiohttp SynapseRequest shim and legacy Twisted
+/// IRequest objects.
 ///
 /// # Errors
 ///
-/// Returns an error if the Python object doesn't properly implement `IRequest`
+/// Returns an error if the Python object doesn't implement the expected interface
 pub fn http_request_from_twisted(request: &Bound<'_, PyAny>) -> PyResult<Request<Bytes>> {
     let content = request.getattr("content")?;
     let body = read_io_body(&content, 4096)?;
@@ -94,18 +97,20 @@ pub fn http_request_from_twisted(request: &Bound<'_, PyAny>) -> PyResult<Request
     Ok(req)
 }
 
-/// Send an [`http::Response`] through a Twisted `IRequest`
+/// Send an [`http::Response`] through a Python request object
 ///
-/// It uses the following members of `IRequest`:
-///
-///  - `responseHeaders`, which is expected to have a `addRawHeader(bytes, bytes)` method
+/// Works with any Python object that has:
+///  - `responseHeaders`, with an `addRawHeader(str, bytes)` method
 ///  - `setResponseCode(int)` method
 ///  - `write(bytes)` method
 ///  - `finish()` method
 ///
-///  # Errors
+/// Compatible with both the aiohttp SynapseRequest shim and legacy Twisted
+/// IRequest objects.
 ///
-/// Returns an error if the Python object doesn't properly implement `IRequest`
+/// # Errors
+///
+/// Returns an error if the Python object doesn't implement the expected interface
 pub fn http_response_to_twisted<B>(
     request: &Bound<'_, PyAny>,
     response: Response<B>,

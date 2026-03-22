@@ -48,14 +48,24 @@ import signedjson.key
 import unpaddedbase64
 from typing_extensions import Concatenate, ParamSpec
 
+import asyncio
 import unittest as _stdlib_unittest
 
-from twisted.internet.defer import Deferred, ensureDeferred
-from twisted.internet.testing import MemoryReactor, MemoryReactorClock
-from twisted.python.failure import Failure
-from twisted.python.threadpool import ThreadPool
-from twisted.web.resource import Resource
-from twisted.web.server import Request
+try:
+    from twisted.internet.defer import Deferred, ensureDeferred
+    from twisted.internet.testing import MemoryReactor, MemoryReactorClock
+    from twisted.python.failure import Failure
+    from twisted.python.threadpool import ThreadPool
+except ImportError:
+    Deferred = asyncio.Future  # type: ignore[assignment,misc]
+    ensureDeferred = asyncio.ensure_future  # type: ignore[assignment]
+    MemoryReactor = object  # type: ignore[assignment,misc]
+    MemoryReactorClock = object  # type: ignore[assignment,misc]
+    Failure = Exception  # type: ignore[assignment,misc]
+    ThreadPool = object  # type: ignore[assignment,misc]
+
+from synapse.http.resource import Resource
+from synapse.http.aiohttp_shim import SynapseRequest as Request
 
 from synapse import events
 from synapse.api.constants import EventTypes

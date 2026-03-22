@@ -19,23 +19,13 @@
 #
 #
 
+import asyncio
 import logging
+import ssl
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Optional
 
-import attr
-try:
-    from txredisapi import (
-        ConnectionHandler,
-        RedisFactory,
-        SubscriberProtocol,
-        UnixConnectionHandler,
-    )
-except ImportError:
-    ConnectionHandler = object  # type: ignore[misc,assignment]
-    RedisFactory = object  # type: ignore[misc,assignment]
-    SubscriberProtocol = object  # type: ignore[misc,assignment]
-    UnixConnectionHandler = object  # type: ignore[misc,assignment]
+import redis.asyncio
 
 try:
     from zope.interface import implementer
@@ -45,15 +35,7 @@ except ImportError:
             return cls
         return decorator
 
-try:
-    from twisted.internet.interfaces import IAddress, IConnector
-    from twisted.python.failure import Failure
-except ImportError:
-    IAddress = Any  # type: ignore[assignment,misc]
-    IConnector = Any  # type: ignore[assignment,misc]
-    Failure = BaseException  # type: ignore[assignment,misc]
-
-from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
+from synapse.logging.context import PreserveLoggingContext
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
@@ -78,104 +60,66 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
-V = TypeVar("V")
-
-
-@attr.s
-class ConstantProperty(Generic[T, V]):
-    """A descriptor that returns the given constant, ignoring attempts to set
-    it.
-    """
-
-    constant: V = attr.ib()
-
-    def __get__(self, obj: T | None, objtype: type[T] | None = None) -> V:
-        return self.constant
-
-    def __set__(self, obj: T | None, value: V) -> None:
-        pass
-
 
 @implementer(IReplicationConnection)
-class RedisSubscriber(SubscriberProtocol):
-    """Connection to redis subscribed to replication stream.
+class RedisSubscriber:
+    """Async Redis subscriber for replication.
 
     This class fulfils two functions:
 
-    (a) it implements the twisted Protocol API, where it handles the SUBSCRIBEd redis
-    connection, parsing *incoming* messages into replication commands, and passing them
-    to `ReplicationCommandHandler`
+    (a) it manages a redis pub/sub subscription, parsing *incoming* messages into
+    replication commands, and passing them to `ReplicationCommandHandler`
 
     (b) it implements the IReplicationConnection API, where it sends *outgoing* commands
-    onto outbound_redis_connection.
-
-    Due to the vagaries of `txredisapi` we don't want to have a custom
-    constructor, so instead we expect the defined attributes below to be set
-    immediately after initialisation.
+    onto the outbound redis connection.
 
     Attributes:
-        server_name: The homeserver name of the Synapse instance that this connection
-            is associated with. This is used to label metrics and should be set to
-            `hs.hostname`.
+        server_name: The homeserver name of the Synapse instance.
+        hs: The HomeServer instance.
         synapse_handler: The command handler to handle incoming commands.
-        synapse_stream_prefix: The *redis* stream name to subscribe to and publish
-            from (not anything to do with Synapse replication streams).
-        synapse_outbound_redis_connection: The connection to redis to use to send
-            commands.
+        synapse_stream_prefix: The redis stream name prefix.
+        synapse_channel_names: Additional channel name suffixes.
+        synapse_outbound_redis_connection: The redis.asyncio.Redis connection for publishing.
     """
 
-    server_name: str
-    hs: "HomeServer"
-    synapse_handler: "ReplicationCommandHandler"
-    synapse_stream_prefix: str
-    synapse_channel_names: list[str]
-    synapse_outbound_redis_connection: ConnectionHandler
+    def __init__(
+        self,
+        hs: "HomeServer",
+        outbound_redis_connection: redis.asyncio.Redis,
+        channel_names: list[str],
+    ):
+        self.server_name = hs.hostname
+        self.hs = hs
+        self.synapse_handler: "ReplicationCommandHandler" = (
+            hs.get_replication_command_handler()
+        )
+        self.synapse_stream_prefix = hs.hostname
+        self.synapse_channel_names = channel_names
+        self.synapse_outbound_redis_connection = outbound_redis_connection
 
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
-
-        # a logcontext which we use for processing incoming commands. We declare it as a
-        # background process so that the CPU stats get reported to prometheus.
-        self._logging_context: BackgroundProcessLoggingContext | None = None
+        self._pubsub: Optional[redis.asyncio.client.PubSub] = None
+        self._listen_task: Optional[asyncio.Task] = None
+        self._logging_context: Optional[BackgroundProcessLoggingContext] = None
 
     def _get_logging_context(self) -> BackgroundProcessLoggingContext:
-        """
-        We lazily create the logging context so that `self.server_name` is set and
-        available. See `RedisDirectTcpReplicationClientFactory.buildProtocol` for more
-        details on why we set `self.server_name` after the fact instead of in the
-        constructor.
-        """
-        assert self.server_name is not None, (
-            "self.server_name must be set before using _get_logging_context()"
-        )
         if self._logging_context is None:
-            # a logcontext which we use for processing incoming commands. We declare it as a
-            # background process so that the CPU stats get reported to prometheus.
             with PreserveLoggingContext():
-                # thanks to `PreserveLoggingContext()`, the new logcontext is guaranteed to
-                # capture the sentinel context as its containing context and won't prevent
-                # GC of / unintentionally reactivate what would be the current context.
                 self._logging_context = BackgroundProcessLoggingContext(
                     name="replication_command_handler", server_name=self.server_name
                 )
         return self._logging_context
 
-    def connectionMade(self) -> None:
-        logger.info("Connected to redis")
-        super().connectionMade()
-        self.hs.run_as_background_process("subscribe-replication", self._send_subscribe)
+    async def start(self, pubsub: redis.asyncio.client.PubSub) -> None:
+        """Start the subscription and listen for messages."""
+        self._pubsub = pubsub
 
-    async def _send_subscribe(self) -> None:
-        # it's important to make sure that we only send the REPLICATE command once we
-        # have successfully subscribed to the stream - otherwise we might miss the
-        # POSITION response sent back by the other end.
         fully_qualified_stream_names = [
             f"{self.synapse_stream_prefix}/{stream_suffix}"
             for stream_suffix in self.synapse_channel_names
         ] + [self.synapse_stream_prefix]
+
         logger.info("Sending redis SUBSCRIBE for %r", fully_qualified_stream_names)
-        await make_deferred_yieldable(self.subscribe(fully_qualified_stream_names))
+        await self._pubsub.subscribe(*fully_qualified_stream_names)
 
         logger.info(
             "Successfully subscribed to redis stream, sending REPLICATE command"
@@ -185,18 +129,44 @@ class RedisSubscriber(SubscriberProtocol):
         logger.info("REPLICATE successfully sent")
 
         # We send out our positions when there is a new connection in case the
-        # other side missed updates. We do this for Redis connections as the
-        # otherside won't know we've connected and so won't issue a REPLICATE.
+        # other side missed updates.
         self.synapse_handler.send_positions_to_connection()
 
-    def messageReceived(self, pattern: str, channel: str, message: str) -> None:
-        """Received a message from redis."""
-        with PreserveLoggingContext(self._get_logging_context()):
-            self._parse_and_dispatch_message(message)
+        # Start the background listener
+        self._listen_task = asyncio.ensure_future(self._listen_loop())
+
+    async def _listen_loop(self) -> None:
+        """Background loop that reads messages from the pub/sub subscription."""
+        assert self._pubsub is not None
+        try:
+            async for message in self._pubsub.listen():
+                if message["type"] == "message":
+                    data = message["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8")
+                    with PreserveLoggingContext(self._get_logging_context()):
+                        self._parse_and_dispatch_message(data)
+        except redis.asyncio.ConnectionError:
+            logger.info("Lost connection to redis (subscriber)")
+        except asyncio.CancelledError:
+            logger.info("Redis subscriber listen loop cancelled")
+        except Exception:
+            logger.exception("Unexpected error in redis subscriber listen loop")
+        finally:
+            self._on_connection_lost()
+
+    def _on_connection_lost(self) -> None:
+        """Handle a lost connection."""
+        logger.info("Lost connection to redis")
+        self.synapse_handler.lost_connection(self)
+
+        # mark the logging context as finished
+        with PreserveLoggingContext():
+            with self._get_logging_context():
+                pass
 
     def _parse_and_dispatch_message(self, message: str) -> None:
         if message.strip() == "":
-            # Ignore blank lines
             return
 
         try:
@@ -208,8 +178,6 @@ class RedisSubscriber(SubscriberProtocol):
             )
             return
 
-        # We use "redis" as the name here as we don't have 1:1 connections to
-        # remote instances.
         tcp_inbound_commands_counter.labels(
             command=cmd.NAME,
             name="redis",
@@ -219,15 +187,7 @@ class RedisSubscriber(SubscriberProtocol):
         self.handle_command(cmd)
 
     def handle_command(self, cmd: Command) -> None:
-        """Handle a command we have received over the replication stream.
-
-        Delegates to `self.handler.on_<COMMAND>` (which can optionally return an
-        Awaitable).
-
-        Args:
-            cmd: received command
-        """
-
+        """Handle a command received over the replication stream."""
         cmd_func = getattr(self.synapse_handler, "on_%s" % (cmd.NAME,), None)
         if not cmd_func:
             logger.warning("Unhandled command: %r", cmd)
@@ -235,56 +195,28 @@ class RedisSubscriber(SubscriberProtocol):
 
         res = cmd_func(self, cmd)
 
-        # the handler might be a coroutine: fire it off as a background process
-        # if so.
-
         if isawaitable(res):
             self.hs.run_as_background_process(
                 "replication-" + cmd.get_logcontext_id(), lambda: res
             )
 
-    def connectionLost(self, reason: Failure) -> None:  # type: ignore[override]
-        logger.info("Lost connection to redis")
-        super().connectionLost(reason)
-        self.synapse_handler.lost_connection(self)
-
-        # mark the logging context as finished by triggering `__exit__()`
-        with PreserveLoggingContext():
-            with self._get_logging_context():
-                pass
-            # the sentinel context is now active, which may not be correct.
-            # PreserveLoggingContext() will restore the correct logging context.
-
     def send_command(self, cmd: Command) -> None:
-        """Send a command if connection has been established.
-
-        Args:
-            cmd: The command to send
-        """
+        """Send a command if connection has been established."""
         self.hs.run_as_background_process(
             "send-cmd",
             self._async_send_command,
             cmd,
-            # We originally started tracing background processes to avoid `There was no
-            # active span` errors but this change meant we started generating 15x the
-            # number of spans than before (this is one of the most heavily called
-            # instances of `run_as_background_process`).
-            #
-            # Since we don't log or tag a tracing span in the downstream
-            # code, we can safely disable this.
             bg_start_span=False,
         )
 
     async def _async_send_command(self, cmd: Command) -> None:
-        """Encode a replication command and send it over our outbound connection"""
+        """Encode a replication command and send it over our outbound connection."""
         string = "%s %s" % (cmd.NAME, cmd.to_line())
         if "\n" in string:
             raise Exception("Unexpected newline in command: %r", string)
 
         encoded_string = string.encode("utf-8")
 
-        # We use "redis" as the name here as we don't have 1:1 connections to
-        # remote instances.
         tcp_outbound_commands_counter.labels(
             command=cmd.NAME,
             name="redis",
@@ -293,235 +225,183 @@ class RedisSubscriber(SubscriberProtocol):
 
         channel_name = cmd.redis_channel_name(self.synapse_stream_prefix)
 
-        await make_deferred_yieldable(
-            self.synapse_outbound_redis_connection.publish(channel_name, encoded_string)
+        await self.synapse_outbound_redis_connection.publish(
+            channel_name, encoded_string
         )
 
+    async def stop(self) -> None:
+        """Stop the subscriber and clean up."""
+        if self._listen_task is not None:
+            self._listen_task.cancel()
+            try:
+                await self._listen_task
+            except asyncio.CancelledError:
+                pass
+        if self._pubsub is not None:
+            await self._pubsub.unsubscribe()
+            await self._pubsub.close()
 
-class SynapseRedisFactory(RedisFactory):
-    """A subclass of RedisFactory that periodically sends pings to ensure that
-    we detect dead connections.
+
+class RedisReplicationManager:
+    """Manages Redis connections for replication with automatic reconnection.
+
+    This replaces the old Twisted-based SynapseRedisFactory and
+    RedisDirectTcpReplicationClientFactory.
     """
 
-    # We want to *always* retry connecting, txredisapi will stop if there is a
-    # failure during certain operations, e.g. during AUTH.
-    continueTrying = cast(bool, ConstantProperty(True))
+    # Reconnection parameters
+    INITIAL_RETRY_DELAY = 1.0
+    MAX_RETRY_DELAY = 5.0
 
     def __init__(
         self,
         hs: "HomeServer",
-        uuid: str,
-        dbid: int | None,
-        poolsize: int,
-        isLazy: bool = False,
-        handler: type = ConnectionHandler,
-        charset: str = "utf-8",
-        password: str | None = None,
-        replyTimeout: int = 30,
-        convertNumbers: int | None = True,
+        outbound_redis_connection: redis.asyncio.Redis,
+        channel_names: list[str],
     ):
-        super().__init__(
-            uuid=uuid,
-            dbid=dbid,
-            poolsize=poolsize,
-            isLazy=isLazy,
-            handler=handler,
-            charset=charset,
-            password=password,
-            replyTimeout=replyTimeout,
-            convertNumbers=convertNumbers,
-        )
-
-        self.hs = hs  # nb must be called this for @wrap_as_background_process
+        self.hs = hs
         self.server_name = hs.hostname
+        self._outbound_redis_connection = outbound_redis_connection
+        self._channel_names = channel_names
+        self._subscriber: Optional[RedisSubscriber] = None
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._stopped = False
 
+        # Start periodic pings on the outbound connection
         hs.get_clock().looping_call(self._send_ping, Duration(seconds=30))
 
     @wrap_as_background_process("redis_ping")
     async def _send_ping(self) -> None:
-        for connection in self.pool:
+        try:
+            await self._outbound_redis_connection.ping()
+        except Exception:
+            logger.warning("Failed to send ping to redis connection")
+
+    async def start(self) -> None:
+        """Start the replication manager, connecting to Redis."""
+        await self._connect()
+
+    async def _connect(self) -> None:
+        """Create a subscriber and connect to Redis."""
+        retry_delay = self.INITIAL_RETRY_DELAY
+
+        while not self._stopped:
             try:
-                await make_deferred_yieldable(connection.ping())
+                subscriber = RedisSubscriber(
+                    self.hs,
+                    self._outbound_redis_connection,
+                    self._channel_names,
+                )
+
+                # Create a new Redis connection for the pub/sub subscriber
+                sub_connection = _create_redis_connection_from_config(self.hs)
+                pubsub = sub_connection.pubsub()
+
+                await subscriber.start(pubsub)
+                self._subscriber = subscriber
+                logger.info("Connected to redis for replication")
+
+                # Reset retry delay on successful connection
+                retry_delay = self.INITIAL_RETRY_DELAY
+
+                # Wait for the listen task to finish (which means we disconnected)
+                if subscriber._listen_task is not None:
+                    await subscriber._listen_task
+
+                logger.info("Redis subscriber disconnected, will reconnect")
+
+            except redis.asyncio.ConnectionError as e:
+                logger.info(
+                    "Connection to redis failed: %s, retrying in %.1fs",
+                    e,
+                    retry_delay,
+                )
             except Exception:
-                logger.warning("Failed to send ping to a redis connection")
+                logger.exception(
+                    "Unexpected error connecting to redis, retrying in %.1fs",
+                    retry_delay,
+                )
 
-    # ReconnectingClientFactory has some logging (if you enable `self.noisy`), but
-    # it's rubbish. We add our own here.
+            if self._stopped:
+                break
 
-    def startedConnecting(self, connector: IConnector) -> None:
-        logger.info(
-            "Connecting to redis server %s", format_address(connector.getDestination())
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, self.MAX_RETRY_DELAY)
+
+    async def stop(self) -> None:
+        """Stop the replication manager."""
+        self._stopped = True
+        if self._subscriber is not None:
+            await self._subscriber.stop()
+        if self._reconnect_task is not None:
+            self._reconnect_task.cancel()
+
+
+def _create_redis_connection_from_config(hs: "HomeServer") -> redis.asyncio.Redis:
+    """Create a redis.asyncio.Redis connection from the HomeServer config."""
+    rc = hs.config.redis
+
+    ssl_context: Optional[ssl.SSLContext] = None
+    if rc.redis_use_tls:
+        ctx_factory = ClientContextFactory(rc)
+        ssl_context = ctx_factory.getContext()
+
+    if rc.redis_path is not None:
+        return redis.asyncio.Redis(
+            unix_socket_path=rc.redis_path,
+            password=rc.redis_password,
+            db=rc.redis_dbid or 0,
         )
-        super().startedConnecting(connector)
-
-    def clientConnectionFailed(self, connector: IConnector, reason: Failure) -> None:
-        logger.info(
-            "Connection to redis server %s failed: %s",
-            format_address(connector.getDestination()),
-            reason.value,
-        )
-        super().clientConnectionFailed(connector, reason)
-
-    def clientConnectionLost(self, connector: IConnector, reason: Failure) -> None:
-        logger.info(
-            "Connection to redis server %s lost: %s",
-            format_address(connector.getDestination()),
-            reason.value,
-        )
-        super().clientConnectionLost(connector, reason)
-
-
-def format_address(address: Any) -> str:
-    if hasattr(address, 'host') and hasattr(address, 'port'):
-        return "%s:%i" % (address.host, address.port)
-    return str(address)
-
-
-class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
-    """This is a reconnecting factory that connects to redis and immediately
-    subscribes to some streams.
-
-    Args:
-        hs
-        outbound_redis_connection: A connection to redis that will be used to
-            send outbound commands (this is separate to the redis connection
-            used to subscribe).
-        channel_names: A list of channel names to append to the base channel name
-            to additionally subscribe to.
-            e.g. if ['ABC', 'DEF'] is specified then we'll listen to:
-            example.com; example.com/ABC; and example.com/DEF.
-    """
-
-    maxDelay = 5
-    protocol = RedisSubscriber
-
-    def __init__(
-        self,
-        hs: "HomeServer",
-        outbound_redis_connection: ConnectionHandler,
-        channel_names: list[str],
-    ):
-        super().__init__(
-            hs,
-            uuid="subscriber",
-            dbid=None,
-            poolsize=1,
-            replyTimeout=30,
-            password=hs.config.redis.redis_password,
+    else:
+        return redis.asyncio.Redis(
+            host=rc.redis_host,
+            port=rc.redis_port,
+            password=rc.redis_password,
+            db=rc.redis_dbid or 0,
+            ssl=ssl_context is not None,
+            ssl_ca_certs=rc.redis_ca_file if rc.redis_use_tls else None,
+            ssl_ca_data=None,
+            ssl_certfile=rc.redis_certificate if rc.redis_use_tls else None,
+            ssl_keyfile=rc.redis_private_key if rc.redis_use_tls else None,
         )
 
-        self.server_name = hs.hostname
-        self.hs = hs
-        self.synapse_handler = hs.get_replication_command_handler()
-        self.synapse_stream_prefix = hs.hostname
-        self.synapse_channel_names = channel_names
 
-        self.synapse_outbound_redis_connection = outbound_redis_connection
-
-    def buildProtocol(self, addr: IAddress) -> RedisSubscriber:
-        p = super().buildProtocol(addr)
-        p = cast(RedisSubscriber, p)
-
-        # We do this here rather than add to the constructor of `RedisSubcriber`
-        # as to do so would involve overriding `buildProtocol` entirely, however
-        # the base method does some other things than just instantiating the
-        # protocol.
-        p.server_name = self.server_name
-        p.hs = self.hs
-        p.synapse_handler = self.synapse_handler
-        p.synapse_outbound_redis_connection = self.synapse_outbound_redis_connection
-        p.synapse_stream_prefix = self.synapse_stream_prefix
-        p.synapse_channel_names = self.synapse_channel_names
-
-        return p
-
-
-def lazyConnection(
+def create_redis_connection(
     hs: "HomeServer",
     host: str = "localhost",
     port: int = 6379,
-    dbid: int | None = None,
-    reconnect: bool = True,
-    password: str | None = None,
-    replyTimeout: int = 30,
-) -> ConnectionHandler:
-    """Creates a connection to Redis that is lazily set up and reconnects if the
-    connections is lost.
-    """
+    password: Optional[str] = None,
+    dbid: Optional[int] = None,
+) -> redis.asyncio.Redis:
+    """Create a redis.asyncio.Redis connection for outbound commands (publish, ping, etc.)."""
+    rc = hs.config.redis
 
-    uuid = "%s:%d" % (host, port)
-    factory = SynapseRedisFactory(
-        hs,
-        uuid=uuid,
-        dbid=dbid,
-        poolsize=1,
-        isLazy=True,
-        handler=ConnectionHandler,
+    ssl_context: Optional[ssl.SSLContext] = None
+    if rc.redis_use_tls:
+        ctx_factory = ClientContextFactory(rc)
+        ssl_context = ctx_factory.getContext()
+
+    return redis.asyncio.Redis(
+        host=host,
+        port=port,
         password=password,
-        replyTimeout=replyTimeout,
+        db=dbid or 0,
+        ssl=ssl_context is not None,
+        ssl_ca_certs=rc.redis_ca_file if rc.redis_use_tls else None,
+        ssl_certfile=rc.redis_certificate if rc.redis_use_tls else None,
+        ssl_keyfile=rc.redis_private_key if rc.redis_use_tls else None,
     )
-    factory.continueTrying = reconnect
-
-    reactor = hs.get_reactor()
-
-    if hs.config.redis.redis_use_tls:
-        ssl_context_factory = ClientContextFactory(hs.config.redis)
-        reactor.connectSSL(
-            host,
-            port,
-            factory,
-            ssl_context_factory,
-            timeout=30,
-            bindAddress=None,
-        )
-    else:
-        reactor.connectTCP(
-            host,
-            port,
-            factory,
-            timeout=30,
-            bindAddress=None,
-        )
-
-    return factory.handler
 
 
-def lazyUnixConnection(
+def create_redis_unix_connection(
     hs: "HomeServer",
     path: str = "/tmp/redis.sock",
-    dbid: int | None = None,
-    reconnect: bool = True,
-    password: str | None = None,
-    replyTimeout: int = 30,
-) -> ConnectionHandler:
-    """Creates a connection to Redis that is lazily set up and reconnects if the
-    connection is lost.
-
-    Returns:
-        A subclass of ConnectionHandler, which is a UnixConnectionHandler in this case.
-    """
-
-    uuid = path
-
-    factory = SynapseRedisFactory(
-        hs,
-        uuid=uuid,
-        dbid=dbid,
-        poolsize=1,
-        isLazy=True,
-        handler=UnixConnectionHandler,
+    password: Optional[str] = None,
+    dbid: Optional[int] = None,
+) -> redis.asyncio.Redis:
+    """Create a redis.asyncio.Redis connection over a Unix socket."""
+    return redis.asyncio.Redis(
+        unix_socket_path=path,
         password=password,
-        replyTimeout=replyTimeout,
+        db=dbid or 0,
     )
-    factory.continueTrying = reconnect
-
-    reactor = hs.get_reactor()
-
-    reactor.connectUNIX(
-        path,
-        factory,
-        timeout=30,
-        checkPID=False,
-    )
-
-    return factory.handler

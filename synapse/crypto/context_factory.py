@@ -26,7 +26,10 @@ from service_identity.pyopenssl import verify_hostname, verify_ip_address
 try:
     from zope.interface import implementer
 except ImportError:
-    pass
+    def implementer(*args, **kwargs):  # type: ignore[no-redef]
+        def decorator(cls):
+            return cls
+        return decorator
 
 from OpenSSL import SSL, crypto
 _TWISTED_AVAILABLE = False
@@ -77,6 +80,41 @@ except ImportError:
 
     class Failure(BaseException):  # type: ignore[no-redef]
         pass
+
+    try:
+        from zope.interface import Interface as _Iface
+        class IPolicyForHTTPS(_Iface):  # type: ignore[no-redef]
+            pass
+        class IOpenSSLClientConnectionCreator(_Iface):  # type: ignore[no-redef]
+            pass
+    except ImportError:
+        class IPolicyForHTTPS:  # type: ignore[no-redef]
+            pass
+        class IOpenSSLClientConnectionCreator:  # type: ignore[no-redef]
+            pass
+
+    class TLSMemoryBIOProtocol:  # type: ignore[no-redef]
+        pass
+
+    class CertificateOptions:  # type: ignore[no-redef]
+        """Stub for twisted.internet.ssl.CertificateOptions.
+
+        Uses pyOpenSSL directly (which is a synapse dependency independent of
+        Twisted) to create a TLS context.
+        """
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self._ctx = SSL.Context(SSL.SSLv23_METHOD)
+            # Apply some sensible defaults
+            self._ctx.set_options(
+                SSL.OP_NO_SSLv2 | SSL.OP_NO_SSLv3
+            )
+        def getContext(self) -> SSL.Context:
+            return self._ctx
+
+    def platformTrust() -> None:  # type: ignore[no-redef]
+        pass
+
+    _TWISTED_AVAILABLE = False
 
 from synapse.config.homeserver import HomeServerConfig
 

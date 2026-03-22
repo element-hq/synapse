@@ -111,7 +111,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-matrix-synapse-ldap3 = ["matrix-synapse-ldap3>=0.1"]
+# matrix-synapse-ldap3 is disabled — it depends on Twisted.
+# Use an asyncio-compatible LDAP auth provider instead.
+# matrix-synapse-ldap3 = ["matrix-synapse-ldap3>=0.1"]
 postgres = [
     "psycopg2>=2.8;platform_python_implementation != 'PyPy'",
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
@@ -144,7 +146,7 @@ opentracing = [
 jwt = ["authlib"]
 # hiredis is not a *strict* dependency, but it makes things much faster.
 # (if it is not installed, we fall back to slow code.)
-redis = ["txredisapi>=1.4.7", "hiredis>=0.3"]
+redis = ["redis>=4.0.0", "hiredis>=0.3"]
 # Required to use experimental `caches.track_memory_usage` config option.
 cache-memory = ["pympler>=1.0"]
 # If this is updated, don't forget to update the equivalent lines in
@@ -160,8 +162,8 @@ test = ["parameterized>=0.9.0", "idna>=3.3"]
 # NB: the strings in this list must be *package* names, not extra names.
 # Some of our extra names _are_ package names, which can lead to great confusion.
 all = [
-    # matrix-synapse-ldap3
-    "matrix-synapse-ldap3>=0.1",
+    # matrix-synapse-ldap3 — disabled (depends on Twisted)
+    # "matrix-synapse-ldap3>=0.1",
     # postgres
     "psycopg2>=2.8;platform_python_implementation != 'PyPy'",
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
@@ -177,7 +179,7 @@ all = [
     # opentracing
     "jaeger-client>=4.2.0", "opentracing>=2.2.0",
     # redis
-    "txredisapi>=1.4.7", "hiredis>=0.3",
+    "redis>=4.0.0", "hiredis>=0.3",
     # cache-memory
     # 1.0 added support for python 3.10, our current minimum supported python version
     "pympler>=1.0",

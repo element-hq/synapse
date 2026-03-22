@@ -20,40 +20,17 @@
 import logging
 import os
 
-try:
-    import twisted.logger
-except ImportError:
-    pass
-
 from synapse.logging.context import LoggingContextFilter
 from synapse.synapse_rust import reset_logging_config
 
 
-class ToTwistedHandler(logging.Handler):
-    """logging handler which sends the logs to the twisted log"""
-
-    tx_log = twisted.logger.Logger()
-
-    def emit(self, record: logging.LogRecord) -> None:
-        log_entry = self.format(record)
-        log_level = record.levelname.lower().replace("warning", "warn")
-        self.tx_log.emit(
-            twisted.logger.LogLevel.levelWithName(log_level), "{entry}", entry=log_entry
-        )
-
-
 def setup_logging() -> None:
-    """Configure the python logging appropriately for the tests.
-
-    (Logs will end up in _trial_temp.)
-    """
+    """Configure the python logging appropriately for the tests."""
     root_logger = logging.getLogger()
 
-    # We exclude `%(asctime)s` from this format because the Twisted logger adds its own
-    # timestamp
     log_format = "%(name)s - %(lineno)d - %(levelname)s - %(request)s - %(message)s"
 
-    handler = ToTwistedHandler()
+    handler = logging.StreamHandler()
     formatter = logging.Formatter(log_format)
     handler.setFormatter(formatter)
     handler.addFilter(LoggingContextFilter())

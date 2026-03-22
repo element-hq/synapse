@@ -96,8 +96,8 @@ impl PyTokioRuntime {
     }
 }
 
-/// Get a handle to the Tokio runtime stored on the reactor instance, or create
-/// a new one.
+/// Get a handle to the Tokio runtime stored on the reactor/event loop, or
+/// create a new one.
 fn runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRuntime>> {
     if !reactor.hasattr(TOKIO_RUNTIME_ATTR)? {
         install_runtime(reactor)?;
@@ -106,19 +106,18 @@ fn runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRuntime>
     get_runtime(reactor)
 }
 
-/// Install a new Tokio runtime on the reactor instance.
+/// Install a new Tokio runtime on the reactor/event loop instance.
 fn install_runtime(reactor: &Bound<PyAny>) -> PyResult<()> {
     let py = reactor.py();
     let runtime = PyTokioRuntime { runtime: None };
     let runtime = runtime.into_pyobject(py)?;
 
-    // Attach the runtime to the reactor, starting it when the reactor is
-    // running, stopping it when the reactor is shutting down
-    reactor.call_method1("callWhenRunning", (runtime.getattr("start")?,))?;
-    reactor.call_method1(
-        "addSystemEventTrigger",
-        ("after", "shutdown", runtime.getattr("shutdown")?),
-    )?;
+    // Start the Tokio runtime immediately if we're using asyncio
+    // (no callWhenRunning needed — the asyncio loop is already running
+    // by the time Python code calls into Rust).
+    runtime.borrow_mut().start()?;
+
+    // Store the runtime on the reactor/loop object for later access.
     reactor.setattr(TOKIO_RUNTIME_ATTR, runtime)?;
 
     Ok(())
@@ -126,20 +125,17 @@ fn install_runtime(reactor: &Bound<PyAny>) -> PyResult<()> {
 
 /// Get a reference to a Tokio runtime handle stored on the reactor instance.
 fn get_runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRuntime>> {
-    // This will raise if `TOKIO_RUNTIME_ATTR` is not set or if it is
-    // not a `Runtime`. Careful that this could happen if the user sets it
-    // manually, or if multiple versions of `pyo3-twisted` are used!
     let runtime: Bound<PyTokioRuntime> = reactor.getattr(TOKIO_RUNTIME_ATTR)?.extract()?;
     Ok(runtime.borrow())
 }
 
-/// A reference to the `twisted.internet.defer` module.
-static DEFER: OnceCell<Py<PyAny>> = OnceCell::new();
+/// A reference to the `asyncio` module.
+static ASYNCIO: OnceCell<Py<PyAny>> = OnceCell::new();
 
-/// Access to the `twisted.internet.defer` module.
-fn defer(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
-    Ok(DEFER
-        .get_or_try_init(|| py.import("twisted.internet.defer").map(Into::into))?
+/// Access the `asyncio` module.
+fn asyncio(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    Ok(ASYNCIO
+        .get_or_try_init(|| py.import("asyncio").map(Into::into))?
         .bind(py))
 }
 
@@ -148,8 +144,8 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     let child_module: Bound<'_, PyModule> = PyModule::new(py, "http_client")?;
     child_module.add_class::<HttpClient>()?;
 
-    // Make sure we fail early if we can't load some modules
-    defer(py)?;
+    // Make sure we fail early if we can't load the asyncio module
+    asyncio(py)?;
 
     m.add_submodule(&child_module)?;
 
@@ -230,7 +226,7 @@ impl HttpClient {
         builder: RequestBuilder,
         response_limit: usize,
     ) -> PyResult<Bound<'a, PyAny>> {
-        create_deferred(py, self.reactor.bind(py), async move {
+        create_future(py, self.reactor.bind(py), async move {
             let response = builder.send().await.context("sending request")?;
 
             let status = response.status();
@@ -263,11 +259,12 @@ impl HttpClient {
     }
 }
 
-/// Creates a twisted deferred from the given future, spawning the task on the
-/// tokio runtime.
+/// Creates an asyncio Future from the given Rust future, spawning the task on
+/// the Tokio runtime.
 ///
-/// Does not handle deferred cancellation or contextvars.
-fn create_deferred<'py, F, O>(
+/// The result is delivered back to the asyncio event loop via
+/// `loop.call_soon_threadsafe`.
+fn create_future<'py, F, O>(
     py: Python<'py>,
     reactor: &Bound<'py, PyAny>,
     fut: F,
@@ -276,16 +273,21 @@ where
     F: Future<Output = PyResult<O>> + Send + 'static,
     for<'a> O: IntoPyObject<'a> + Send + 'static,
 {
-    let deferred = defer(py)?.call_method0("Deferred")?;
-    let deferred_callback = deferred.getattr("callback")?.unbind();
-    let deferred_errback = deferred.getattr("errback")?.unbind();
+    // Get the running asyncio event loop
+    let asyncio_mod = asyncio(py)?;
+    let loop_obj = asyncio_mod.call_method0("get_event_loop")?;
+
+    // Create an asyncio.Future on the current event loop
+    let future = loop_obj.call_method0("create_future")?;
+    let future_set_result = future.getattr("set_result")?.unbind();
+    let future_set_exception = future.getattr("set_exception")?.unbind();
 
     let rt = runtime(reactor)?;
     let handle = rt.handle()?;
     let task = handle.spawn(fut);
 
-    // Unbind the reactor so that we can pass it to the task
-    let reactor = reactor.clone().unbind();
+    // Unbind the loop so we can pass it to the async task
+    let loop_ref = loop_obj.clone().unbind();
     handle.spawn(async move {
         let res = task.await;
 
@@ -299,35 +301,37 @@ where
                 },
             };
 
-            // Re-bind the reactor
-            let reactor = reactor.bind(py);
+            // Re-bind the loop
+            let loop_obj = loop_ref.bind(py);
 
-            // Send the result to the deferred, via `.callback(..)` or `.errback(..)`
+            // Deliver the result to the asyncio Future via
+            // loop.call_soon_threadsafe(future.set_result, value) or
+            // loop.call_soon_threadsafe(future.set_exception, err)
             match res {
                 Ok(obj) => {
-                    reactor
-                        .call_method("callFromThread", (deferred_callback, obj), None)
-                        .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
+                    loop_obj
+                        .call_method("call_soon_threadsafe", (future_set_result, obj), None)
+                        .expect("call_soon_threadsafe should not fail");
                 }
                 Err(err) => {
-                    reactor
-                        .call_method("callFromThread", (deferred_errback, err), None)
-                        .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
+                    loop_obj
+                        .call_method("call_soon_threadsafe", (future_set_exception, err), None)
+                        .expect("call_soon_threadsafe should not fail");
                 }
             }
         });
     });
 
-    // Make the deferred follow the Synapse logcontext rules
-    make_deferred_yieldable(py, &deferred)
+    // Wrap the future with make_deferred_yieldable for logcontext handling
+    make_awaitable_with_logcontext(py, &future)
 }
 
 static MAKE_DEFERRED_YIELDABLE: OnceLock<pyo3::Py<pyo3::PyAny>> = OnceLock::new();
 
-/// Given a deferred, make it follow the Synapse logcontext rules
-fn make_deferred_yieldable<'py>(
+/// Given an awaitable, wrap it with Synapse's logcontext handling
+fn make_awaitable_with_logcontext<'py>(
     py: Python<'py>,
-    deferred: &Bound<'py, PyAny>,
+    awaitable: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let make_deferred_yieldable = MAKE_DEFERRED_YIELDABLE.get_or_init(|| {
         let sys = PyModule::import(py, "synapse.logging.context").unwrap();
@@ -336,7 +340,7 @@ fn make_deferred_yieldable<'py>(
     });
 
     make_deferred_yieldable
-        .call1(py, (deferred,))?
+        .call1(py, (awaitable,))?
         .extract(py)
         .map_err(Into::into)
 }

@@ -41,7 +41,21 @@ try:
     from twisted.web.http_headers import Headers
     from twisted.web.iweb import IResponse
 except ImportError:
-    pass
+    Failure = Exception  # type: ignore[assignment,misc]
+
+    class ResponseDone(Exception):  # type: ignore[no-redef]
+        pass
+
+    # HTTP status phrases
+    RESPONSES = {200: b"OK", 302: b"Found", 400: b"Bad Request", 401: b"Unauthorized", 403: b"Forbidden", 404: b"Not Found", 500: b"Internal Server Error"}  # type: ignore[assignment]
+    Headers = dict  # type: ignore[assignment,misc]
+
+    try:
+        from zope.interface import Interface
+        class IResponse(Interface):  # type: ignore[no-redef]
+            pass
+    except ImportError:
+        IResponse = object  # type: ignore[assignment,misc]
 
 from synapse.types import JsonSerializable
 

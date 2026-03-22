@@ -46,7 +46,6 @@ from synapse.replication.tcp.commands import (
     UserIpCommand,
     UserSyncCommand,
 )
-from synapse.replication.tcp.context import ClientContextFactory
 from synapse.replication.tcp.protocol import IReplicationConnection
 from synapse.replication.tcp.streams import (
     STREAMS_MAP,
@@ -246,8 +245,8 @@ class ReplicationCommandHandler:
         # how batching works.
         self._pending_batches: dict[str, list[Any]] = {}
 
-        # The factory used to create connections.
-        self._factory: ReconnectingClientFactory | None = None
+        # The redis replication manager (replaces old Twisted factory).
+        self._redis_manager: Any = None
 
         # The currently connected connections. (The list of places we need to send
         # outgoing replication commands to.)
@@ -332,7 +331,7 @@ class ReplicationCommandHandler:
             to new channels.
         """
 
-        if self._factory is not None:
+        if self._redis_manager is not None:
             # We don't allow subscribing after the fact to avoid the chance
             # of missing an important message because we didn't subscribe in time.
             raise RuntimeError(
@@ -384,7 +383,7 @@ class ReplicationCommandHandler:
 
     def start_replication(self, hs: "HomeServer") -> None:
         """Helper method to start replication."""
-        from synapse.replication.tcp.redis import RedisDirectTcpReplicationClientFactory
+        from synapse.replication.tcp.redis import RedisReplicationManager
 
         # First let's ensure that we have a ReplicationStreamer started.
         hs.get_replication_streamer()
@@ -396,41 +395,18 @@ class ReplicationCommandHandler:
         # First create the connection for sending commands.
         outbound_redis_connection = hs.get_outbound_redis_connection()
 
-        # Now create the factory/connection for the subscription stream.
-        self._factory = RedisDirectTcpReplicationClientFactory(
+        # Now create the manager which handles subscription and reconnection.
+        self._redis_manager = RedisReplicationManager(
             hs,
             outbound_redis_connection,
             channel_names=self._channels_to_subscribe_to,
         )
 
-        reactor = hs.get_reactor()
-        redis_config = hs.config.redis
-        if redis_config.redis_path is not None:
-            reactor.connectUNIX(
-                redis_config.redis_path,
-                self._factory,
-                timeout=30,
-                checkPID=False,
-            )
-
-        elif hs.config.redis.redis_use_tls:
-            ssl_context_factory = ClientContextFactory(hs.config.redis)
-            reactor.connectSSL(
-                redis_config.redis_host,
-                redis_config.redis_port,
-                self._factory,
-                ssl_context_factory,
-                timeout=30,
-                bindAddress=None,
-            )
-        else:
-            reactor.connectTCP(
-                redis_config.redis_host,
-                redis_config.redis_port,
-                self._factory,
-                timeout=30,
-                bindAddress=None,
-            )
+        # Start the manager as a background process
+        hs.run_as_background_process(
+            "redis-replication-manager",
+            self._redis_manager.start,
+        )
 
     def get_streams(self) -> dict[str, Stream]:
         """Get a map from stream name to all streams."""
@@ -776,8 +752,7 @@ class ReplicationCommandHandler:
         # on reconnection if something fails after this point and we drop the
         # connection. Unfortunately, we don't really have a better definition of
         # "fully established" than the connection being established.
-        if self._factory:
-            self._factory.resetDelay()
+        # No need to reset delay - RedisReplicationManager handles reconnection internally
 
         # Tell the other end if we have any users currently syncing.
         currently_syncing = (

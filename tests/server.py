@@ -49,43 +49,52 @@ import attr
 from incremental import Version
 from typing_extensions import ParamSpec
 try:
-    from zope.interface import implementer
+    from zope.interface import Interface, implementer
 except ImportError:
-    pass
+    class Interface:  # type: ignore[no-redef]
+        pass
+    def implementer(*args: Any, **kwargs: Any) -> Any:  # type: ignore[no-redef]
+        def decorator(cls: Any) -> Any:
+            return cls
+        return decorator
 
+# Provide Twisted interfaces or stubs for test class decorators
 try:
-    import twisted
-    from twisted.enterprise import adbapi
-    from twisted.internet import address, defer, tcp, threads, udp
-    from twisted.internet._resolver import SimpleResolverComplexifier
-    from twisted.internet.address import IPv4Address, IPv6Address
-    from twisted.internet.defer import Deferred, fail, maybeDeferred, succeed
-    from twisted.internet.error import DNSLookupError
     from twisted.internet.interfaces import (
-        IAddress,
-        IConnector,
         IConsumer,
-        IHostnameResolver,
-        IListeningPort,
-        IProducer,
-        IProtocol,
-        IPullProducer,
         IPushProducer,
-        IReactorPluggableNameResolver,
-        IReactorTime,
-        IResolverSimple,
         ITCPTransport,
         ITransport,
     )
-    from twisted.internet.protocol import ClientFactory, DatagramProtocol, Factory
-    from twisted.internet.testing import AccumulatingProtocol, MemoryReactorClock
-    from twisted.python import threadpool
-    from twisted.python.failure import Failure
-    from twisted.web.http_headers import Headers
-    from twisted.web.resource import IResource
-    from twisted.web.server import Request, Site
 except ImportError:
-    pass
+    class ITransport(Interface):  # type: ignore[no-redef]
+        pass
+    class IPushProducer(Interface):  # type: ignore[no-redef]
+        pass
+    class IConsumer(Interface):  # type: ignore[no-redef]
+        pass
+    class ITCPTransport(Interface):  # type: ignore[no-redef]
+        pass
+
+from synapse.http.aiohttp_shim import SynapseRequest as Request
+from synapse.http.resource import Resource
+
+# Twisted imports — optional, with asyncio fallbacks
+try:
+    from twisted.internet.testing import MemoryReactorClock
+    from twisted.internet.interfaces import IReactorPluggableNameResolver
+    from twisted.web.server import Site
+    _HAS_TWISTED = True
+except ImportError:
+    MemoryReactorClock = object  # type: ignore[assignment,misc]
+    IReactorPluggableNameResolver = object  # type: ignore[assignment,misc]
+    Site = object  # type: ignore[assignment,misc]
+    _HAS_TWISTED = False
+
+# These are used as type annotations or in a few test utilities
+IResource = Any
+Failure = Exception  # type: ignore[assignment,misc]
+Headers = Any  # type: ignore[assignment,misc]
 
 from synapse.api.constants import MAX_REQUEST_SIZE
 from synapse.config.database import DatabaseConnectionConfig
@@ -546,170 +555,43 @@ def make_request(
 
 # ISynapseReactor implies IReactorPluggableNameResolver, but explicitly
 # marking this as an implementer of the latter seems to keep mypy-zope happier.
-@implementer(IReactorPluggableNameResolver)
-class ThreadedMemoryReactorClock(MemoryReactorClock):
-    """
-    A MemoryReactorClock that supports callFromThread.
+class ThreadedMemoryReactorClock:
+    """A minimal fake reactor for tests.
+
+    Provides the subset of reactor methods that Synapse tests need:
+    ``advance()``, ``callFromThread()``, ``getThreadPool()``, ``run()``.
+
+    This replaces the Twisted ``MemoryReactorClock`` with a pure-asyncio
+    implementation. Time is NOT managed here — use ``NativeClock`` for
+    fake-time control. This class exists only because some code expects
+    a "reactor" object.
     """
 
     def __init__(self) -> None:
-        self.threadpool = ThreadPool(self)
+        from concurrent.futures import ThreadPoolExecutor
 
-        self._tcp_callbacks: dict[tuple[str, int], Callable] = {}
-        self._udp: list[udp.Port] = []
+        self._thread_callbacks: deque[Callable[..., Any]] = deque()
         self.lookups: dict[str, str] = {}
-        self._thread_callbacks: deque[Callable[..., R]] = deque()
+        self._executor = ThreadPoolExecutor(max_workers=4)
+        self.triggers: dict[Any, Any] = {}
 
-        lookups = self.lookups
+        # Provide a threadpool attribute that tests/unittest.py expects
+        self.threadpool = _FakeThreadPool()
 
-        @implementer(IResolverSimple)
-        class FakeResolver:
-            def getHostByName(
-                self, name: str, timeout: Sequence[int] | None = None
-            ) -> "Deferred[str]":
-                if name not in lookups:
-                    return fail(DNSLookupError("OH NO: unknown %s" % (name,)))
-                return succeed(lookups[name])
-
-        # In order for the TLS protocol tests to work, modify _get_default_clock
-        # on newer Twisted versions to use the test reactor's clock.
-        #
-        # This is *super* dirty since it is never undone and relies on the next
-        # test to overwrite it.
-        if twisted.version > Version("Twisted", 23, 8, 0):
-            try:
-                from twisted.protocols import tls
-            except ImportError:
-                pass
-
-            tls._get_default_clock = lambda: self
-
-        super().__init__()
-
-        # Override the default name resolver with our fake resolver. This must
-        # happen after `super().__init__()` so that the base class doesn't
-        # overwrite it again.
-        self.nameResolver = SimpleResolverComplexifier(FakeResolver())
+    def seconds(self) -> float:
+        """Return the current (fake) time. Used by IReactorTime compatibility."""
+        return time.time()
 
     def run(self) -> None:
-        """
-        Override the call from `MemoryReactorClock` to add an additional step that
-        cleans up any `whenRunningHooks` that have been called.
-        This is necessary for a clean shutdown to occur as these hooks can hold
-        references to the `SynapseHomeServer`.
-        """
-        super().run()
-
-        # `MemoryReactorClock` never clears the hooks that have already been called.
-        # So manually clear the hooks here after they have been run.
-        self.whenRunningHooks.clear()
-
-    def installNameResolver(self, resolver: IHostnameResolver) -> IHostnameResolver:
-        raise NotImplementedError()
-
-    def listenUDP(
-        self,
-        port: int,
-        protocol: DatagramProtocol,
-        interface: str = "",
-        maxPacketSize: int = 8196,
-    ) -> udp.Port:
-        p = udp.Port(port, protocol, interface, maxPacketSize, self)
-        p.startListening()
-        self._udp.append(p)
-        return p
-
-    def callFromThread(
-        self, callable: Callable[..., Any], *args: object, **kwargs: object
-    ) -> None:
-        """
-        Make the callback fire in the next reactor iteration.
-        """
-        cb = lambda: callable(*args, **kwargs)
-        # it's not safe to call callLater() here, so we append the callback to a
-        # separate queue.
-        self._thread_callbacks.append(cb)
-
-    def callInThread(
-        self, callable: Callable[..., Any], *args: object, **kwargs: object
-    ) -> None:
-        raise NotImplementedError()
-
-    def suggestThreadPoolSize(self, size: int) -> None:
-        raise NotImplementedError()
-
-    def getThreadPool(self) -> "threadpool.ThreadPool":
-        # Cast to match super-class.
-        return cast(threadpool.ThreadPool, self.threadpool)
-
-    def add_tcp_client_callback(
-        self, host: str, port: int, callback: Callable[[], None]
-    ) -> None:
-        """Add a callback that will be invoked when we receive a connection
-        attempt to the given IP/port using `connectTCP`.
-
-        Note that the callback gets run before we return the connection to the
-        client, which means callbacks cannot block while waiting for writes.
-        """
-        self._tcp_callbacks[(host, port)] = callback
-
-    def connectUNIX(
-        self,
-        address: str,
-        factory: ClientFactory,
-        timeout: float = 30,
-        checkPID: int = 0,
-    ) -> IConnector:
-        """
-        Unix sockets aren't supported for unit tests yet. Make it obvious to any
-        developer trying it out that they will need to do some work before being able
-        to use it in tests.
-        """
-        raise Exception("Unix sockets are not implemented for tests yet, sorry.")
-
-    def listenUNIX(
-        self,
-        address: str,
-        factory: Factory,
-        backlog: int = 50,
-        mode: int = 0o666,
-        wantPID: int = 0,
-    ) -> IListeningPort:
-        """
-        Unix sockets aren't supported for unit tests yet. Make it obvious to any
-        developer trying it out that they will need to do some work before being able
-        to use it in tests.
-        """
-        raise Exception("Unix sockets are not implemented for tests, sorry")
-
-    def connectTCP(
-        self,
-        host: str,
-        port: int,
-        factory: ClientFactory,
-        timeout: float = 30,
-        bindAddress: tuple[str, int] | None = None,
-    ) -> IConnector:
-        """Fake L{IReactorTCP.connectTCP}."""
-
-        conn = super().connectTCP(
-            host, port, factory, timeout=timeout, bindAddress=None
-        )
-        if self.lookups and host in self.lookups:
-            validate_connector(conn, self.lookups[host])
-
-        callback = self._tcp_callbacks.get((host, port))
-        if callback:
-            callback()
-
-        return conn
+        """No-op — the asyncio loop is managed elsewhere."""
+        pass
 
     def advance(self, amount: float) -> None:
-        # first advance our reactor's time, and run any "callLater" callbacks that
-        # makes ready
-        super().advance(amount)
+        """Process any pending callFromThread callbacks.
 
-        # now run any "callFromThread" callbacks
+        Note: fake-time advancement is handled by ``NativeClock.advance()``,
+        not here. This method only drains the callFromThread queue.
+        """
         while True:
             try:
                 callback = self._thread_callbacks.popleft()
@@ -717,40 +599,72 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
                 break
             callback()
 
-            # check for more "callLater" callbacks added by the thread callback
-            # This isn't required in a regular reactor, but it ends up meaning that
-            # our database queries can complete in a single call to `advance` [1] which
-            # simplifies tests.
-            #
-            # [1]: we replace the threadpool backing the db connection pool with a
-            # mock ThreadPool which doesn't really use threads; but we still use
-            # reactor.callFromThread to feed results back from the db functions to the
-            # main thread.
-            super().advance(0)
+    def callFromThread(
+        self, callable: Callable[..., Any], *args: object, **kwargs: object
+    ) -> None:
+        cb = lambda: callable(*args, **kwargs)
+        self._thread_callbacks.append(cb)
+
+    def callWhenRunning(self, callable: Callable[..., Any], *args: Any) -> None:
+        """Run the callback immediately (we're always 'running')."""
+        callable(*args)
+
+    def addSystemEventTrigger(
+        self, phase: str, event_type: str, callable: Callable[..., Any], *args: Any
+    ) -> Any:
+        key = (phase, event_type)
+        self.triggers[key] = (callable, args)
+        return key
+
+    def getThreadPool(self) -> Any:
+        return self.threadpool
+
+    def callInThread(
+        self, callable: Callable[..., Any], *args: object, **kwargs: object
+    ) -> None:
+        callable(*args, **kwargs)
+
+    def suggestThreadPoolSize(self, size: int) -> None:
+        pass
+
+    # Provide pump() for compatibility with code that calls reactor.pump()
+    def pump(self, timings: list[float] | None = None) -> None:
+        self.advance(0)
+
+
+class _FakeThreadPool:
+    """Minimal threadpool stub for tests."""
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def callInThreadWithCallback(
+        self,
+        onResult: Callable,
+        func: Callable,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        # Run synchronously — no real threading in tests
+        try:
+            result = func(*args, **kwargs)
+            onResult(True, result)
+        except Exception as e:
+            onResult(False, e)
 
 
 def cleanup_test_reactor_system_event_triggers(
     reactor: ThreadedMemoryReactorClock,
 ) -> None:
-    """Cleanup any registered system event triggers.
-    The `twisted.internet.test.ThreadedMemoryReactor` does not implement
-    `removeSystemEventTrigger` so won't clean these triggers up on it's own properly.
-    When trying to override `removeSystemEventTrigger` in `ThreadedMemoryReactorClock`
-    in order to implement this functionality, twisted complains about the reactor being
-    unclean and fails some tests.
-    """
+    """Cleanup any registered system event triggers."""
     reactor.triggers.clear()
 
 
-def validate_connector(connector: tcp.Connector, expected_ip: str) -> None:
-    """Try to validate the obtained connector as it would happen when
-    synapse is running and the conection will be established.
-
-    This method will raise a useful exception when necessary, else it will
-    just do nothing.
-
-    This is in order to help catch quirks related to reactor.connectTCP,
-    since when called directly, the connector's destination will be of type
+def validate_connector(connector: Any, expected_ip: str) -> None:
+    """Stub — TCP connector validation is a Twisted concept.
     IPv4Address, with the hostname as the literal host that was given (which
     could be an IPv6-only host or an IPv6 literal).
 
@@ -1319,12 +1233,10 @@ def setup_test_homeserver(
     # cleanup functions result in holding the `hs` in memory.
     cleanup_hs_ref = weakref.ref(hs)
 
-    def shutdown_hs_on_cleanup() -> "Deferred[None]":
+    async def shutdown_hs_on_cleanup() -> None:
         cleanup_hs = cleanup_hs_ref()
-        deferred: "Deferred[None]" = defer.succeed(None)
         if cleanup_hs is not None:
-            deferred = defer.ensureDeferred(cleanup_hs.shutdown())
-        return deferred
+            await cleanup_hs.shutdown()
 
     # Register the cleanup hook for the homeserver.
     # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting

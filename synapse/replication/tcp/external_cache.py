@@ -20,18 +20,16 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
+import redis.asyncio
 from prometheus_client import Counter, Histogram
 
 from synapse.logging import opentracing
-from synapse.logging.context import make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
-    from txredisapi import ConnectionHandler
-
     from synapse.server import HomeServer
 
 set_counter = Counter(
@@ -72,12 +70,9 @@ class ExternalCache:
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
 
+        self._redis_connection: Optional[redis.asyncio.Redis] = None
         if hs.config.redis.redis_enabled:
-            self._redis_connection: "ConnectionHandler" | None = (
-                hs.get_outbound_redis_connection()
-            )
-        else:
-            self._redis_connection = None
+            self._redis_connection = hs.get_outbound_redis_connection()
 
     def _get_redis_key(self, cache_name: str, key: str) -> str:
         return "cache_v1:%s:%s" % (cache_name, key)
@@ -100,8 +95,7 @@ class ExternalCache:
             cache_name=cache_name, **{SERVER_NAME_LABEL: self.server_name}
         ).inc()
 
-        # txredisapi requires the value to be string, bytes or numbers, so we
-        # encode stuff in JSON.
+        # Encode stuff in JSON for storage.
         encoded_value = json_encoder.encode(value)
 
         logger.debug("Caching %s %s: %r", cache_name, key, encoded_value)
@@ -113,12 +107,10 @@ class ExternalCache:
             with response_timer.labels(
                 method="set", **{SERVER_NAME_LABEL: self.server_name}
             ).time():
-                return await make_deferred_yieldable(
-                    self._redis_connection.set(
-                        self._get_redis_key(cache_name, key),
-                        encoded_value,
-                        pexpire=expiry_ms,
-                    )
+                return await self._redis_connection.set(
+                    self._get_redis_key(cache_name, key),
+                    encoded_value,
+                    px=expiry_ms,
                 )
 
     async def get(self, cache_name: str, key: str) -> Any | None:
@@ -134,8 +126,8 @@ class ExternalCache:
             with response_timer.labels(
                 method="get", **{SERVER_NAME_LABEL: self.server_name}
             ).time():
-                result = await make_deferred_yieldable(
-                    self._redis_connection.get(self._get_redis_key(cache_name, key))
+                result = await self._redis_connection.get(
+                    self._get_redis_key(cache_name, key)
                 )
 
         logger.debug("Got cache result %s %s: %r", cache_name, key, result)
@@ -149,7 +141,10 @@ class ExternalCache:
         if not result:
             return None
 
-        # For some reason the integers get magically converted back to integers
+        # redis.asyncio returns bytes by default
+        if isinstance(result, bytes):
+            result = result.decode("utf-8")
+
         if isinstance(result, int):
             return result
 
