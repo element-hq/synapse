@@ -41,7 +41,8 @@ from synapse.appservice import (
 )
 from synapse.events import EventBase
 from synapse.events.utils import SerializeEventConfig, serialize_event
-from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
+from synapse.http.client import is_unknown_endpoint
+from synapse.http.native_client import SimpleHttpClient
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID

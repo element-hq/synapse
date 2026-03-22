@@ -147,6 +147,7 @@ from synapse.http.client import (
     ReplicationClient,
     SimpleHttpClient,
 )
+from synapse.http.native_client import NativeSimpleHttpClient
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
@@ -765,26 +766,26 @@ class HomeServer(metaclass=abc.ABCMeta):
         return RegularPolicyForHTTPS()
 
     @cache_in_self
-    def get_simple_http_client(self) -> SimpleHttpClient:
+    def get_simple_http_client(self) -> NativeSimpleHttpClient:
         """
         An HTTP client with no special configuration.
         """
-        return SimpleHttpClient(self)
+        return NativeSimpleHttpClient(self)
 
     @cache_in_self
-    def get_proxied_http_client(self) -> SimpleHttpClient:
+    def get_proxied_http_client(self) -> NativeSimpleHttpClient:
         """
         An HTTP client that uses configured HTTP(S) proxies.
         """
-        return SimpleHttpClient(self, use_proxy=True)
+        return NativeSimpleHttpClient(self, use_proxy=True)
 
     @cache_in_self
-    def get_proxied_blocklisted_http_client(self) -> SimpleHttpClient:
+    def get_proxied_blocklisted_http_client(self) -> NativeSimpleHttpClient:
         """
         An HTTP client that uses configured HTTP(S) proxies and blocks IPs
         based on the configured IP ranges.
         """
-        return SimpleHttpClient(
+        return NativeSimpleHttpClient(
             self,
             ip_allowlist=self.config.server.ip_range_allowlist,
             ip_blocklist=self.config.server.ip_range_blocklist,

@@ -68,7 +68,7 @@ from synapse.handlers.auth import (
     AuthHandler,
 )
 from synapse.handlers.push_rules import RuleSpec, check_actions
-from synapse.http.client import SimpleHttpClient
+from synapse.http.native_client import SimpleHttpClient
 from synapse.http.server import (
     DirectServeHtmlResource,
     DirectServeJsonResource,

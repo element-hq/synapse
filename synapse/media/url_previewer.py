@@ -41,7 +41,7 @@ except ImportError:
     pass
 
 from synapse.api.errors import Codes, SynapseError
-from synapse.http.client import SimpleHttpClient
+from synapse.http.native_client import SimpleHttpClient
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.media._base import FileInfo, get_filename_from_headers
 from synapse.media.media_storage import MediaStorage, SHA256TransparentIOWriter

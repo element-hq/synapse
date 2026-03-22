@@ -49,12 +49,6 @@ from pymacaroons.exceptions import (
     MacaroonInvalidSignatureException,
 )
 
-try:
-    from twisted.web.client import readBody
-    from twisted.web.http_headers import Headers
-except ImportError:
-    pass
-
 from synapse.api.errors import SynapseError
 from synapse.config import ConfigError
 from synapse.config.oidc import OidcProviderClientSecretJwtKey, OidcProviderConfig
@@ -62,7 +56,6 @@ from synapse.handlers.sso import MappingException, UserAttributes
 from synapse.http.server import finish_request
 from synapse.http.servlet import parse_string
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import make_deferred_yieldable
 from synapse.module_api import ModuleApi
 from synapse.types import JsonDict, UserID, map_username_to_mxid_localpart
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
@@ -760,7 +753,7 @@ class OidcProvider:
         token_endpoint = metadata.get("token_endpoint")
         raw_headers: dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": self._http_client.user_agent.decode("ascii"),
+            "User-Agent": self._http_client.user_agent if isinstance(self._http_client.user_agent, str) else self._http_client.user_agent.decode("ascii"),
             "Accept": "application/json",
         }
 
@@ -777,7 +770,7 @@ class OidcProvider:
         uri, raw_headers, body = self._client_auth.prepare(
             method="POST", uri=token_endpoint, headers=raw_headers, body=body
         )
-        headers = Headers({k: [v] for (k, v) in raw_headers.items()})
+        headers = {k: v for (k, v) in raw_headers.items()}
 
         # Do the actual request
         # We're not using the SimpleHttpClient util methods as we don't want to
@@ -791,12 +784,12 @@ class OidcProvider:
 
         # This is used in multiple error messages below
         status = "{code} {phrase}".format(
-            code=response.code, phrase=response.phrase.decode("utf-8")
+            code=response.status, phrase=response.reason or ""
         )
 
-        resp_body = await make_deferred_yieldable(readBody(response))
+        resp_body = await response.read()
 
-        if response.code >= 500:
+        if response.status >= 500:
             # In case of a server error, we should first try to decode the body
             # and check for an error field. If not, we respond with a generic
             # error message.
@@ -825,7 +818,7 @@ class OidcProvider:
             # In case the authorization server responded with an error field,
             # it should be a 4xx code. If not, warn about it but don't do
             # anything special and report the original error message.
-            if response.code < 400:
+            if response.status < 400:
                 logger.debug(
                     "Invalid response from the authorization server: "
                     'responded with a "%s" '
@@ -840,7 +833,7 @@ class OidcProvider:
         # Now, this should not be an error. According to RFC6749 sec 5.1, it
         # should be a 200 code. We're a bit more flexible than that, and will
         # only throw on a 4xx code.
-        if response.code >= 400:
+        if response.status >= 400:
             description = (
                 'Authorization server responded with a "{status}" error '
                 'but did not include an "error" field in its response.'.format(
@@ -870,18 +863,15 @@ class OidcProvider:
         resp = await self._http_client.request(
             "GET",
             metadata["userinfo_endpoint"],
-            headers=Headers(
-                {"Authorization": ["Bearer {}".format(token["access_token"])]}
-            ),
+            headers={"Authorization": "Bearer {}".format(token["access_token"])},
         )
 
-        body = await readBody(resp)
+        body = await resp.read()
 
-        content_type_headers = resp.headers.getRawHeaders("Content-Type")
-        assert content_type_headers
+        content_type = resp.headers.get("Content-Type", "")
         # We use `startswith` because the header value can contain the `charset` parameter
-        # even if it is useless, and Twisted doesn't take care of that for us.
-        if content_type_headers[0].startswith("application/jwt"):
+        # even if it is useless.
+        if content_type.startswith("application/jwt"):
             alg_values = metadata.get(
                 "id_token_signing_alg_values_supported", ["RS256"]
             )

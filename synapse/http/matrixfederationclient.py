@@ -74,12 +74,12 @@ from synapse.http.client import (
     BlocklistingAgentWrapper,
     BodyExceededMaxSize,
     ByteWriteable,
-    SimpleHttpClient,
     _make_scheduler,
     encode_query_args,
     read_body_with_max_size,
     read_multipart_response,
 )
+from synapse.http.native_client import SimpleHttpClient
 from synapse.http.connectproxyclient import BearerProxyCredentials
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
 from synapse.http.proxyagent import ProxyAgent

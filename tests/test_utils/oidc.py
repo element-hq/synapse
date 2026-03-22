@@ -29,17 +29,11 @@ from urllib.parse import parse_qs
 
 import attr
 
-try:
-    from twisted.web.http_headers import Headers
-    from twisted.web.iweb import IResponse
-except ImportError:
-    pass
-
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
-from tests.test_utils import FakeResponse
+from tests.test_utils import NativeFakeResponse as FakeResponse
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -281,7 +275,7 @@ class FakeOidcServer:
             token: If True, makes the token endpoint return a 500 error.
             userinfo: If True, makes the userinfo endpoint return a 500 error.
         """
-        buggy = FakeResponse(code=500, body=b"Internal server error")
+        buggy = FakeResponse(status=500, body=b"Internal server error")
 
         patches = {}
         if jwks:
@@ -300,26 +294,22 @@ class FakeOidcServer:
         method: str,
         uri: str,
         data: bytes | None = None,
-        headers: Headers | None = None,
-    ) -> IResponse:
+        headers: dict[str, str] | None = None,
+    ) -> FakeResponse:
         """The override of the SimpleHttpClient#request() method"""
         access_token: str | None = None
 
         if headers is None:
-            headers = Headers()
+            headers = {}
 
         # Try to find the access token in the headers if any
-        auth_headers = headers.getRawHeaders(b"Authorization")
-        if auth_headers:
-            parts = auth_headers[0].split(b" ")
-            if parts[0] == b"Bearer" and len(parts) == 2:
-                access_token = parts[1].decode("ascii")
+        auth_header = headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            access_token = auth_header[len("Bearer "):]
 
         if method == "POST":
             # If the method is POST, assume it has an url-encoded body
-            if data is None or headers.getRawHeaders(b"Content-Type") != [
-                b"application/x-www-form-urlencoded"
-            ]:
+            if data is None or headers.get("Content-Type") != "application/x-www-form-urlencoded":
                 return FakeResponse.json(code=400, payload={"error": "invalid_request"})
 
             params = parse_qs(data.decode("utf-8"))
@@ -338,28 +328,28 @@ class FakeOidcServer:
             elif uri == self.userinfo_endpoint:
                 return self.get_userinfo_handler(access_token=access_token)
 
-        return FakeResponse(code=404, body=b"404 not found")
+        return FakeResponse(status=404, body=b"404 not found")
 
     # Request handlers
-    def _get_jwks_handler(self) -> IResponse:
+    def _get_jwks_handler(self) -> FakeResponse:
         """Handles requests to the JWKS URI."""
         return FakeResponse.json(payload=self.get_jwks())
 
-    def _get_metadata_handler(self) -> IResponse:
+    def _get_metadata_handler(self) -> FakeResponse:
         """Handles requests to the OIDC well-known document."""
         return FakeResponse.json(payload=self.get_metadata())
 
-    def _get_userinfo_handler(self, access_token: str | None) -> IResponse:
+    def _get_userinfo_handler(self, access_token: str | None) -> FakeResponse:
         """Handles requests to the userinfo endpoint."""
         if access_token is None:
-            return FakeResponse(code=401)
+            return FakeResponse(status=401)
         user_info = self.get_userinfo(access_token)
         if user_info is None:
-            return FakeResponse(code=401)
+            return FakeResponse(status=401)
 
         return FakeResponse.json(payload=user_info)
 
-    def _post_token_handler(self, params: dict[str, list[str]]) -> IResponse:
+    def _post_token_handler(self, params: dict[str, list[str]]) -> FakeResponse:
         """Handles requests to the token endpoint."""
         code = params.get("code", [])
 

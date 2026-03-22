@@ -36,7 +36,7 @@ from synapse.api.errors import (
 )
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.http import RequestTimedOutError
-from synapse.http.client import SimpleHttpClient
+from synapse.http.native_client import SimpleHttpClient
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict, Requester
 from synapse.util.hash import sha256_and_url_safe_base64

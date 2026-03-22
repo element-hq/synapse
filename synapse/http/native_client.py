@@ -14,11 +14,8 @@
 
 """asyncio-native HTTP client using aiohttp.
 
-Phase 4 of the Twisted → asyncio migration. Provides NativeSimpleHttpClient
-as a replacement for SimpleHttpClient, using aiohttp.ClientSession instead
-of treq + Twisted Agent.
-
-This module is unused until later phases switch callers to use it.
+Provides NativeSimpleHttpClient as a replacement for SimpleHttpClient, using
+aiohttp.ClientSession instead of treq + Twisted Agent.
 """
 
 import asyncio
@@ -28,6 +25,7 @@ import urllib.parse
 from http import HTTPStatus
 from io import BytesIO
 from typing import (
+    TYPE_CHECKING,
     Any,
     BinaryIO,
     Callable,
@@ -46,6 +44,9 @@ from synapse.http.client import (
     encode_query_args,
     redact_uri,
 )
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -141,57 +142,82 @@ class NativeSimpleHttpClient:
 
     def __init__(
         self,
-        user_agent: str,
+        hs_or_user_agent: "HomeServer | str",
         ip_allowlist: IPSet | None = None,
         ip_blocklist: IPSet | None = None,
+        use_proxy: bool = False,
+        # Explicit params (used when hs_or_user_agent is a string)
         proxy_url: str | None = None,
         ssl_context: ssl.SSLContext | None = None,
         max_connections: int = 100,
         connection_timeout: float = 15.0,
         request_timeout: float = _DEFAULT_REQUEST_TIMEOUT,
+        # Extra kwargs accepted for BaseHttpClient compat (ignored)
+        **kwargs: Any,
     ) -> None:
         """
-        Args:
-            user_agent: User-Agent header value.
-            ip_allowlist: IP addresses to allow even if in blocklist.
-            ip_blocklist: IP addresses to disallow.
-            proxy_url: HTTP proxy URL (e.g., "http://proxy:8080").
-            ssl_context: SSL context for TLS connections.
-            max_connections: Max persistent connections per host.
-            connection_timeout: Timeout for establishing connections.
-            request_timeout: Default timeout for request headers.
+        Can be constructed with either a HomeServer or explicit params.
+
+        HomeServer mode (matches SimpleHttpClient API):
+            NativeSimpleHttpClient(hs, ip_allowlist=..., ip_blocklist=..., use_proxy=...)
+
+        Explicit mode:
+            NativeSimpleHttpClient(user_agent, ip_blocklist=..., proxy_url=..., ...)
         """
+        if isinstance(hs_or_user_agent, str):
+            # Explicit mode
+            user_agent = hs_or_user_agent
+        else:
+            # HomeServer mode
+            hs = hs_or_user_agent
+            ua = hs.version_string
+            user_agent = ua.decode("ascii") if isinstance(ua, bytes) else ua
+            max_connections = max(int(100 * hs.config.caches.global_factor), 5)
+            if use_proxy:
+                proxy_config = hs.config.server.proxy_config
+                if proxy_config:
+                    # Prefer HTTPS proxy, fall back to HTTP proxy
+                    proxy_url = proxy_config.https_proxy or proxy_config.http_proxy
+
         self.user_agent = user_agent
         self._ip_allowlist = ip_allowlist
         self._ip_blocklist = ip_blocklist or IPSet()
         self._proxy_url = proxy_url
         self._request_timeout = request_timeout
+        self._ssl_context = ssl_context
+        self._max_connections = max_connections
+        self._connection_timeout = connection_timeout
+        self._session: aiohttp.ClientSession | None = None
 
-        # Build connector with optional IP blocklisting resolver
-        resolver = None
-        if ip_blocklist:
-            resolver = _BlocklistingResolver(ip_allowlist, ip_blocklist)
+    def _get_session(self) -> aiohttp.ClientSession:
+        """Lazily create the aiohttp session on first use."""
+        if self._session is None:
+            resolver = None
+            if self._ip_blocklist:
+                resolver = _BlocklistingResolver(self._ip_allowlist, self._ip_blocklist)
 
-        connector = aiohttp.TCPConnector(
-            limit_per_host=max_connections,
-            resolver=resolver,
-            ssl=ssl_context or False,
-        )
+            connector = aiohttp.TCPConnector(
+                limit_per_host=self._max_connections,
+                resolver=resolver,
+                ssl=self._ssl_context or False,
+            )
 
-        timeout = aiohttp.ClientTimeout(
-            sock_connect=connection_timeout,
-            total=None,  # We manage total timeout per-request
-        )
+            timeout = aiohttp.ClientTimeout(
+                sock_connect=self._connection_timeout,
+                total=None,  # We manage total timeout per-request
+            )
 
-        self._session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=timeout,
-            headers={"User-Agent": user_agent},
-        )
+            self._session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+                headers={"User-Agent": self.user_agent},
+            )
+        return self._session
 
     async def close(self) -> None:
         """Close the underlying aiohttp session."""
-        await self._session.close()
+        if self._session is not None:
+            await self._session.close()
 
     async def request(
         self,
@@ -230,8 +256,9 @@ class NativeSimpleHttpClient:
         logger.debug("Sending request %s %s", method, redact_uri(uri))
 
         try:
+            session = self._get_session()
             response = await asyncio.wait_for(
-                self._session.request(
+                session.request(
                     method,
                     uri,
                     data=data,
@@ -470,7 +497,7 @@ class NativeSimpleHttpClient:
         max_size: int | None = None,
         headers: RawHeaders | None = None,
         is_allowed_content_type: Callable[[str], bool] | None = None,
-    ) -> tuple[int, dict[str, list[str]], str, int]:
+    ) -> tuple[int, dict[bytes, list[bytes]], str, int]:
         """Download a file from a URL, streaming to output_stream.
 
         Args:
@@ -482,6 +509,7 @@ class NativeSimpleHttpClient:
 
         Returns:
             Tuple of (length, response_headers, final_url, status_code).
+            Headers are bytes-keyed for compatibility with existing callers.
 
         Raises:
             SynapseError: On non-2xx response, oversized body, or timeout.
@@ -489,9 +517,10 @@ class NativeSimpleHttpClient:
         h = self._build_headers(headers)
         response = await self.request("GET", url, headers=h)
 
-        resp_headers: dict[str, list[str]] = {}
+        # Build bytes-keyed headers for backward compatibility
+        resp_headers: dict[bytes, list[bytes]] = {}
         for key, value in response.headers.items():
-            resp_headers.setdefault(key, []).append(value)
+            resp_headers.setdefault(key.encode("ascii"), []).append(value.encode("utf-8"))
 
         if response.status > 299:
             logger.warning("Got %d when downloading %s", response.status, url)
@@ -501,8 +530,8 @@ class NativeSimpleHttpClient:
                 Codes.UNKNOWN,
             )
 
-        if is_allowed_content_type and "Content-Type" in resp_headers:
-            content_type = resp_headers["Content-Type"][0]
+        if is_allowed_content_type and b"Content-Type" in resp_headers:
+            content_type = resp_headers[b"Content-Type"][0].decode("ascii")
             if not is_allowed_content_type(content_type):
                 raise SynapseError(
                     HTTPStatus.BAD_GATEWAY,
@@ -563,3 +592,7 @@ class NativeSimpleHttpClient:
                 for v in raw_values:
                     h[key_str] = v.decode("ascii") if isinstance(v, bytes) else str(v)
         return h
+
+
+# Alias for drop-in replacement of synapse.http.client.SimpleHttpClient
+SimpleHttpClient = NativeSimpleHttpClient

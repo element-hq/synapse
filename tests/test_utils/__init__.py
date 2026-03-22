@@ -155,6 +155,38 @@ class FakeResponse:  # type: ignore[misc]
         return cls(code=code, body=body, headers=headers)
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class NativeFakeResponse:
+    """A fake aiohttp.ClientResponse-compatible object for tests.
+
+    Provides the subset of aiohttp.ClientResponse API used by
+    NativeSimpleHttpClient and its callers.
+    """
+
+    # HTTP status code
+    status: int = 200
+
+    # body of the response
+    body: bytes = b""
+
+    # response headers (dict-like)
+    headers: dict[str, str] = attr.Factory(dict)
+
+    @property
+    def reason(self) -> str:
+        code_phrase = RESPONSES.get(self.status, b"Unknown Status")
+        return code_phrase.decode("ascii") if isinstance(code_phrase, bytes) else str(code_phrase)
+
+    async def read(self) -> bytes:
+        return self.body
+
+    @classmethod
+    def json(cls, *, code: int = 200, payload: JsonSerializable) -> "NativeFakeResponse":
+        headers = {"Content-Type": "application/json"}
+        body = json.dumps(payload).encode("utf-8")
+        return cls(status=code, body=body, headers=headers)
+
+
 # A small image used in some tests.
 #
 # Resolution: 1×1, MIME type: image/png, Extension: png, Size: 67 B
