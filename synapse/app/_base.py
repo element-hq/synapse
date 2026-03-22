@@ -46,12 +46,6 @@ import aiohttp.web
 from cryptography.utils import CryptographyDeprecationWarning
 from typing_extensions import ParamSpec, assert_never
 
-try:
-    from twisted.internet import error
-    from twisted.internet.protocol import ServerFactory
-except ImportError:
-    pass
-
 import synapse.util.caches
 from synapse.api.constants import MAX_REQUEST_SIZE
 from synapse.app import check_bind_error

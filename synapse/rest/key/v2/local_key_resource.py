@@ -26,15 +26,11 @@ from typing import TYPE_CHECKING
 from signedjson.sign import sign_json
 from unpaddedbase64 import encode_base64
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.http.servlet import RestServlet
 from synapse.types import JsonDict
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

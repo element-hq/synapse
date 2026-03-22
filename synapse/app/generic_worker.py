@@ -23,11 +23,6 @@ import logging
 import sys
 from typing import Any, Optional
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    pass
-
 import synapse
 import synapse.events
 from synapse.api.urls import (
@@ -118,6 +113,11 @@ from synapse.storage.databases.main.user_directory import UserDirectoryStore
 from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerStore
 from synapse.types import ISynapseReactor
 from synapse.util.httpresourcetree import create_resource_tree
+
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    Resource = object  # type: ignore[assignment,misc]
 
 logger = logging.getLogger("synapse.app.generic_worker")
 

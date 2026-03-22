@@ -38,11 +38,12 @@ except ImportError:
 
 try:
     from twisted.internet import task
-    from twisted.internet.tcp import Connection
     from twisted.protocols.basic import LineOnlyReceiver
     from twisted.python.failure import Failure
 except ImportError:
-    pass
+    task = None  # type: ignore[assignment]
+    LineOnlyReceiver = object  # type: ignore[assignment,misc]
+    Failure = BaseException  # type: ignore[assignment,misc]
 
 from synapse.logging.context import PreserveLoggingContext
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge

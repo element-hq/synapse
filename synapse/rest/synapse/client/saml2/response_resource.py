@@ -20,15 +20,11 @@
 
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.http.server import DirectServeHtmlResource
 from synapse.http.site import SynapseRequest
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 

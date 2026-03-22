@@ -22,11 +22,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.constants import LoginType
 from synapse.api.errors import LoginError, SynapseError
@@ -38,6 +33,7 @@ from synapse.http.site import SynapseRequest
 from ._base import client_patterns
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

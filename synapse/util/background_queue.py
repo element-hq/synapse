@@ -24,11 +24,6 @@ from typing import (
     TypeVar,
 )
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
-
 from synapse.util.async_helpers import DeferredEvent
 from synapse.util.duration import Duration
 from asyncio import CancelledError

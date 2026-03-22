@@ -27,11 +27,6 @@ import sys
 import tempfile
 from typing import Mapping, Optional, Sequence
 
-try:
-    from twisted.internet import defer, task
-except ImportError:
-    pass
-
 import synapse
 from synapse.app import _base
 from synapse.config._base import ConfigError
@@ -380,11 +375,7 @@ def main() -> None:
         _base.start_worker_reactor(
             "synapse-admin-cmd",
             admin_command_server.config,
-            # We use task.react as the basic run command as it correctly handles tearing
-            # down the reactor when the deferreds resolve and setting the return value.
-            run_command=lambda: task.react(
-                lambda _reactor: defer.ensureDeferred(start(admin_command_server, args))
-            ),
+            run_command=lambda: asyncio.run(start(admin_command_server, args)),
         )
 
 

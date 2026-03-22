@@ -33,11 +33,6 @@ from typing import (
 
 from prometheus_client import Counter, Gauge, Histogram
 
-try:
-    from twisted.python import failure
-except ImportError:
-    pass
-
 from synapse.api.constants import (
     Direction,
     EduTypes,
@@ -537,11 +532,10 @@ class FederationServer(FederationBase):
                     logger.warning("Error handling PDU %s: %s", event_id, e)
                     return {"error": str(e)}
                 except Exception as e:
-                    f = failure.Failure()
                     logger.error(
                         "Failed to handle PDU %s",
                         event_id,
-                        exc_info=(f.type, f.value, f.getTracebackObject()),
+                        exc_info=True,
                     )
                     return {"error": str(e)}
 
@@ -1321,11 +1315,10 @@ class FederationServer(FederationBase):
                     # response (as we've already responded).
                     logger.warning("Error handling PDU %s: %s", event.event_id, e)
                 except Exception:
-                    f = failure.Failure()
                     logger.error(
                         "Failed to handle PDU %s",
                         event.event_id,
-                        exc_info=(f.type, f.value, f.getTracebackObject()),
+                        exc_info=True,
                     )
 
                 received_ts = await self.store.remove_received_event_from_staging(

@@ -28,11 +28,6 @@ from enum import Enum
 from http import HTTPStatus
 from typing import Any, Optional
 
-try:
-    from twisted.web import http
-except ImportError:
-    pass
-
 from synapse.util.json import json_decoder
 
 if typing.TYPE_CHECKING:
@@ -193,7 +188,7 @@ class RedirectException(CodeMessageException):
            b"sessionId=a3fWa; Expires=Wed, 21 Oct 2015 07:28:00 GMT"
     """
 
-    def __init__(self, location: bytes, http_code: int = http.FOUND):
+    def __init__(self, location: bytes, http_code: int = HTTPStatus.FOUND):
         """
 
         Args:

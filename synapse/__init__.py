@@ -43,34 +43,6 @@ if py_version < (3, 10):
     print("Synapse requires Python 3.10 or above.")
     sys.exit(1)
 
-# Allow using the asyncio reactor via env var.
-if strtobool(os.environ.get("SYNAPSE_ASYNC_IO_REACTOR", "0")):
-    import asyncio
-
-    try:
-        from twisted.internet import asyncioreactor
-    except ImportError:
-        pass
-
-    asyncioreactor.install(asyncio.get_event_loop())
-
-# Twisted and canonicaljson will fail to import when this file is executed to
-# get the __version__ during a fresh install. That's OK and subsequent calls to
-# actually start Synapse will import these libraries fine.
-try:
-    from twisted.internet import protocol
-    try:
-        from twisted.internet.protocol import Factory
-        from twisted.names.dns import DNSDatagramProtocol
-    except ImportError:
-        pass
-
-    protocol.Factory.noisy = False
-    Factory.noisy = False
-    DNSDatagramProtocol.noisy = False
-except ImportError:
-    pass
-
 # Teach canonicaljson how to serialise immutabledicts.
 try:
     from canonicaljson import register_preserialisation_callback

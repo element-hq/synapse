@@ -17,11 +17,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    pass
-
 from synapse.rest.synapse.mas.devices import (
     MasDeleteDeviceResource,
     MasSyncDevicesResource,
@@ -38,6 +33,11 @@ from synapse.rest.synapse.mas.users import (
     MasSetDisplayNameResource,
     MasUnsetDisplayNameResource,
 )
+
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    Resource = object  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

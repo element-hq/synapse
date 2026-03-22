@@ -21,17 +21,13 @@
 import logging
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.errors import ThreepidValidationError
 from synapse.http.server import DirectServeHtmlResource
 from synapse.http.servlet import parse_string
 from synapse.util.stringutils import assert_valid_client_secret
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

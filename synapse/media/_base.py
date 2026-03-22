@@ -44,9 +44,11 @@ try:
     from twisted.internet.defer import Deferred
     from twisted.internet.interfaces import IConsumer
     from twisted.python.failure import Failure
-    from twisted.web.server import Request
 except ImportError:
-    pass
+    interfaces = None  # type: ignore[assignment]
+    Deferred = None  # type: ignore[assignment,misc]
+    IConsumer = None  # type: ignore[assignment,misc]
+    Failure = BaseException  # type: ignore[assignment,misc]
 
 from synapse.api.errors import Codes, cs_error
 from synapse.http.server import finish_request, respond_with_json

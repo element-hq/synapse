@@ -10,15 +10,14 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+from asyncio import Future
 from typing import Mapping
-
-from twisted.internet.defer import Deferred
 
 from synapse.types import ISynapseReactor
 
 class HttpClient:
     """
-    The returned deferreds follow Synapse logcontext rules.
+    The returned futures follow Synapse logcontext rules.
     """
 
     def __init__(
@@ -31,7 +30,7 @@ class HttpClient:
         Create a new HTTP client backed by reqwest.
 
         Args:
-            reactor: The Twisted reactor to coordinate with
+            reactor: The reactor to coordinate with
             user_agent: The user agent to use for requests
             http2_only: Whether to use HTTP/2 only, even on unencrypted connections. By
                 default, it will always use HTTP/1.1 over unencrypted connections, and
@@ -40,11 +39,11 @@ class HttpClient:
                 Ensure the upstream server supports HTTP/2 before enabling this.
         """
 
-    def get(self, url: str, response_limit: int) -> Deferred[bytes]: ...
+    def get(self, url: str, response_limit: int) -> Future[bytes]: ...
     def post(
         self,
         url: str,
         response_limit: int,
         headers: Mapping[str, str],
         request_body: str,
-    ) -> Deferred[bytes]: ...
+    ) -> Future[bytes]: ...

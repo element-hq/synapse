@@ -23,11 +23,6 @@ from typing import TYPE_CHECKING
 
 from netaddr import IPAddress
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse import event_auth
 from synapse.api.constants import EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import (
@@ -46,6 +41,7 @@ from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

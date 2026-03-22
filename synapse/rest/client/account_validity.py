@@ -21,11 +21,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.http.server import HttpServer, respond_with_html
 from synapse.http.servlet import RestServlet, parse_string
 from synapse.http.site import SynapseRequest
@@ -34,6 +29,7 @@ from synapse.types import JsonDict
 from ._base import client_patterns
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

@@ -25,17 +25,13 @@ from xml.etree import ElementTree as ET
 
 import attr
 
-try:
-    from twisted.web.client import PartialDownloadError
-except ImportError:
-    pass
-
 from synapse.api.errors import HttpResponseException
 from synapse.handlers.sso import MappingException, UserAttributes
 from synapse.http.site import SynapseRequest
 from synapse.types import UserID, map_username_to_mxid_localpart
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

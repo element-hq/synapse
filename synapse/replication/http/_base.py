@@ -29,9 +29,9 @@ from prometheus_client import Counter, Gauge
 
 try:
     from twisted.internet.error import ConnectError, DNSLookupError
-    from twisted.web.server import Request
 except ImportError:
-    pass
+    ConnectError = OSError  # type: ignore[assignment,misc]
+    DNSLookupError = OSError  # type: ignore[assignment,misc]
 
 from synapse.api.errors import HttpResponseException, SynapseError
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
@@ -49,6 +49,7 @@ from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

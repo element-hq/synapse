@@ -134,12 +134,7 @@ class RemoteHandler(logging.Handler):
 
         # Connect without DNS lookups if it's a direct IP.
         if _reactor is None:
-            try:
-                from twisted.internet import reactor
-            except ImportError:
-                pass
-
-            _reactor = reactor  # type: ignore[assignment]
+                        _reactor = reactor  # type: ignore[assignment]
 
         try:
             ip = ip_address(self.host)

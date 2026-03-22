@@ -36,11 +36,11 @@ except ImportError:
     pass
 
 try:
-    from twisted.internet.address import IPv4Address, IPv6Address
-    from twisted.internet.interfaces import IAddress, IConnector
+    from twisted.internet.interfaces import IConnector
     from twisted.python.failure import Failure
 except ImportError:
-    pass
+    IConnector = Any  # type: ignore[assignment,misc]
+    Failure = BaseException  # type: ignore[assignment,misc]
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL

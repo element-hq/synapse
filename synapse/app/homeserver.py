@@ -24,12 +24,6 @@ import os
 import sys
 from typing import Any, Iterable, Optional
 
-try:
-    from twisted.web.resource import EncodingResourceWrapper, Resource
-    from twisted.web.server import GzipEncoderFactory
-except ImportError:
-    pass
-
 import synapse
 from synapse import events
 from synapse.api.urls import (
@@ -75,6 +69,14 @@ from synapse.storage import DataStore
 from synapse.types import ISynapseReactor
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.module_loader import load_module
+
+try:
+    from twisted.web.resource import EncodingResourceWrapper, Resource
+    from twisted.web.server import GzipEncoderFactory
+except ImportError:
+    Resource = object  # type: ignore[assignment,misc]
+    EncodingResourceWrapper = None  # type: ignore[assignment,misc]
+    GzipEncoderFactory = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger("synapse.app.homeserver")
 

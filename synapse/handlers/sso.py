@@ -36,12 +36,6 @@ from urllib.parse import urlencode
 
 import attr
 
-try:
-    from twisted.web.iweb import IRequest
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.constants import LoginType, ProfileFields
 from synapse.api.errors import Codes, NotFoundError, RedirectException, SynapseError
 from synapse.config.sso import SsoAttributeRequirement
@@ -61,6 +55,7 @@ from synapse.util.async_helpers import Linearizer
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

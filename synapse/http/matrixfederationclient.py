@@ -46,17 +46,6 @@ from canonicaljson import encode_canonical_json
 from prometheus_client import Counter
 from signedjson.sign import sign_json
 
-try:
-    from twisted.internet import defer
-    from twisted.internet.error import DNSLookupError
-    from twisted.internet.interfaces import IReactorTime
-    from twisted.internet.task import Cooperator
-    from twisted.web.client import ResponseFailed
-    from twisted.web.http_headers import Headers
-    from twisted.web.iweb import UNKNOWN_LENGTH, IAgent, IBodyProducer, IResponse
-except ImportError:
-    pass
-
 import synapse.metrics
 import synapse.util.retryutils
 from synapse.api.errors import (

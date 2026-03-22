@@ -12,7 +12,7 @@
 
 from typing import Any
 
-from twisted.web.iweb import IRequest
+from synapse.http.aiohttp_shim import SynapseRequest as IRequest
 
 from synapse.server import HomeServer
 

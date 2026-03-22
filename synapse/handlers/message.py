@@ -26,11 +26,6 @@ from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 
 from canonicaljson import encode_canonical_json
 
-try:
-    from twisted.internet.interfaces import IDelayedCall
-except ImportError:
-    pass
-
 from synapse import event_auth
 from synapse.api.constants import (
     EventContentFields,
@@ -114,7 +109,7 @@ class MessageHandler:
 
         # The scheduled call to self._expire_event. None if no call is currently
         # scheduled.
-        self._scheduled_expiry: Optional[IDelayedCall] = None
+        self._scheduled_expiry: Optional[Any] = None
 
         if not hs.config.worker.worker_app:
             self.hs.run_as_background_process(

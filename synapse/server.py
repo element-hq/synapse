@@ -44,17 +44,6 @@ from wsgiref.simple_server import WSGIServer
 from attr import dataclass
 from typing_extensions import TypeAlias
 
-try:
-    from twisted.internet import defer
-    from twisted.internet.base import _SystemEventID
-    from twisted.internet.interfaces import IOpenSSLContextFactory
-    from twisted.internet.tcp import Port
-    from twisted.python.threadpool import ThreadPool
-    from twisted.web.iweb import IPolicyForHTTPS
-    from twisted.web.resource import Resource
-except ImportError:
-    pass
-
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.auth.mas import MasDelegatedAuth
@@ -338,12 +327,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         """
 
         if not reactor:
-            try:
-                from twisted.internet import reactor as _reactor
-            except ImportError:
-                pass
-
-            reactor = cast(ISynapseReactor, _reactor)
+                        reactor = cast(ISynapseReactor, _reactor)
 
         self._reactor = reactor
         self.hostname = hostname
@@ -361,7 +345,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         self.datastores: Databases | None = None
 
-        self._module_web_resources: dict[str, Resource] = {}
+        self._module_web_resources: dict[str, Any] = {}
         self._module_web_resources_consumed = False
 
         # This attribute is set by the free function `refresh_certificate`.
@@ -370,7 +354,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._is_shutdown = False
         self._async_shutdown_handlers: list[ShutdownInfo] = []
         self._sync_shutdown_handlers: list[ShutdownInfo] = []
-        self._background_processes: set[defer.Deferred[Any | None]] = set()
+        self._background_processes: set[asyncio.Future[Any | None]] = set()
 
         # For every server we spawn in the process, track it in the metrics
         synapse_server_name_info.labels(**{SERVER_NAME_LABEL: self.hostname}).set(1)
@@ -381,7 +365,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         func: Callable[..., Awaitable[R | None]],
         *args: Any,
         **kwargs: Any,
-    ) -> "defer.Deferred[R | None]":
+    ) -> "asyncio.Future[R | None]":
         """Run the given function in its own logcontext, with resource metrics
 
         This should be used to wrap processes which are fired off to run in the
@@ -526,7 +510,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         for shutdown_handler in self._async_shutdown_handlers:
             try:
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
-                defer.ensureDeferred(shutdown_handler.func(**shutdown_handler.kwargs))
+                asyncio.ensure_future(shutdown_handler.func(**shutdown_handler.kwargs))
             except Exception as e:
                 logger.error("Error calling shutdown async handler: %s", e)
         self._async_shutdown_handlers.clear()
@@ -600,7 +584,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             ShutdownInfo(func=shutdown_func, trigger_id=id, kwargs=kwargs)
         )
 
-    def register_module_web_resource(self, path: str, resource: Resource) -> None:
+    def register_module_web_resource(self, path: str, resource: Any) -> None:
         """Allows a module to register a web resource to be served at the given path.
 
         If multiple modules register a resource for the same path, the module that

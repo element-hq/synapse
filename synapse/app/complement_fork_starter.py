@@ -28,12 +28,14 @@ import sys
 from types import FrameType
 from typing import Any, Callable
 
-try:
-    from twisted.internet.main import installReactor
-except ImportError:
-    pass
-
 from synapse.app.complement_fork_proxied_reactor import ProxiedReactor
+
+try:
+    from twisted.internet.asyncioreactor import AsyncioSelectorReactor
+    from twisted.internet.epollreactor import EPollReactor
+except ImportError:
+    AsyncioSelectorReactor = None  # type: ignore[assignment,misc]
+    EPollReactor = None  # type: ignore[assignment,misc]
 
 # a list of the original signal handlers, before we installed our custom ones.
 # We restore these in our child processes.
@@ -68,19 +70,9 @@ def _worker_entrypoint(
     ):
         import asyncio
 
-        try:
-            from twisted.internet.asyncioreactor import AsyncioSelectorReactor
-        except ImportError:
-            pass
-
         reactor = AsyncioSelectorReactor(asyncio.get_event_loop())
         proxy_reactor._install_real_reactor(reactor)
     else:
-        try:
-            from twisted.internet.epollreactor import EPollReactor
-        except ImportError:
-            pass
-
         proxy_reactor._install_real_reactor(EPollReactor())
 
     func()

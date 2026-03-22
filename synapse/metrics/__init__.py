@@ -54,19 +54,18 @@ from prometheus_client.core import (
     GaugeMetricFamily,
 )
 
-try:
-    from twisted.python.threadpool import ThreadPool
-    from twisted.web.resource import Resource
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 # This module is imported for its side effects; flake8 needn't warn that it's unused.
 import synapse.metrics._reactor_metrics  # noqa: F401
 from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
 from synapse.metrics._types import Collector
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION
+
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    Resource = object  # type: ignore[assignment,misc]
+
 
 logger = logging.getLogger(__name__)
 
@@ -412,6 +411,7 @@ class _InFlightGaugeRuntime(Collector):
 
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
 
     class InFlightGauge(_InFlightGaugeRuntime, Generic[MetricsEntry]):
         """

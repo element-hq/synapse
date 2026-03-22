@@ -21,14 +21,8 @@
 import logging
 from contextlib import AsyncExitStack
 from types import TracebackType
-from typing import TYPE_CHECKING, Collection, Optional
+from typing import Any, TYPE_CHECKING, Collection, Optional
 from weakref import WeakValueDictionary
-
-try:
-    from twisted.internet import defer
-    from twisted.internet.task import LoopingCall
-except ImportError:
-    pass
 
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
@@ -406,7 +400,7 @@ class Lock:
 
         # We might be called from a non-main thread, so we defer setting up the
         # looping call.
-        self._looping_call: LoopingCall | None = None
+        self._looping_call: Any | None = None
         reactor.callFromThread(self._setup_looping_call)
 
         self._dropped = False

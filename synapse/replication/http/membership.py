@@ -20,11 +20,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.http.server import HttpServer
 from synapse.http.site import SynapseRequest
 from synapse.replication.http._base import ReplicationEndpoint

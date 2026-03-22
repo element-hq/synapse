@@ -26,12 +26,6 @@ from typing import TYPE_CHECKING
 
 from prometheus_client import Counter
 
-try:
-    from twisted.internet.interfaces import IAddress
-    from twisted.internet.protocol import ServerFactory
-except ImportError:
-    pass
-
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.replication.tcp.commands import PositionCommand
 from synapse.replication.tcp.protocol import ServerReplicationStreamProtocol
@@ -39,6 +33,11 @@ from synapse.replication.tcp.streams import EventsStream
 from synapse.replication.tcp.streams._base import CachesStream, StreamRow, Token
 from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
+
+try:
+    from twisted.internet.protocol import ServerFactory
+except ImportError:
+    ServerFactory = object  # type: ignore[misc,assignment]
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

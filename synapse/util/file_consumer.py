@@ -22,11 +22,9 @@ import queue
 from typing import Any, BinaryIO, Optional, Union, cast
 
 try:
-    from twisted.internet import threads
     from twisted.internet.defer import Deferred
-    from twisted.internet.interfaces import IPullProducer, IPushProducer
 except ImportError:
-    pass
+    from asyncio import Future as Deferred  # type: ignore[assignment]
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import ISynapseReactor
@@ -53,7 +51,7 @@ class BackgroundFileConsumer:
         self._reactor: ISynapseReactor = reactor
 
         # Producer we're registered with
-        self._producer: Optional[Union[IPushProducer, IPullProducer]] = None
+        self._producer: Optional[Union[Any, Any]] = None
 
         # True if PushProducer, false if PullProducer
         self.streaming = False
@@ -75,7 +73,7 @@ class BackgroundFileConsumer:
         self._write_exception: Exception | None = None
 
     def registerProducer(
-        self, producer: Union[IPushProducer, IPullProducer], streaming: bool
+        self, producer: Union[Any, Any], streaming: bool
     ) -> None:
         """Part of IConsumer interface
 
@@ -125,8 +123,8 @@ class BackgroundFileConsumer:
         if self.streaming and self._bytes_queue.qsize() >= self._PAUSE_ON_QUEUE_SIZE:
             self._paused_producer = True
             assert self._producer is not None
-            # cast safe because `streaming` means this is an IPushProducer
-            cast(IPushProducer, self._producer).pauseProducing()
+            # cast safe because `streaming` means this is an Any
+            cast(Any, self._producer).pauseProducing()
 
     def _writer(self) -> None:
         """This is run in a background thread to write to the file."""

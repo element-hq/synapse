@@ -196,17 +196,11 @@ from typing import (
 import attr
 from typing_extensions import Concatenate, ParamSpec
 
-try:
-    from twisted.internet import defer
-    from twisted.web.http import Request
-    from twisted.web.http_headers import Headers
-except ImportError:
-    pass
-
 from synapse.config import ConfigError
 from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.http.site import SynapseRequest
     from synapse.server import HomeServer
 
@@ -800,7 +794,7 @@ def inject_header_dict(
         headers[key.encode()] = [value.encode()]
 
 
-def inject_response_headers(response_headers: Headers) -> None:
+def inject_response_headers(response_headers: Any) -> None:
     """Inject the current trace id into the HTTP response headers"""
     if not opentracing:
         return

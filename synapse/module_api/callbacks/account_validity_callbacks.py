@@ -21,11 +21,7 @@
 
 import logging
 from typing import Awaitable, Callable
-
-try:
-    from twisted.web.http import Request
-except ImportError:
-    pass
+from synapse.http.aiohttp_shim import SynapseRequest as Request
 
 logger = logging.getLogger(__name__)
 

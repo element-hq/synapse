@@ -23,11 +23,6 @@ import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
-try:
-    from twisted.web.client import PartialDownloadError
-except ImportError:
-    pass
-
 from synapse.api.constants import LoginType
 from synapse.api.errors import Codes, LoginError, SynapseError
 from synapse.util.json import json_decoder

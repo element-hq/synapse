@@ -21,11 +21,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.events import make_event_from_dict
 from synapse.events.snapshot import EventContext, EventPersistencePair
@@ -35,6 +30,7 @@ from synapse.types import JsonDict
 from synapse.util.metrics import Measure
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
     from synapse.storage.databases.main import DataStore
 

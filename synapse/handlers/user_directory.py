@@ -23,11 +23,6 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional
 
-try:
-    from twisted.internet.interfaces import IDelayedCall
-except ImportError:
-    pass
-
 import synapse.metrics
 from synapse.api.constants import (
     EventTypes,
@@ -128,7 +123,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         # Guard to ensure we only have one process for refreshing remote profiles
         self._is_refreshing_remote_profiles = False
         # Handle to cancel the `call_later` of `kick_off_remote_profile_refresh_process`
-        self._refresh_remote_profiles_call_later: Optional[IDelayedCall] = None
+        self._refresh_remote_profiles_call_later: Optional[Any] = None
 
         # Guard to ensure we only have one process for refreshing remote profiles
         # for the given servers.

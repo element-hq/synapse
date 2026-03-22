@@ -22,12 +22,6 @@
 import logging
 from typing import TYPE_CHECKING, Optional
 
-try:
-    from twisted.internet.error import AlreadyCalled, AlreadyCancelled
-    from twisted.internet.interfaces import IDelayedCall
-except ImportError:
-    pass
-
 from synapse.push import Pusher, PusherConfig, PusherConfigException, ThrottleParams
 from synapse.push.mailer import Mailer
 from synapse.push.push_types import EmailReason
@@ -74,7 +68,7 @@ class EmailPusher(Pusher):
         self.server_name = hs.hostname
         self.store = self.hs.get_datastores().main
         self.email = pusher_config.pushkey
-        self.timed_call: Optional[IDelayedCall] = None
+        self.timed_call: Optional[Any] = None
         self.throttle_params: dict[str, ThrottleParams] = {}
         self._inited = False
 

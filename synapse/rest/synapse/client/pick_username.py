@@ -22,12 +22,6 @@
 import logging
 from typing import TYPE_CHECKING, Generator
 
-try:
-    from twisted.web.resource import Resource
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.errors import SynapseError
 from synapse.handlers.sso import get_username_mapping_session_cookie_from_request
 from synapse.http.server import (
@@ -39,6 +33,12 @@ from synapse.http.servlet import parse_boolean, parse_string
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict
 from synapse.util.templates import build_jinja_env
+
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    Resource = object  # type: ignore[assignment,misc]
+
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

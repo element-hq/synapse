@@ -358,11 +358,6 @@ def setup_logging(
         use_worker_options: True to use the 'worker_log_config' option
             instead of 'log_config'.
     """
-    try:
-        from twisted.internet import reactor
-    except ImportError:
-        pass
-
     log_config_path = (
         config.worker.worker_log_config
         if use_worker_options

@@ -19,15 +19,17 @@
 #
 #
 from OpenSSL.SSL import Context
+
 try:
-    from twisted.internet import ssl
+    from twisted.internet import ssl as twisted_ssl
+    _ContextFactoryBase = twisted_ssl.ClientContextFactory
 except ImportError:
-    pass
+    _ContextFactoryBase = object  # type: ignore[assignment,misc]
 
 from synapse.config.redis import RedisConfig
 
 
-class ClientContextFactory(ssl.ClientContextFactory):
+class ClientContextFactory(_ContextFactoryBase):
     def __init__(self, redis_config: RedisConfig):
         self.redis_config = redis_config
 

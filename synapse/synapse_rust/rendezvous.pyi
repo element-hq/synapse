@@ -10,7 +10,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from twisted.web.iweb import IRequest
+from synapse.http.aiohttp_shim import SynapseRequest as IRequest
 
 from synapse.server import HomeServer
 

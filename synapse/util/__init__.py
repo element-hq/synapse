@@ -33,29 +33,23 @@ from typing import (
 import attr
 from matrix_common.versionstring import get_distribution_version_string
 
-try:
-    from twisted.internet import defer
-    from twisted.python.failure import Failure
-except ImportError:
-    pass
-
 if typing.TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
 
 
-def unwrapFirstError(failure: Failure) -> Failure:
-    # Deprecated: you probably just want to catch the error and reraise
-    # the subFailure's value, which will do a better job of preserving stacktraces.
-    # (actually, you probably want to use yieldable_gather_results anyway)
-    failure.trap(defer.FirstError) if hasattr(defer, "FirstError") else None
-    return failure.value.subFailure
+def unwrapFirstError(failure: BaseException) -> BaseException:
+    # Deprecated: you probably just want to catch the error and reraise.
+    # With asyncio, gather with return_exceptions=True returns the exception directly.
+    if hasattr(failure, 'subFailure'):
+        return failure.subFailure
+    return failure
 
 
 def log_failure(
-    failure: Failure, msg: str, consumeErrors: bool = True
-) -> Failure | None:
+    failure: BaseException | None, msg: str, consumeErrors: bool = True
+) -> BaseException | None:
     """Creates a function suitable for passing to `Deferred.addErrback` that
     logs any failures that occur.
 
@@ -69,9 +63,12 @@ def log_failure(
         The Failure if consumeErrors is false. None, otherwise.
     """
 
-    logger.error(
-        msg, exc_info=(failure.type, failure.value, failure.getTracebackObject())
-    )
+    if failure is not None:
+        logger.error(
+            msg, exc_info=(type(failure), failure, failure.__traceback__)
+        )
+    else:
+        logger.error(msg)
 
     if not consumeErrors:
         return failure

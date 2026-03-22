@@ -25,12 +25,6 @@ from typing import TYPE_CHECKING, Optional
 
 from prometheus_client import Counter
 
-try:
-    from twisted.internet.error import AlreadyCalled, AlreadyCancelled
-    from twisted.internet.interfaces import IDelayedCall
-except ImportError:
-    pass
-
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.logging import opentracing
@@ -123,7 +117,7 @@ class HttpPusher(Pusher):
         self.data = pusher_config.data
         self.backoff_delay = HttpPusher.INITIAL_BACKOFF_SEC
         self.failing_since = pusher_config.failing_since
-        self.timed_call: Optional[IDelayedCall] = None
+        self.timed_call: Optional[Any] = None
         self._is_processing = False
         self._group_unread_count_by_room = (
             hs.config.push.push_group_unread_count_by_room

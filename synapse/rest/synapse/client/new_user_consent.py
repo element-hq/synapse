@@ -21,11 +21,6 @@
 import logging
 from typing import TYPE_CHECKING, Generator
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.errors import SynapseError
 from synapse.handlers.sso import get_username_mapping_session_cookie_from_request
 from synapse.http.server import DirectServeHtmlResource, respond_with_html
@@ -35,6 +30,7 @@ from synapse.types import UserID
 from synapse.util.templates import build_jinja_env
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

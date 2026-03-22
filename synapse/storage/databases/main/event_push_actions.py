@@ -82,6 +82,7 @@ receipt.
 import logging
 from collections import defaultdict
 from typing import (
+    Any,
     TYPE_CHECKING,
     Collection,
     Mapping,
@@ -89,11 +90,6 @@ from typing import (
 )
 
 import attr
-
-try:
-    from twisted.internet.task import LoopingCall
-except ImportError:
-    pass
 
 from synapse.api.constants import MAIN_TIMELINE, ReceiptTypes
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -253,7 +249,7 @@ def _deserialize_action(actions: str, is_highlight: bool) -> list[dict | str]:
 
 
 class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBaseStore):
-    _background_tasks: list[LoopingCall] = []
+    _background_tasks: list[Any] = []
 
     def __init__(
         self,

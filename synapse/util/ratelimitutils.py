@@ -37,11 +37,6 @@ from weakref import WeakSet
 
 from prometheus_client.core import Counter
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
-
 from synapse.api.errors import LimitExceededError
 from synapse.config.ratelimiting import FederationRatelimitSettings
 from synapse.logging.context import (

@@ -24,26 +24,33 @@ import logging
 import urllib.parse
 from typing import TYPE_CHECKING, Any, Optional, cast
 
-try:
-    from twisted.internet import protocol
-    from twisted.internet.interfaces import ITCPTransport
-    from twisted.internet.protocol import connectionDone
-    from twisted.python import failure
-    from twisted.python.failure import Failure
-    from twisted.web.client import ResponseDone
-    from twisted.web.http_headers import Headers
-    from twisted.web.iweb import IResponse
-    from twisted.web.resource import IResource
-    from twisted.web.server import Request, Site
-except ImportError:
-    pass
-
 from synapse.api.errors import Codes, InvalidProxyCredentialsError
 from synapse.http import QuieterFileBodyProducer
 from synapse.http.server import _AsyncResource
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import ISynapseReactor
 from synapse.util.async_helpers import timeout_deferred
+
+try:
+    from twisted.python import failure
+    from twisted.python.failure import Failure
+    from twisted.internet import protocol
+    from twisted.internet.protocol import connectionDone
+    from twisted.internet.interfaces import ITCPTransport
+    from twisted.web.resource import IResource
+    from twisted.web.client import ResponseDone
+    from twisted.web.http_headers import Headers
+    from twisted.web.server import Site
+except ImportError:
+    failure = None  # type: ignore[assignment]
+    Failure = BaseException  # type: ignore[assignment,misc]
+    protocol = None  # type: ignore[assignment]
+    connectionDone = None  # type: ignore[assignment]
+    ITCPTransport = None  # type: ignore[assignment]
+    IResource = None  # type: ignore[assignment]
+    ResponseDone = None  # type: ignore[assignment]
+    Headers = dict  # type: ignore[assignment,misc]
+    Site = object  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:
     from synapse.http.site import SynapseRequest

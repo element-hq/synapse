@@ -33,11 +33,6 @@ import yaml
 from netaddr import AddrFormatError, IPNetwork, IPSet
 from typing_extensions import TypeGuard
 
-try:
-    from twisted.conch.ssh.keys import Key
-except ImportError:
-    pass
-
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.types import JsonDict, StrSequence
 from synapse.util.module_loader import load_module

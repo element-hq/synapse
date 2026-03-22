@@ -26,6 +26,11 @@ import platform
 import time
 from typing import Iterable
 
+try:
+    from twisted.internet import task
+except ImportError:
+    task = None  # type: ignore[assignment]
+
 from prometheus_client.core import (
     REGISTRY,
     CounterMetricFamily,
@@ -34,11 +39,6 @@ from prometheus_client.core import (
     Histogram,
     Metric,
 )
-
-try:
-    from twisted.internet import task
-except ImportError:
-    pass
 
 from synapse.metrics._types import Collector
 

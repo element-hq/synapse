@@ -27,12 +27,6 @@ from typing import Any, Callable, Iterable
 from prometheus_client import Histogram, Metric
 from prometheus_client.core import REGISTRY, GaugeMetricFamily
 
-try:
-    from twisted.internet import reactor, selectreactor
-    from twisted.internet.asyncioreactor import AsyncioSelectorReactor
-except ImportError:
-    pass
-
 from synapse.app.complement_fork_proxied_reactor import ProxiedReactor
 from synapse.metrics._types import Collector
 
@@ -57,6 +51,20 @@ try:
 except ImportError:
 
     class PollReactor:  # type: ignore[no-redef]
+        pass
+
+
+try:
+    from twisted.internet import selectreactor
+except ImportError:
+    selectreactor = None  # type: ignore[assignment]
+
+
+try:
+    from twisted.internet.asyncioreactor import AsyncioSelectorReactor
+except ImportError:
+
+    class AsyncioSelectorReactor:  # type: ignore[no-redef]
         pass
 
 
@@ -137,7 +145,7 @@ def install_reactor_metrics(target_reactor: Any) -> None:
             target_reactor._poller = ObjWrapper(reactor._poller, "poll")  # type: ignore[attr-defined]
             wrapper = target_reactor._poller._wrapped_method  # type: ignore[attr-defined]
 
-        elif isinstance(target_reactor, selectreactor.SelectReactor):
+        elif selectreactor is not None and isinstance(target_reactor, selectreactor.SelectReactor):
             # Twisted uses a module-level _select function.
             wrapper = selectreactor._select = CallWrapper(selectreactor._select)
 
@@ -188,5 +196,9 @@ def install_reactor_metrics(target_reactor: Any) -> None:
 # The `ProxiedReactor` will handle calling `install_reactor_metrics(...)` itself when
 # ready. Skipping allows us to avoid seeing confusing `Skipping configuring reactor
 # metrics: unexpected reactor type: ProxiedReactor` warnings.
-if not isinstance(reactor, ProxiedReactor):
-    install_reactor_metrics(reactor)
+try:
+    from twisted.internet import reactor
+    if not isinstance(reactor, ProxiedReactor):
+        install_reactor_metrics(reactor)
+except ImportError:
+    pass  # Twisted not installed; reactor metrics unavailable

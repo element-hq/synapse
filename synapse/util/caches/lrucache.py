@@ -38,11 +38,6 @@ from typing import (
     overload,
 )
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
-
 from synapse.config import cache as cache_config
 from synapse.metrics.jemalloc import get_jemalloc_stats
 from synapse.util import caches

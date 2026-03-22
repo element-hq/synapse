@@ -42,11 +42,7 @@ import bcrypt
 import unpaddedbase64
 from prometheus_client import Counter
 
-try:
-    from asyncio import CancelledError
-    from twisted.web.server import Request
-except ImportError:
-    pass
+from synapse.http.aiohttp_shim import SynapseRequest as Request
 
 from synapse.api.constants import LoginType
 from synapse.api.errors import (

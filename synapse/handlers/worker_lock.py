@@ -31,11 +31,6 @@ from weakref import WeakSet
 
 import attr
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
-
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import start_active_span
 from synapse.metrics.background_process_metrics import wrap_as_background_process

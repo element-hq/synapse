@@ -49,17 +49,6 @@ try:
     from twisted.web import resource
     from twisted.web.pages import notFound
 except ImportError:
-    try:
-        from twisted.web.resource import NoResource as notFound  # type: ignore[assignment]
-    except ImportError:
-        pass
-
-try:
-    from twisted.web.resource import IResource
-    from twisted.web.server import Request
-    from twisted.web.static import File
-    from twisted.web.util import redirectTo
-except ImportError:
     pass
 
 from synapse.api.errors import (
@@ -631,7 +620,14 @@ class DirectServeHtmlResource(_AsyncResource):
         return_html_error(exc, request, self.ERROR_TEMPLATE)
 
 
-class StaticResource(File):
+try:
+    from twisted.web.static import File as _TwistedFile
+    _StaticBase = _TwistedFile
+except ImportError:
+    _StaticBase = object  # type: ignore[assignment,misc]
+
+
+class StaticResource(_StaticBase):
     """
     A resource that represents a plain non-interpreted file or directory.
 

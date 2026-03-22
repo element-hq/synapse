@@ -32,13 +32,8 @@ dependencies = [
     "signedjson>=1.1.0,<2.0.0",
     # validating SSL certs for IP addresses requires service_identity 18.1.
     "service-identity>=18.1.0",
-    # Twisted is optional — kept for backward compatibility during asyncio migration.
-    # All Twisted imports are wrapped in try/except ImportError.
-    # "Twisted[tls]>=21.2.0",
-    # "treq>=21.5.0",
     "aiohttp>=3.9.0",
-    # Twisted has required pyopenssl 16.0 since about Twisted 16.6.
-    # pyOpenSSL 16.2.0 fixes compatibility with OpenSSL 1.1.0. 
+    # pyOpenSSL 16.2.0 fixes compatibility with OpenSSL 1.1.0.
     "pyOpenSSL>=16.2.0",
     "PyYAML>=5.3",
     "pyasn1>=0.1.9",
@@ -104,13 +99,14 @@ dependencies = [
     "pyparsing>=2.4",  # via packaging
     "pyrsistent>=0.18.0",  # via jsonschema
     "requests>=2.16.0", # 2.16.0+ no longer vendors urllib3, avoiding Python 3.10+ incompatibility
-    "urllib3>=1.26.5", # via treq; 1.26.5 fixes Python 3.10+ collections.abc compatibility
+    "urllib3>=1.26.5", # 1.26.5 fixes Python 3.10+ collections.abc compatibility
     # 5.2 is the current version in Debian oldstable. If we don't care to support that, then 5.4 is
     # the minimum version from Ubuntu 22.04 and RHEL 9. (as of 2025-12)
     # When bumping this version to 6.2 or above, refer to https://github.com/element-hq/synapse/pull/19274
     # for details of Synapse improvements that may be unlocked. Particularly around the use of `|`
     # syntax with zope interface types.
-    "zope-interface>=5.2", # via twisted
+    # zope-interface is still used by some remaining compatibility code
+    "zope-interface>=5.2",
     "aiohttp (>=3.13.3,<4.0.0)",
 ]
 

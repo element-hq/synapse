@@ -24,11 +24,6 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import StrictStr
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -41,6 +36,7 @@ from synapse.types import JsonDict, RoomAlias
 from synapse.types.rest import RequestBodyModel
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

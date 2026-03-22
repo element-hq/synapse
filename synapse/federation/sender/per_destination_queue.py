@@ -28,11 +28,6 @@ from typing import TYPE_CHECKING, Hashable, Iterable
 import attr
 from prometheus_client import Counter
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
-
 from synapse.api.constants import EduTypes
 from synapse.api.errors import (
     FederationDeniedError,

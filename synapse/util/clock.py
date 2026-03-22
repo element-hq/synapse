@@ -34,10 +34,12 @@ except ImportError:
 try:
     from twisted.internet import defer, task
     from twisted.internet.defer import Deferred
-    from twisted.internet.interfaces import IDelayedCall
     from twisted.internet.task import LoopingCall
 except ImportError:
-    pass
+    defer = None  # type: ignore[assignment]
+    Deferred = None  # type: ignore[assignment,misc]
+    LoopingCall = None  # type: ignore[assignment,misc]
+    task = None  # type: ignore[assignment]
 
 from synapse.logging import context
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
@@ -110,7 +112,7 @@ class Clock:
         self._looping_calls: WeakSet[LoopingCall] = WeakSet()
         """List of active looping calls"""
 
-        self._call_id_to_delayed_call: dict[int, IDelayedCall] = {}
+        self._call_id_to_delayed_call: dict[int, Any] = {}
         """
         Mapping from unique call ID to delayed call.
 
@@ -565,18 +567,17 @@ class Clock:
         )  # type: ignore[prefer-synapse-clock-add-system-event-trigger]
 
 
-@implementer(IDelayedCall)
 class DelayedCallWrapper:
-    """Wraps an `IDelayedCall` so that we can intercept the call to `cancel()` and
+    """Wraps an `Any` so that we can intercept the call to `cancel()` and
     properly cleanup the delayed call from the tracking map of the `Clock`.
 
     args:
-        delayed_call: The actual `IDelayedCall`
+        delayed_call: The actual `Any`
         call_id: Unique identifier for this delayed call
         clock: The clock instance tracking this call
     """
 
-    def __init__(self, delayed_call: IDelayedCall, call_id: int, clock: Clock):
+    def __init__(self, delayed_call: Any, call_id: int, clock: Clock):
         self.delayed_call = delayed_call
         self.call_id = call_id
         self.clock = clock

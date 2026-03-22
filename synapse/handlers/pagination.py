@@ -23,11 +23,6 @@ from typing import TYPE_CHECKING, cast
 
 import attr
 
-try:
-    from twisted.python.failure import Failure
-except ImportError:
-    pass
-
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.api.filtering import Filter
@@ -384,12 +379,11 @@ class PaginationHandler:
                 )
             logger.info("[purge] complete")
             return None
-        except Exception:
-            f = Failure()
+        except Exception as e:
             logger.error(
-                "[purge] failed", exc_info=(f.type, f.value, f.getTracebackObject())
+                "[purge] failed", exc_info=True
             )
-            return f.getErrorMessage()
+            return str(e)
 
     async def get_delete_task(self, delete_id: str) -> ScheduledTask | None:
         """Get the current status of an active deleting

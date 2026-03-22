@@ -28,15 +28,6 @@ from typing import Callable
 import aiohttp
 import attr
 
-try:
-    from twisted.internet import defer
-    from twisted.web.client import RedirectAgent
-    from twisted.web.http import stringToDatetime
-    from twisted.web.http_headers import Headers
-    from twisted.web.iweb import IAgent, IResponse
-except ImportError:
-    pass
-
 from synapse.http.client import (
     BodyExceededMaxSize,
     async_read_body_with_max_size,

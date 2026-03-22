@@ -32,13 +32,16 @@ from typing import TYPE_CHECKING, BinaryIO, Iterable
 from urllib.parse import urljoin, urlparse, urlsplit
 from urllib.request import urlopen
 
+import asyncio
+
 import attr
 
 try:
     from twisted.internet.defer import Deferred
     from twisted.internet.error import DNSLookupError
 except ImportError:
-    pass
+    Deferred = asyncio.Future  # type: ignore[assignment,misc]
+    DNSLookupError = OSError  # type: ignore[assignment,misc]
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.native_client import SimpleHttpClient

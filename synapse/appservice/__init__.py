@@ -37,7 +37,7 @@ from netaddr import IPSet
 try:
     from twisted.internet import reactor
 except ImportError:
-    pass
+    reactor = None  # type: ignore[assignment]
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase

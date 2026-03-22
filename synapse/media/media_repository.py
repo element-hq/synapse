@@ -29,12 +29,8 @@ from typing import IO, TYPE_CHECKING
 import attr
 from matrix_common.types.mxc_uri import MXCUri
 
-try:
-    import twisted.internet.error
-    import twisted.web.http
-    from twisted.internet.defer import Deferred
-except ImportError:
-    pass
+import asyncio
+from http import HTTPStatus
 
 from synapse.api.errors import (
     Codes,
@@ -205,13 +201,13 @@ class MediaRepository:
 
         self.media_repository_callbacks = hs.get_module_api_callbacks().media_repository
 
-    def _start_update_recently_accessed(self) -> Deferred:
+    def _start_update_recently_accessed(self) -> "asyncio.Task[None]":
         return self.hs.run_as_background_process(
             "update_recently_accessed_media",
             self._update_recently_accessed,
         )
 
-    def _start_apply_media_retention_rules(self) -> Deferred:
+    def _start_apply_media_retention_rules(self) -> "asyncio.Task[None]":
         return self.hs.run_as_background_process(
             "apply_media_retention_rules",
             self._apply_media_retention_rules,
@@ -925,7 +921,7 @@ class MediaRepository:
                     media_id,
                     e.response,
                 )
-                if e.code == twisted.web.http.NOT_FOUND:
+                if e.code == HTTPStatus.NOT_FOUND:
                     raise e.to_synapse_error()
                 raise SynapseError(502, "Failed to fetch remote media")
 
@@ -1053,7 +1049,7 @@ class MediaRepository:
                     media_id,
                     e.response,
                 )
-                if e.code == twisted.web.http.NOT_FOUND:
+                if e.code == HTTPStatus.NOT_FOUND:
                     raise e.to_synapse_error()
                 raise SynapseError(502, "Failed to fetch remote media")
 

@@ -29,11 +29,6 @@ from typing_extensions import ParamSpec
 
 import asyncio
 
-try:
-    from twisted.web.iweb import IRequest
-except ImportError:
-    pass
-
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import JsonDict, Requester
 from synapse.util.async_helpers import ObservableDeferred
@@ -110,7 +105,7 @@ class HttpTransactionCache:
         fn: Callable[P, Awaitable[tuple[int, JsonDict]]],
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> "Deferred[tuple[int, JsonDict]]":
+    ) -> "asyncio.Future[tuple[int, JsonDict]]":
         """Fetches the response for this transaction, or executes the given function
         to produce a response for this transaction.
 

@@ -19,13 +19,7 @@
 #
 #
 import re
-
-try:
-    from twisted.internet import address, task
-    from twisted.web.client import FileBodyProducer
-    from twisted.web.iweb import IRequest
-except ImportError:
-    pass
+from typing import Any
 
 from synapse.api.errors import SynapseError
 
@@ -47,21 +41,23 @@ def redact_uri(uri: str) -> str:
     return CLIENT_SECRET_RE.sub(r"\1<redacted>\3", uri)
 
 
-class QuieterFileBodyProducer(FileBodyProducer):
-    """Wrapper for FileBodyProducer that avoids CRITICAL errors when the connection drops.
+try:
+    from twisted.web.client import FileBodyProducer
+    from twisted.internet import task
 
-    Workaround for https://github.com/matrix-org/synapse/issues/4003 /
-    https://twistedmatrix.com/trac/ticket/6528
-    """
+    class QuieterFileBodyProducer(FileBodyProducer):
+        """Wrapper for FileBodyProducer that avoids CRITICAL errors when the connection drops."""
 
-    def stopProducing(self) -> None:
-        try:
-            FileBodyProducer.stopProducing(self)
-        except task.TaskStopped:
-            pass
+        def stopProducing(self) -> None:
+            try:
+                FileBodyProducer.stopProducing(self)
+            except task.TaskStopped:
+                pass
+except ImportError:
+    pass
 
 
-def get_request_uri(request: IRequest) -> bytes:
+def get_request_uri(request: "Any") -> bytes:
     """Return the full URI that was requested by the client"""
     return b"%s://%s%s" % (
         b"https" if request.isSecure() else b"http",
@@ -71,13 +67,13 @@ def get_request_uri(request: IRequest) -> bytes:
     )
 
 
-def _get_requested_host(request: IRequest) -> bytes:
+def _get_requested_host(request: "Any") -> bytes:
     hostname = request.getHeader(b"host")
     if hostname:
         return hostname
 
     # no Host header, use the address/port that the request arrived on
-    host: address.IPv4Address | address.IPv6Address = request.getHost()
+    host: Any = request.getHost()
 
     hostname = host.host.encode("ascii")
 

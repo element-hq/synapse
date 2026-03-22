@@ -39,12 +39,6 @@ from weakref import WeakValueDictionary
 
 import attr
 
-try:
-    from twisted.internet import defer
-    from twisted.python.failure import Failure
-except ImportError:
-    pass
-
 from synapse.logging.context import make_deferred_yieldable, preserve_fn
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import delay_cancellation

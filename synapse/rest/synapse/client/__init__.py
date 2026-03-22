@@ -21,11 +21,6 @@
 
 from typing import TYPE_CHECKING, Mapping
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    pass
-
 from synapse.rest.synapse.client.federation_whitelist import FederationWhitelistResource
 from synapse.rest.synapse.client.new_user_consent import NewUserConsentResource
 from synapse.rest.synapse.client.pick_idp import PickIdpResource
@@ -34,6 +29,12 @@ from synapse.rest.synapse.client.rendezvous import MSC4108RendezvousSessionResou
 from synapse.rest.synapse.client.sso_register import SsoRegisterResource
 from synapse.rest.synapse.client.unsubscribe import UnsubscribeResource
 from synapse.rest.synapse.mas import MasResource
+
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    Resource = object  # type: ignore[assignment,misc]
+
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

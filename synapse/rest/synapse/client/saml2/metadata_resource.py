@@ -24,11 +24,12 @@ import saml2.metadata
 
 try:
     from twisted.web.resource import Resource
-    from twisted.web.server import Request
 except ImportError:
-    pass
+    Resource = object  # type: ignore[assignment,misc]
+
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 

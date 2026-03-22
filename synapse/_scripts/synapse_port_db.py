@@ -45,11 +45,6 @@ from typing import (
 
 import yaml
 
-try:
-    from twisted.internet import defer, reactor as reactor_
-except ImportError:
-    pass
-
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.logging.context import (
@@ -98,6 +93,11 @@ from synapse.storage.databases.state.bg_updates import StateBackgroundUpdateStor
 from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor
+
+try:
+    from twisted.internet import reactor as reactor_
+except ImportError:
+    reactor_ = None  # type: ignore[assignment]
 
 # Cast safety: Twisted does some naughty magic which replaces the
 # twisted.internet.reactor module with a Reactor instance at runtime.
@@ -934,16 +934,14 @@ class Porter:
 
             # Step 4. Figure out what still needs copying
             self.progress.set_state("Checking on port progress")
-            setup_res = await make_deferred_yieldable(
-                defer.gatherResults(
-                    [
-                        run_in_background(self.setup_table, table)
-                        for table in tables
-                        if table not in ["schema_version", "applied_schema_deltas"]
-                        and not table.startswith("sqlite_")
-                    ],
-                    consumeErrors=True,
-                )
+            setup_res = await asyncio.gather(
+                *[
+                    run_in_background(self.setup_table, table)
+                    for table in tables
+                    if table not in ["schema_version", "applied_schema_deltas"]
+                    and not table.startswith("sqlite_")
+                ],
+                return_exceptions=True,
             )
             # Map from table name to args passed to `handle_table`, i.e. a tuple
             # of: `postgres_size`, `table_size`, `forward_chunk`, `backward_chunk`.
@@ -969,18 +967,16 @@ class Porter:
                     if not constraints.get(table, set()) - tables_ported
                 ]
 
-                await make_deferred_yieldable(
-                    defer.gatherResults(
-                        [
-                            run_in_background(
-                                self.handle_table,
-                                table,
-                                *tables_to_port_info_map.pop(table),
-                            )
-                            for table in tables_to_port
-                        ],
-                        consumeErrors=True,
-                    )
+                await asyncio.gather(
+                    *[
+                        run_in_background(
+                            self.handle_table,
+                            table,
+                            *tables_to_port_info_map.pop(table),
+                        )
+                        for table in tables_to_port
+                    ],
+                    return_exceptions=True,
                 )
 
                 tables_ported.update(tables_to_port)
@@ -1139,18 +1135,14 @@ class Porter:
     async def _get_total_count_to_port(
         self, table: str, forward_chunk: int, backward_chunk: int
     ) -> tuple[int, int]:
-        remaining, done = await make_deferred_yieldable(
-            defer.gatherResults(
-                [
-                    run_in_background(
-                        self._get_remaining_count_to_port,
-                        table,
-                        forward_chunk,
-                        backward_chunk,
-                    ),
-                    run_in_background(self._get_already_ported_count, table),
-                ],
-            )
+        remaining, done = await asyncio.gather(
+            run_in_background(
+                self._get_remaining_count_to_port,
+                table,
+                forward_chunk,
+                backward_chunk,
+            ),
+            run_in_background(self._get_already_ported_count, table),
         )
 
         remaining = int(remaining) if remaining else 0
@@ -1584,7 +1576,7 @@ def main() -> None:
         async def run() -> None:
             await porter.run()
 
-        hs.get_clock().call_when_running(lambda: defer.ensureDeferred(run()))
+        hs.get_clock().call_when_running(lambda: asyncio.ensure_future(run()))
 
         reactor.run()
 

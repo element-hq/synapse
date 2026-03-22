@@ -31,11 +31,6 @@ from urllib import parse as urlparse
 import attr
 from prometheus_client.core import Histogram
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse import event_auth
 from synapse.api.constants import (
     Direction,
@@ -91,6 +86,7 @@ from synapse.util.events import generate_fake_event_id
 from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

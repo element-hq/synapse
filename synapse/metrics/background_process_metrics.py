@@ -41,11 +41,6 @@ from prometheus_client import Metric
 from prometheus_client.core import REGISTRY, Counter, Gauge
 from typing_extensions import Concatenate, ParamSpec
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
-
 from synapse.logging.context import (
     ContextResourceUsage,
     LoggingContext,
@@ -233,7 +228,7 @@ def run_as_background_process(
     bg_start_span: bool = True,
     test_only_tracer: Optional["opentracing.Tracer"] = None,
     **kwargs: Any,
-) -> "defer.Deferred[R | None]":
+) -> "asyncio.Future[R | None]":
     """Run the given function in its own logcontext, with resource metrics
 
     This should be used to wrap processes which are fired off to run in the
@@ -430,7 +425,7 @@ def wrap_as_background_process(
     desc: "LiteralString",
 ) -> Callable[
     [Callable[P, Awaitable[R | None]]],
-    Callable[P, "defer.Deferred[R | None]"],
+    Callable[P, "asyncio.Future[R | None]"],
 ]:
     """Decorator that wraps an asynchronous function `func`, returning a synchronous
     decorated function. Calling the decorated version runs `func` as a background
@@ -453,11 +448,11 @@ def wrap_as_background_process(
 
     def wrapper(
         func: Callable[Concatenate[HasHomeServer, P], Awaitable[R | None]],
-    ) -> Callable[P, "defer.Deferred[R | None]"]:
+    ) -> Callable[P, "asyncio.Future[R | None]"]:
         @wraps(func)
         def wrapped_func(
             self: HasHomeServer, *args: P.args, **kwargs: P.kwargs
-        ) -> "defer.Deferred[R | None]":
+        ) -> "asyncio.Future[R | None]":
             assert self.hs is not None, (
                 "The `hs` attribute must be set on the object where `@wrap_as_background_process` decorator is used."
             )

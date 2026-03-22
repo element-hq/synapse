@@ -20,12 +20,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.resource import Resource
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import NotFoundError
 from synapse.http.server import DirectServeJsonResource
@@ -33,6 +27,12 @@ from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import parse_server_name
+
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    Resource = object  # type: ignore[assignment,misc]
+
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

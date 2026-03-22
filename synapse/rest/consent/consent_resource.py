@@ -28,11 +28,6 @@ from typing import TYPE_CHECKING, Any
 import jinja2
 from jinja2 import TemplateNotFound
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.errors import NotFoundError, StoreError, SynapseError
 from synapse.config import ConfigError
 from synapse.http.server import DirectServeHtmlResource, respond_with_html
@@ -40,6 +35,7 @@ from synapse.http.servlet import parse_bytes_from_args, parse_string
 from synapse.types import UserID
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 # language to use for the templates. TODO: figure this out from Accept-Language

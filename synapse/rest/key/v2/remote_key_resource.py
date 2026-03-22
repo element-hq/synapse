@@ -26,11 +26,6 @@ from typing import TYPE_CHECKING, Mapping
 from pydantic import ConfigDict, StrictInt, StrictStr
 from signedjson.sign import sign_json
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.crypto.keyring import ServerKeyFetcher
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -45,6 +40,7 @@ from synapse.util.async_helpers import yieldable_gather_results
 from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

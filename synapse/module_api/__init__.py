@@ -36,14 +36,6 @@ import attr
 import jinja2
 from typing_extensions import Concatenate, ParamSpec
 
-try:
-    from twisted.internet import defer
-    from twisted.internet.interfaces import IDelayedCall
-    from twisted.python.threadpool import ThreadPool
-    from twisted.web.resource import Resource
-except ImportError:
-    pass
-
 from synapse.api import errors
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import SynapseError
@@ -164,6 +156,12 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze
 from synapse.util.sentinel import Sentinel
+
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    Resource = object  # type: ignore[assignment,misc]
+
 
 if TYPE_CHECKING:
     # Old versions don't have `LiteralString`
@@ -1397,7 +1395,7 @@ class ModuleApi:
         *args: object,
         desc: str | None = None,
         **kwargs: object,
-    ) -> IDelayedCall:
+    ) -> Any:
         """Wraps a function as a background process and calls it in a given number of milliseconds.
 
         The scheduled call is not persistent: if the current Synapse instance is
@@ -1416,7 +1414,7 @@ class ModuleApi:
             **kwargs: Keyword arguments to pass to function.
 
         Returns:
-            IDelayedCall handle from twisted, which allows to cancel the delayed call if desired.
+            A handle which allows cancelling the delayed call if desired.
         """
 
         if desc is None:

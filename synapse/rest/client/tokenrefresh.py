@@ -21,11 +21,6 @@
 
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.errors import AuthError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet
@@ -33,6 +28,7 @@ from synapse.http.servlet import RestServlet
 from ._base import client_patterns
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 

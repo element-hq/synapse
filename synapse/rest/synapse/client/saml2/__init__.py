@@ -21,13 +21,14 @@
 import logging
 from typing import TYPE_CHECKING
 
+from synapse.rest.synapse.client.saml2.metadata_resource import SAML2MetadataResource
+from synapse.rest.synapse.client.saml2.response_resource import SAML2ResponseResource
+
 try:
     from twisted.web.resource import Resource
 except ImportError:
-    pass
+    Resource = object  # type: ignore[assignment,misc]
 
-from synapse.rest.synapse.client.saml2.metadata_resource import SAML2MetadataResource
-from synapse.rest.synapse.client.saml2.response_resource import SAML2ResponseResource
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

@@ -27,10 +27,9 @@ from typing import TYPE_CHECKING, Iterable
 from sortedcontainers import SortedList
 
 try:
-    from twisted.internet import defer
     from twisted.internet.defer import Deferred
 except ImportError:
-    pass
+    from asyncio import Future as Deferred  # type: ignore[assignment]
 
 from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.federation import send_queue

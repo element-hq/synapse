@@ -20,13 +20,8 @@
 #
 
 import logging
+import sys
 from typing import TYPE_CHECKING, Awaitable, Callable
-
-try:
-    from twisted.internet import defer
-    from twisted.python.failure import Failure
-except ImportError:
-    pass
 
 from synapse.logging.context import (
     ContextResourceUsage,
@@ -482,14 +477,14 @@ class TaskScheduler:
                 except CancelledError:
                     status = TaskStatus.CANCELLED
                 except Exception:
-                    f = Failure()
+                    exc_info = sys.exc_info()
                     logger.error(
                         "scheduled task %s failed",
                         task.id,
-                        exc_info=(f.type, f.value, f.getTracebackObject()),
+                        exc_info=exc_info,
                     )
                     status = TaskStatus.FAILED
-                    error = f.getErrorMessage()
+                    error = str(exc_info[1]) if exc_info[1] else "Unknown error"
 
                 await self._store.update_scheduled_task(
                     task.id,

@@ -23,11 +23,6 @@ import logging
 import random
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 import synapse
 import synapse.api.auth
 import synapse.types
@@ -75,6 +70,7 @@ from synapse.util.threepids import (
 from ._base import client_patterns, interactive_auth_handler
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)

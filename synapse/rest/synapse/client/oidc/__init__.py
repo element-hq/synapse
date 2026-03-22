@@ -22,15 +22,16 @@
 import logging
 from typing import TYPE_CHECKING
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    pass
-
 from synapse.rest.synapse.client.oidc.backchannel_logout_resource import (
     OIDCBackchannelLogoutResource,
 )
 from synapse.rest.synapse.client.oidc.callback_resource import OIDCCallbackResource
+
+try:
+    from twisted.web.resource import Resource
+except ImportError:
+    Resource = object  # type: ignore[assignment,misc]
+
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

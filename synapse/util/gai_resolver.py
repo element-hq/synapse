@@ -46,13 +46,13 @@ if TYPE_CHECKING:
     try:
         from twisted.python.runtime import platform
     except ImportError:
-        pass
+        platform = None  # type: ignore[assignment]
 
-    if platform.supportsThreads():
+    if platform and platform.supportsThreads():
         try:
             from twisted.python.threadpool import ThreadPool
         except ImportError:
-            pass
+            ThreadPool = object  # type: ignore[misc, assignment]
     else:
         ThreadPool = object  # type: ignore[misc, assignment]
 

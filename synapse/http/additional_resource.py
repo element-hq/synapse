@@ -20,14 +20,10 @@
 
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.http.server import DirectServeJsonResource
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 

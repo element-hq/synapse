@@ -26,15 +26,15 @@ from typing import cast
 
 import yaml
 
-try:
-    from twisted.internet import defer, reactor as reactor_
-except ImportError:
-    pass
-
 from synapse.config.homeserver import HomeServerConfig
 from synapse.server import HomeServer
 from synapse.storage import DataStore
 from synapse.types import ISynapseReactor
+
+try:
+    from twisted.internet import reactor as reactor_
+except ImportError:
+    reactor_ = None  # type: ignore[assignment]
 
 # Cast safety: Twisted does some naughty magic which replaces the
 # twisted.internet.reactor module with a Reactor instance at runtime.
@@ -66,7 +66,7 @@ def run_background_updates(hs: HomeServer) -> None:
 
     def run() -> None:
         # Apply all background updates on the database.
-        defer.ensureDeferred(
+        asyncio.ensure_future(
             hs.run_as_background_process(
                 "background_updates",
                 run_background_updates,

@@ -20,6 +20,7 @@
 #
 
 import abc
+import asyncio
 import logging
 from contextlib import ExitStack
 from http import HTTPStatus
@@ -35,11 +36,6 @@ from signedjson.key import (
 from signedjson.sign import SignatureVerifyException, signature_ids, verify_signed_json
 from signedjson.types import VerifyKey
 from unpaddedbase64 import decode_base64
-
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
 
 from synapse.api.errors import (
     Codes,
@@ -268,7 +264,7 @@ class Keyring:
 
     def verify_json_objects_for_server(
         self, server_and_json: Iterable[tuple[str, dict, int]]
-    ) -> list["defer.Deferred[None]"]:
+    ) -> list["asyncio.Future[None]"]:
         """Bulk verifies signatures of json objects, bulk fetching keys as
         necessary.
 

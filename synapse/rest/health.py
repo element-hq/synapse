@@ -19,13 +19,14 @@
 #
 #
 
+from synapse.api.errors import Codes
+from synapse.http.aiohttp_shim import SynapseRequest as Request
+
 try:
     from twisted.web.resource import Resource
-    from twisted.web.server import Request
 except ImportError:
-    pass
+    Resource = object  # type: ignore[assignment,misc]
 
-from synapse.api.errors import Codes
 
 
 class HealthResource(Resource):

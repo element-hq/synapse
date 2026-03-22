@@ -28,11 +28,6 @@ import attr
 from pydantic import StrictBool, StrictStr, StringConstraints
 from typing_extensions import Annotated
 
-try:
-    from twisted.web.server import Request
-except ImportError:
-    pass
-
 from synapse.api.constants import LoginType
 from synapse.api.errors import (
     Codes,
@@ -69,6 +64,7 @@ from synapse.util.threepids import check_3pid_allowed, validate_email
 from ._base import client_patterns, interactive_auth_handler
 
 if TYPE_CHECKING:
+    from synapse.http.aiohttp_shim import SynapseRequest as Request
     from synapse.server import HomeServer
 
 

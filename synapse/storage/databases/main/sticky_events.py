@@ -15,11 +15,6 @@ import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Collection, cast
 
-try:
-    from twisted.internet.defer import Deferred
-except ImportError:
-    pass
-
 from synapse.events import EventBase
 from synapse.replication.tcp.streams._base import StickyEventsStream
 from synapse.storage.database import (
@@ -409,7 +404,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             (now,),
         )
 
-    def _run_background_cleanup(self) -> Deferred:
+    def _run_background_cleanup(self) -> "asyncio.Task[None]":
         return self.hs.run_as_background_process(
             "delete_expired_sticky_events",
             self._delete_expired_sticky_events,

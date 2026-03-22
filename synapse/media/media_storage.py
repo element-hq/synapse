@@ -51,7 +51,9 @@ try:
     from twisted.internet.defer import Deferred
     from twisted.internet.interfaces import IConsumer
 except ImportError:
-    pass
+    interfaces = None  # type: ignore[assignment]
+    Deferred = None  # type: ignore[assignment,misc]
+    IConsumer = None  # type: ignore[assignment,misc]
 
 from synapse.api.errors import NotFoundError
 from synapse.logging.context import defer_to_thread, run_in_background

@@ -15,11 +15,6 @@
 import logging
 from typing import TYPE_CHECKING, Optional
 
-try:
-    from twisted.internet.interfaces import IDelayedCall
-except ImportError:
-    pass
-
 from synapse.api.constants import EventTypes, StickyEvent, StickyEventField
 from synapse.api.errors import ShadowBanError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
@@ -77,7 +72,7 @@ class DelayedEventsHandler:
             cfg=self._config.ratelimiting.rc_delayed_event_mgmt,
         )
 
-        self._next_delayed_event_call: Optional[IDelayedCall] = None
+        self._next_delayed_event_call: Optional[Any] = None
 
         # The current position in the current_state_delta stream
         self._event_pos: int | None = None

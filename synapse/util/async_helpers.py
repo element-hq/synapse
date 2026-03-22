@@ -50,17 +50,8 @@ from typing_extensions import Concatenate, ParamSpec, Unpack
 
 from asyncio import CancelledError
 
-try:
-    from twisted.internet import defer
-    from twisted.internet.defer import CancelledError as TwistedCancelledError
-    from twisted.python.failure import Failure
-
-    # Tuple for catching both CancelledError types during transition
-    AnyCancelledError = (CancelledError, TwistedCancelledError)
-except ImportError:
-    defer = None  # type: ignore[assignment]
-    Failure = BaseException  # type: ignore[misc,assignment]
-    AnyCancelledError = (CancelledError,)  # type: ignore[assignment]
+Failure = BaseException  # type: ignore[misc,assignment]
+AnyCancelledError = (CancelledError,)
 
 from synapse.logging.context import (
     PreserveLoggingContext,
