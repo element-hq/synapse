@@ -738,12 +738,16 @@ class PerspectivesKeyFetcher(BaseV2KeyFetcher):
 
             return {}
 
-        results = await make_deferred_yieldable(
-            defer.gatherResults(
-                [run_in_background(get_key, server) for server in self.key_servers],
-                consumeErrors=True,
-            ).addErrback(unwrapFirstError)
+        import asyncio as _asyncio
+
+        results = await _asyncio.gather(
+            *[get_key(server) for server in self.key_servers],
+            return_exceptions=True,
         )
+        # Check for exceptions
+        for r in results:
+            if isinstance(r, BaseException):
+                raise r
 
         union_of_keys: dict[str, dict[str, FetchKeyResult]] = {}
         for result in results:

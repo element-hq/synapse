@@ -260,7 +260,14 @@ class Clock:
         # current context into the reactor after the function finishes.
         with context.PreserveLoggingContext():
             d = call.start(duration.as_secs(), now=now)
-        d.addErrback(log_failure, "Looping call died", consumeErrors=False)
+        if hasattr(d, 'addErrback'):
+            d.addErrback(log_failure, "Looping call died", consumeErrors=False)
+        elif hasattr(d, 'add_done_callback'):
+            def _log_err(f: Any) -> None:
+                exc = f.exception() if hasattr(f, 'exception') else None
+                if exc:
+                    logger.exception("Looping call died", exc_info=exc)
+            d.add_done_callback(_log_err)
         self._looping_calls.add(call)
 
         clock_debug_logger.debug(

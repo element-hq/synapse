@@ -601,11 +601,20 @@ class DatabasePool:
         self._clock = hs.get_clock()
         self._txn_limit = database_config.config.get("txn_limit", 0)
         self._database_config = database_config
-        self._db_pool = make_pool(
-            reactor=hs.get_reactor(),
+        from synapse.storage.native_database import NativeConnectionPool
+
+        # Check for a pre-prepared connection (used in tests with in-memory SQLite)
+        prepped_conn = database_config.config.get("_TEST_PREPPED_CONN")
+        if prepped_conn and hasattr(prepped_conn, 'conn'):
+            initial_conn = prepped_conn.conn  # Extract raw connection from LoggingDatabaseConnection
+        else:
+            initial_conn = None
+
+        self._db_pool = NativeConnectionPool(
             db_config=database_config,
             engine=engine,
             server_name=self.server_name,
+            initial_connection=initial_conn,
         )
 
         self.updates = BackgroundUpdater(hs, self)

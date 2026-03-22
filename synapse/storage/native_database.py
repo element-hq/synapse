@@ -56,6 +56,7 @@ class NativeConnectionPool:
         engine: BaseDatabaseEngine,
         server_name: str,
         max_workers: int = 5,
+        initial_connection: Connection | None = None,
     ) -> None:
         self._db_config = db_config
         self._engine = engine
@@ -68,6 +69,12 @@ class NativeConnectionPool:
             if not k.startswith("cp_")
         }
 
+        # For in-memory SQLite, use single worker and allow cross-thread access
+        db_path = self._db_args.get("database", "")
+        if db_path == ":memory:" or db_path == "":
+            max_workers = 1
+            self._db_args["check_same_thread"] = False
+
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers,
             thread_name_prefix=f"synapse-db-{db_config.name}",
@@ -76,15 +83,25 @@ class NativeConnectionPool:
         # Thread-local storage for per-thread connections
         self._thread_local = threading.local()
 
+        # For in-memory SQLite or when an initial connection is provided,
+        # use a shared connection (not thread-local)
+        self._shared_conn: Connection | None = initial_connection
+        if db_path == ":memory:" or db_path == "":
+            self._use_shared_conn = True
+        else:
+            self._use_shared_conn = initial_connection is not None
+
         self._closed = False
 
     def _get_connection(self) -> Connection:
         """Get or create a connection for the current thread.
 
-        Each thread in the pool maintains its own persistent connection.
-        If the connection is closed or doesn't exist, a new one is created
-        and initialized via the engine's on_new_connection callback.
+        For shared mode (in-memory SQLite), uses a single shared connection.
+        Otherwise, each thread gets its own persistent connection.
         """
+        if self._use_shared_conn and self._shared_conn is not None:
+            return self._shared_conn
+
         conn = getattr(self._thread_local, "conn", None)
 
         if conn is not None and not self._engine.is_connection_closed(conn):
@@ -105,7 +122,10 @@ class NativeConnectionPool:
             )
             self._engine.on_new_connection(db_conn)
 
-        self._thread_local.conn = raw_conn
+        if self._use_shared_conn:
+            self._shared_conn = raw_conn
+        else:
+            self._thread_local.conn = raw_conn
         return raw_conn
 
     def _reconnect(self) -> Connection:
@@ -145,18 +165,9 @@ class NativeConnectionPool:
             conn = self._get_connection()
             return func(conn, *args, **kwargs)
 
-        # Submit to thread pool. Use asyncio if available, Twisted otherwise.
-        try:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(self._executor, _inner)
-        except RuntimeError:
-            # No running asyncio loop — use Twisted's thread pool
-            try:
-                from twisted.internet import threads
-                return await threads.deferToThread(_inner)
-            except ImportError:
-                # Last resort: blocking call
-                return self._executor.submit(_inner).result()
+        # Run in thread pool via asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, _inner)
 
     async def runInteraction(
         self,
@@ -190,18 +201,9 @@ class NativeConnectionPool:
                 conn.rollback()
                 raise
 
-        # Submit to thread pool. Use asyncio if available, Twisted otherwise.
-        try:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(self._executor, _inner)
-        except RuntimeError:
-            # No running asyncio loop — use Twisted's thread pool
-            try:
-                from twisted.internet import threads
-                return await threads.deferToThread(_inner)
-            except ImportError:
-                # Last resort: blocking call
-                return self._executor.submit(_inner).result()
+        # Run in thread pool via asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, _inner)
 
     def close(self) -> None:
         """Shut down the connection pool.

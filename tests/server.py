@@ -1169,7 +1169,7 @@ def setup_test_homeserver(
         if PREPPED_SQLITE_DB_CONN is None:
             temp_engine = create_engine(database_config)
             PREPPED_SQLITE_DB_CONN = LoggingDatabaseConnection(
-                conn=sqlite3.connect(":memory:"),
+                conn=sqlite3.connect(":memory:", check_same_thread=False),
                 engine=temp_engine,
                 default_txn_name="PREPPED_CONN",
                 server_name=server_name,

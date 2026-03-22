@@ -583,99 +583,27 @@ async def gather_optional_coroutines(
     )
 
 
-def timeout_deferred(
+async def timeout_deferred(
     *,
-    deferred: "defer.Deferred[_T]",
+    deferred: Any = None,
     timeout: float,
     cancel_on_shutdown: bool = True,
-    clock: Clock,
-) -> "defer.Deferred[_T]":
-    """The in built twisted `Deferred.addTimeout` fails to time out deferreds
-    that have a canceller that throws exceptions. This method creates a new
-    deferred that wraps and times out the given deferred, correctly handling
-    the case where the given deferred's canceller throws.
+    clock: Any = None,
+) -> Any:
+    """Await an awaitable with a timeout.
 
-    (See https://twistedmatrix.com/trac/ticket/9534)
-
-    NOTE: Unlike `Deferred.addTimeout`, this function returns a new deferred.
-
-    NOTE: the TimeoutError raised by the resultant deferred is
-    twisted.internet.asyncio.TimeoutError, which is *different* to the built-in
-    TimeoutError, as well as various other TimeoutErrors you might have imported.
+    Raises asyncio.TimeoutError if the timeout expires.
 
     Args:
-        deferred: The Deferred to potentially timeout.
-        timeout: Timeout in seconds
-        cancel_on_shutdown: Whether this call should be tracked for cleanup during
-            shutdown. In general, all calls should be tracked. There may be a use case
-            not to track calls with a `timeout` of 0 (or similarly short) since tracking
-            them may result in rapid insertions and removals of tracked calls
-            unnecessarily. But unless a specific instance of tracking proves to be an
-            issue, we can just track all delayed calls.
-        clock: The `Clock` instance used to track delayed calls.
-
+        deferred: The awaitable to potentially timeout.
+        timeout: Timeout in seconds.
+        cancel_on_shutdown: Ignored (kept for API compatibility).
+        clock: Ignored (kept for API compatibility).
 
     Returns:
-        A new Deferred, which will errback with asyncio.TimeoutError on timeout.
+        The result of the awaitable.
     """
-    new_d: "defer.Deferred[_T]" = defer.Deferred()
-
-    timed_out = [False]
-
-    def time_it_out() -> None:
-        timed_out[0] = True
-
-        try:
-            with PreserveLoggingContext():
-                deferred.cancel()
-        except Exception:  # if we throw any exception it'll break time outs
-            logger.exception("Canceller failed during timeout")
-
-        # the cancel() call should have set off a chain of errbacks which
-        # will have errbacked new_d, but in case it hasn't, errback it now.
-
-        if not new_d.called:
-            with PreserveLoggingContext():
-                new_d.errback(asyncio.TimeoutError("Timed out after %gs" % (timeout,)))
-
-    # We don't track these calls since they are short.
-    delayed_call = clock.call_later(
-        Duration(seconds=timeout),
-        time_it_out,
-        call_later_cancel_on_shutdown=cancel_on_shutdown,
-    )
-
-    def convert_cancelled(value: Failure) -> Failure:
-        # if the original deferred was cancelled, and our timeout has fired, then
-        # the reason it was cancelled was due to our timeout. Turn the CancelledError
-        # into a TimeoutError.
-        if timed_out[0] and value.check(CancelledError):
-            raise asyncio.TimeoutError("Timed out after %gs" % (timeout,))
-        return value
-
-    deferred.addErrback(convert_cancelled)
-
-    def cancel_timeout(result: _T) -> _T:
-        # stop the pending call to cancel the deferred if it's been fired
-        if delayed_call.active():
-            delayed_call.cancel()
-        return result
-
-    deferred.addBoth(cancel_timeout)
-
-    def success_cb(val: _T) -> None:
-        if not new_d.called:
-            with PreserveLoggingContext():
-                new_d.callback(val)
-
-    def failure_cb(val: Failure) -> None:
-        if not new_d.called:
-            with PreserveLoggingContext():
-                new_d.errback(val)
-
-    deferred.addCallbacks(success_cb, failure_cb)
-
-    return new_d
+    return await asyncio.wait_for(deferred, timeout=timeout)
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -700,67 +628,19 @@ def maybe_awaitable(value: Awaitable[R] | R) -> Awaitable[R]:
     return DoneAwaitable(value)
 
 
-@overload
-def delay_cancellation(awaitable: "defer.Deferred[T]") -> "defer.Deferred[T]": ...
-
-
-@overload
-def delay_cancellation(awaitable: Coroutine[Any, Any, T]) -> "defer.Deferred[T]": ...
-
-
-@overload
-def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]: ...
-
-
 def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
-    """Delay cancellation of a coroutine or `Deferred` awaitable until it resolves.
+    """Shield an awaitable from cancellation.
 
-    Has the same effect as `stop_cancellation`, but the returned `Deferred` will not
-    resolve with a `CancelledError` until the original awaitable resolves.
-
-    Args:
-        deferred: The coroutine or `Deferred` to protect against cancellation. May
-            optionally follow the Synapse logcontext rules.
-
-    Returns:
-        A new `Deferred`, which will contain the result of the original coroutine or
-        `Deferred`. The new `Deferred` will not propagate cancellation through to the
-        original coroutine or `Deferred`.
-
-        When cancelled, the new `Deferred` will wait until the original coroutine or
-        `Deferred` resolves before failing with a `CancelledError`.
-
-        The new `Deferred` will follow the Synapse logcontext rules if `awaitable`
-        follows the Synapse logcontext rules. Otherwise the new `Deferred` should be
-        wrapped with `make_deferred_yieldable`.
+    The returned awaitable will not propagate cancellation to the original.
+    Uses asyncio.shield for native asyncio support.
     """
-
-    # First, convert the awaitable into a `Deferred`.
-    if isinstance(awaitable, defer.Deferred):
-        deferred = awaitable
-    elif asyncio.iscoroutine(awaitable):
-        # Ideally we'd use `Deferred.fromCoroutine()` here, to save on redundant
-        # type-checking, but we'd need Twisted >= 21.2.
-        deferred = defer.ensureDeferred(awaitable)
+    if asyncio.iscoroutine(awaitable):
+        return asyncio.shield(asyncio.ensure_future(awaitable))
+    elif asyncio.isfuture(awaitable):
+        return asyncio.shield(awaitable)
     else:
-        # We have no idea what to do with this awaitable.
-        # We assume it's already resolved, such as `DoneAwaitable`s or `Future`s from
-        # `make_awaitable`, and let the caller `await` it normally.
+        # Already resolved or unknown type — return as-is
         return awaitable
-
-    def handle_cancel(new_deferred: "defer.Deferred[T]") -> None:
-        # before the new deferred is cancelled, we `pause` it to stop the cancellation
-        # propagating. we then `unpause` it once the wrapped deferred completes, to
-        # propagate the exception.
-        new_deferred.pause()
-        with PreserveLoggingContext():
-            new_deferred.errback(Failure(CancelledError()))
-
-        deferred.addBoth(lambda _: new_deferred.unpause())
-
-    new_deferred: "defer.Deferred[T]" = defer.Deferred(handle_cancel)
-    deferred.chainDeferred(new_deferred)
-    return new_deferred
 
 
 # ===========================================================================

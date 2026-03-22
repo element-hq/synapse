@@ -19,16 +19,12 @@
 #
 #
 
-# Install the asyncio reactor BEFORE any other Twisted imports.
-# This ensures asyncio.get_running_loop() works inside Twisted-driven code,
-# enabling native asyncio primitives (Future, Event, create_task, etc.)
+# Set up an asyncio event loop for tests.
 import asyncio as _asyncio
+import nest_asyncio as _nest_asyncio
 
-try:
-    from twisted.internet import asyncioreactor
+_test_asyncio_loop = _asyncio.new_event_loop()
+_asyncio.set_event_loop(_test_asyncio_loop)
 
-    _test_asyncio_loop = _asyncio.new_event_loop()
-    _asyncio.set_event_loop(_test_asyncio_loop)
-    asyncioreactor.install(_test_asyncio_loop)
-except Exception:
-    pass  # Already installed or Twisted not available
+# Allow nested event loop calls (run_until_complete inside run_until_complete)
+_nest_asyncio.apply(_test_asyncio_loop)

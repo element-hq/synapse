@@ -869,47 +869,63 @@ class HomeserverTestCase(TestCase):
 
     def pump(self, by: float = 0.0) -> None:
         """
-        Pump the reactor enough that Deferreds will fire.
+        Pump both the test reactor and the asyncio event loop.
         """
+        import asyncio
+
+        # Advance Twisted's fake clock
         self.reactor.pump([by] * 100)
 
+        # Drive the asyncio event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if not loop.is_closed() and not loop.is_running():
+                loop.run_until_complete(asyncio.sleep(0))
+        except RuntimeError:
+            pass
+
     def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
-        deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump(by=by)
-        return self.successResultOf(deferred)
+        import asyncio
+
+        # Advance Twisted's fake clock first (for any time-dependent setup)
+        if by > 0:
+            self.reactor.pump([by] * 100)
+
+        # Drive the coroutine to completion on the global event loop
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(d)  # type: ignore[arg-type]
 
     def get_failure(
         self, d: Awaitable[Any], exc: type[_ExcType], by: float = 0.0
-    ) -> _TypedFailure[_ExcType]:
+    ) -> Any:
         """
-        Run an awaitable and get a Failure from it. The failure must be of the type `exc`.
+        Run an awaitable and get a Failure from it.
         """
-        deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
+        import asyncio
+
+        future = asyncio.ensure_future(d)  # type: ignore[arg-type]
+
+        error_holder: list[BaseException] = []
+
+        def _on_done(f: asyncio.Future) -> None:  # type: ignore[type-arg]
+            try:
+                f.result()
+            except BaseException as e:
+                error_holder.append(e)
+
+        future.add_done_callback(_on_done)
         self.pump(by)
-        return self.failureResultOf(deferred, exc)
+
+        if error_holder and isinstance(error_holder[0], exc):
+            return Failure(error_holder[0])
+        elif error_holder:
+            self.fail(f"Expected {exc}, got {type(error_holder[0])}: {error_holder[0]}")
+        else:
+            self.fail("Expected failure, but awaitable succeeded")
 
     def get_success_or_raise(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         """Drive awaitable to completion and return result or raise exception."""
-        deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
-
-        results: list = []
-        deferred.addBoth(results.append)
-
-        self.pump(by=by)
-
-        if not results:
-            self.fail(
-                "Success result expected on {!r}, found no result instead".format(
-                    deferred
-                )
-            )
-
-        result = results[0]
-
-        if isinstance(result, Failure):
-            result.raiseException()
-
-        return result
+        return self.get_success(d, by=by)
 
     def register_user(
         self,

@@ -421,15 +421,15 @@ class HomeServer(metaclass=abc.ABCMeta):
         deferred = run_as_background_process(desc, self.hostname, func, *args, **kwargs)  # type: ignore[untracked-background-process]
         self._background_processes.add(deferred)
 
-        def on_done(res: R) -> R:
+        def on_done(fut: Any) -> None:
             try:
-                self._background_processes.remove(deferred)
-            except KeyError:
-                # If the background process isn't being tracked anymore we can just move on.
+                self._background_processes.discard(deferred)
+            except Exception:
                 pass
-            return res
 
-        deferred.addBoth(on_done)
+        if hasattr(deferred, 'add_done_callback'):
+            deferred.add_done_callback(on_done)
+
         return deferred
 
     async def shutdown(self) -> None:

@@ -50,13 +50,7 @@ from typing import (
 import attr
 from typing_extensions import ParamSpec
 
-try:
-    from twisted.internet import defer, threads
-    from twisted.python.threadpool import ThreadPool
-
-    HAS_TWISTED = True
-except ImportError:
-    HAS_TWISTED = False
+HAS_TWISTED = False
 
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.util.stringutils import random_string_insecure_fast
@@ -819,48 +813,18 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-async def _unwrap_awaitable(awaitable: Awaitable[R]) -> R:
-    """Unwraps an arbitrary awaitable by awaiting it."""
-    return await awaitable
 
-
-@overload
-def preserve_fn(
-    f: Callable[P, Awaitable[R]],
-) -> Callable[P, Any]:
-    # The `type: ignore[misc]` above suppresses
-    # "Overloaded function signatures 1 and 2 overlap with incompatible return types"
-    ...
-
-
-@overload
-def preserve_fn(f: Callable[P, R]) -> Callable[P, Any]: ...
+T = TypeVar("T")
+ResultT = TypeVar("ResultT")
 
 
 def preserve_fn(
-    f: Callable[P, R] | Callable[P, Awaitable[R]],
+    f: Callable[P, Awaitable[R]] | Callable[P, R],
 ) -> Callable[P, Any]:
     """Function decorator which wraps the function with run_in_background"""
-
     def g(*args: P.args, **kwargs: P.kwargs) -> Any:
         return run_in_background(f, *args, **kwargs)
-
     return g
-
-
-@overload
-def run_in_background(
-    f: Callable[P, Awaitable[R]], *args: P.args, **kwargs: P.kwargs
-) -> Any:
-    # The `type: ignore[misc]` above suppresses
-    # "Overloaded function signatures 1 and 2 overlap with incompatible return types"
-    ...
-
-
-@overload
-def run_in_background(
-    f: Callable[P, R], *args: P.args, **kwargs: P.kwargs
-) -> Any: ...
 
 
 def run_in_background(
@@ -868,248 +832,86 @@ def run_in_background(
     *args: P.args,
     **kwargs: P.kwargs,
 ) -> Any:
-    """Calls a function, ensuring that the current context is restored after
-    return from the function, and that the sentinel context is set once the
-    deferred returned by the function completes.
+    """Calls a function, scheduling any coroutine as a background task.
 
-    To explain how the log contexts work here:
-     - When `run_in_background` is called, the calling logcontext is stored
-       ("original"), we kick off the background task in the current context, and we
-       restore that original context before returning.
-     - For a completed deferred, that's the end of the story.
-     - For an incomplete deferred, when the background task finishes, we don't want to
-       leak our context into the reactor which would erroneously get attached to the
-       next operation picked up by the event loop. We add a callback to the deferred
-       which will clear the logging context after it finishes and yields control back to
-       the reactor.
-
-    Useful for wrapping functions that return a deferred or coroutine, which you don't
-    yield or await on (for instance because you want to pass it to
-    deferred.gatherResults()).
-
-    If f returns a Coroutine object, it will be wrapped into a Deferred (which will have
-    the side effect of executing the coroutine).
-
-    Note that if you completely discard the result, you should make sure that
-    `f` doesn't raise any deferred exceptions, otherwise a scary-looking
-    CRITICAL error about an unhandled error will be logged without much
-    indication about where it came from.
-
-    Returns:
-        Deferred which returns the result of func, or `None` if func raises.
-        Note that the returned Deferred does not follow the synapse logcontext
-        rules.
+    Preserves the calling logcontext. When the task completes, resets to
+    SENTINEL to avoid leaking into the event loop.
     """
-    instance_id = random_string_insecure_fast(5)
     calling_context = current_context()
-    logcontext_debug_logger.debug(
-        "run_in_background(%s): called with logcontext=%s", instance_id, calling_context
-    )
     try:
-        # (kick off the task in the current context)
         res = f(*args, **kwargs)
     except Exception:
-        # the assumption here is that the caller doesn't want to be disturbed
-        # by synchronous exceptions, so let's turn them into Failures.
-        return defer.fail()
+        import sys
+        loop = asyncio.get_event_loop()
+        fut: asyncio.Future[Any] = loop.create_future()
+        fut.set_exception(sys.exc_info()[1])  # type: ignore[arg-type]
+        return fut
 
-    # `res` may be a coroutine, `Deferred`, some other kind of awaitable, or a plain
-    # value. Convert it to a `Deferred`.
-    #
-    # Wrapping the value in a deferred has the side effect of executing the coroutine,
-    # if it is one. If it's already a deferred, then we can just use that.
-    # `res` may be a coroutine, `Deferred`, Future, or a plain value.
-    # Try to schedule via asyncio first (enables native asyncio primitives),
-    # fall back to Twisted Deferreds.
-    d: Any
-    try:
-        loop = asyncio.get_running_loop()
-        # asyncio loop is running — use asyncio.ensure_future
-        if isinstance(res, typing.Coroutine):
-            d = asyncio.ensure_future(res)
-        elif isinstance(res, (asyncio.Task, asyncio.Future)):
-            d = res
-        elif HAS_TWISTED and isinstance(res, defer.Deferred):
-            d = res  # Keep Deferreds as-is
-        elif isinstance(res, Awaitable):
-            d = asyncio.ensure_future(_unwrap_awaitable(res))
-        else:
-            fut: asyncio.Future[R] = loop.create_future()
-            fut.set_result(res)
-            d = fut
-    except RuntimeError:
-        # No asyncio loop running — fall back to Twisted
-        if isinstance(res, typing.Coroutine):
-            d = defer.ensureDeferred(res)
-        elif HAS_TWISTED and isinstance(res, defer.Deferred):
-            d = res
-        elif isinstance(res, Awaitable):
-            d = defer.ensureDeferred(_unwrap_awaitable(res))
-        else:
-            d = defer.succeed(res)
+    if isinstance(res, typing.Coroutine):
+        return run_coroutine_in_background(res)
 
-    # Check if already completed
-    is_done = False
-    if isinstance(d, (asyncio.Task, asyncio.Future)):
-        is_done = d.done()
-    elif hasattr(d, 'called'):
-        is_done = d.called and not getattr(d, 'paused', False)
+    if isinstance(res, (asyncio.Task, asyncio.Future)):
+        if not res.done():
+            set_current_context(calling_context)
+            def _reset(f: "asyncio.Future[Any]") -> None:
+                set_current_context(SENTINEL_CONTEXT)
+            res.add_done_callback(_reset)
+        return res
 
-    if is_done:
-        return d
-
-    # Restore calling context and add sentinel-reset callback
-    set_current_context(calling_context)
-
-    if isinstance(d, (asyncio.Task, asyncio.Future)):
-        def _reset_asyncio(f: "asyncio.Future[Any]") -> None:
-            set_current_context(SENTINEL_CONTEXT)
-        d.add_done_callback(_reset_asyncio)
-    elif hasattr(d, 'addBoth'):
-        d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
-
-    return d
+    # Plain value — wrap in a resolved future
+    loop = asyncio.get_event_loop()
+    fut: asyncio.Future[Any] = loop.create_future()
+    fut.set_result(res)
+    return fut
 
 
 def run_coroutine_in_background(
     coroutine: typing.Coroutine[Any, Any, R],
-) -> Any:
-    """Run the coroutine, ensuring that the current context is restored after
-    return from the function, and that the sentinel context is set once the
-    deferred returned by the function completes.
+) -> "asyncio.Task[R]":
+    """Schedule a coroutine as a background asyncio.Task."""
+    calling_context = current_context()
 
-    Useful for wrapping coroutines that you don't yield or await on (for
-    instance because you want to pass it to deferred.gatherResults()).
-
-    This is a special case of `run_in_background` where we can accept a coroutine
-    directly rather than a function. We can do this because coroutines do not continue
-    running once they have yielded.
-
-    This is an ergonomic helper so we can do this:
-    ```python
-    run_coroutine_in_background(func1(arg1))
-    ```
-    Rather than having to do this:
-    ```python
-    run_in_background(lambda: func1(arg1))
-    ```
-    """
-    return run_in_background(lambda: coroutine)
-
-
-T = TypeVar("T")
-
-
-ResultT = TypeVar("ResultT")
-
-
-def _set_context_cb(result: ResultT, context: LoggingContextOrSentinel) -> ResultT:
-    """A callback function which just sets the logging context"""
-    set_current_context(context)
-    return result
-
-
-def make_deferred_yieldable(deferred: Any) -> Any:
-    """Make a Deferred or awaitable follow the Synapse logcontext rules.
-
-    For Twisted Deferreds: adds callbacks to save/restore logcontext.
-    For native awaitables: returns an async wrapper that preserves logcontext.
-    The returned value is always awaitable.
-    """
-    # Handle Twisted Deferreds
-    if HAS_TWISTED and isinstance(deferred, defer.Deferred):
-        if deferred.called and not deferred.paused:
-            return deferred
-        calling_context = set_current_context(SENTINEL_CONTEXT)
-        deferred.addBoth(_set_context_cb, calling_context)
-        return deferred
-
-    # For native awaitables, wrap in an async function
-    async def _wrap() -> Any:
-        calling_context = set_current_context(SENTINEL_CONTEXT)
+    async def _wrapper() -> R:
         try:
-            return await deferred
+            return await coroutine
         finally:
-            set_current_context(calling_context)
+            set_current_context(SENTINEL_CONTEXT)
 
-    return _wrap()
+    task = asyncio.ensure_future(_wrapper())
+    set_current_context(calling_context)
+    return task
 
 
-def defer_to_thread(
-    reactor: "ISynapseReactor", f: Callable[P, R], *args: P.args, **kwargs: P.kwargs
-) -> Any:
+async def make_deferred_yieldable(awaitable: Any) -> Any:
+    """Await an awaitable while preserving the logging context.
+
+    Clears the logcontext before awaiting (so it doesn't leak into the
+    event loop) and restores it after completion.
     """
-    Calls the function `f` using a thread from the reactor's default threadpool and
-    returns the result as a Deferred.
+    if awaitable is None or not hasattr(awaitable, '__await__') and not asyncio.isfuture(awaitable) and not asyncio.iscoroutine(awaitable):
+        # Plain value — return directly
+        return awaitable
 
-    Creates a new logcontext for `f`, which is created as a child of the current
-    logcontext (so its CPU usage metrics will get attributed to the current
-    logcontext). `f` should preserve the logcontext it is given.
-
-    The result deferred follows the Synapse logcontext rules: you should `yield`
-    on it.
-
-    Args:
-        reactor: The reactor in whose main thread the Deferred will be invoked,
-            and whose threadpool we should use for the function.
-
-            Normally this will be hs.get_reactor().
-
-        f: The function to call.
-
-        args: positional arguments to pass to f.
-
-        kwargs: keyword arguments to pass to f.
-
-    Returns:
-        A Deferred which fires a callback with the result of `f`, or an
-            errback if `f` throws an exception.
-    """
-    return defer_to_threadpool(reactor, reactor.getThreadPool(), f, *args, **kwargs)
+    calling_context = set_current_context(SENTINEL_CONTEXT)
+    try:
+        return await awaitable
+    finally:
+        set_current_context(calling_context)
 
 
-def defer_to_threadpool(
-    reactor: "ISynapseReactor",
-    threadpool: ThreadPool,
-    f: Callable[P, R],
-    *args: P.args,
-    **kwargs: P.kwargs,
-) -> Any:
-    """
-    A wrapper for twisted.internet.threads.deferToThreadpool, which handles
-    logcontexts correctly.
+async def defer_to_thread(
+    reactor: Any = None, f: Callable[P, R] = None, *args: P.args, **kwargs: P.kwargs
+) -> R:
+    """Run a function in a thread pool executor, preserving logcontext."""
+    if f is None:
+        # Called as defer_to_thread(f, *args) without reactor
+        f = reactor
+        reactor = None
 
-    Calls the function `f` using a thread from the given threadpool and returns
-    the result as a Deferred.
-
-    Creates a new logcontext for `f`, which is created as a child of the current
-    logcontext (so its CPU usage metrics will get attributed to the current
-    logcontext). `f` should preserve the logcontext it is given.
-
-    The result deferred follows the Synapse logcontext rules: you should `yield`
-    on it.
-
-    Args:
-        reactor: The reactor in whose main thread the Deferred will be invoked.
-            Normally this will be hs.get_reactor().
-
-        threadpool: The threadpool to use for running `f`. Normally this will be
-            hs.get_reactor().getThreadPool().
-
-        f: The function to call.
-
-        args: positional arguments to pass to f.
-
-        kwargs: keyword arguments to pass to f.
-
-    Returns:
-        A Deferred which fires a callback with the result of `f`, or an
-            errback if `f` throws an exception.
-    """
     curr_context = current_context()
     if not curr_context:
         logger.warning(
-            "Calling defer_to_threadpool from sentinel context: metrics will be lost"
+            "Calling defer_to_thread from sentinel context: metrics will be lost"
         )
         parent_context = None
         server_name = "unknown_server_from_sentinel_context"
@@ -1126,157 +928,24 @@ def defer_to_threadpool(
         ):
             return f(*args, **kwargs)
 
-    return make_deferred_yieldable(threads.deferToThreadPool(reactor, threadpool, g))
-
-
-# ===========================================================================
-# asyncio-native utility functions
-#
-# These provide asyncio-native equivalents of the Twisted/Deferred-based
-# utility functions above. They operate on _current_context_var directly
-# (NOT threading.local) because they are designed for pure asyncio code
-# where ContextVar propagation into child Tasks is the desired behavior.
-#
-# These functions should only be used from asyncio-native code paths
-# (running inside asyncio.Task), not from Twisted Deferred chains.
-# ===========================================================================
-
-
-def _native_current_context() -> "LoggingContextOrSentinel":
-    """Read context from ContextVar (for asyncio-native code paths only)."""
-    return _current_context_var.get()
-
-
-def _native_set_current_context(
-    context: "LoggingContextOrSentinel",
-) -> "LoggingContextOrSentinel":
-    """Set context in ContextVar (for asyncio-native code paths only).
-
-    Unlike set_current_context(), this does NOT write to threading.local,
-    since asyncio-native code runs in Tasks with their own ContextVar copy.
-    """
-    if context is None:
-        raise TypeError("'context' argument may not be None")
-
-    current = _current_context_var.get()
-
-    if current is not context:
-        rusage = get_thread_resource_usage()
-        current.stop(rusage)
-        _current_context_var.set(context)
-        context.start(rusage)
-
-    return current
-
-
-_NativeT = TypeVar("_NativeT")
-
-
-async def make_future_yieldable(
-    future: "asyncio.Future[_NativeT]",
-) -> _NativeT:
-    """Given an asyncio.Future, make it follow the Synapse logcontext rules.
-
-    This is the asyncio-native equivalent of make_deferred_yieldable().
-
-    - If the future has completed, awaits it directly (logcontext unchanged).
-    - If the future has not yet completed, resets the logcontext to SENTINEL
-      before awaiting, and restores the calling logcontext when the future
-      completes.
-
-    The returned coroutine can be awaited without leaking the current logcontext
-    into the event loop.
-
-    NOTE: This uses ContextVar directly and should only be called from
-    asyncio-native code paths (inside asyncio.Task), not from Twisted code.
-    """
-    if future.done():
-        return future.result()
-
-    # Save and clear the calling context so we don't leak it into the loop
-    calling_context = _native_set_current_context(SENTINEL_CONTEXT)
-
-    try:
-        result = await future
-    except BaseException:
-        # Restore context before propagating the exception
-        _native_set_current_context(calling_context)
-        raise
-    else:
-        _native_set_current_context(calling_context)
-        return result
-
-
-def run_coroutine_in_background_native(
-    coroutine: "typing.Coroutine[Any, Any, _NativeT]",
-) -> "asyncio.Task[_NativeT]":
-    """Schedule a coroutine as a background asyncio.Task, preserving logcontext.
-
-    This is the asyncio-native equivalent of run_coroutine_in_background().
-
-    The calling logcontext is restored after the task is created. When the
-    background task completes, the logcontext is reset to SENTINEL to avoid
-    leaking into the event loop.
-
-    Returns:
-        The asyncio.Task running the coroutine (does NOT follow logcontext rules;
-        callers should use make_future_yieldable if they want to await it).
-    """
-    calling_context = _native_current_context()
-
-    async def _wrapper() -> _NativeT:
-        try:
-            return await coroutine
-        finally:
-            # Reset to sentinel so we don't leak context into the event loop
-            _native_set_current_context(SENTINEL_CONTEXT)
-
-    task = asyncio.create_task(_wrapper())
-    # Restore the calling context (create_task may have changed it)
-    _native_set_current_context(calling_context)
-    return task
-
-
-def run_in_background_native(
-    f: "Callable[P, Awaitable[_NativeT]] | Callable[P, _NativeT]",
-    *args: "P.args",
-    **kwargs: "P.kwargs",
-) -> "asyncio.Task[_NativeT]":
-    """Call a function and schedule any resulting coroutine as a background task.
-
-    This is the asyncio-native equivalent of run_in_background().
-
-    Preserves the calling logcontext. When the background task completes,
-    resets to SENTINEL context.
-    """
-    calling_context = _native_current_context()
-    try:
-        res = f(*args, **kwargs)
-    except Exception:
-        # Return a future that contains the exception
-        loop = asyncio.get_running_loop()
-        future: "asyncio.Future[_NativeT]" = loop.create_future()
-        import sys
-
-        future.set_exception(sys.exc_info()[1])  # type: ignore[arg-type]
-        return future  # type: ignore[return-value]
-
-    if isinstance(res, typing.Coroutine):
-        return run_coroutine_in_background_native(res)
-
-    if isinstance(res, asyncio.Task) or isinstance(res, asyncio.Future):
-        # Already scheduled; add sentinel-reset callback if not done
-        if not res.done():
-            _native_set_current_context(calling_context)
-
-            def _reset_context(f: "asyncio.Future[Any]") -> None:
-                _native_set_current_context(SENTINEL_CONTEXT)
-
-            res.add_done_callback(_reset_context)
-        return res  # type: ignore[return-value]
-
-    # Plain value — wrap in a completed future
     loop = asyncio.get_running_loop()
-    future2: "asyncio.Future[_NativeT]" = loop.create_future()
-    future2.set_result(res)  # type: ignore[arg-type]
-    return future2  # type: ignore[return-value]
+    return await loop.run_in_executor(None, g)
+
+
+async def defer_to_threadpool(
+    reactor: Any,
+    threadpool: Any,
+    f: Callable[P, R],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> R:
+    """Run a function in a threadpool, preserving logcontext."""
+    return await defer_to_thread(f, *args, **kwargs)
+
+
+# Legacy aliases
+_native_current_context = current_context
+_native_set_current_context = set_current_context
+make_future_yieldable = make_deferred_yieldable
+run_coroutine_in_background_native = run_coroutine_in_background
+run_in_background_native = run_in_background
