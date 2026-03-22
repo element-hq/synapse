@@ -58,15 +58,12 @@ from typing import (
 import attr
 from typing_extensions import assert_never
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
+import asyncio
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.filtering import Filter
 from synapse.events import EventBase
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import run_in_background
 from synapse.logging.opentracing import tag_args, trace
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
@@ -704,21 +701,18 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         results = {}
         room_ids = list(room_ids)
         for rm_ids in (room_ids[i : i + 20] for i in range(0, len(room_ids), 20)):
-            res = await make_deferred_yieldable(
-                defer.gatherResults(
-                    [
-                        run_in_background(
-                            self.paginate_room_events_by_stream_ordering,
-                            room_id=room_id,
-                            from_key=from_key,
-                            to_key=to_key,
-                            direction=direction,
-                            limit=limit,
-                        )
-                        for room_id in rm_ids
-                    ],
-                    consumeErrors=True,
-                )
+            res = await asyncio.gather(
+                *(
+                    run_in_background(
+                        self.paginate_room_events_by_stream_ordering,
+                        room_id=room_id,
+                        from_key=from_key,
+                        to_key=to_key,
+                        direction=direction,
+                        limit=limit,
+                    )
+                    for room_id in rm_ids
+                ),
             )
             results.update(dict(zip(rm_ids, res)))
 

@@ -19,21 +19,15 @@
 #
 #
 
+import asyncio
 import logging
 from collections import defaultdict
 from typing import Collection
 
-try:
-    from twisted.internet import defer
-    from twisted.internet.defer import Deferred
-except ImportError:
-    pass
-
-from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
+from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import trace_with_opname
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.databases.main.room import RoomWorkerStore
-from synapse.util import unwrapFirstError
 from synapse.util.cancellation import cancellable
 
 logger = logging.getLogger(__name__)
@@ -44,9 +38,9 @@ class PartialStateEventsTracker:
 
     def __init__(self, store: EventsWorkerStore):
         self._store = store
-        # a map from event id to a set of Deferreds which are waiting for that event to be
+        # a map from event id to a set of Futures which are waiting for that event to be
         # un-partial-stated.
-        self._observers: dict[str, set[Deferred[None]]] = defaultdict(set)
+        self._observers: dict[str, set[asyncio.Future[None]]] = defaultdict(set)
 
     def notify_un_partial_stated(self, event_id: str) -> None:
         """Notify that we now have full state for a given event
@@ -68,7 +62,8 @@ class PartialStateEventsTracker:
         )
         with PreserveLoggingContext():
             for o in observers:
-                o.callback(None)
+                if not o.done():
+                    o.set_result(None)
 
     @trace_with_opname("PartialStateEventsTracker.await_full_state")
     @cancellable
@@ -96,8 +91,9 @@ class PartialStateEventsTracker:
         )
 
         # create an observer for each lazy-joined event
-        observers: dict[str, Deferred[None]] = {
-            event_id: Deferred() for event_id in partial_state_event_ids
+        loop = asyncio.get_event_loop()
+        observers: dict[str, asyncio.Future[None]] = {
+            event_id: loop.create_future() for event_id in partial_state_event_ids
         }
         for event_id, observer in observers.items():
             self._observers[event_id].add(observer)
@@ -111,15 +107,10 @@ class PartialStateEventsTracker:
             ).items():
                 # there may have been a call to notify_un_partial_stated during the
                 # db query, so the observers may already have been called.
-                if not partial and not observers[event_id].called:
-                    observers[event_id].callback(None)
+                if not partial and not observers[event_id].done():
+                    observers[event_id].set_result(None)
 
-            await make_deferred_yieldable(
-                defer.gatherResults(
-                    observers.values(),
-                    consumeErrors=True,
-                )
-            ).addErrback(unwrapFirstError)
+            await asyncio.gather(*observers.values())
             logger.info("Events %s all un-partial-stated", observers.keys())
         finally:
             # remove any observers we created. This should happen when the notification
@@ -141,9 +132,9 @@ class PartialCurrentStateTracker:
     def __init__(self, store: RoomWorkerStore):
         self._store = store
 
-        # a map from room id to a set of Deferreds which are waiting for that room to be
+        # a map from room id to a set of Futures which are waiting for that room to be
         # un-partial-stated.
-        self._observers: dict[str, set[Deferred[None]]] = defaultdict(set)
+        self._observers: dict[str, set[asyncio.Future[None]]] = defaultdict(set)
 
     def notify_un_partial_stated(self, room_id: str) -> None:
         """Notify that we now have full current state for a given room
@@ -163,14 +154,16 @@ class PartialCurrentStateTracker:
         )
         with PreserveLoggingContext():
             for o in observers:
-                o.callback(None)
+                if not o.done():
+                    o.set_result(None)
 
     @trace_with_opname("PartialCurrentStateTracker.await_full_state")
     @cancellable
     async def await_full_state(self, room_id: str) -> None:
-        # We add the deferred immediately so that the DB call to check for
+        # We add the future immediately so that the DB call to check for
         # partial state doesn't race when we unpartial the room.
-        d: Deferred[None] = Deferred()
+        loop = asyncio.get_event_loop()
+        d: asyncio.Future[None] = loop.create_future()
         self._observers.setdefault(room_id, set()).add(d)
 
         try:
@@ -185,7 +178,7 @@ class PartialCurrentStateTracker:
                 stack_info=True,
             )
 
-            await make_deferred_yieldable(d)
+            await d
 
             logger.info("Room has un-partial-stated")
         finally:

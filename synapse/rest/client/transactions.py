@@ -27,9 +27,9 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Hashable
 
 from typing_extensions import ParamSpec
 
+import asyncio
+
 try:
-    from twisted.internet.defer import Deferred
-    from twisted.python.failure import Failure
     from twisted.web.iweb import IRequest
 except ImportError:
     pass
@@ -136,12 +136,11 @@ class HttpTransactionCache:
             # if the request fails with an exception, remove it
             # from the transaction map. This is done to ensure that we don't
             # cache transient errors like rate-limiting errors, etc.
-            def remove_from_map(err: Failure) -> None:
-                self.transactions.pop(txn_key, None)
-                # we deliberately do not propagate the error any further, as we
-                # expect the observers to have reported it.
+            def remove_from_map(t: asyncio.Task) -> None:
+                if t.cancelled() or t.exception() is not None:
+                    self.transactions.pop(txn_key, None)
 
-            deferred.addErrback(remove_from_map)
+            deferred.add_done_callback(remove_from_map)
 
         return make_deferred_yieldable(observable.observe())
 

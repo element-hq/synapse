@@ -69,7 +69,6 @@ from synapse.federation.units import Edu, Transaction, serialize_and_filter_pdus
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import (
-    make_deferred_yieldable,
     nested_logging_context,
     run_in_background,
 )
@@ -90,7 +89,6 @@ from synapse.storage.databases.main.lock import Lock
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.roommember import MemberSummary
 from synapse.types import JsonDict, StateMap, UserID, get_domain_from_id
-from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import Linearizer, concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.duration import Duration
@@ -408,16 +406,13 @@ class FederationServer(FederationBase):
         # We process PDUs and EDUs in parallel. This is important as we don't
         # want to block things like to device messages from reaching clients
         # behind the potentially expensive handling of PDUs.
-        pdu_results, _ = await make_deferred_yieldable(
-            gather_results(
-                (
-                    run_in_background(
-                        self._handle_pdus_in_txn, origin, transaction, request_time
-                    ),
-                    run_in_background(self._handle_edus_in_txn, origin, transaction),
+        pdu_results, _ = await gather_results(
+            (
+                run_in_background(
+                    self._handle_pdus_in_txn, origin, transaction, request_time
                 ),
-                consumeErrors=True,
-            ).addErrback(unwrapFirstError)
+                run_in_background(self._handle_edus_in_txn, origin, transaction),
+            ),
         )
 
         response = {"pdus": pdu_results}

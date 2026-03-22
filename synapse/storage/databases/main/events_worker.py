@@ -38,10 +38,7 @@ from typing import (
 import attr
 from prometheus_client import Gauge
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
+import asyncio
 
 from synapse.api.constants import Direction, EventTypes
 from synapse.api.errors import NotFoundError, SynapseError
@@ -89,7 +86,6 @@ from synapse.storage.util.sequence import build_sequence_generator
 from synapse.types import JsonDict, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
-from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import ObservableDeferred, delay_cancellation
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.lrucache import AsyncLruCache
@@ -316,7 +312,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         self._event_fetch_lock = threading.Condition()
         self._event_fetch_list: list[
-            tuple[Iterable[str], "defer.Deferred[dict[str, _EventRow]]"]
+            tuple[Iterable[str], "asyncio.Future[dict[str, _EventRow]]"]
         ] = []
         self._event_fetch_ongoing = 0
         event_fetch_ongoing_gauge.labels(**{SERVER_NAME_LABEL: self.server_name}).set(
@@ -873,8 +869,10 @@ class EventsWorkerStore(SQLBaseStore):
                 # to all the events we pulled from the DB (this will result in this
                 # function returning more events than requested, but that can happen
                 # already due to `_get_events_from_db`).
+                loop = asyncio.get_event_loop()
+                _fetching_future: asyncio.Future[dict[str, EventCacheEntry]] = loop.create_future()
                 fetching_deferred: ObservableDeferred[dict[str, EventCacheEntry]] = (
-                    ObservableDeferred(defer.Deferred(), consumeErrors=True)
+                    ObservableDeferred(_fetching_future, consumeErrors=True)
                 )
                 for event_id in missing_events_ids:
                     self._current_event_fetches[event_id] = fetching_deferred
@@ -897,7 +895,8 @@ class EventsWorkerStore(SQLBaseStore):
                     missing_events.update(db_missing_events)
                 except Exception as e:
                     with PreserveLoggingContext():
-                        fetching_deferred.errback(e)
+                        if not _fetching_future.done():
+                            _fetching_future.set_exception(e)
                     raise e
                 finally:
                     # Ensure that we mark these events as no longer being fetched.
@@ -905,7 +904,8 @@ class EventsWorkerStore(SQLBaseStore):
                         self._current_event_fetches.pop(event_id, None)
 
                 with PreserveLoggingContext():
-                    fetching_deferred.callback(missing_events)
+                    if not _fetching_future.done():
+                        _fetching_future.set_result(missing_events)
 
                 return missing_events
 
@@ -920,12 +920,9 @@ class EventsWorkerStore(SQLBaseStore):
         if already_fetching_deferreds:
             # Wait for the other event requests to finish and add their results
             # to ours.
-            results = await make_deferred_yieldable(
-                defer.gatherResults(
-                    (d.observe() for d in already_fetching_deferreds),
-                    consumeErrors=True,
-                )
-            ).addErrback(unwrapFirstError)
+            results = await asyncio.gather(
+                *(d.observe() for d in already_fetching_deferreds),
+            )
 
             for result in results:
                 # We filter out events that we haven't asked for as we might get
@@ -1234,8 +1231,9 @@ class EventsWorkerStore(SQLBaseStore):
                 # Fail any outstanding fetches since no one else will handle them.
                 assert exc is not None
                 with PreserveLoggingContext():
-                    for _, deferred in event_fetches_to_fail:
-                        deferred.errback(exc)
+                    for _, future in event_fetches_to_fail:
+                        if not future.done():
+                            future.set_exception(exc)
 
     def _fetch_loop(self, conn: LoggingDatabaseConnection) -> None:
         """Takes a database connection and waits for requests for events from
@@ -1269,7 +1267,7 @@ class EventsWorkerStore(SQLBaseStore):
     def _fetch_event_list(
         self,
         conn: LoggingDatabaseConnection,
-        event_list: list[tuple[Iterable[str], "defer.Deferred[dict[str, _EventRow]]"]],
+        event_list: list[tuple[Iterable[str], "asyncio.Future[dict[str, _EventRow]]"]],
     ) -> None:
         """Handle a load of requests from the _event_fetch_list queue
 
@@ -1303,23 +1301,27 @@ class EventsWorkerStore(SQLBaseStore):
                     events_to_fetch,
                 )
 
-                # We only want to resolve deferreds from the main thread
+                # We only want to resolve futures from the main thread
+                loop = asyncio.get_event_loop()
+
                 def fire() -> None:
                     for _, d in event_list:
-                        d.callback(row_dict)
+                        if not d.done():
+                            d.set_result(row_dict)
 
-                with PreserveLoggingContext():
-                    self.hs.get_reactor().callFromThread(fire)
+                loop.call_soon_threadsafe(fire)
             except Exception as e:
                 logger.exception("do_fetch")
 
-                # We only want to resolve deferreds from the main thread
+                # We only want to resolve futures from the main thread
+                loop = asyncio.get_event_loop()
+
                 def fire_errback(exc: Exception) -> None:
                     for _, d in event_list:
-                        d.errback(exc)
+                        if not d.done():
+                            d.set_exception(exc)
 
-                with PreserveLoggingContext():
-                    self.hs.get_reactor().callFromThread(fire_errback, e)
+                loop.call_soon_threadsafe(fire_errback, e)
 
     @trace
     async def _get_events_from_db(
@@ -1544,7 +1546,8 @@ class EventsWorkerStore(SQLBaseStore):
             that weren't requested.
         """
 
-        events_d: "defer.Deferred[dict[str, _EventRow]]" = defer.Deferred()
+        loop = asyncio.get_running_loop()
+        events_d: asyncio.Future[dict[str, _EventRow]] = loop.create_future()
         with self._event_fetch_lock:
             self._event_fetch_list.append((events, events_d))
             self._event_fetch_lock.notify()

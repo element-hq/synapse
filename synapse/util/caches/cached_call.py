@@ -18,14 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import asyncio
 import enum
 from typing import Awaitable, Callable, Generic, TypeVar
-
-try:
-    from twisted.internet.defer import Deferred
-    from twisted.python.failure import Failure
-except ImportError:
-    pass
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 
@@ -69,7 +64,7 @@ class CachedCall(Generic[TV]):
     CachedCall object.
     """
 
-    __slots__ = ["_callable", "_deferred", "_result"]
+    __slots__ = ["_callable", "_task", "_result", "_exception"]
 
     def __init__(self, f: Callable[[], Awaitable[TV]]):
         """
@@ -78,28 +73,33 @@ class CachedCall(Generic[TV]):
                 at once (per instance of CachedCall)
         """
         self._callable: Callable[[], Awaitable[TV]] | None = f
-        self._deferred: Deferred | None = None
-        self._result: _Sentinel | TV | Failure = _Sentinel.sentinel
+        self._task: asyncio.Task | None = None
+        self._result: _Sentinel | TV = _Sentinel.sentinel
+        self._exception: BaseException | None = None
 
     async def get(self) -> TV:
         """Kick off the call if necessary, and return the result"""
 
         # Fire off the callable now if this is our first time
-        if not self._deferred:
+        if not self._task:
             assert self._callable is not None
-            self._deferred = run_in_background(self._callable)
+            self._task = run_in_background(self._callable)
 
             # we will never need the callable again, so make sure it can be GCed
             self._callable = None
 
-            # once the deferred completes, store the result. We cannot simply leave the
-            # result in the deferred, since `awaiting` a deferred destroys its result.
-            # (Also, if it's a Failure, GCing the deferred would log a critical error
-            # about unhandled Failures)
-            def got_result(r: TV | Failure) -> None:
-                self._result = r
+            # once the task completes, store the result.
+            def got_result(t: asyncio.Task) -> None:
+                if t.cancelled():
+                    self._exception = asyncio.CancelledError()
+                    return
+                exc = t.exception()
+                if exc is not None:
+                    self._exception = exc
+                else:
+                    self._result = t.result()
 
-            self._deferred.addBoth(got_result)
+            self._task.add_done_callback(got_result)
 
         # TODO: consider cancellation semantics. Currently, if the call to get()
         #    is cancelled, the underlying call will continue (and any future calls
@@ -107,15 +107,14 @@ class CachedCall(Generic[TV]):
         #    the fact the underlying call may be logged to a cancelled logcontext,
         #    and any eventual exception may not be reported.
 
-        # we can now await the deferred, and once it completes, return the result.
-        if isinstance(self._result, _Sentinel):
-            await make_deferred_yieldable(self._deferred)
-            assert not isinstance(self._result, _Sentinel)
+        # we can now await the task, and once it completes, return the result.
+        if isinstance(self._result, _Sentinel) and self._exception is None:
+            await make_deferred_yieldable(self._task)
 
-        if isinstance(self._result, Failure):
-            self._result.raiseException()
-            raise AssertionError("unexpected return from Failure.raiseException")
+        if self._exception is not None:
+            raise self._exception
 
+        assert not isinstance(self._result, _Sentinel)
         return self._result
 
 

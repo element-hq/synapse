@@ -841,10 +841,11 @@ def run_in_background(
     try:
         res = f(*args, **kwargs)
     except Exception as e:
-        # Return a coroutine that raises the exception
-        async def _raise() -> Any:
-            raise e
-        return _raise()
+        # Return a failed Task so callers can handle it asynchronously
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[Any] = loop.create_future()
+        future.set_exception(e)
+        return future
 
     if isinstance(res, typing.Coroutine):
         # Schedule the coroutine as a Task on the event loop.
@@ -861,10 +862,11 @@ def run_in_background(
             res.add_done_callback(_reset)
         return res
 
-    # Plain value — wrap in a coroutine
-    async def _return_value() -> Any:
-        return res
-    return _return_value()
+    # Plain value — return a resolved Future so callers can await it
+    loop = asyncio.get_event_loop()
+    future: asyncio.Future[Any] = loop.create_future()
+    future.set_result(res)
+    return future
 
 
 def run_coroutine_in_background(

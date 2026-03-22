@@ -26,15 +26,9 @@ from typing import (
     Collection,
     Mapping,
     Sequence,
-    cast,
 )
 
 from prometheus_client import Counter
-
-try:
-    from twisted.internet.defer import Deferred
-except ImportError:
-    pass
 
 from synapse.api.constants import (
     MAIN_TIMELINE,
@@ -47,7 +41,7 @@ from synapse.api.room_versions import PushRuleRoomFlag
 from synapse.event_auth import auth_types_for_event, get_user_power_level
 from synapse.events import EventBase, relation_from_event
 from synapse.events.snapshot import EventContext, EventPersistencePair
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import run_in_background
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main.roommember import EventIdMembership
@@ -56,7 +50,6 @@ from synapse.storage.roommember import ProfileInfo
 from synapse.synapse_rust.push import FilteredPushRules, PushRuleEvaluator
 from synapse.types import JsonValue
 from synapse.types.state import StateFilter
-from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import gather_results
 from synapse.util.caches import register_cache
 from synapse.util.metrics import measure_func
@@ -404,31 +397,25 @@ class BulkPushRuleEvaluator:
             (power_levels, sender_power_level),
             related_events,
             profiles,
-        ) = await make_deferred_yieldable(
-            cast(
-                "Deferred[tuple[int, tuple[dict, int | None], dict[str, dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
-                gather_results(
-                    (
-                        run_in_background(  # type: ignore[call-overload]
-                            self.store.get_number_joined_users_in_room,
-                            event.room_id,  # type: ignore[arg-type]
-                        ),
-                        run_in_background(
-                            self._get_power_levels_and_sender_level,
-                            event,
-                            context,
-                            event_id_to_event,
-                        ),
-                        run_in_background(self._related_events, event),
-                        run_in_background(  # type: ignore[call-overload]
-                            self.store.get_subset_users_in_room_with_profiles,
-                            event.room_id,
-                            rules_by_user.keys(),
-                        ),
-                    ),
-                    consumeErrors=True,
-                ).addErrback(unwrapFirstError),
-            )
+        ) = await gather_results(
+            (
+                run_in_background(  # type: ignore[call-overload]
+                    self.store.get_number_joined_users_in_room,
+                    event.room_id,  # type: ignore[arg-type]
+                ),
+                run_in_background(
+                    self._get_power_levels_and_sender_level,
+                    event,
+                    context,
+                    event_id_to_event,
+                ),
+                run_in_background(self._related_events, event),
+                run_in_background(  # type: ignore[call-overload]
+                    self.store.get_subset_users_in_room_with_profiles,
+                    event.room_id,
+                    rules_by_user.keys(),
+                ),
+            ),
         )
 
         # Find the event's thread ID.

@@ -31,11 +31,6 @@ from typing import (
 
 import attr
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
-
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import (
     active_span,
@@ -237,7 +232,7 @@ class ResponseCache(Generic[KV]):
         )
         self._result_cache[key] = entry
 
-        def on_complete(r: RV) -> RV:
+        def on_complete(f: Any) -> None:
             # if this cache has a non-zero timeout, and the callback has not cleared
             # the should_cache bit, we leave it in the cache for now and schedule
             # its removal later.
@@ -256,12 +251,11 @@ class ResponseCache(Generic[KV]):
             else:
                 # otherwise, remove the result immediately.
                 self.unset(key)
-            return r
 
         # make sure we do this *after* adding the entry to result_cache,
         # in case the result is already complete (in which case flipping the order would
         # leave us with a stuck entry in the cache).
-        result.addBoth(on_complete)
+        deferred.add_done_callback(on_complete)
         return entry
 
     def unset(self, key: KV) -> None:
@@ -388,7 +382,7 @@ class ResponseCache(Generic[KV]):
 
         result = entry.result.observe()
         if self._enable_logging:
-            if result.called:
+            if entry.result.has_called():
                 logger.info(
                     "[%s]: using completed cached result for [%s]", self._name, key
                 )

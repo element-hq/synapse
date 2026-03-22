@@ -28,15 +28,12 @@ from signedjson.key import VerifyKey, decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, verify_signed_json
 from unpaddedbase64 import decode_base64
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
+import asyncio
 
 from synapse.api.constants import EduTypes
 from synapse.api.errors import CodeMessageException, Codes, NotFoundError, SynapseError
 from synapse.handlers.device import DeviceWriterHandler
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import run_in_background
 from synapse.logging.opentracing import log_kv, set_tag, tag_args, trace
 from synapse.types import (
     JsonDict,
@@ -809,14 +806,11 @@ class E2eKeysHandler:
                 set_tag("error", True)
                 set_tag("reason", str(failure))
 
-        await make_deferred_yieldable(
-            defer.gatherResults(
-                [
-                    run_in_background(claim_client_keys, destination)
-                    for destination in remote_queries
-                ],
-                consumeErrors=True,
-            )
+        await asyncio.gather(
+            *(
+                run_in_background(claim_client_keys, destination)
+                for destination in remote_queries
+            ),
         )
 
         logger.info(

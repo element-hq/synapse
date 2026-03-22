@@ -156,6 +156,7 @@ class FakeChannel:
     _producer: Optional[Union[IPullProducer, IPushProducer]] = None
     resource_usage: ContextResourceUsage | None = None
     _request: Request | None = None
+    _clock: Any = None  # NativeClock, for advancing fake time
 
     @property
     def request(self) -> Request:
@@ -319,10 +320,21 @@ class FakeChannel:
             if _time.monotonic() > deadline:
                 raise TimedOutException("Timed out waiting for request to finish.")
 
+            # Advance NativeClock fake time (fires pending sleeps)
+            if self._clock is not None:
+                self._clock.advance(0.0)
+
             self._reactor.advance(0.1)
             # Drive asyncio event loop for DB operations, task completions, etc.
-            if not loop.is_closed() and not loop.is_running():
-                loop.run_until_complete(asyncio.sleep(0))
+            # Use a small real sleep to allow thread pool callbacks to be delivered.
+            if not loop.is_closed():
+                async def _drain() -> None:
+                    """Run multiple event loop ticks to drain pending work."""
+                    for _ in range(20):
+                        await asyncio.sleep(0.001)
+                        if self._clock is not None:
+                            self._clock.advance(0.0)
+                loop.run_until_complete(_drain())
 
     def extract_cookies(self, cookies: MutableMapping[str, str]) -> None:
         """Process the contents of any Set-Cookie headers in the response
@@ -384,6 +396,7 @@ def make_request(
     await_result: bool = True,
     custom_headers: Iterable[CustomHeaderType] | None = None,
     client_ip: str = "127.0.0.1",
+    clock: Any = None,
 ) -> FakeChannel:
     """
     Make a web request using the given method, path and content, and render it
@@ -440,7 +453,7 @@ def make_request(
     if isinstance(content, str):
         content = content.encode("utf8")
 
-    channel = FakeChannel(site, reactor, ip=client_ip)
+    channel = FakeChannel(site, reactor, ip=client_ip, clock=clock)
 
     req = request(
         channel,

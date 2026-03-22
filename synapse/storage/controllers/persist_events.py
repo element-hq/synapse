@@ -40,10 +40,7 @@ from typing import (
 import attr
 from prometheus_client import Counter, Histogram
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
+import asyncio
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
@@ -232,8 +229,9 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
             # the new task has been merged into the last task in the queue
             end_item = queue[-1]
         else:
+            loop = asyncio.get_running_loop()
             deferred: ObservableDeferred[_PersistResult] = ObservableDeferred(
-                defer.Deferred(), consumeErrors=True
+                loop.create_future(), consumeErrors=True
             )
 
             end_item = _EventPersistQueueItem(

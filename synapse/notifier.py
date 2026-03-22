@@ -35,11 +35,7 @@ from typing import (
 import attr
 from prometheus_client import Counter
 
-try:
-    from twisted.internet import defer
-    from twisted.internet.defer import Deferred
-except ImportError:
-    pass
+import asyncio
 
 from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import AuthError
@@ -147,13 +143,13 @@ class _NotifierUserStream:
         self.last_notified_ms = time_now_ms
 
         # Set of listeners that we need to wake up when there has been a change.
-        self.listeners: set[Deferred[StreamToken]] = set()
+        self.listeners: set[asyncio.Future[StreamToken]] = set()
 
     def update_and_fetch_deferreds(
         self,
         current_token: StreamToken,
         time_now_ms: int,
-    ) -> Collection["Deferred[StreamToken]"]:
+    ) -> Collection["asyncio.Future[StreamToken]"]:
         """Update the stream for this user because of a new event from an
         event source, and return the set of deferreds to wake up.
 
@@ -189,27 +185,35 @@ class _NotifierUserStream:
     def count_listeners(self) -> int:
         return len(self.listeners)
 
-    def new_listener(self, token: StreamToken) -> "Deferred[StreamToken]":
-        """Returns a deferred that is resolved when there is a new token
+    def new_listener(self, token: StreamToken) -> "asyncio.Future[StreamToken]":
+        """Returns a future that is resolved when there is a new token
         greater than the given token.
 
         Args:
             token: The token from which we are streaming from, i.e. we shouldn't
                 notify for things that happened before this.
         """
+        loop = asyncio.get_running_loop()
+
         # Immediately wake up stream if something has already since happened
         # since their last token.
         if token != self.current_token:
-            return defer.succeed(self.current_token)
+            f: asyncio.Future[StreamToken] = loop.create_future()
+            f.set_result(self.current_token)
+            return f
 
-        # Create a new deferred and add it to the set of listeners. We add a
+        # Create a new future and add it to the set of listeners. We add a
         # cancel handler to remove it from the set again, to handle timeouts.
-        deferred: "Deferred[StreamToken]" = Deferred(
-            canceller=lambda d: self.listeners.discard(d)
-        )
-        self.listeners.add(deferred)
+        future: asyncio.Future[StreamToken] = loop.create_future()
+        self.listeners.add(future)
 
-        return deferred
+        def _on_cancel(f: asyncio.Future[StreamToken]) -> None:
+            if f.cancelled():
+                self.listeners.discard(f)
+
+        future.add_done_callback(_on_cancel)
+
+        return future
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -370,7 +374,7 @@ class Notifier:
         time_now_ms = self.clock.time_msec()
         current_token = self.event_sources.get_current_token()
 
-        listeners: list["Deferred[StreamToken]"] = []
+        listeners: list["asyncio.Future[StreamToken]"] = []
         for user_stream in user_streams:
             try:
                 listeners.extend(
@@ -381,7 +385,8 @@ class Notifier:
 
         with PreserveLoggingContext():
             for listener in listeners:
-                listener.callback(current_token)
+                if not listener.done():
+                    listener.set_result(current_token)
 
         users_woken_by_stream_counter.labels(
             stream=StreamKeyType.UN_PARTIAL_STATED_ROOMS,
@@ -591,7 +596,7 @@ class Notifier:
 
             time_now_ms = self.clock.time_msec()
             current_token = self.event_sources.get_current_token()
-            listeners: list["Deferred[StreamToken]"] = []
+            listeners: list["asyncio.Future[StreamToken]"] = []
             for user_stream in user_streams:
                 try:
                     listeners.extend(
@@ -602,13 +607,14 @@ class Notifier:
                 except Exception:
                     logger.exception("Failed to notify listener")
 
-            # We resolve all these deferreds in one go so that we only need to
+            # We resolve all these futures in one go so that we only need to
             # call `PreserveLoggingContext` once, as it has a bunch of overhead
             # (to calculate performance stats)
             if listeners:
                 with PreserveLoggingContext():
                     for listener in listeners:
-                        listener.callback(current_token)
+                        if not listener.done():
+                            listener.set_result(current_token)
 
             if user_streams:
                 users_woken_by_stream_counter.labels(

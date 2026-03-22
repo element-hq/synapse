@@ -31,12 +31,9 @@ from typing import (
 
 from prometheus_client import Gauge
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
+import asyncio
 
-from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
+from synapse.logging.context import PreserveLoggingContext
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
@@ -149,15 +146,10 @@ class BatchingQueue(Generic[V, R]):
         key.
         """
 
-        # First we create a defer and add it and the value to the list of
+        # First we create a future and add it and the value to the list of
         # pending items.
-        import asyncio as _aq
-        try:
-            loop = _aq.get_running_loop()
-            d: Any = loop.create_future()
-        except RuntimeError:
-            # No running loop — use Twisted Deferred as fallback
-            d = defer.Deferred()
+        loop = asyncio.get_running_loop()
+        d: asyncio.Future[V] = loop.create_future()
         self._next_values.setdefault(key, []).append((value, d))
 
         # If we're not currently processing the key fire off a background
@@ -166,7 +158,7 @@ class BatchingQueue(Generic[V, R]):
             self.hs.run_as_background_process(self._name, self._process_queue, key)
 
         with self._number_in_flight_metric.track_inprogress():
-            return await make_deferred_yieldable(d)
+            return await d
 
     async def _process_queue(self, key: Hashable) -> None:
         """A background task to repeatedly pull things off the queue for the
@@ -197,16 +189,16 @@ class BatchingQueue(Generic[V, R]):
                     results = await self._process_batch_callback(values)
 
                     with PreserveLoggingContext():
-                        for _, deferred in next_values:
-                            deferred.callback(results)
+                        for _, future in next_values:
+                            future.set_result(results)
 
                 except Exception as e:
                     with PreserveLoggingContext():
-                        for _, deferred in next_values:
-                            if deferred.called:
+                        for _, future in next_values:
+                            if future.done():
                                 continue
 
-                            deferred.errback(e)
+                            future.set_exception(e)
 
         finally:
             self._processing_keys.discard(key)

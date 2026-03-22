@@ -28,17 +28,14 @@ from typing import (
 
 from prometheus_client import Counter
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
+import asyncio
 
 import synapse
 from synapse.api.constants import EduTypes, EventTypes
 from synapse.appservice import ApplicationService
 from synapse.events import EventBase
 from synapse.handlers.presence import format_user_presence_state
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import run_in_background
 from synapse.metrics import (
     SERVER_NAME_LABEL,
     event_processing_loop_counter,
@@ -191,14 +188,11 @@ class ApplicationServicesHandler:
                         for event in events:
                             await handle_event(event)
 
-                    await make_deferred_yieldable(
-                        defer.gatherResults(
-                            [
-                                run_in_background(handle_room_events, evs)
-                                for evs in events_by_room.values()
-                            ],
-                            consumeErrors=True,
-                        )
+                    await asyncio.gather(
+                        *(
+                            run_in_background(handle_room_events, evs)
+                            for evs in events_by_room.values()
+                        ),
                     )
 
                     await self.store.set_appservice_last_pos(upper_bound)
@@ -763,21 +757,19 @@ class ApplicationServicesHandler:
     ) -> list[JsonDict]:
         services = self._get_services_for_3pn(protocol)
 
-        results = await make_deferred_yieldable(
-            defer.DeferredList(
-                [
-                    run_in_background(
-                        self.appservice_api.query_3pe, service, kind, protocol, fields
-                    )
-                    for service in services
-                ],
-                consumeErrors=True,
-            )
+        results = await asyncio.gather(
+            *(
+                run_in_background(
+                    self.appservice_api.query_3pe, service, kind, protocol, fields
+                )
+                for service in services
+            ),
+            return_exceptions=True,
         )
 
         ret = []
-        for success, result in results:
-            if success:
+        for result in results:
+            if not isinstance(result, BaseException):
                 ret.extend(result)
 
         return ret
@@ -910,26 +902,24 @@ class ApplicationServicesHandler:
                     continue
 
         # Query each service in parallel.
-        results = await make_deferred_yieldable(
-            defer.DeferredList(
-                [
-                    run_in_background(  # type: ignore[call-overload]
-                        self.appservice_api.claim_client_keys,
-                        # We know this must be an app service.
-                        self.store.get_app_service_by_id(service_id),
-                        service_query,
-                    )
-                    for service_id, service_query in query_by_appservice.items()
-                ],
-                consumeErrors=True,
-            )
+        results = await asyncio.gather(
+            *(
+                run_in_background(  # type: ignore[call-overload]
+                    self.appservice_api.claim_client_keys,
+                    # We know this must be an app service.
+                    self.store.get_app_service_by_id(service_id),
+                    service_query,
+                )
+                for service_id, service_query in query_by_appservice.items()
+            ),
+            return_exceptions=True,
         )
 
         # Patch together the results -- they are all independent (since they
         # require exclusive control over the users, which is the outermost key).
         claimed_keys: dict[str, dict[str, dict[str, JsonDict]]] = {}
-        for success, result in results:
-            if success:
+        for result in results:
+            if not isinstance(result, BaseException):
                 claimed_keys.update(result[0])
                 missing.extend(result[1])
 
@@ -966,27 +956,25 @@ class ApplicationServicesHandler:
                     continue
 
         # Query each service in parallel.
-        results = await make_deferred_yieldable(
-            defer.DeferredList(
-                [
-                    run_in_background(  # type: ignore[call-overload]
-                        self.appservice_api.query_keys,
-                        # We know this must be an app service.
-                        self.store.get_app_service_by_id(service_id),
-                        service_query,
-                    )
-                    for service_id, service_query in query_by_appservice.items()
-                ],
-                consumeErrors=True,
-            )
+        results = await asyncio.gather(
+            *(
+                run_in_background(  # type: ignore[call-overload]
+                    self.appservice_api.query_keys,
+                    # We know this must be an app service.
+                    self.store.get_app_service_by_id(service_id),
+                    service_query,
+                )
+                for service_id, service_query in query_by_appservice.items()
+            ),
+            return_exceptions=True,
         )
 
         # Patch together the results -- they are all independent (since they
         # require exclusive control over the users). They get returned as a single
         # dictionary.
         key_queries: dict[str, dict[str, dict[str, JsonDict]]] = {}
-        for success, result in results:
-            if success:
+        for result in results:
+            if not isinstance(result, BaseException):
                 key_queries.update(result)
 
         return key_queries

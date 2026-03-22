@@ -34,7 +34,7 @@ from synapse.events.utils import SerializeEventConfig
 from synapse.events.validator import EventValidator
 from synapse.handlers.presence import format_user_presence_state
 from synapse.handlers.receipts import ReceiptEventSource
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import run_in_background
 from synapse.storage.roommember import RoomsForUser
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
@@ -46,7 +46,6 @@ from synapse.types import (
     StreamToken,
     UserID,
 )
-from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.visibility import filter_and_transform_events_for_client
@@ -199,31 +198,35 @@ class InitialSyncHandler:
             try:
                 if event.membership == Membership.JOIN:
                     room_end_token = now_token.room_key
-                    deferred_room_state = run_in_background(
-                        self._state_storage_controller.get_current_state, event.room_id
-                    )
+
+                    async def _get_current_state() -> dict:
+                        return await self._state_storage_controller.get_current_state(event.room_id)
+
+                    deferred_room_state = run_in_background(_get_current_state)
                 elif event.membership == Membership.LEAVE:
                     room_end_token = RoomStreamToken(
                         stream=event.event_pos.stream,
                     )
-                    deferred_room_state = run_in_background(
-                        self._state_storage_controller.get_state_for_events,
-                        [event.event_id],
-                    ).addCallback(lambda states: states[event.event_id])
 
-                (messages, token), current_state = await make_deferred_yieldable(
-                    gather_results(
-                        (
-                            run_in_background(
-                                self.store.get_recent_events_for_room,
-                                event.room_id,
-                                limit=pagin_config.limit,
-                                end_token=room_end_token,
-                            ),
-                            deferred_room_state,
+                    async def _get_state_for_event() -> dict:
+                        states = await self._state_storage_controller.get_state_for_events(
+                            [event.event_id],
                         )
+                        return states[event.event_id]
+
+                    deferred_room_state = run_in_background(_get_state_for_event)
+
+                (messages, token), current_state = await gather_results(
+                    (
+                        run_in_background(
+                            self.store.get_recent_events_for_room,
+                            event.room_id,
+                            limit=pagin_config.limit,
+                            end_token=room_end_token,
+                        ),
+                        deferred_room_state,
                     )
-                ).addErrback(unwrapFirstError)
+                )
 
                 messages = await filter_and_transform_events_for_client(
                     self._storage_controllers,
@@ -480,20 +483,17 @@ class InitialSyncHandler:
                 requester.user.to_string(),
             )
 
-        presence, receipts, (messages, token) = await make_deferred_yieldable(
-            gather_results(
-                (
-                    run_in_background(get_presence),
-                    run_in_background(get_receipts),
-                    run_in_background(
-                        self.store.get_recent_events_for_room,
-                        room_id,
-                        limit=pagin_config.limit,
-                        end_token=now_token.room_key,
-                    ),
+        presence, receipts, (messages, token) = await gather_results(
+            (
+                run_in_background(get_presence),
+                run_in_background(get_receipts),
+                run_in_background(
+                    self.store.get_recent_events_for_room,
+                    room_id,
+                    limit=pagin_config.limit,
+                    end_token=now_token.room_key,
                 ),
-                consumeErrors=True,
-            ).addErrback(unwrapFirstError)
+            ),
         )
 
         messages = await filter_and_transform_events_for_client(

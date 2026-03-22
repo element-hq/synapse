@@ -69,7 +69,7 @@ from synapse.events.validator import EventValidator
 from synapse.handlers.directory import DirectoryHandler
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import run_in_background
 from synapse.replication.http.send_events import ReplicationSendEventsRestServlet
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
@@ -83,7 +83,7 @@ from synapse.types import (
     create_requester,
 )
 from synapse.types.state import StateFilter
-from synapse.util import log_failure, unwrapFirstError
+from synapse.util import log_failure
 from synapse.util.async_helpers import Linearizer, gather_results
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
@@ -1579,10 +1579,14 @@ class EventCreationHandler:
 
         # We now persist the event (and update the cache in parallel, since we
         # don't want to block on it).
-        #
-        # Note: mypy gets confused if we inline dl and check with twisted#11770.
-        # Some kind of bug in mypy's deduction?
-        deferreds = (
+
+        async def _cache_joined_hosts() -> None:
+            try:
+                await self.cache_joined_hosts_for_events(events_and_context)
+            except Exception:
+                log_failure(None, "cache_joined_hosts_for_event failed")
+
+        tasks = (
             run_in_background(
                 self._persist_events,
                 requester=requester,
@@ -1590,13 +1594,9 @@ class EventCreationHandler:
                 ratelimit=ratelimit,
                 extra_users=extra_users,
             ),
-            run_in_background(
-                self.cache_joined_hosts_for_events, events_and_context
-            ).addErrback(log_failure, "cache_joined_hosts_for_event failed"),
+            run_in_background(_cache_joined_hosts),
         )
-        result, _ = await make_deferred_yieldable(
-            gather_results(deferreds, consumeErrors=True)
-        ).addErrback(unwrapFirstError)
+        result, _ = await gather_results(tasks)
 
         return result
 

@@ -629,6 +629,11 @@ class NativeLoopingCall:
     def __init__(self, task: "asyncio.Task[None]") -> None:
         self._task = task
 
+    @property
+    def running(self) -> bool:
+        """Whether the looping call is still running."""
+        return not self._task.done()
+
     def stop(self) -> None:
         """Stop the looping call."""
         self._task.cancel()
@@ -725,7 +730,8 @@ class NativeClock:
         # Pending sleeps: list of (wake_time, future)
         import heapq
         self._fake_time: float = time_mod.time()
-        self._pending_sleeps: list[tuple[float, asyncio.Future]] = []
+        self._pending_sleeps: list[tuple[float, int, asyncio.Future]] = []
+        self._sleep_seq = 0  # tiebreaker for heapq when wake_times are equal
         self._use_fake_time = False  # Set to True by tests
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
@@ -758,7 +764,8 @@ class NativeClock:
             loop = self._get_loop()
             future: asyncio.Future[None] = loop.create_future()
             wake_time = self._fake_time + duration.as_secs()
-            heapq.heappush(self._pending_sleeps, (wake_time, future))
+            self._sleep_seq += 1
+            heapq.heappush(self._pending_sleeps, (wake_time, self._sleep_seq, future))
             await future
         else:
             await asyncio.sleep(duration.as_secs())
@@ -774,7 +781,7 @@ class NativeClock:
         # Fire any sleeps that are now due
         while self._pending_sleeps and self._pending_sleeps[0][0] <= self._fake_time:
             import heapq
-            _, future = heapq.heappop(self._pending_sleeps)
+            _, _, future = heapq.heappop(self._pending_sleeps)
             if not future.done():
                 future.set_result(None)
 

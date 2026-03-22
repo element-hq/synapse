@@ -143,10 +143,7 @@ from typing import (
 import attr
 from prometheus_client import Counter
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
+import asyncio
 
 import synapse.metrics
 from synapse.api.constants import EventTypes, Membership
@@ -158,7 +155,7 @@ from synapse.federation.sender.per_destination_queue import (
 )
 from synapse.federation.sender.transaction_manager import TransactionManager
 from synapse.federation.units import Edu
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import run_in_background
 from synapse.metrics import (
     SERVER_NAME_LABEL,
     LaterGauge,
@@ -746,14 +743,11 @@ class FederationSender(AbstractFederationSender):
                         event = event_cache.event
                         events_by_room.setdefault(event.room_id, []).append(event)
 
-                await make_deferred_yieldable(
-                    defer.gatherResults(
-                        [
-                            run_in_background(handle_room_events, evs)
-                            for evs in events_by_room.values()
-                        ],
-                        consumeErrors=True,
-                    )
+                await asyncio.gather(
+                    *(
+                        run_in_background(handle_room_events, evs)
+                        for evs in events_by_room.values()
+                    ),
                 )
 
                 logger.debug("Successfully handled up to %i", next_token)

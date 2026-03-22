@@ -29,14 +29,9 @@ from typing import (
     cast,
 )
 
-try:
-    from twisted.internet import defer
-except ImportError:
-    pass
-
 from synapse.api.errors import StoreError
 from synapse.config.homeserver import ExperimentalConfig
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import run_in_background
 from synapse.replication.tcp.streams import PushRulesStream
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
@@ -54,7 +49,6 @@ from synapse.storage.push_rule import InconsistentRuleException, RuleNotFoundExc
 from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
 from synapse.synapse_rust.push import FilteredPushRules, PushRule, PushRules
 from synapse.types import JsonDict
-from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import gather_results
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.stream_change_cache import StreamChangeCache
@@ -273,33 +267,27 @@ class PushRulesWorkerStore(
             user_id: [] for user_id in user_ids
         }
 
-        # gatherResults loses all type information.
-        rows, enabled_map_by_user = await make_deferred_yieldable(
-            gather_results(
-                (
-                    cast(
-                        Any,
-                        run_in_background(
-                            self.db_pool.simple_select_many_batch,
-                            table="push_rules",
-                            column="user_name",
-                            iterable=user_ids,
-                            retcols=(
-                                "user_name",
-                                "rule_id",
-                                "priority_class",
-                                "priority",
-                                "conditions",
-                                "actions",
-                            ),
-                            desc="bulk_get_push_rules",
-                            batch_size=1000,
-                        ),
+        # gather_results loses all type information.
+        rows, enabled_map_by_user = await gather_results(
+            (
+                run_in_background(
+                    self.db_pool.simple_select_many_batch,
+                    table="push_rules",
+                    column="user_name",
+                    iterable=user_ids,
+                    retcols=(
+                        "user_name",
+                        "rule_id",
+                        "priority_class",
+                        "priority",
+                        "conditions",
+                        "actions",
                     ),
-                    run_in_background(self.bulk_get_push_rules_enabled, user_ids),
+                    desc="bulk_get_push_rules",
+                    batch_size=1000,
                 ),
-                consumeErrors=True,
-            ).addErrback(unwrapFirstError)
+                run_in_background(self.bulk_get_push_rules_enabled, user_ids),
+            ),
         )
 
         # Sort by highest priority_class, then highest priority.

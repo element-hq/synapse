@@ -803,6 +803,7 @@ class HomeserverTestCase(TestCase):
             await_result,
             custom_headers,
             client_ip,
+            clock=self.clock,
         )
 
     def setup_test_homeserver(

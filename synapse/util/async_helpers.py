@@ -421,6 +421,24 @@ class ObservableFuture(Generic[_T]):
             raise ValueError(f"{self!r} has no result yet")
         return self._result[1]
 
+    def callback(self, result: _T) -> None:
+        """Resolve the underlying future with a result (Deferred compat)."""
+        self._future.set_result(result)
+
+    def errback(self, exc: BaseException | None = None) -> None:
+        """Reject the underlying future with an exception (Deferred compat).
+
+        If no exception is given, uses the current exception from sys.exc_info().
+        """
+        if exc is None:
+            import sys
+
+            _, exc_val, _ = sys.exc_info()
+            if exc_val is None:
+                raise RuntimeError("errback() called with no active exception")
+            exc = exc_val
+        self._future.set_exception(exc)
+
 
 class NativeLinearizer:
     """asyncio-native equivalent of Linearizer.
