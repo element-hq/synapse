@@ -52,7 +52,7 @@ class PeriodicallyFlushingMemoryHandler(MemoryHandler):
 
         reactor_to_use: IReactorCore
         if reactor is None:
-                        reactor_to_use = cast(IReactorCore, global_reactor)
+            reactor_to_use = cast(IReactorCore, global_reactor)
         else:
             reactor_to_use = reactor
 
