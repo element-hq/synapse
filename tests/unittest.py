@@ -368,6 +368,14 @@ class TestCase(_stdlib_unittest.TestCase):
                 f"(difference: {abs(first - second)!r})"
             )
 
+    def assertSubstring(self, substring: str, text: str) -> None:
+        """Assert that substring is found in text.
+
+        Replacement for twisted.trial.unittest.TestCase.assertSubstring.
+        """
+        if substring not in text:
+            self.fail(f"{substring!r} not found in {text!r}")
+
     def assertNoResult(self, d: "Deferred[Any]") -> None:
         """Assert that a Deferred has not yet fired.
 
