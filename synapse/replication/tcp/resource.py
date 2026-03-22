@@ -22,7 +22,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from prometheus_client import Counter
 
@@ -36,8 +36,10 @@ from synapse.util.metrics import Measure
 
 try:
     from twisted.internet.protocol import ServerFactory
+    from twisted.internet.interfaces import IAddress
 except ImportError:
     ServerFactory = object  # type: ignore[misc,assignment]
+    IAddress = Any  # type: ignore[misc,assignment]
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

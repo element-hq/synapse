@@ -36,13 +36,6 @@ import asyncio
 
 import attr
 
-try:
-    from twisted.internet.defer import Deferred
-    from twisted.internet.error import DNSLookupError
-except ImportError:
-    Deferred = asyncio.Future  # type: ignore[assignment,misc]
-    DNSLookupError = OSError  # type: ignore[assignment,misc]
-
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.native_client import SimpleHttpClient
 from synapse.logging.context import make_deferred_yieldable, run_in_background
@@ -490,7 +483,7 @@ class UrlPreviewer:
             # handler will return a SynapseError to the client instead of
             # blank data or a 500.
             raise
-        except DNSLookupError:
+        except OSError:
             # DNS lookup returned no results
             # Note: This will also be the case if one of the resolved IP
             # addresses is blocked.
@@ -752,7 +745,7 @@ class UrlPreviewer:
 
         return open_graph_result, oembed_response.author_name, expiration_ms
 
-    def _start_expire_url_cache_data(self) -> Deferred:
+    def _start_expire_url_cache_data(self) -> asyncio.Future:
         return self.hs.run_as_background_process(
             "expire_url_cache_data", self._expire_url_cache_data
         )

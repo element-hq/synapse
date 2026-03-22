@@ -22,10 +22,7 @@
 from synapse.api.errors import Codes
 from synapse.http.aiohttp_shim import SynapseRequest as Request
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    Resource = object  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource
 
 
 

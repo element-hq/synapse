@@ -22,23 +22,12 @@ import asyncio
 
 import argparse
 import logging
-from typing import cast
-
 import yaml
 
 from synapse.config.homeserver import HomeServerConfig
 from synapse.server import HomeServer
 from synapse.storage import DataStore
-from synapse.types import ISynapseReactor
 
-try:
-    from twisted.internet import reactor as reactor_
-except ImportError:
-    reactor_ = None  # type: ignore[assignment]
-
-# Cast safety: Twisted does some naughty magic which replaces the
-# twisted.internet.reactor module with a Reactor instance at runtime.
-reactor = cast(ISynapseReactor, reactor_)
 logger = logging.getLogger("update_database")
 
 
@@ -49,7 +38,7 @@ class MockHomeserver(HomeServer):
         super().__init__(
             hostname=config.server.server_name,
             config=config,
-            reactor=reactor,
+            reactor=None,
         )
 
 
@@ -61,8 +50,8 @@ def run_background_updates(hs: HomeServer) -> None:
         await main.db_pool.updates.run_background_updates(sleep=False)
         if state:
             await state.db_pool.updates.run_background_updates(sleep=False)
-        # Stop the reactor to exit the script once every background update is run.
-        reactor.stop()
+        # Stop the event loop to exit the script once every background update is run.
+        asyncio.get_event_loop().stop()
 
     def run() -> None:
         # Apply all background updates on the database.
@@ -73,9 +62,10 @@ def run_background_updates(hs: HomeServer) -> None:
             )
         )
 
-    hs.get_clock().call_when_running(run)
+    loop = asyncio.get_event_loop()
+    loop.call_soon(run)
 
-    reactor.run()
+    loop.run_forever()
 
 
 def main() -> None:

@@ -18,27 +18,24 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from OpenSSL.SSL import Context
-
-try:
-    from twisted.internet import ssl as twisted_ssl
-    _ContextFactoryBase = twisted_ssl.ClientContextFactory
-except ImportError:
-    _ContextFactoryBase = object  # type: ignore[assignment,misc]
+import ssl
 
 from synapse.config.redis import RedisConfig
 
 
-class ClientContextFactory(_ContextFactoryBase):
+class ClientContextFactory:
+    """Creates SSL contexts for Redis connections."""
+
     def __init__(self, redis_config: RedisConfig):
         self.redis_config = redis_config
 
-    def getContext(self) -> Context:
-        ctx = super().getContext()
+    def getContext(self) -> ssl.SSLContext:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         if self.redis_config.redis_certificate:
-            ctx.use_certificate_file(self.redis_config.redis_certificate)
-        if self.redis_config.redis_private_key:
-            ctx.use_privatekey_file(self.redis_config.redis_private_key)
+            ctx.load_cert_chain(
+                certfile=self.redis_config.redis_certificate,
+                keyfile=self.redis_config.redis_private_key,
+            )
         if self.redis_config.redis_ca_file:
             ctx.load_verify_locations(cafile=self.redis_config.redis_ca_file)
         elif self.redis_config.redis_ca_path:

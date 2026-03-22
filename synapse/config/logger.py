@@ -24,26 +24,10 @@ import logging
 import logging.config
 import os
 import sys
-import threading
 from string import Template
 from typing import TYPE_CHECKING, Any
 
 import yaml
-try:
-    from zope.interface import implementer
-except ImportError:
-    pass
-
-try:
-    from twisted.logger import (
-        ILogObserver,
-        LogBeginner,
-        STDLibLogObserver,
-        eventAsText,
-        globalLogBeginner,
-    )
-except ImportError:
-    pass
 
 from synapse.logging.context import LoggingContextFilter
 from synapse.synapse_rust import reset_logging_config
@@ -210,7 +194,7 @@ Marks whether we've already successfully ran `one_time_logging_setup()`.
 """
 
 
-def one_time_logging_setup(*, logBeginner: LogBeginner = globalLogBeginner) -> None:
+def one_time_logging_setup() -> None:
     """
     Perform one-time logging configuration for the Python process.
 
@@ -241,46 +225,6 @@ def one_time_logging_setup(*, logBeginner: LogBeginner = globalLogBeginner) -> N
         return record
 
     logging.setLogRecordFactory(factory)
-
-    # Route Twisted's native logging through to the standard library logging
-    # system.
-    observer = STDLibLogObserver()
-
-    threadlocal = threading.local()
-
-    @implementer(ILogObserver)
-    def _log(event: dict) -> None:
-        if "log_text" in event:
-            if event["log_text"].startswith("DNSDatagramProtocol starting on "):
-                return
-
-            if event["log_text"].startswith("(UDP Port "):
-                return
-
-            if event["log_text"].startswith("Timing out client"):
-                return
-
-        # this is a workaround to make sure we don't get stack overflows when the
-        # logging system raises an error which is written to stderr which is redirected
-        # to the logging system, etc.
-        if getattr(threadlocal, "active", False):
-            # write the text of the event, if any, to the *real* stderr (which may
-            # be redirected to /dev/null, but there's not much we can do)
-            try:
-                event_text = eventAsText(event)
-                print("logging during logging: %s" % event_text, file=sys.__stderr__)
-            except Exception:
-                # gah.
-                pass
-            return
-
-        try:
-            threadlocal.active = True
-            return observer(event)
-        finally:
-            threadlocal.active = False
-
-    logBeginner.beginLoggingTo([_log], redirectStandardIO=False)
 
     _already_performed_one_time_logging_setup = True
 
@@ -391,4 +335,4 @@ def setup_logging(
     logger.info("Server hostname: %s", config.server.server_name)
     logger.info("Public Base URL: %s", config.server.public_baseurl)
     logger.info("Instance name: %s", hs.get_instance_name())
-    logger.info("Twisted reactor: %s", type(reactor).__name__)
+    logger.info("Event loop: asyncio")

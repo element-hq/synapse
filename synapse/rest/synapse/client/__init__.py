@@ -30,10 +30,7 @@ from synapse.rest.synapse.client.sso_register import SsoRegisterResource
 from synapse.rest.synapse.client.unsubscribe import UnsubscribeResource
 from synapse.rest.synapse.mas import MasResource
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    Resource = object  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource
 
 
 if TYPE_CHECKING:

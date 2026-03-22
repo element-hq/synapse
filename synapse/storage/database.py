@@ -115,7 +115,7 @@ UNIQUE_INDEX_BACKGROUND_UPDATES = {
 
 class _PoolConnection(Connection):
     """
-    A Connection from twisted.enterprise.adbapi.Connection.
+    A pooled database connection with a reconnect method.
     """
 
     def reconnect(self) -> None: ...
@@ -319,7 +319,7 @@ class LoggingTransaction:
     def call_after(
         self, callback: Callable[P, object], *args: P.args, **kwargs: P.kwargs
     ) -> None:
-        """Call the given callback on the main twisted thread after the transaction has
+        """Call the given callback on the main thread after the transaction has
         finished successfully.
 
         Mostly used to invalidate the caches on the correct thread.
@@ -340,7 +340,7 @@ class LoggingTransaction:
     def async_call_after(
         self, callback: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
     ) -> None:
-        """Call the given asynchronous callback on the main twisted thread after
+        """Call the given asynchronous callback on the main thread after
         the transaction has finished successfully (but before those added in `call_after`).
 
         Mostly used to invalidate remote caches after transactions.
@@ -361,7 +361,7 @@ class LoggingTransaction:
     def call_on_exception(
         self, callback: Callable[P, object], *args: P.args, **kwargs: P.kwargs
     ) -> None:
-        """Call the given callback on the main twisted thread after the transaction has
+        """Call the given callback on the main thread after the transaction has
         failed.
 
         Note that transactions may be retried a few times if they encounter database
@@ -617,7 +617,7 @@ class DatabasePool:
         self._current_txn_total_time = 0.0
         self._previous_loop_ts = 0.0
 
-        # Transaction counter: key is the twisted thread id, value is the current count
+        # Transaction counter: key is the thread id, value is the current count
         self._txn_counters: dict[int, int] = defaultdict(int)
 
         # TODO(paul): These can eventually be removed once the metrics code
@@ -951,7 +951,7 @@ class DatabasePool:
         Arguments:
             desc: description of the transaction, for logging and metrics
             func: callback function, which will be called with a
-                database transaction (twisted.enterprise.adbapi.Transaction) as
+                database transaction (LoggingTransaction) as
                 its first argument, followed by `args` and `kwargs`.
 
             db_autocommit: Whether to run the function in "autocommit" mode,
@@ -1032,7 +1032,7 @@ class DatabasePool:
 
         Arguments:
             func: callback function, which will be called with a
-                database connection (twisted.enterprise.adbapi.Connection) as
+                database connection (a Connection object) as
                 its first argument, followed by `args` and `kwargs`.
             args: positional args to pass to `func`
             db_autocommit: Whether to run the function in "autocommit" mode,

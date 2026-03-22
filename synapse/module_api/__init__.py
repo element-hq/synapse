@@ -157,10 +157,7 @@ from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze
 from synapse.util.sentinel import Sentinel
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    Resource = object  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource
 
 
 if TYPE_CHECKING:

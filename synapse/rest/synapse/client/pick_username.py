@@ -34,10 +34,7 @@ from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict
 from synapse.util.templates import build_jinja_env
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    Resource = object  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource
 
 
 if TYPE_CHECKING:

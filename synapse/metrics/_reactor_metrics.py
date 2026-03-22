@@ -19,6 +19,7 @@
 #
 #
 
+import asyncio
 import logging
 import time
 from selectors import SelectSelector, _PollLikeSelector  # type: ignore[attr-defined]
@@ -27,7 +28,6 @@ from typing import Any, Callable, Iterable
 from prometheus_client import Histogram, Metric
 from prometheus_client.core import REGISTRY, GaugeMetricFamily
 
-from synapse.app.complement_fork_proxied_reactor import ProxiedReactor
 from synapse.metrics._types import Collector
 
 try:
@@ -38,46 +38,16 @@ except ImportError:
         pass
 
 
-try:
-    from twisted.internet.epollreactor import EPollReactor
-except ImportError:
-
-    class EPollReactor:  # type: ignore[no-redef]
-        pass
-
-
-try:
-    from twisted.internet.pollreactor import PollReactor
-except ImportError:
-
-    class PollReactor:  # type: ignore[no-redef]
-        pass
-
-
-try:
-    from twisted.internet import selectreactor
-except ImportError:
-    selectreactor = None  # type: ignore[assignment]
-
-
-try:
-    from twisted.internet.asyncioreactor import AsyncioSelectorReactor
-except ImportError:
-
-    class AsyncioSelectorReactor:  # type: ignore[no-redef]
-        pass
-
-
 logger = logging.getLogger(__name__)
 
 #
-# Twisted reactor metrics
+# Event loop metrics
 #
 
 # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
 tick_time = Histogram(  # type: ignore[missing-server-name-label]
     "python_twisted_reactor_tick_time",
-    "Tick time of the Twisted reactor (sec)",
+    "Tick time of the asyncio event loop (sec)",
     buckets=[0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1, 2, 5],
 )
 
@@ -91,7 +61,7 @@ class CallWrapper:
 
     def __call__(self, *args, **kwargs) -> Any:  # type: ignore[no-untyped-def]
         # record the time since this was last called. This gives a good proxy for
-        # how long it takes to run everything in the reactor - ie, how long anything
+        # how long it takes to run everything in the event loop - ie, how long anything
         # waiting for the next tick will have to wait.
         tick_time.observe(time.time() - self.last_polled)
 
@@ -130,57 +100,73 @@ class ReactorLastSeenMetric(Collector):
         # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
         cm = GaugeMetricFamily(  # type: ignore[missing-server-name-label]
             "python_twisted_reactor_last_seen",
-            "Seconds since the Twisted reactor was last seen",
+            "Seconds since the asyncio event loop was last seen",
         )
         cm.add_metric([], time.time() - self._call_wrapper.last_polled)
         yield cm
 
 
-def install_reactor_metrics(target_reactor: Any) -> None:
-    # Twisted has already select a reasonable reactor for us, so assumptions can be
-    # made about the shape.
+def install_reactor_metrics(target: Any = None) -> None:
+    """Install metrics for the asyncio event loop.
+
+    Wraps the underlying selector's poll/select method to measure tick times.
+
+    Args:
+        target: Either an asyncio event loop, or a Twisted reactor (for backward
+            compatibility). If None, attempts to get the running asyncio event loop.
+    """
     wrapper = None
     try:
-        if isinstance(target_reactor, (PollReactor, EPollReactor)):
-            target_reactor._poller = ObjWrapper(reactor._poller, "poll")  # type: ignore[attr-defined]
-            wrapper = target_reactor._poller._wrapped_method  # type: ignore[attr-defined]
-
-        elif selectreactor is not None and isinstance(target_reactor, selectreactor.SelectReactor):
-            # Twisted uses a module-level _select function.
-            wrapper = selectreactor._select = CallWrapper(selectreactor._select)
-
-        elif isinstance(target_reactor, AsyncioSelectorReactor):
-            # For asyncio look at the underlying asyncio event loop.
-            asyncio_loop = (
-                target_reactor._asyncioEventloop
-            )  # A sub-class of BaseEventLoop,
-
-            # A sub-class of BaseSelector.
-            selector = asyncio_loop._selector  # type: ignore[attr-defined]
-
-            if isinstance(selector, SelectSelector):
-                wrapper = selector._select = CallWrapper(selector._select)  # type: ignore[attr-defined]
-
-            # poll, epoll, and /dev/poll.
-            elif isinstance(selector, _PollLikeSelector):
-                selector._selector = ObjWrapper(selector._selector, "poll")  # type: ignore[attr-defined]
-                wrapper = selector._selector._wrapped_method  # type: ignore[attr-defined]
-
-            elif isinstance(selector, KqueueSelector):
-                selector._selector = ObjWrapper(selector._selector, "control")  # type: ignore[attr-defined]
-                wrapper = selector._selector._wrapped_method  # type: ignore[attr-defined]
-
-            else:
-                # E.g. this does not support the (Windows-only) ProactorEventLoop.
+        # Determine the asyncio event loop to instrument
+        asyncio_loop = None
+        if target is None:
+            try:
+                asyncio_loop = asyncio.get_event_loop()
+            except RuntimeError:
                 logger.warning(
-                    "Skipping configuring reactor metrics: unexpected asyncio loop selector: %r via %r",
-                    selector,
-                    asyncio_loop,
+                    "Skipping configuring reactor metrics: no running asyncio event loop"
                 )
+                return
+        elif hasattr(target, '_selector'):
+            # It's an asyncio event loop directly
+            asyncio_loop = target
+        elif hasattr(target, '_asyncioEventloop'):
+            # It's a Twisted AsyncioSelectorReactor
+            asyncio_loop = target._asyncioEventloop
         else:
             logger.warning(
-                "Skipping configuring reactor metrics: unexpected reactor type: %r",
-                target_reactor,
+                "Skipping configuring reactor metrics: unexpected target type: %r",
+                target,
+            )
+            return
+
+        if asyncio_loop is None:
+            logger.warning(
+                "Skipping configuring reactor metrics: could not find asyncio event loop"
+            )
+            return
+
+        # A sub-class of BaseSelector.
+        selector = asyncio_loop._selector  # type: ignore[attr-defined]
+
+        if isinstance(selector, SelectSelector):
+            wrapper = selector._select = CallWrapper(selector._select)  # type: ignore[attr-defined]
+
+        # poll, epoll, and /dev/poll.
+        elif isinstance(selector, _PollLikeSelector):
+            selector._selector = ObjWrapper(selector._selector, "poll")  # type: ignore[attr-defined]
+            wrapper = selector._selector._wrapped_method  # type: ignore[attr-defined]
+
+        elif isinstance(selector, KqueueSelector):
+            selector._selector = ObjWrapper(selector._selector, "control")  # type: ignore[attr-defined]
+            wrapper = selector._selector._wrapped_method  # type: ignore[attr-defined]
+
+        else:
+            # E.g. this does not support the (Windows-only) ProactorEventLoop.
+            logger.warning(
+                "Skipping configuring reactor metrics: unexpected asyncio loop selector: %r via %r",
+                selector,
+                asyncio_loop,
             )
     except Exception as e:
         logger.warning("Configuring reactor metrics failed: %r", e)
@@ -190,15 +176,12 @@ def install_reactor_metrics(target_reactor: Any) -> None:
         REGISTRY.register(ReactorLastSeenMetric(wrapper))  # type: ignore[missing-server-name-label]
 
 
-# Install reactor metrics for the global reactor.
-#
-# Skip installation if using `ProxiedReactor` (used by `complement_fork_starter.py`).
-# The `ProxiedReactor` will handle calling `install_reactor_metrics(...)` itself when
-# ready. Skipping allows us to avoid seeing confusing `Skipping configuring reactor
-# metrics: unexpected reactor type: ProxiedReactor` warnings.
+# Install reactor metrics for the global asyncio event loop (if available).
+# This may be called before the event loop is running, in which case
+# it will be a no-op and should be called again later.
 try:
-    from twisted.internet import reactor
-    if not isinstance(reactor, ProxiedReactor):
-        install_reactor_metrics(reactor)
-except ImportError:
-    pass  # Twisted not installed; reactor metrics unavailable
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        install_reactor_metrics(loop)
+except RuntimeError:
+    pass  # No event loop yet; metrics will be installed later

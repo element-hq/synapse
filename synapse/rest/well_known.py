@@ -28,10 +28,7 @@ from synapse.types import JsonDict
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import parse_server_name
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    Resource = object  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource
 
 
 if TYPE_CHECKING:

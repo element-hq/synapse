@@ -30,13 +30,6 @@ from typing import Any, Callable
 
 from synapse.app.complement_fork_proxied_reactor import ProxiedReactor
 
-try:
-    from twisted.internet.asyncioreactor import AsyncioSelectorReactor
-    from twisted.internet.epollreactor import EPollReactor
-except ImportError:
-    AsyncioSelectorReactor = None  # type: ignore[assignment,misc]
-    EPollReactor = None  # type: ignore[assignment,misc]
-
 # a list of the original signal handlers, before we installed our custom ones.
 # We restore these in our child processes.
 _original_signal_handlers: dict[int, Any] = {}
@@ -51,8 +44,7 @@ def _worker_entrypoint(
     We just need to set up the command-line arguments, create our real reactor
     and then kick off the worker's main() function.
     """
-
-    from synapse.util.stringutils import strtobool
+    import asyncio
 
     sys.argv = args
 
@@ -61,19 +53,19 @@ def _worker_entrypoint(
     for sig, handler in _original_signal_handlers.items():
         signal.signal(sig, handler)
 
-    # Install the asyncio reactor if the
-    # SYNAPSE_COMPLEMENT_FORKING_LAUNCHER_ASYNC_IO_REACTOR is set to 1. The
-    # SYNAPSE_ASYNC_IO_REACTOR variable would be used, but then causes
-    # synapse/__init__.py to also try to install an asyncio reactor.
-    if strtobool(
-        os.environ.get("SYNAPSE_COMPLEMENT_FORKING_LAUNCHER_ASYNC_IO_REACTOR", "0")
-    ):
-        import asyncio
+    # Create a new asyncio event loop for this forked process.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-        reactor = AsyncioSelectorReactor(asyncio.get_event_loop())
+    # Try to install a Twisted reactor wrapping the asyncio loop, if Twisted is available.
+    try:
+        from twisted.internet.asyncioreactor import AsyncioSelectorReactor
+        reactor = AsyncioSelectorReactor(loop)
         proxy_reactor._install_real_reactor(reactor)
-    else:
-        proxy_reactor._install_real_reactor(EPollReactor())
+    except ImportError:
+        # Twisted not available; the proxy reactor won't have a real reactor,
+        # but the worker can still run using asyncio directly.
+        pass
 
     func()
 
@@ -104,7 +96,13 @@ def main() -> None:
     # Prevent Twisted from installing a shared reactor that all the workers will
     # inherit when we fork(), by installing our own beforehand.
     proxy_reactor = ProxiedReactor()
-    installReactor(proxy_reactor)
+    try:
+        from twisted.internet import reactor as _unused_reactor  # noqa: F401
+        # If Twisted is available, install the proxy reactor
+        from twisted.internet.main import installReactor
+        installReactor(proxy_reactor)
+    except ImportError:
+        pass  # Twisted not available; skip reactor installation
 
     # Import the entrypoints for all the workers.
     worker_functions = []

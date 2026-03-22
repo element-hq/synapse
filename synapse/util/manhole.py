@@ -24,6 +24,7 @@ import sys
 import traceback
 from typing import Any
 
+_TWISTED_MANHOLE_AVAILABLE = False
 try:
     from twisted.conch import manhole_ssh
     from twisted.conch.insults import insults
@@ -32,6 +33,7 @@ try:
     from twisted.cred import checkers, portal
     from twisted.internet import defer
     from twisted.internet.protocol import ServerFactory
+    _TWISTED_MANHOLE_AVAILABLE = True
 except ImportError:
     pass
 
@@ -75,7 +77,7 @@ EddTrx3TNpr1D5m/f+6mnXWrc8u9y1+GNx9yz889xMjIBTBI9KqaaOs=
 -----END RSA PRIVATE KEY-----"""
 
 
-def manhole(settings: ManholeConfig, globals: dict[str, Any]) -> ServerFactory:
+def manhole(settings: ManholeConfig, globals: dict[str, Any]) -> Any:
     """Starts a ssh listener with password authentication using
     the given username and password. Clients connecting to the ssh
     listener will find themselves in a colored python shell with
@@ -89,6 +91,12 @@ def manhole(settings: ManholeConfig, globals: dict[str, Any]) -> ServerFactory:
     Returns:
         A factory to pass to ``listenTCP``
     """
+    if not _TWISTED_MANHOLE_AVAILABLE:
+        raise ImportError(
+            "Twisted with conch support is required for the manhole feature. "
+            "Install it with: pip install twisted[conch]"
+        )
+
     username = settings.username
     password = settings.password.encode("ascii")
     priv_key = settings.priv_key

@@ -114,10 +114,7 @@ from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerS
 from synapse.types import ISynapseReactor
 from synapse.util.httpresourcetree import create_resource_tree
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    Resource = object  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource
 
 logger = logging.getLogger("synapse.app.generic_worker")
 

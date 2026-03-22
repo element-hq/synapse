@@ -20,190 +20,35 @@
 #
 
 import logging
-from typing import Optional
-
-try:
-    from zope.interface import implementer
-except ImportError:
-    pass
-
-try:
-    from twisted.internet import defer
-    from twisted.internet.endpoints import (
-        HostnameEndpoint,
-        UNIXClientEndpoint,
-        wrapClientTLS,
-    )
-    from twisted.internet.interfaces import IStreamClientEndpoint
-    from twisted.python.failure import Failure
-    from twisted.web.client import URI, HTTPConnectionPool, _AgentBase
-    from twisted.web.error import SchemeNotSupported
-    from twisted.web.http_headers import Headers
-    from twisted.web.iweb import (
-        IAgent,
-        IAgentEndpointFactory,
-        IBodyProducer,
-        IPolicyForHTTPS,
-        IResponse,
-    )
-except ImportError:
-    pass
+from typing import Any
 
 from synapse.config.workers import (
     InstanceLocationConfig,
-    InstanceTcpLocationConfig,
-    InstanceUnixLocationConfig,
 )
-from synapse.types import ISynapseReactor
 
 logger = logging.getLogger(__name__)
 
 
-@implementer(IAgentEndpointFactory)
+# The Twisted-based ReplicationEndpointFactory and ReplicationAgent classes have been
+# removed as part of the Twisted->asyncio migration. Replication HTTP requests are now
+# handled by NativeReplicationClient using aiohttp.
+#
+# For backward compatibility of imports, we provide stubs.
+
+
 class ReplicationEndpointFactory:
-    """Connect to a given TCP or UNIX socket"""
-
-    def __init__(
-        self,
-        reactor: ISynapseReactor,
-        instance_map: dict[str, InstanceLocationConfig],
-        context_factory: IPolicyForHTTPS,
-    ) -> None:
-        self.reactor = reactor
-        self.instance_map = instance_map
-        self.context_factory = context_factory
-
-    def endpointForURI(self, uri: URI) -> IStreamClientEndpoint:
-        """
-        This part of the factory decides what kind of endpoint is being connected to.
-
-        Args:
-            uri: The pre-parsed URI object containing all the uri data
-
-        Returns: The correct client endpoint object
-        """
-        # The given URI has a special scheme and includes the worker name. The
-        # actual connection details are pulled from the instance map.
-        worker_name = uri.netloc.decode("utf-8")
-        location_config = self.instance_map[worker_name]
-        scheme = location_config.scheme()
-
-        if isinstance(location_config, InstanceTcpLocationConfig):
-            endpoint = HostnameEndpoint(
-                self.reactor,
-                location_config.host,
-                location_config.port,
-            )
-            if scheme == "https":
-                wrapped_endpoint = wrapClientTLS(
-                    # The 'port' argument below isn't actually used by the function
-                    self.context_factory.creatorForNetloc(
-                        location_config.host.encode("utf-8"),
-                        location_config.port,
-                    ),
-                    endpoint,
-                )
-                return wrapped_endpoint
-
-            return endpoint
-        elif isinstance(location_config, InstanceUnixLocationConfig):
-            return UNIXClientEndpoint(self.reactor, location_config.path)
-        else:
-            raise SchemeNotSupported(f"Unsupported scheme: {scheme}")
-
-
-@implementer(IAgent)
-class ReplicationAgent(_AgentBase):
-    """
-    Client for connecting to replication endpoints via HTTP and HTTPS.
-
-    Much of this code is copied from Twisted's twisted.web.client.Agent.
-    """
-
-    def __init__(
-        self,
-        reactor: ISynapseReactor,
-        instance_map: dict[str, InstanceLocationConfig],
-        contextFactory: IPolicyForHTTPS,
-        connectTimeout: float | None = None,
-        bindAddress: bytes | None = None,
-        pool: HTTPConnectionPool | None = None,
-    ):
-        """
-        Create a ReplicationAgent.
-
-        Args:
-            reactor: A reactor for this Agent to place outgoing connections.
-            contextFactory: A factory for TLS contexts, to control the
-                verification parameters of OpenSSL.  The default is to use a
-                BrowserLikePolicyForHTTPS, so unless you have special
-                requirements you can leave this as-is.
-            connectTimeout: The amount of time that this Agent will wait
-                for the peer to accept a connection.
-            bindAddress: The local address for client sockets to bind to.
-            pool: An HTTPConnectionPool instance, or None, in which
-                case a non-persistent HTTPConnectionPool instance will be
-                created.
-        """
-        _AgentBase.__init__(self, reactor, pool)
-        endpoint_factory = ReplicationEndpointFactory(
-            reactor, instance_map, contextFactory
-        )
-        self._endpointFactory = endpoint_factory
-
-    def request(
-        self,
-        method: bytes,
-        uri: bytes,
-        headers: Headers | None = None,
-        bodyProducer: Optional[IBodyProducer] = None,
-    ) -> Any:
-        """
-        Issue a request to the server indicated by the given uri.
-
-        An existing connection from the connection pool may be used or a new
-        one may be created.
-
-        Currently, HTTP, HTTPS and UNIX schemes are supported in uri.
-
-        This is copied from twisted.web.client.Agent, except:
-
-        * It uses a different pool key (combining the scheme with either host & port or
-          socket path).
-        * It does not call _ensureValidURI(...) as the strictness of IDNA2008 is not
-          required when using a worker's name as a 'hostname' for Synapse HTTP
-          Replication machinery. Specifically, this allows a range of ascii characters
-          such as '+' and '_' in hostnames/worker's names.
-
-        See: twisted.web.iweb.IAgent.request
-        """
-        parsedURI = URI.fromBytes(uri)
-        try:
-            endpoint = self._endpointFactory.endpointForURI(parsedURI)
-        except SchemeNotSupported:
-            raise
-
-        worker_name = parsedURI.netloc.decode("utf-8")
-        key_scheme = self._endpointFactory.instance_map[worker_name].scheme()
-        key_netloc = self._endpointFactory.instance_map[worker_name].netloc()
-        # Build a connection pool key.
-        #
-        # `_AgentBase` expects this to be a three-tuple of `(scheme, host,
-        # port)` of type `bytes`. We don't have a real port when connecting via
-        # a Unix socket, so use `0`.
-        key = (
-            key_scheme.encode("ascii"),
-            key_netloc.encode("utf-8"),
-            0,
+    """Stub: The Twisted ReplicationEndpointFactory has been removed."""
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError(
+            "ReplicationEndpointFactory has been removed. "
+            "Use NativeReplicationClient instead."
         )
 
-        # _requestWithEndpoint comes from _AgentBase class
-        return self._requestWithEndpoint(
-            key,
-            endpoint,
-            method,
-            parsedURI,
-            headers,
-            bodyProducer,
-            parsedURI.originForm,
+
+class ReplicationAgent:
+    """Stub: The Twisted ReplicationAgent has been removed."""
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError(
+            "ReplicationAgent has been removed. "
+            "Use NativeReplicationClient instead."
         )

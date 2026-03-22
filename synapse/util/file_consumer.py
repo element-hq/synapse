@@ -18,15 +18,11 @@
 #
 #
 
+import asyncio
 import queue
 from typing import Any, BinaryIO, Optional, Union, cast
 
-try:
-    from twisted.internet.defer import Deferred
-except ImportError:
-    from asyncio import Future as Deferred  # type: ignore[assignment]
-
-from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.logging.context import make_deferred_yieldable
 from synapse.types import ISynapseReactor
 
 
@@ -64,10 +60,10 @@ class BackgroundFileConsumer:
         # unregister a final None is sent.
         self._bytes_queue: queue.Queue[bytes | None] = queue.Queue()
 
-        # Deferred that is resolved when finished writing
+        # asyncio.Future that is resolved when finished writing
         #
-        # This is really Deferred[None], but mypy doesn't seem to like that.
-        self._finished_deferred: Deferred[Any] | None = None
+        # This is really asyncio.Future[None], but mypy doesn't seem to like that.
+        self._finished_deferred: asyncio.Future[Any] | None = None
 
         # If the _writer thread throws an exception it gets stored here.
         self._write_exception: Exception | None = None
@@ -87,16 +83,8 @@ class BackgroundFileConsumer:
 
         self._producer = producer
         self.streaming = streaming
-        self._finished_deferred = run_in_background(
-            threads.deferToThreadPool,
-            # mypy seems to get confused with the chaining of ParamSpec from
-            # run_in_background to deferToThreadPool.
-            #
-            # For Twisted trunk, ignore arg-type; for Twisted release ignore unused-ignore.
-            self._reactor,  # type: ignore[arg-type,unused-ignore]
-            self._reactor.getThreadPool(),  # type: ignore[arg-type,unused-ignore]
-            self._writer,  # type: ignore[arg-type,unused-ignore]
-        )
+        self._loop = asyncio.get_event_loop()
+        self._finished_deferred = self._loop.run_in_executor(None, self._writer)
         if not streaming:
             self._producer.resumeProducing()
 
@@ -104,7 +92,7 @@ class BackgroundFileConsumer:
         """Part of IProducer interface"""
         self._producer = None
         assert self._finished_deferred is not None
-        if not self._finished_deferred.called:
+        if not self._finished_deferred.done():
             self._bytes_queue.put_nowait(None)
 
     def write(self, write_bytes: bytes) -> None:
@@ -113,7 +101,7 @@ class BackgroundFileConsumer:
             raise self._write_exception
 
         assert self._finished_deferred is not None
-        if self._finished_deferred.called:
+        if self._finished_deferred.done():
             raise Exception("consumer has closed")
 
         self._bytes_queue.put_nowait(write_bytes)
@@ -128,13 +116,14 @@ class BackgroundFileConsumer:
 
     def _writer(self) -> None:
         """This is run in a background thread to write to the file."""
+        loop = self._loop
         try:
             while self._producer or not self._bytes_queue.empty():
                 # If we've paused the producer check if we should resume the
                 # producer.
                 if self._producer and self._paused_producer:
                     if self._bytes_queue.qsize() <= self._RESUME_ON_QUEUE_SIZE:
-                        self._reactor.callFromThread(self._resume_paused_producer)
+                        loop.call_soon_threadsafe(self._resume_paused_producer)
 
                 bytes = self._bytes_queue.get()
 
@@ -146,14 +135,14 @@ class BackgroundFileConsumer:
                 # If its a pull producer then we need to explicitly ask for
                 # more stuff.
                 if not self.streaming and self._producer:
-                    self._reactor.callFromThread(self._producer.resumeProducing)
+                    loop.call_soon_threadsafe(self._producer.resumeProducing)
         except Exception as e:
             self._write_exception = e
             raise
         finally:
             self._file_obj.close()
 
-    def wait(self) -> "Deferred[None]":
+    def wait(self) -> "asyncio.Future[None]":
         """Returns a deferred that resolves when finished writing to file"""
         assert self._finished_deferred is not None
         return make_deferred_yieldable(self._finished_deferred)

@@ -115,7 +115,7 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
     }
 
     logger = logging.getLogger("synapse")
-    one_time_logging_setup(logBeginner=beginner)
+    one_time_logging_setup()
     _setup_stdlib_logging(
         hs_config,  # type: ignore[arg-type]
         None,

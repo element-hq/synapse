@@ -75,14 +75,8 @@ from synapse.util.caches.lrucache import setup_expire_lru_cache_entries
 from synapse.util.daemonize import daemonize_process
 from synapse.util.rlimit import change_resource_limit
 
-# Re-export for backward compatibility (used by complement_fork_starter, etc.)
-try:
-    from twisted.internet import reactor as _reactor
-    from synapse.types import ISynapseReactor
-    from typing import cast
-    reactor = cast(ISynapseReactor, _reactor)
-except ImportError:
-    reactor = None  # type: ignore[assignment]
+# Reactor is no longer used directly; kept as None for backward compat.
+reactor = None
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -409,7 +403,7 @@ def listen_manhole(
 def listen_tcp(
     bind_addresses: StrCollection,
     port: int,
-    factory: "ServerFactory",
+    factory: Any,
     reactor: Any = None,
     backlog: int = 50,
 ) -> list[Any]:
@@ -421,24 +415,28 @@ def listen_tcp(
     Returns:
         list of listening port objects
     """
-    if reactor is None:
+    try:
         from twisted.internet import reactor as _reactor
-        reactor = _reactor
+        if reactor is None:
+            reactor = _reactor
 
-    r = []
-    for address in bind_addresses:
-        try:
-            r.append(reactor.listenTCP(port, factory, backlog, address))
-        except error.CannotListenError as e:
-            check_bind_error(e, address, bind_addresses)
+        r = []
+        for address in bind_addresses:
+            try:
+                r.append(reactor.listenTCP(port, factory, backlog, address))
+            except Exception as e:
+                check_bind_error(e, address, bind_addresses)
 
-    return r
+        return r
+    except ImportError:
+        logger.warning("Twisted not available, cannot listen on TCP (e.g. for manhole)")
+        return []
 
 
 def listen_unix(
     path: str,
     mode: int,
-    factory: "ServerFactory",
+    factory: Any,
     reactor: Any = None,
     backlog: int = 50,
 ) -> list[Any]:
@@ -450,15 +448,17 @@ def listen_unix(
     Returns:
         list of listening port objects
     """
-    if reactor is None:
+    try:
         from twisted.internet import reactor as _reactor
-        reactor = _reactor
+        if reactor is None:
+            reactor = _reactor
 
-    wantPID = True
-
-    return [
-        reactor.listenUNIX(path, factory, backlog, mode, wantPID)
-    ]
+        return [
+            reactor.listenUNIX(path, factory, backlog, mode, True)
+        ]
+    except ImportError:
+        logger.warning("Twisted not available, cannot listen on UNIX socket (e.g. for manhole)")
+        return []
 
 
 class ListenerException(RuntimeError):

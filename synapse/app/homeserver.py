@@ -70,19 +70,14 @@ from synapse.types import ISynapseReactor
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.module_loader import load_module
 
-try:
-    from twisted.web.resource import EncodingResourceWrapper, Resource
-    from twisted.web.server import GzipEncoderFactory
-except ImportError:
-    Resource = object  # type: ignore[assignment,misc]
-    EncodingResourceWrapper = None  # type: ignore[assignment,misc]
-    GzipEncoderFactory = None  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource
 
 logger = logging.getLogger("synapse.app.homeserver")
 
 
 def gz_wrap(r: Resource) -> Resource:
-    return EncodingResourceWrapper(r, [GzipEncoderFactory()])
+    # aiohttp handles gzip compression via middleware, so this is now a passthrough.
+    return r
 
 
 class SynapseHomeServer(HomeServer):

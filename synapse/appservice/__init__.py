@@ -34,10 +34,6 @@ from typing import (
 import attr
 from netaddr import IPSet
 
-try:
-    from twisted.internet import reactor
-except ImportError:
-    reactor = None  # type: ignore[assignment]
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
@@ -122,7 +118,7 @@ class ApplicationService:
         # `@cached` that aren't aware of the `HomeServer` instance.
         # nb must be called this for @cached
         self.clock = Clock(
-            cast(ISynapseThreadlessReactor, reactor), server_name=self.server_name
+            cast(ISynapseThreadlessReactor, None), server_name=self.server_name
         )  # type: ignore[multiple-internal-clocks]
 
         self.namespaces = self._check_namespaces(namespaces)

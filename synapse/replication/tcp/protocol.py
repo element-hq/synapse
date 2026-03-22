@@ -28,13 +28,19 @@ import fcntl
 import logging
 import struct
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Collection
+from typing import TYPE_CHECKING, Any, Callable, Collection
 
 from prometheus_client import Counter
 try:
     from zope.interface import Interface, implementer
 except ImportError:
-    pass
+    # Provide minimal stubs
+    class Interface:  # type: ignore[no-redef]
+        pass
+    def implementer(*args: Any, **kwargs: Any) -> Any:  # type: ignore[no-redef]
+        def decorator(cls: Any) -> Any:
+            return cls
+        return decorator
 
 try:
     from twisted.internet import task

@@ -19,42 +19,8 @@
 #
 #
 
-import json
 import logging
-import urllib.parse
-from typing import TYPE_CHECKING, Any, Optional, cast
-
-from synapse.api.errors import Codes, InvalidProxyCredentialsError
-from synapse.http import QuieterFileBodyProducer
-from synapse.http.server import _AsyncResource
-from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.types import ISynapseReactor
-from synapse.util.async_helpers import timeout_deferred
-
-try:
-    from twisted.python import failure
-    from twisted.python.failure import Failure
-    from twisted.internet import protocol
-    from twisted.internet.protocol import connectionDone
-    from twisted.internet.interfaces import ITCPTransport
-    from twisted.web.resource import IResource
-    from twisted.web.client import ResponseDone
-    from twisted.web.http_headers import Headers
-    from twisted.web.server import Site
-except ImportError:
-    failure = None  # type: ignore[assignment]
-    Failure = BaseException  # type: ignore[assignment,misc]
-    protocol = None  # type: ignore[assignment]
-    connectionDone = None  # type: ignore[assignment]
-    ITCPTransport = None  # type: ignore[assignment]
-    IResource = None  # type: ignore[assignment]
-    ResponseDone = None  # type: ignore[assignment]
-    Headers = dict  # type: ignore[assignment,misc]
-    Site = object  # type: ignore[assignment,misc]
-
-if TYPE_CHECKING:
-    from synapse.http.site import SynapseRequest
-    from synapse.server import HomeServer
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -106,195 +72,22 @@ def parse_connection_header_value(
     return extra_headers_to_remove
 
 
-class ProxyResource(_AsyncResource):
-    """
-    A stub resource that proxies any requests with a `matrix-federation://` scheme
-    through the given `federation_agent` to the remote homeserver and ferries back the
-    info.
-    """
-
-    isLeaf = True
-
-    def __init__(self, reactor: ISynapseReactor, hs: "HomeServer"):
-        super().__init__(hs.get_clock(), True)
-
-        self.reactor = reactor
-        self.agent = hs.get_federation_http_client().agent
-
-        self._proxy_authorization_secret = hs.config.worker.worker_replication_secret
-
-    def _check_auth(self, request: Request) -> None:
-        # The `matrix-federation://` proxy functionality can only be used with auth.
-        # Protect homserver admins forgetting to configure a secret.
-        assert self._proxy_authorization_secret is not None
-
-        # Get the authorization header.
-        auth_headers = request.requestHeaders.getRawHeaders(b"Proxy-Authorization")
-
-        if not auth_headers:
-            raise InvalidProxyCredentialsError(
-                "Missing Proxy-Authorization header.", Codes.MISSING_TOKEN
-            )
-        if len(auth_headers) > 1:
-            raise InvalidProxyCredentialsError(
-                "Too many Proxy-Authorization headers.", Codes.UNAUTHORIZED
-            )
-        parts = auth_headers[0].split(b" ")
-        if parts[0] == b"Bearer" and len(parts) == 2:
-            received_secret = parts[1].decode("ascii")
-            if self._proxy_authorization_secret == received_secret:
-                # Success!
-                return
-
-        raise InvalidProxyCredentialsError(
-            "Invalid Proxy-Authorization header.", Codes.UNAUTHORIZED
+# The Twisted-based ProxyResource, _ProxyResponseBody, and ProxySite classes have been
+# removed as part of the Twisted->asyncio migration. Federation proxy functionality
+# would need to be reimplemented using aiohttp if needed.
+#
+# For backward compatibility of imports, we provide stubs.
+class ProxyResource:
+    """Stub: The Twisted ProxyResource has been removed."""
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError(
+            "ProxyResource has been removed as part of the Twisted->asyncio migration."
         )
 
-    async def _async_render(self, request: "SynapseRequest") -> tuple[int, Any]:
-        uri = urllib.parse.urlparse(request.uri)
-        assert uri.scheme == b"matrix-federation"
 
-        # Check the authorization headers before handling the request.
-        self._check_auth(request)
-
-        headers = Headers()
-        for header_name in (b"User-Agent", b"Authorization", b"Content-Type"):
-            header_value = request.getHeader(header_name)
-            if header_value:
-                headers.addRawHeader(header_name, header_value)
-
-        request_deferred = run_in_background(
-            self.agent.request,
-            request.method,
-            request.uri,
-            headers=headers,
-            bodyProducer=QuieterFileBodyProducer(request.content),
+class ProxySite:
+    """Stub: The Twisted ProxySite has been removed."""
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError(
+            "ProxySite has been removed as part of the Twisted->asyncio migration."
         )
-        request_deferred = timeout_deferred(
-            deferred=request_deferred,
-            # This should be set longer than the timeout in `MatrixFederationHttpClient`
-            # so that it has enough time to complete and pass us the data before we give
-            # up.
-            timeout=90,
-            clock=self._clock,
-        )
-
-        response = await make_deferred_yieldable(request_deferred)
-
-        return response.code, response
-
-    def _send_response(
-        self,
-        request: "SynapseRequest",
-        code: int,
-        response_object: Any,
-    ) -> None:
-        response = cast(IResponse, response_object)
-        response_headers = cast(Headers, response.headers)
-
-        request.setResponseCode(code)
-
-        # The `Connection` header also defines which headers should not be copied over.
-        connection_header = response_headers.getRawHeaders(b"connection")
-        extra_headers_to_remove_lowercase = parse_connection_header_value(
-            connection_header[0] if connection_header else None
-        )
-
-        # Copy headers.
-        for k, v in response_headers.getAllRawHeaders():
-            # Do not copy over any hop-by-hop headers. These are meant to only be
-            # consumed by the immediate recipient and not be forwarded on.
-            header_key_lowercase = k.decode("ascii").lower()
-            if (
-                header_key_lowercase in HOP_BY_HOP_HEADERS_LOWERCASE
-                or header_key_lowercase in extra_headers_to_remove_lowercase
-            ):
-                continue
-
-            request.responseHeaders.setRawHeaders(k, v)
-
-        response.deliverBody(_ProxyResponseBody(request))
-
-    def _send_error_response(
-        self,
-        f: failure.Failure,
-        request: "SynapseRequest",
-    ) -> None:
-        if isinstance(f.value, InvalidProxyCredentialsError):
-            error_response_code = f.value.code
-            error_response_json = {"errcode": f.value.errcode, "err": f.value.msg}
-        else:
-            error_response_code = 502
-            error_response_json = {
-                "errcode": Codes.UNKNOWN,
-                "err": "ProxyResource: Error when proxying request: %s %s -> %s"
-                % (
-                    request.method.decode("ascii"),
-                    request.uri.decode("ascii"),
-                    f,
-                ),
-            }
-
-        request.setResponseCode(error_response_code)
-        request.setHeader(b"Content-Type", b"application/json")
-        request.write((json.dumps(error_response_json)).encode())
-        request.finish()
-
-
-class _ProxyResponseBody(protocol.Protocol):
-    """
-    A protocol that proxies the given remote response data back out to the given local
-    request.
-    """
-
-    transport: Optional[ITCPTransport] = None
-
-    def __init__(self, request: "SynapseRequest") -> None:
-        self._request = request
-
-    def dataReceived(self, data: bytes) -> None:
-        # Avoid sending response data to the local request that already disconnected
-        if self._request._disconnected and self.transport is not None:
-            # Close the connection (forcefully) since all the data will get
-            # discarded anyway.
-            self.transport.abortConnection()
-            return
-
-        self._request.write(data)
-
-    def connectionLost(self, reason: Failure = connectionDone) -> None:
-        # If the local request is already finished (successfully or failed), don't
-        # worry about sending anything back.
-        if self._request.finished:
-            return
-
-        if reason.check(ResponseDone):
-            self._request.finish()
-        else:
-            # Abort the underlying request since our remote request also failed.
-            if self._request.channel:
-                self._request.channel.forceAbortClient()
-
-
-class ProxySite(Site):
-    """
-    Proxies any requests with a `matrix-federation://` scheme through the given
-    `federation_agent`. Otherwise, behaves like a normal `Site`.
-    """
-
-    def __init__(
-        self,
-        resource: IResource,
-        reactor: ISynapseReactor,
-        hs: "HomeServer",
-    ):
-        super().__init__(resource, reactor=reactor)
-
-        self._proxy_resource = ProxyResource(reactor, hs=hs)
-
-    def getResourceFor(self, request: "SynapseRequest") -> IResource:
-        uri = urllib.parse.urlparse(request.uri)
-        if uri.scheme == b"matrix-federation":
-            return self._proxy_resource
-
-        return super().getResourceFor(request)

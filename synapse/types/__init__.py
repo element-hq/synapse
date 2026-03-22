@@ -53,24 +53,6 @@ from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
 from typing_extensions import Self
 from unpaddedbase64 import decode_base64
-try:
-    from zope.interface import Interface
-except ImportError:
-    pass
-
-try:
-    from asyncio import CancelledError
-    from twisted.internet.interfaces import (
-        IReactorCore,
-        IReactorPluggableNameResolver,
-        IReactorSSL,
-        IReactorTCP,
-        IReactorThreads,
-        IReactorTime,
-        IReactorUNIX,
-    )
-except ImportError:
-    pass
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.util.cancellation import cancellable
@@ -121,33 +103,11 @@ StrCollection = tuple[str, ...] | list[str] | AbstractSet[str]
 StrSequence = tuple[str, ...] | list[str]
 
 
-# Note that this seems to require inheriting *directly* from Interface in order
-# for mypy-zope to realize it is an interface.
-class ISynapseThreadlessReactor(
-    IReactorTCP,
-    IReactorSSL,
-    IReactorUNIX,
-    IReactorPluggableNameResolver,
-    IReactorTime,
-    IReactorCore,
-    Interface,
-):
-    """
-    The interfaces necessary for Synapse to function (without threads).
-
-    Helpful because we use `twisted.internet.testing.MemoryReactorClock` in tests which
-    doesn't implement `IReactorThreads`.
-    """
-
-
-# Note that this seems to require inheriting *directly* from Interface in order
-# for mypy-zope to realize it is an interface.
-class ISynapseReactor(
-    ISynapseThreadlessReactor,
-    IReactorThreads,
-    Interface,
-):
-    """The interfaces necessary for Synapse to function."""
+# Type aliases replacing the former Zope interface definitions.
+# These were previously Zope Interface classes combining Twisted reactor
+# interfaces. They are only used for type annotations, so Any suffices.
+ISynapseThreadlessReactor = Any
+ISynapseReactor = Any
 
 
 _ELT = TypeVar("_ELT")

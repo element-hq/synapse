@@ -41,6 +41,8 @@ def redact_uri(uri: str) -> str:
     return CLIENT_SECRET_RE.sub(r"\1<redacted>\3", uri)
 
 
+# QuieterFileBodyProducer is no longer needed (Twisted HTTP client removed).
+# Kept as a stub for backward compatibility of imports.
 try:
     from twisted.web.client import FileBodyProducer
     from twisted.internet import task
@@ -54,7 +56,11 @@ try:
             except task.TaskStopped:
                 pass
 except ImportError:
-    pass
+    # Twisted not installed; provide a no-op stub
+    class QuieterFileBodyProducer:  # type: ignore[no-redef]
+        """Stub: Twisted is not installed."""
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise ImportError("QuieterFileBodyProducer requires Twisted, which is not installed")
 
 
 def get_request_uri(request: "Any") -> bytes:
@@ -91,7 +97,7 @@ def _get_requested_host(request: "Any") -> bytes:
     )
 
 
-def get_request_user_agent(request: IRequest, default: str = "") -> str:
+def get_request_user_agent(request: Any, default: str = "") -> str:
     """Return the last User-Agent header, or the given default."""
     # There could be raw utf-8 bytes in the User-Agent header.
 

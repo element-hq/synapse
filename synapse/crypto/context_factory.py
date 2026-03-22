@@ -29,6 +29,7 @@ except ImportError:
     pass
 
 from OpenSSL import SSL, crypto
+_TWISTED_AVAILABLE = False
 try:
     from twisted.internet._sslverify import _defaultCurveName
     from twisted.internet.abstract import isIPAddress, isIPv6Address
@@ -42,8 +43,40 @@ try:
     from twisted.protocols.tls import TLSMemoryBIOProtocol
     from twisted.python.failure import Failure
     from twisted.web.iweb import IPolicyForHTTPS
+    _TWISTED_AVAILABLE = True
 except ImportError:
-    pass
+    # Provide minimal fallbacks for when Twisted is not installed.
+    # The TLS context factory classes require Twisted, so they will
+    # raise errors if used without it.
+    import ipaddress
+
+    def isIPAddress(addr: str) -> bool:
+        try:
+            ipaddress.IPv4Address(addr)
+            return True
+        except ValueError:
+            return False
+
+    def isIPv6Address(addr: str) -> bool:
+        try:
+            ipaddress.IPv6Address(addr)
+            return True
+        except ValueError:
+            return False
+
+    _defaultCurveName = "prime256v1"
+
+    class ContextFactory:  # type: ignore[no-redef]
+        pass
+
+    class TLSVersion:  # type: ignore[no-redef]
+        TLSv1_0 = "TLSv1"
+        TLSv1_1 = "TLSv1.1"
+        TLSv1_2 = "TLSv1.2"
+        TLSv1_3 = "TLSv1.3"
+
+    class Failure(BaseException):  # type: ignore[no-redef]
+        pass
 
 from synapse.config.homeserver import HomeServerConfig
 

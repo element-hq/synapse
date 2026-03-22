@@ -34,10 +34,7 @@ from synapse.rest.synapse.mas.users import (
     MasUnsetDisplayNameResource,
 )
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    Resource = object  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

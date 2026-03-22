@@ -61,10 +61,7 @@ from synapse.metrics._types import Collector
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    Resource = object  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource
 
 
 logger = logging.getLogger(__name__)

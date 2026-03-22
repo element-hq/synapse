@@ -27,10 +27,7 @@ from synapse.rest.synapse.client.oidc.backchannel_logout_resource import (
 )
 from synapse.rest.synapse.client.oidc.callback_resource import OIDCCallbackResource
 
-try:
-    from twisted.web.resource import Resource
-except ImportError:
-    Resource = object  # type: ignore[assignment,misc]
+from synapse.http.resource import Resource
 
 
 if TYPE_CHECKING:

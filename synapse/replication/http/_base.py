@@ -27,11 +27,8 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar
 
 from prometheus_client import Counter, Gauge
 
-try:
-    from twisted.internet.error import ConnectError, DNSLookupError
-except ImportError:
-    ConnectError = OSError  # type: ignore[assignment,misc]
-    DNSLookupError = OSError  # type: ignore[assignment,misc]
+ConnectError = OSError
+DNSLookupError = OSError
 
 from synapse.api.errors import HttpResponseException, SynapseError
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME

@@ -24,21 +24,32 @@ from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 import attr
-from txredisapi import (
-    ConnectionHandler,
-    RedisFactory,
-    SubscriberProtocol,
-    UnixConnectionHandler,
-)
+try:
+    from txredisapi import (
+        ConnectionHandler,
+        RedisFactory,
+        SubscriberProtocol,
+        UnixConnectionHandler,
+    )
+except ImportError:
+    ConnectionHandler = object  # type: ignore[misc,assignment]
+    RedisFactory = object  # type: ignore[misc,assignment]
+    SubscriberProtocol = object  # type: ignore[misc,assignment]
+    UnixConnectionHandler = object  # type: ignore[misc,assignment]
+
 try:
     from zope.interface import implementer
 except ImportError:
-    pass
+    def implementer(*args: Any, **kwargs: Any) -> Any:  # type: ignore[no-redef]
+        def decorator(cls: Any) -> Any:
+            return cls
+        return decorator
 
 try:
-    from twisted.internet.interfaces import IConnector
+    from twisted.internet.interfaces import IAddress, IConnector
     from twisted.python.failure import Failure
 except ImportError:
+    IAddress = Any  # type: ignore[assignment,misc]
     IConnector = Any  # type: ignore[assignment,misc]
     Failure = BaseException  # type: ignore[assignment,misc]
 
@@ -360,8 +371,8 @@ class SynapseRedisFactory(RedisFactory):
         super().clientConnectionLost(connector, reason)
 
 
-def format_address(address: IAddress) -> str:
-    if isinstance(address, (IPv4Address, IPv6Address)):
+def format_address(address: Any) -> str:
+    if hasattr(address, 'host') and hasattr(address, 'port'):
         return "%s:%i" % (address.host, address.port)
     return str(address)
 

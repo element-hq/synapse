@@ -22,14 +22,10 @@ import asyncio
 """A replication client for use by synapse workers."""
 
 import logging
+from asyncio import Future
 from typing import TYPE_CHECKING, Iterable
 
 from sortedcontainers import SortedList
-
-try:
-    from twisted.internet.defer import Deferred
-except ImportError:
-    from asyncio import Future as Deferred  # type: ignore[assignment]
 
 from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.federation import send_queue
@@ -103,7 +99,7 @@ class ReplicationDataHandler:
         # Map from stream and instance to list of deferreds waiting for the stream to
         # arrive at a particular position. The lists are sorted by stream position.
         self._streams_to_waiters: dict[
-            tuple[str, str], SortedList[tuple[int, Deferred]]
+            tuple[str, str], SortedList[tuple[int, Future]]
         ] = {}
 
     async def on_rdata(
@@ -354,7 +350,7 @@ class ReplicationDataHandler:
 
         # Create a new deferred that times out after N seconds, as we don't want
         # to wedge here forever.
-        deferred: "Deferred[None]" = Deferred()
+        deferred: "Future[None]" = Future()
         deferred = timeout_deferred(
             deferred=deferred,
             timeout=_WAIT_FOR_REPLICATION_TIMEOUT_SECONDS,

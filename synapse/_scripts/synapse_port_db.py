@@ -92,16 +92,6 @@ from synapse.storage.databases.main.user_directory import (
 from synapse.storage.databases.state.bg_updates import StateBackgroundUpdateStore
 from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
-from synapse.types import ISynapseReactor
-
-try:
-    from twisted.internet import reactor as reactor_
-except ImportError:
-    reactor_ = None  # type: ignore[assignment]
-
-# Cast safety: Twisted does some naughty magic which replaces the
-# twisted.internet.reactor module with a Reactor instance at runtime.
-reactor = cast(ISynapseReactor, reactor_)
 logger = logging.getLogger("synapse_port_db")
 
 
@@ -325,7 +315,7 @@ class MockHomeserver(HomeServer):
         super().__init__(
             hostname=config.server.server_name,
             config=config,
-            reactor=reactor,
+            reactor=None,
         )
 
 
@@ -990,7 +980,7 @@ class Porter:
             end_error_exec_info = sys.exc_info()  # type: ignore[assignment]
             logger.exception("")
         finally:
-            reactor.stop()
+            asyncio.get_event_loop().stop()
 
     def _convert_rows(
         self, table: str, headers: list[str], rows: list[tuple]
@@ -1576,9 +1566,10 @@ def main() -> None:
         async def run() -> None:
             await porter.run()
 
-        hs.get_clock().call_when_running(lambda: asyncio.ensure_future(run()))
+        loop = asyncio.get_event_loop()
+        loop.call_soon(lambda: asyncio.ensure_future(run()))
 
-        reactor.run()
+        loop.run_forever()
 
     if args.curses:
         curses.wrapper(start)

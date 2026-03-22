@@ -41,19 +41,6 @@ from typing import (
 from uuid import uuid4
 
 import attr
-try:
-    from zope.interface import implementer
-except ImportError:
-    pass
-
-try:
-    from twisted.internet import interfaces
-    from twisted.internet.defer import Deferred
-    from twisted.internet.interfaces import IConsumer
-except ImportError:
-    interfaces = None  # type: ignore[assignment]
-    Deferred = None  # type: ignore[assignment,misc]
-    IConsumer = None  # type: ignore[assignment,misc]
 
 from synapse.api.errors import NotFoundError
 from synapse.logging.context import defer_to_thread, run_in_background
@@ -497,8 +484,8 @@ class FileResponder(Responder):
         self.hs = hs
         self.open_file = open_file
 
-    def write_to_consumer(self, consumer: IConsumer) -> Deferred:
-        return ThreadedFileSender(self.hs).beginFileTransfer(self.open_file, consumer)
+    async def write_to_consumer(self, consumer: Any) -> None:
+        await ThreadedFileSender(self.hs).beginFileTransfer(self.open_file, consumer)
 
     def __exit__(
         self,
@@ -544,8 +531,6 @@ class ReadableFileWrapper:
                 await self.clock.sleep(Duration(seconds=0))
 
 
-@implementer(interfaces.IConsumer)
-@implementer(interfaces.IPushProducer)
 class MultipartFileConsumer:
     """Wraps a given consumer so that any data that gets written to it gets
     converted to a multipart format.
@@ -554,7 +539,7 @@ class MultipartFileConsumer:
     def __init__(
         self,
         clock: Clock,
-        wrapped_consumer: interfaces.IConsumer,
+        wrapped_consumer: Any,
         file_content_type: str,
         json_object: JsonDict,
         disposition: str,
@@ -570,7 +555,7 @@ class MultipartFileConsumer:
 
         # The producer that registered with us, and if it's a push or pull
         # producer.
-        self.producer: "interfaces.IProducer" | None = None
+        self.producer: Any = None
         self.streaming: bool | None = None
 
         # Whether the wrapped consumer has asked us to pause.
@@ -582,7 +567,7 @@ class MultipartFileConsumer:
     ### IConsumer APIs ###
 
     def registerProducer(
-        self, producer: "interfaces.IProducer", streaming: bool
+        self, producer: Any, streaming: bool
     ) -> None:
         """
         Register to receive data from a producer.
@@ -680,7 +665,7 @@ class MultipartFileConsumer:
         self.paused = True
 
         if self.streaming:
-            cast("interfaces.IPushProducer", self.producer).pauseProducing()
+            self.producer.pauseProducing()
         else:
             self.paused = True
 
@@ -694,7 +679,7 @@ class MultipartFileConsumer:
         assert self.producer is not None
 
         if self.streaming:
-            cast("interfaces.IPushProducer", self.producer).resumeProducing()
+            self.producer.resumeProducing()
         else:
             # If the producer is not a streaming producer we need to start
             # repeatedly calling  `resumeProducing` in a loop.
@@ -731,7 +716,7 @@ class MultipartFileConsumer:
     async def _resumeProducingRepeatedly(self) -> None:
         assert self.producer is not None
         assert not self.streaming
-        producer = cast("interfaces.IPullProducer", self.producer)
+        producer = self.producer
 
         self.paused = False
         while not self.paused:

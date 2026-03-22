@@ -19,25 +19,14 @@
 #
 #
 
+import asyncio
 import email.utils
 import logging
+import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from io import BytesIO
 from typing import TYPE_CHECKING
-
-try:
-    from twisted.internet.defer import Deferred
-    from twisted.internet.endpoints import HostnameEndpoint
-    from twisted.internet.interfaces import IProtocolFactory
-    from twisted.internet.ssl import optionsForClientTLS
-    from twisted.mail.smtp import ESMTPSenderFactory
-    from twisted.protocols.tls import TLSMemoryBIOFactory
-except ImportError:
-    pass
-
-from synapse.logging.context import make_deferred_yieldable
-from synapse.types import ISynapseReactor
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -46,7 +35,6 @@ logger = logging.getLogger(__name__)
 
 
 async def _sendmail(
-    reactor: ISynapseReactor,
     smtphost: str,
     smtpport: int,
     from_addr: str,
@@ -59,11 +47,11 @@ async def _sendmail(
     enable_tls: bool = True,
     force_tls: bool = False,
     tlsname: str | None = None,
+    **kwargs: object,
 ) -> None:
-    """A simple wrapper around ESMTPSenderFactory, to allow substitution in tests
+    """Send an email using stdlib smtplib, run in a thread executor to avoid blocking.
 
     Params:
-        reactor: reactor to use to make the outbound connection
         smtphost: hostname to connect to
         smtpport: port to connect to
         from_addr: "From" address for email
@@ -72,50 +60,63 @@ async def _sendmail(
         username: username to authenticate with, if auth is enabled
         password: password to give when authenticating
         require_auth: if auth is not offered, fail the request
-        require_tls: if TLS is not offered, fail the reqest
-        enable_tls: True to enable STARTTLS. If this is False and require_tls is True,
-           the request will fail.
-        force_tls: True to enable Implicit TLS.
-        tlsname: the domain name expected as the TLS certificate's commonname,
-           defaults to smtphost.
+        require_tls: if TLS is not offered, fail the request
+        enable_tls: True to enable STARTTLS
+        force_tls: True to enable Implicit TLS (SMTPS)
+        tlsname: the domain name expected for TLS certificate verification
     """
-    msg = BytesIO(msg_bytes)
-    d: "Deferred[object]" = Deferred()
     if not enable_tls:
         tlsname = None
     elif tlsname is None:
         tlsname = smtphost
 
-    factory: IProtocolFactory = ESMTPSenderFactory(
-        username,
-        password,
-        from_addr,
-        to_addr,
-        msg,
-        d,
-        heloFallback=True,
-        requireAuthentication=require_auth,
-        requireTransportSecurity=require_tls,
-        hostname=tlsname,
-    )
+    def _blocking_send() -> None:
+        context = ssl.create_default_context() if enable_tls or force_tls else None
 
-    if force_tls:
-        factory = TLSMemoryBIOFactory(optionsForClientTLS(tlsname), True, factory)
+        if force_tls:
+            # Implicit TLS (SMTPS)
+            server = smtplib.SMTP_SSL(
+                smtphost, smtpport, timeout=30, context=context
+            )
+        else:
+            server = smtplib.SMTP(smtphost, smtpport, timeout=30)
 
-    endpoint = HostnameEndpoint(
-        reactor, smtphost, smtpport, timeout=30, bindAddress=None
-    )
+        try:
+            server.ehlo()
 
-    await make_deferred_yieldable(endpoint.connect(factory))
+            if enable_tls and not force_tls:
+                if server.has_extn("starttls"):
+                    server.starttls(context=context)
+                    server.ehlo()
+                elif require_tls:
+                    raise RuntimeError(
+                        "SMTP server does not support STARTTLS but require_tls is True"
+                    )
 
-    await make_deferred_yieldable(d)
+            if username is not None and password is not None:
+                server.login(
+                    username.decode("utf-8"),
+                    password.decode("utf-8"),
+                )
+            elif require_auth:
+                raise RuntimeError(
+                    "SMTP server requires auth but no credentials provided"
+                )
+
+            server.sendmail(from_addr, [to_addr], msg_bytes)
+        finally:
+            try:
+                server.quit()
+            except smtplib.SMTPException:
+                server.close()
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _blocking_send)
 
 
 class SendEmailHandler:
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
-
-        self._reactor = hs.get_reactor()
 
         self._from = hs.config.email.email_notif_from
         self._smtp_host = hs.config.email.email_smtp_host
@@ -179,11 +180,6 @@ class SendEmailHandler:
         multipart_msg["Auto-Submitted"] = "auto-generated"
         # Also include a Microsoft-Exchange specific header:
         #    https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmail/ced68690-498a-4567-9d14-5c01f974d8b1
-        # which suggests it can take the value "All" to "suppress all auto-replies",
-        # or a comma separated list of auto-reply classes to suppress.
-        # The following stack overflow question has a little more context:
-        #    https://stackoverflow.com/a/25324691/5252017
-        #    https://stackoverflow.com/a/61646381/5252017
         multipart_msg["X-Auto-Response-Suppress"] = "All"
 
         if additional_headers:
@@ -196,7 +192,6 @@ class SendEmailHandler:
         logger.info("Sending email to %s", email_address)
 
         await self._sendmail(
-            self._reactor,
             self._smtp_host,
             self._smtp_port,
             raw_from,

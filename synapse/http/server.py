@@ -45,11 +45,13 @@ from asyncio import CancelledError
 from synapse.types import ISynapseThreadlessReactor
 
 try:
-    from twisted.internet import reactor
+    from twisted.internet import reactor as _twisted_reactor
     from twisted.web import resource
     from twisted.web.pages import notFound
 except ImportError:
-    pass
+    _twisted_reactor = None  # type: ignore[assignment]
+    resource = None  # type: ignore[assignment]
+    notFound = None  # type: ignore[assignment]
 
 from synapse.api.errors import (
     CodeMessageException,
@@ -395,7 +397,7 @@ class DirectServeJsonResource(_AsyncResource):
             # As of the time of writing this, all Synapse internal usages of
             # `DirectServeJsonResource` pass in the existing homeserver clock instance.
             clock = Clock(  # type: ignore[multiple-internal-clocks]
-                ISynapseThreadlessReactor(reactor),
+                ISynapseThreadlessReactor(_twisted_reactor),
                 server_name="synapse_module_running_from_unknown_server",
             )
 
@@ -592,7 +594,7 @@ class DirectServeHtmlResource(_AsyncResource):
             # As of the time of writing this, all Synapse internal usages of
             # `DirectServeHtmlResource` pass in the existing homeserver clock instance.
             clock = Clock(  # type: ignore[multiple-internal-clocks]
-                ISynapseThreadlessReactor(reactor),
+                ISynapseThreadlessReactor(_twisted_reactor),
                 server_name="synapse_module_running_from_unknown_server",
             )
 
@@ -626,6 +628,11 @@ try:
 except ImportError:
     _StaticBase = object  # type: ignore[assignment,misc]
 
+try:
+    _ResourceBase = resource.Resource
+except Exception:
+    _ResourceBase = object  # type: ignore[assignment,misc]
+
 
 class StaticResource(_StaticBase):
     """
@@ -634,15 +641,17 @@ class StaticResource(_StaticBase):
     Differs from the File resource by adding clickjacking protection.
     """
 
-    def render_GET(self, request: Request) -> bytes:
+    def render_GET(self, request: Any) -> bytes:
         set_clickjacking_protection_headers(request)
         return super().render_GET(request)
 
-    def directoryListing(self) -> IResource:
-        return notFound()
+    def directoryListing(self) -> Any:
+        if notFound is not None:
+            return notFound()
+        return None
 
 
-class UnrecognizedRequestResource(resource.Resource):
+class UnrecognizedRequestResource(_ResourceBase):
     """
     Similar to twisted.web.resource.NoResource, but returns a JSON 404 with an
     errcode of M_UNRECOGNIZED.
@@ -654,27 +663,28 @@ class UnrecognizedRequestResource(resource.Resource):
         # Return empty bytes — the response has already been written to the request.
         return b""
 
-    def getChild(self, name: str, request: Request) -> resource.Resource:
+    def getChild(self, name: str, request: Any) -> Any:
         return self
 
 
-class RootRedirect(resource.Resource):
+class RootRedirect(_ResourceBase):
     """Redirects the root '/' path to another path."""
 
     def __init__(self, path: str):
         super().__init__()
         self.url = path
 
-    def render_GET(self, request: Request) -> bytes:
+    def render_GET(self, request: Any) -> bytes:
+        from twisted.web.util import redirectTo
         return redirectTo(self.url.encode("ascii"), request)
 
-    def getChild(self, name: str, request: Request) -> resource.Resource:
+    def getChild(self, name: str, request: Any) -> Any:
         if len(name) == 0:
             return self  # select ourselves as the child to render
         return super().getChild(name, request)
 
 
-class OptionsResource(resource.Resource):
+class OptionsResource(_ResourceBase):
     """Responds to OPTION requests for itself and all children."""
 
     def render_OPTIONS(self, request: "SynapseRequest") -> bytes:
@@ -685,7 +695,7 @@ class OptionsResource(resource.Resource):
 
         return b""
 
-    def getChildWithDefault(self, path: str, request: Request) -> resource.Resource:
+    def getChildWithDefault(self, path: str, request: Any) -> Any:
         if request.method == b"OPTIONS":
             return self  # select ourselves as the child to render
         return super().getChildWithDefault(path, request)

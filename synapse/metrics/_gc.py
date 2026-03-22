@@ -20,16 +20,12 @@
 #
 
 
+import asyncio
 import gc
 import logging
 import platform
 import time
 from typing import Iterable
-
-try:
-    from twisted.internet import task
-except ImportError:
-    task = None  # type: ignore[assignment]
 
 from prometheus_client.core import (
     REGISTRY,
@@ -141,10 +137,20 @@ def install_gc_manager() -> None:
                 gc_time.labels(i).observe(end - start)
                 gc_unreachable.labels(i).set(unreachable)
 
-    # We can ignore the lint here since this looping call does not hold a `HomeServer`
-    # reference so can be cleaned up by other means on shutdown.
-    gc_task = task.LoopingCall(_maybe_gc)  # type: ignore[prefer-synapse-clock-looping-call]
-    gc_task.start(0.1)
+    async def _gc_loop() -> None:
+        """Async loop that periodically runs _maybe_gc."""
+        while True:
+            await asyncio.sleep(0.1)
+            _maybe_gc()
+
+    # Schedule the GC loop. We get the running event loop; if there isn't one
+    # yet (e.g. during module-level init), the caller is expected to start the
+    # loop later, and this will be a no-op.
+    try:
+        loop = asyncio.get_event_loop()
+        loop.create_task(_gc_loop())
+    except RuntimeError:
+        pass  # No event loop yet; GC manager will be less effective.
 
 
 #

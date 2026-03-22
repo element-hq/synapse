@@ -19,6 +19,7 @@
 #
 #
 
+import asyncio
 import logging
 import random
 import time
@@ -26,16 +27,17 @@ from typing import Any, Callable
 
 import attr
 
-try:
-    from twisted.names import client
-except ImportError:
-    client = None  # type: ignore[assignment]
-
-from synapse.logging.context import make_deferred_yieldable
-
 logger = logging.getLogger(__name__)
 
 SERVER_CACHE: dict[bytes, list["Server"]] = {}
+
+# Try to import DNS resolution libraries in order of preference
+_dns_resolver: Any = None
+try:
+    import dns.resolver
+    _dns_resolver = "dnspython"
+except ImportError:
+    pass
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -103,24 +105,22 @@ def _sort_server_list(server_list: list[Server]) -> list[Server]:
 
 
 class SrvResolver:
-    """Interface to the dns client to do SRV lookups, with result caching.
+    """Interface to do SRV lookups, with result caching.
 
-    The default resolver in twisted.names doesn't do any caching (it has a CacheResolver,
-    but the cache never gets populated), so we add our own caching layer here.
+    Uses dnspython for DNS resolution if available, otherwise falls back
+    to running `dig` via subprocess.
 
     Args:
-        dns_client (twisted.internet.interfaces.IResolver): twisted resolver impl
         cache: cache object
         get_time: clock implementation. Should return seconds since the epoch
     """
 
     def __init__(
         self,
-        dns_client: Any = client,
+        dns_client: Any = None,
         cache: dict[bytes, list[Server]] = SERVER_CACHE,
         get_time: Callable[[], float] = time.time,
     ):
-        self._dns_client = dns_client
         self._cache = cache
         self._get_time = get_time
 
@@ -145,19 +145,9 @@ class SrvResolver:
                 return _sort_server_list(servers)
 
         try:
-            answers, _, _ = await make_deferred_yieldable(
-                self._dns_client.lookupService(service_name)
-            )
-        except DNSNameError:
-            # TODO: cache this. We can get the SOA out of the exception, and use
-            # the negative-TTL value.
-            return []
-        except DNSNotImplementedError:
-            # For .onion homeservers this is unavailable, just fallback to host:8448
-            return []
-        except DomainError as e:
-            # We failed to resolve the name (other than a NameError)
-            # Try something in the cache, else rereaise
+            answers = await self._do_lookup(service_name)
+        except Exception as e:
+            # Try something in the cache, else reraise
             cache_entry = self._cache.get(service_name, None)
             if cache_entry:
                 logger.warning(
@@ -167,31 +157,102 @@ class SrvResolver:
             else:
                 raise e
 
-        if (
-            len(answers) == 1
-            and answers[0].type == dns.SRV
-            and answers[0].payload
-            and answers[0].payload.target == dns.Name(b".")
-        ):
-            raise ConnectError(f"Service {service_name!r} unavailable")
+        if not answers:
+            return []
 
         servers = []
-
         for answer in answers:
-            if answer.type != dns.SRV or not answer.payload:
-                continue
-
-            payload = answer.payload
-
             servers.append(
                 Server(
-                    host=payload.target.name,
-                    port=payload.port,
-                    priority=payload.priority,
-                    weight=payload.weight,
-                    expires=now + answer.ttl,
+                    host=answer["host"],
+                    port=answer["port"],
+                    priority=answer.get("priority", 0),
+                    weight=answer.get("weight", 0),
+                    expires=now + answer.get("ttl", 300),
                 )
             )
 
         self._cache[service_name] = list(servers)
         return _sort_server_list(servers)
+
+    async def _do_lookup(self, service_name: bytes) -> list[dict]:
+        """Perform the actual DNS SRV lookup.
+
+        Returns a list of dicts with keys: host, port, priority, weight, ttl
+        """
+        name_str = service_name.decode("ascii")
+
+        if _dns_resolver == "dnspython":
+            return await self._lookup_dnspython(name_str)
+        else:
+            return await self._lookup_subprocess(name_str)
+
+    async def _lookup_dnspython(self, name: str) -> list[dict]:
+        """Use dnspython to resolve SRV records."""
+        loop = asyncio.get_event_loop()
+
+        def _resolve() -> list[dict]:
+            try:
+                answers = dns.resolver.resolve(name, "SRV")
+            except dns.resolver.NXDOMAIN:
+                return []
+            except dns.resolver.NoAnswer:
+                return []
+            except dns.resolver.NoNameservers:
+                return []
+
+            results = []
+            for rdata in answers:
+                # Check for the "no service" response (target is ".")
+                target = rdata.target.to_text()
+                if target == ".":
+                    return []
+
+                results.append({
+                    "host": rdata.target.to_text(omit_final_dot=True).encode("ascii"),
+                    "port": rdata.port,
+                    "priority": rdata.priority,
+                    "weight": rdata.weight,
+                    "ttl": answers.rrset.ttl if answers.rrset else 300,
+                })
+            return results
+
+        return await loop.run_in_executor(None, _resolve)
+
+    async def _lookup_subprocess(self, name: str) -> list[dict]:
+        """Fallback: use `dig` subprocess to resolve SRV records."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "dig", "+short", "SRV", name,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        except (FileNotFoundError, asyncio.TimeoutError):
+            logger.warning("Failed to run 'dig' for SRV lookup of %s", name)
+            return []
+
+        results = []
+        for line in stdout.decode("ascii", errors="replace").strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) >= 4:
+                try:
+                    priority = int(parts[0])
+                    weight = int(parts[1])
+                    port = int(parts[2])
+                    target = parts[3].rstrip(".")
+                    if target == ".":
+                        return []
+                    results.append({
+                        "host": target.encode("ascii"),
+                        "port": port,
+                        "priority": priority,
+                        "weight": weight,
+                        "ttl": 300,  # dig +short doesn't give TTL
+                    })
+                except (ValueError, IndexError):
+                    continue
+        return results

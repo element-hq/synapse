@@ -19,95 +19,20 @@
 #
 #
 
-from asyncio import CancelledError
+import asyncio
 import logging
 import sys
 import traceback
 from collections import deque
-from ipaddress import IPv4Address, IPv6Address, ip_address
 from math import floor
-from typing import Callable, Optional
-
-import attr
-try:
-    from zope.interface import implementer
-except ImportError:
-    pass
-
-try:
-    from twisted.application.internet import ClientService
-    from asyncio import CancelledError
-    from twisted.internet.defer import Deferred
-    from twisted.internet.endpoints import (
-        HostnameEndpoint,
-        TCP4ClientEndpoint,
-        TCP6ClientEndpoint,
-    )
-    from twisted.internet.interfaces import (
-        IPushProducer,
-        IReactorTime,
-        IStreamClientEndpoint,
-    )
-    from twisted.internet.protocol import Factory, Protocol
-    from twisted.internet.tcp import Connection
-    from twisted.python.failure import Failure
-except ImportError:
-    pass
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
-@attr.s(slots=True, auto_attribs=True)
-@implementer(IPushProducer)
-class LogProducer:
-    """
-    An IPushProducer that writes logs from its buffer to its transport when it
-    is resumed.
-
-    Args:
-        buffer: Log buffer to read logs from.
-        transport: Transport to write to.
-        format: A callable to format the log record to a string.
-    """
-
-    # This is essentially ITCPTransport, but that is missing certain fields
-    # (connected and registerProducer) which are part of the implementation.
-    transport: Connection
-    _format: Callable[[logging.LogRecord], str]
-    _buffer: deque[logging.LogRecord]
-    _paused: bool = attr.ib(default=False, init=False)
-
-    def pauseProducing(self) -> None:
-        self._paused = True
-
-    def stopProducing(self) -> None:
-        self._paused = True
-        self._buffer = deque()
-
-    def resumeProducing(self) -> None:
-        # If we're already producing, nothing to do.
-        self._paused = False
-
-        # Loop until paused.
-        while self._paused is False and (self._buffer and self.transport.connected):
-            try:
-                # Request the next record and format it.
-                record = self._buffer.popleft()
-                msg = self._format(record)
-
-                # Send it as a new line over the transport.
-                self.transport.write(msg.encode("utf8"))
-                self.transport.write(b"\n")
-            except Exception:
-                # Something has gone wrong writing to the transport -- log it
-                # and break out of the while.
-                traceback.print_exc(file=sys.__stderr__)
-                break
-
-
 class RemoteHandler(logging.Handler):
     """
-    An logging handler that writes logs to a TCP target.
+    A logging handler that writes logs to a TCP target using asyncio.
 
     Args:
         host: The host of the logging target.
@@ -121,7 +46,7 @@ class RemoteHandler(logging.Handler):
         port: int,
         maximum_buffer: int = 1000,
         level: int = logging.NOTSET,
-        _reactor: Optional[IReactorTime] = None,
+        _reactor: Any = None,
     ):
         super().__init__(level=level)
         self.host = host
@@ -129,84 +54,74 @@ class RemoteHandler(logging.Handler):
         self.maximum_buffer = maximum_buffer
 
         self._buffer: deque[logging.LogRecord] = deque()
-        self._connection_waiter: Deferred | None = None
-        self._producer: LogProducer | None = None
+        self._writer: Optional[asyncio.StreamWriter] = None
+        self._connecting = False
+        self._stopping = False
 
-        # Connect without DNS lookups if it's a direct IP.
-        if _reactor is None:
-            _reactor = reactor  # type: ignore[assignment]
+        # Try to connect immediately
+        self._schedule_connect()
+
+    def _schedule_connect(self) -> None:
+        """Schedule a connection attempt on the event loop."""
+        if self._connecting or self._stopping:
+            return
 
         try:
-            ip = ip_address(self.host)
-            if isinstance(ip, IPv4Address):
-                endpoint: IStreamClientEndpoint = TCP4ClientEndpoint(
-                    _reactor, self.host, self.port
-                )
-            elif isinstance(ip, IPv6Address):
-                endpoint = TCP6ClientEndpoint(_reactor, self.host, self.port)
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(self._connect())
             else:
-                raise ValueError("Unknown IP address provided: %s" % (self.host,))
-        except ValueError:
-            endpoint = HostnameEndpoint(_reactor, self.host, self.port)
+                # Event loop not running yet; we'll try again on emit()
+                pass
+        except RuntimeError:
+            pass  # No event loop
 
-        factory = Factory.forProtocol(Protocol)
-        self._service = ClientService(endpoint, factory, clock=_reactor)
-        self._service.startService()
-        self._stopping = False
-        self._connect()
+    async def _connect(self) -> None:
+        """Connect to the remote logging target."""
+        if self._connecting or self._stopping:
+            return
+
+        self._connecting = True
+        try:
+            _, writer = await asyncio.open_connection(self.host, self.port)
+            self._writer = writer
+            self._flush_buffer()
+        except Exception:
+            traceback.print_exc(file=sys.__stderr__)
+            self._writer = None
+            # Retry after a delay
+            if not self._stopping:
+                try:
+                    loop = asyncio.get_event_loop()
+                    loop.call_later(5, self._schedule_connect)
+                except RuntimeError:
+                    pass
+        finally:
+            self._connecting = False
+
+    def _flush_buffer(self) -> None:
+        """Write buffered log records to the transport."""
+        if self._writer is None:
+            return
+
+        while self._buffer:
+            try:
+                record = self._buffer.popleft()
+                msg = self.format(record)
+                self._writer.write(msg.encode("utf-8"))
+                self._writer.write(b"\n")
+            except Exception:
+                traceback.print_exc(file=sys.__stderr__)
+                break
 
     def close(self) -> None:
         self._stopping = True
-        self._service.stopService()
-
-    def _connect(self) -> None:
-        """
-        Triggers an attempt to connect then write to the remote if not already writing.
-        """
-        # Do not attempt to open multiple connections.
-        if self._connection_waiter:
-            return
-
-        def fail(failure: Failure) -> None:
-            # If the Deferred was cancelled (e.g. during shutdown) do not try to
-            # reconnect (this will cause an infinite loop of errors).
-            if failure.check(CancelledError) and self._stopping:
-                return
-
-            # For a different error, print the traceback and re-connect.
-            failure.printTraceback(file=sys.__stderr__)
-            self._connection_waiter = None
-            self._connect()
-
-        def writer(result: Protocol) -> None:
-            # Force recognising transport as a Connection and not the more
-            # generic ITransport.
-            transport: Connection = result.transport  # type: ignore
-
-            # We have a connection. If we already have a producer, and its
-            # transport is the same, just trigger a resumeProducing.
-            if self._producer and transport is self._producer.transport:
-                self._producer.resumeProducing()
-                self._connection_waiter = None
-                return
-
-            # If the producer is still producing, stop it.
-            if self._producer:
-                self._producer.stopProducing()
-
-            # Make a new producer and start it.
-            self._producer = LogProducer(
-                buffer=self._buffer,
-                transport=transport,
-                format=self.format,
-            )
-            transport.registerProducer(self._producer, True)
-            self._producer.resumeProducing()
-            self._connection_waiter = None
-
-        deferred: Deferred = self._service.whenConnected(failAfterFailures=1)
-        deferred.addCallbacks(writer, fail)
-        self._connection_waiter = deferred
+        if self._writer is not None:
+            try:
+                self._writer.close()
+            except Exception:
+                pass
+        super().close()
 
     def _handle_pressure(self) -> None:
         """
@@ -263,5 +178,9 @@ class RemoteHandler(logging.Handler):
             self._buffer.clear()
             logger.warning("Failed clearing backpressure")
 
-        # Try and write immediately.
-        self._connect()
+        # Try to write immediately if connected
+        if self._writer is not None:
+            self._flush_buffer()
+        else:
+            # Try to connect
+            self._schedule_connect()
