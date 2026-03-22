@@ -475,6 +475,12 @@ class HomeServer(metaclass=abc.ABCMeta):
                     await port_shutdown
         self._listening_services.clear()
 
+        # Clean up aiohttp runners (HTTP listeners)
+        from synapse.app._base import _aiohttp_runners
+        for runner in list(_aiohttp_runners):
+            await runner.cleanup()
+        _aiohttp_runners.clear()
+
         for server, thread in self._metrics_listeners:
             server.shutdown()
             thread.join()

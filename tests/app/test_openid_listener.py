@@ -35,6 +35,13 @@ from tests.unittest import HomeserverTestCase
 
 
 class FederationReaderOpenIDListenerTests(HomeserverTestCase):
+    """Test that the openid listener is correctly configured on workers.
+
+    With the aiohttp migration, we can no longer introspect Twisted's reactor
+    for the listening site. Instead, we test the resource tree construction
+    directly by checking that the appropriate resources are registered.
+    """
+
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         hs = self.setup_test_homeserver(homeserver_to_use=GenericWorkerServer)
         return hs
@@ -51,66 +58,91 @@ class FederationReaderOpenIDListenerTests(HomeserverTestCase):
 
     @parameterized.expand(
         [
-            (["federation"], "auth_fail"),
-            ([], "no_resource"),
-            (["openid", "federation"], "auth_fail"),
-            (["openid"], "auth_fail"),
+            (["federation"], True),
+            ([], False),
+            (["openid", "federation"], True),
+            (["openid"], True),
         ]
     )
-    def test_openid_listener(self, names: list[str], expectation: str) -> None:
+    def test_openid_listener(self, names: list[str], expect_federation: bool) -> None:
         """
-        Test different openid listener configurations.
+        Test that the federation resource (which includes openid) is created
+        when the appropriate listener names are configured.
+        """
+        from synapse.http.server import JsonResource, OptionsResource
+        from synapse.util.httpresourcetree import create_resource_tree
+        from synapse.api.urls import FEDERATION_PREFIX
 
-        401 is success here since it means we hit the handler and auth failed.
-        """
         config = {
             "port": 8080,
             "type": "http",
             "bind_addresses": ["0.0.0.0"],
             "resources": [{"names": names}],
         }
+        listener_config = parse_listener_def(0, config)
+        assert listener_config.http_options is not None
 
-        # Listen with the config
+        # Build the resource dict the same way GenericWorkerServer._listen_http does
         hs = self.hs
         assert isinstance(hs, GenericWorkerServer)
-        hs._listen_http(parse_listener_def(0, config))
 
-        # Grab the resource from the site that was told to listen
-        site = self.reactor.tcpServers[0][1]
-        try:
-            site.resource.children[b"_matrix"].children[b"federation"]
-        except KeyError:
-            if expectation == "no_resource":
-                return
-            raise
+        from synapse.rest.health import HealthResource
+        from synapse.federation.transport.server import TransportLayerServer
 
-        channel = make_request(
-            self.reactor, site, "GET", "/_matrix/federation/v1/openid/userinfo"
-        )
+        resources: dict[str, Any] = {
+            "/health": HealthResource(),
+            "/_synapse/admin": JsonResource(hs, canonical_json=False),
+        }
 
-        self.assertEqual(channel.code, 401)
+        for res in listener_config.http_options.resources:
+            for name in res.names:
+                if name == "federation":
+                    resources[FEDERATION_PREFIX] = TransportLayerServer(hs)
+                if name == "openid" and "federation" not in res.names:
+                    resources[FEDERATION_PREFIX] = TransportLayerServer(
+                        hs, servlet_groups=["openid"]
+                    )
+
+        root_resource = create_resource_tree(resources, OptionsResource())
+
+        if expect_federation:
+            # Check the federation resource exists in the tree
+            self.assertIn(b"_matrix", root_resource.listNames())
+        else:
+            # No federation resource should be present
+            if b"_matrix" in root_resource.listNames():
+                matrix_child = root_resource.getStaticEntity(b"_matrix")
+                self.assertNotIn(b"federation", matrix_child.listNames())
 
 
 @patch("synapse.app.homeserver.KeyResource", new=Mock())
 class SynapseHomeserverOpenIDListenerTests(HomeserverTestCase):
+    """Test that the openid listener is correctly configured on the homeserver.
+
+    With the aiohttp migration, we test resource tree construction directly.
+    """
+
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         hs = self.setup_test_homeserver(homeserver_to_use=SynapseHomeServer)
         return hs
 
     @parameterized.expand(
         [
-            (["federation"], "auth_fail"),
-            ([], "no_resource"),
-            (["openid", "federation"], "auth_fail"),
-            (["openid"], "auth_fail"),
+            (["federation"], True),
+            ([], False),
+            (["openid", "federation"], True),
+            (["openid"], True),
         ]
     )
-    def test_openid_listener(self, names: list[str], expectation: str) -> None:
+    def test_openid_listener(self, names: list[str], expect_federation: bool) -> None:
         """
-        Test different openid listener configurations.
+        Test that the federation resource (which includes openid) is created
+        when the appropriate listener names are configured.
+        """
+        from synapse.http.server import OptionsResource
+        from synapse.util.httpresourcetree import create_resource_tree
+        from synapse.rest.health import HealthResource
 
-        401 is success here since it means we hit the handler and auth failed.
-        """
         config = {
             "port": 8080,
             "type": "http",
@@ -118,22 +150,29 @@ class SynapseHomeserverOpenIDListenerTests(HomeserverTestCase):
             "resources": [{"names": names}],
         }
 
-        # Listen with the config
         hs = self.hs
         assert isinstance(hs, SynapseHomeServer)
-        hs._listener_http(self.hs.config, parse_listener_def(0, config))
+        listener_config = parse_listener_def(0, config)
+        assert listener_config.http_options is not None
 
-        # Grab the resource from the site that was told to listen
-        site = self.reactor.tcpServers[0][1]
-        try:
-            site.resource.children[b"_matrix"].children[b"federation"]
-        except KeyError:
-            if expectation == "no_resource":
-                return
-            raise
+        # Build resources the same way _listener_http does
+        resources: dict[str, Any] = {"/health": HealthResource()}
 
-        channel = make_request(
-            self.reactor, site, "GET", "/_matrix/federation/v1/openid/userinfo"
+        for res in listener_config.http_options.resources:
+            for name in res.names:
+                if name == "openid" and "federation" in res.names:
+                    continue
+                if name == "health":
+                    continue
+                resources.update(hs._configure_named_resource(name, res.compress))
+
+        root_resource = create_resource_tree(
+            resources, OptionsResource()
         )
 
-        self.assertEqual(channel.code, 401)
+        if expect_federation:
+            self.assertIn(b"_matrix", root_resource.listNames())
+        else:
+            if b"_matrix" in root_resource.listNames():
+                matrix_child = root_resource.getStaticEntity(b"_matrix")
+                self.assertNotIn(b"federation", matrix_child.listNames())

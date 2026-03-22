@@ -22,10 +22,9 @@
 import logging
 import os
 import sys
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 try:
-    from twisted.internet.tcp import Port
     from twisted.web.resource import EncodingResourceWrapper, Resource
     from twisted.web.server import GzipEncoderFactory
 except ImportError:
@@ -95,7 +94,7 @@ class SynapseHomeServer(HomeServer):
         self,
         config: HomeServerConfig,
         listener_config: ListenerConfig,
-    ) -> Iterable[Port]:
+    ) -> Iterable[Any]:
         # Must exist since this is an HTTP listener.
         assert listener_config.http_options is not None
         site_tag = listener_config.get_site_tag()
@@ -158,17 +157,16 @@ class SynapseHomeServer(HomeServer):
         else:
             root_resource = OptionsResource()
 
-        ports = listen_http(
+        result = listen_http(
             self,
             listener_config,
             create_resource_tree(resources, root_resource),
             self.version_string,
             max_request_body_size(self.config),
             self.tls_server_context_factory,
-            reactor=self.get_reactor(),
         )
 
-        return ports
+        return result
 
     def _configure_named_resource(
         self, name: str, compress: bool = False
@@ -461,7 +459,7 @@ def start_reactor(
     config: HomeServerConfig,
 ) -> None:
     """
-    Start the reactor (Twisted event-loop).
+    Start the asyncio event loop.
 
     Args:
         config: The configuration for the homeserver.

@@ -188,25 +188,35 @@ class FakeChannel:
         """
         if not self.is_finished():
             raise Exception("Request not yet completed")
+        # Read from shim request's response buffer
+        if self._request is not None and hasattr(self._request, '_response_buffer'):
+            return bytes(self._request._response_buffer).decode("utf8")
         return self.result["body"].decode("utf8")
 
     def is_finished(self) -> bool:
         """check if the response has been completely received"""
+        # Check the shim request's finished flag
+        if self._request is not None and hasattr(self._request, 'finished'):
+            return self._request.finished
         return self.result.get("done", False)
 
     @property
     def code(self) -> int:
+        if self._request is not None and hasattr(self._request, 'code'):
+            return int(self._request.code)
         if not self.result:
             raise Exception("No result yet.")
         return int(self.result["code"])
 
     @property
-    def headers(self) -> Headers:
+    def headers(self) -> Any:
+        # Return the shim response headers if available
+        if self._request is not None and hasattr(self._request, 'responseHeaders'):
+            return self._request.responseHeaders
         if not self.result:
             raise Exception("No result yet.")
 
         h = self.result["headers"]
-        assert isinstance(h, Headers)
         return h
 
     def writeHeaders(
@@ -455,7 +465,9 @@ def make_request(
 
     channel = FakeChannel(site, reactor, ip=client_ip, clock=clock)
 
-    req = request(
+    # Use the shim's for_testing constructor
+    from synapse.http.aiohttp_shim import SynapseRequest as ShimRequest
+    req = ShimRequest.for_testing(
         channel,
         site,
         our_server_name="test_server",
@@ -463,18 +475,27 @@ def make_request(
     )
     channel.request = req
 
+    req.method = method
+    req.path = path
+    # URI includes query string
+    req.uri = path
     req.content = BytesIO(content)
-    # Twisted expects to be at the end of the content when parsing the request.
     req.content.seek(0, SEEK_END)
+    req._client_ip = client_ip
 
-    # If `Content-Length` was passed in as a custom header, don't automatically add it
-    # here.
+    # Parse query string into args
+    from urllib.parse import parse_qs, urlparse
+    parsed = urlparse(path if isinstance(path, str) else path.decode("utf-8"))
+    if parsed.query:
+        for k, vs in parse_qs(parsed.query, keep_blank_values=True).items():
+            bk = k.encode("utf-8") if isinstance(k, str) else k
+            req.args[bk] = [v.encode("utf-8") if isinstance(v, str) else v for v in vs]
+
+    # Add standard headers
     if custom_headers is None or not any(
         (k if isinstance(k, bytes) else k.encode("ascii")) == b"Content-Length"
         for k, _ in custom_headers
     ):
-        # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
-        # bodies if the Content-Length header is missing
         req.requestHeaders.addRawHeader(
             b"Content-Length", str(len(content)).encode("ascii")
         )
@@ -498,15 +519,40 @@ def make_request(
                 b"Content-Type", b"application/x-www-form-urlencoded"
             )
         else:
-            # Assume the body is JSON
             req.requestHeaders.addRawHeader(b"Content-Type", b"application/json")
 
     if custom_headers:
         for k, v in custom_headers:
             req.requestHeaders.addRawHeader(k, v)
 
-    req.parseCookies()
-    req.requestReceived(method, path, b"1.1")
+    # Initialize request metrics and logcontext before dispatch
+    import asyncio
+    from synapse.http.request_metrics import RequestMetrics
+    from synapse.logging.context import LoggingContext
+
+    req.start_time = time.time()
+    server_name = getattr(site, 'server_name', 'test')
+    req.request_metrics = RequestMetrics(our_server_name=server_name)
+    req.request_metrics.start(req.start_time, name="test", method=req.get_method())
+    req.logcontext = LoggingContext(
+        name="test-%s-%s" % (req.get_method(), req.get_redacted_uri()),
+        server_name=server_name,
+        request=req,
+    )
+
+    # Dispatch the request through the resource
+    resource = getattr(site, 'resource', None) or getattr(site, '_resource', None)
+    if resource is not None and hasattr(resource, '_async_render_wrapper'):
+        req.render_deferred = asyncio.ensure_future(
+            resource._async_render_wrapper(req)
+        )
+    else:
+        # Fallback: try the old Twisted render path for compatibility
+        if resource is not None and hasattr(resource, 'render'):
+            resource.render(req)
+        else:
+            import sys
+            print(f"WARNING: No resource to dispatch to. site={type(site)}, resource={resource}", file=sys.stderr)
 
     if await_result:
         channel.await_result()

@@ -21,7 +21,7 @@
 #
 import logging
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 try:
     from twisted.web.resource import Resource
@@ -274,7 +274,6 @@ class GenericWorkerServer(HomeServer):
             self.version_string,
             max_request_body_size(self.config),
             self.tls_server_context_factory,
-            reactor=self.get_reactor(),
         )
 
     def start_listening(self) -> None:
