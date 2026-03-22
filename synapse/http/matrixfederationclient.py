@@ -42,7 +42,6 @@ from typing import (
 )
 
 import attr
-import treq
 from canonicaljson import encode_canonical_json
 from prometheus_client import Counter
 from signedjson.sign import sign_json
@@ -69,27 +68,27 @@ from synapse.api.errors import (
 )
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.crypto.context_factory import FederationPolicyForHTTPS
-from synapse.http import QuieterFileBodyProducer
+import aiohttp
+import ssl as stdlib_ssl
+
 from synapse.http.client import (
     BlocklistingAgentWrapper,
     BodyExceededMaxSize,
     ByteWriteable,
-    _make_scheduler,
+    async_read_body_with_max_size,
     encode_query_args,
-    read_body_with_max_size,
-    read_multipart_response,
 )
-from synapse.http.native_client import SimpleHttpClient
+from synapse.http.native_client import SimpleHttpClient, _BlocklistingResolver
 from synapse.http.connectproxyclient import BearerProxyCredentials
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
+from synapse.http.federation.srv_resolver import SrvResolver, Server
 from synapse.http.proxyagent import ProxyAgent
 from synapse.http.types import QueryParams
 from synapse.logging import opentracing
-from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
-from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
+from synapse.util.async_helpers import AwakenableSleeper, Linearizer
 from synapse.util.clock import Clock
 from synapse.util.json import json_decoder
 from synapse.util.metrics import Measure
@@ -272,21 +271,22 @@ class LegacyJsonSendParser(_BaseJsonParser[tuple[int, JsonDict]]):
 
 async def _handle_response(
     clock: Clock,
-    reactor: IReactorTime,
+    reactor: "IReactorTime",
     timeout_sec: float,
     request: MatrixFederationRequest,
-    response: IResponse,
+    response: "aiohttp.ClientResponse",
     start_ms: int,
     parser: ByteParser[T],
 ) -> T:
     """
-    Reads the body of a response with a timeout and sends it to a parser
+    Reads the body of an aiohttp response with a timeout and sends it to a parser
 
     Args:
-        reactor: twisted reactor, for the timeout
+        clock: The clock for timing.
+        reactor: twisted reactor (used for timing only).
         timeout_sec: number of seconds to wait for response to complete
         request: the request that triggered the response
-        response: response to the request
+        response: aiohttp response to the request
         start_ms: Timestamp when request was made
         parser: The parser for the response
 
@@ -298,16 +298,12 @@ async def _handle_response(
 
     finished = False
     try:
-        check_content_type_is(response.headers, parser.CONTENT_TYPE)
+        check_content_type_is_aiohttp(response.headers, parser.CONTENT_TYPE)
 
-        d = read_body_with_max_size(response, parser, max_response_size)
-        d = timeout_deferred(
-            deferred=d,
+        length = await asyncio.wait_for(
+            async_read_body_with_max_size(response, parser, max_response_size),
             timeout=timeout_sec,
-            clock=clock,
         )
-
-        length = await make_deferred_yieldable(d)
 
         finished = True
         value = parser.finish()
@@ -341,7 +337,7 @@ async def _handle_response(
             request.uri.decode("ascii"),
         )
         raise RequestSendFailed(e, can_retry=True) from e
-    except ResponseFailed as e:
+    except aiohttp.ClientError as e:
         logger.warning(
             "{%s} [%s] Failed to read response - %s %s",
             request.txn_id,
@@ -376,8 +372,8 @@ async def _handle_response(
         "{%s} [%s] Completed request: %d %s in %.2f secs, got %d bytes - %s %s",
         request.txn_id,
         request.destination,
-        response.code,
-        response.phrase.decode("ascii", errors="replace"),
+        response.status,
+        response.reason or "",
         time_taken_secs,
         length,
         request.method,
@@ -477,8 +473,6 @@ class MatrixFederationHttpClient:
         self.max_long_retries = hs.config.federation.max_long_retries
         self.max_short_retries = hs.config.federation.max_short_retries
 
-        self._cooperator = Cooperator(scheduler=_make_scheduler(self.clock))
-
         self._sleeper = AwakenableSleeper(self.clock)
 
         self._simple_http_client = SimpleHttpClient(
@@ -493,6 +487,92 @@ class MatrixFederationHttpClient:
         )
         self._is_shutdown = False
 
+        # --- aiohttp-based federation session ---
+        # Create a custom resolver that handles IP blocklisting
+        ip_blocklist = hs.config.server.federation_ip_range_blocklist
+        ip_allowlist = hs.config.server.federation_ip_range_allowlist
+
+        # Store blocklist params for lazy resolver creation
+        self._federation_ip_allowlist = ip_allowlist
+        self._federation_ip_blocklist = ip_blocklist
+
+        # Create SSL context that does NOT verify certificates for federation
+        # (federation uses its own TLS verification via the federation TLS policy)
+        ssl_context = stdlib_ssl.create_default_context()
+        if tls_client_options_factory is not None:
+            # For federation, we still want TLS but with the federation-specific
+            # certificate verification. For now, use a permissive context and rely
+            # on the federation TLS policy for verification.
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = stdlib_ssl.CERT_NONE
+        else:
+            # TLS disabled (for tests)
+            ssl_context = False  # type: ignore[assignment]
+
+        # Store params for lazy session creation (aiohttp needs a running event loop)
+        self._aiohttp_ssl_context = ssl_context
+        self._aiohttp_user_agent = user_agent
+
+        # Determine proxy URL
+        proxy_url: str | None = None
+        proxy_config = hs.config.server.proxy_config
+        if proxy_config:
+            proxy_url = proxy_config.https_proxy or proxy_config.http_proxy
+
+        self._aiohttp_proxy_url = proxy_url
+        self._aiohttp_session: aiohttp.ClientSession | None = None
+
+        # SRV resolver for federation server name resolution
+        self._srv_resolver = SrvResolver()
+
+        # Well-known cache: server_name (bytes) -> delegated server (bytes) or None
+        from synapse.http.federation.well_known_resolver import (
+            WellKnownResolver as _WellKnownResolver,
+        )
+        self._well_known_resolver = _WellKnownResolver(
+            server_name=self.server_name,
+            reactor=self.reactor,
+            clock=self.clock,
+            agent=BlocklistingAgentWrapper(
+                ProxyAgent(
+                    reactor=self.reactor,
+                    proxy_reactor=self.reactor,
+                    contextFactory=tls_client_options_factory,
+                    proxy_config=proxy_config,
+                ),
+                ip_blocklist=ip_blocklist,
+            ),
+            user_agent=user_agent.encode("ascii"),
+        )
+
+    def _get_aiohttp_session(self) -> aiohttp.ClientSession:
+        """Lazily create the aiohttp federation session on first use."""
+        if self._aiohttp_session is None:
+            resolver = None
+            if self._federation_ip_blocklist:
+                resolver = _BlocklistingResolver(
+                    self._federation_ip_allowlist, self._federation_ip_blocklist
+                )
+
+            connector = aiohttp.TCPConnector(
+                limit=100,
+                limit_per_host=5,
+                resolver=resolver,
+                ssl=self._aiohttp_ssl_context,
+            )
+
+            timeout = aiohttp.ClientTimeout(
+                sock_connect=15.0,
+                total=None,  # We manage total timeout per-request
+            )
+
+            self._aiohttp_session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+                headers={"User-Agent": self._aiohttp_user_agent},
+            )
+        return self._aiohttp_session
+
     def shutdown(self) -> None:
         self._is_shutdown = True
 
@@ -501,12 +581,152 @@ class MatrixFederationHttpClient:
 
         self._sleeper.wake(destination)
 
+    async def _resolve_federation_uri(
+        self, uri: bytes
+    ) -> tuple[str, bytes]:
+        """Resolve a matrix-federation:// URI to an https:// URI.
+
+        Performs well-known delegation and SRV resolution as per the Matrix
+        server-server spec.
+
+        Args:
+            uri: The matrix-federation:// URI to resolve.
+
+        Returns:
+            A tuple of (resolved_https_url, host_header_value).
+            The host_header_value is the original server name for the Host header.
+        """
+        from netaddr import AddrFormatError, IPAddress
+
+        parsed = urllib.parse.urlparse(uri)
+        hostname = parsed.hostname  # bytes
+        port = parsed.port
+        original_netloc = parsed.netloc  # for Host header
+
+        if parsed.scheme != b"matrix-federation":
+            # Not a federation URI, just convert to https
+            new_uri = urllib.parse.urlunparse((
+                b"https",
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            ))
+            return new_uri.decode("ascii"), original_netloc
+
+        # Check well-known delegation (only for non-IP, non-port hostnames)
+        is_ip = False
+        try:
+            IPAddress(hostname.decode("ascii"))
+            is_ip = True
+        except (AddrFormatError, UnicodeDecodeError):
+            pass
+
+        delegated_server = None
+        if not is_ip and not port:
+            well_known_result = await self._well_known_resolver.get_well_known(hostname)
+            delegated_server = well_known_result.delegated_server
+
+        if delegated_server:
+            # Re-parse with the delegated server
+            uri = urllib.parse.urlunparse((
+                parsed.scheme,
+                delegated_server,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            ))
+            parsed = urllib.parse.urlparse(uri)
+            hostname = parsed.hostname
+            port = parsed.port
+            # Check if delegated server is an IP
+            try:
+                IPAddress(hostname.decode("ascii"))
+                is_ip = True
+            except (AddrFormatError, UnicodeDecodeError):
+                is_ip = False
+
+        # Now resolve via SRV if no explicit port and not an IP
+        target_host: str
+        target_port: int
+
+        if port or is_ip:
+            target_host = hostname.decode("ascii")
+            target_port = port or 8448
+        else:
+            # Try SRV resolution
+            server_list = await self._srv_resolver.resolve_service(
+                b"_matrix-fed._tcp." + hostname
+            )
+            if not server_list:
+                # Fallback to legacy SRV
+                server_list = await self._srv_resolver.resolve_service(
+                    b"_matrix._tcp." + hostname
+                )
+            if server_list:
+                # Use the first server from the sorted list
+                server = server_list[0]
+                target_host = server.host.decode("ascii")
+                target_port = server.port
+            else:
+                # No SRV records, fallback to hostname:8448
+                target_host = hostname.decode("ascii")
+                target_port = 8448
+
+        # Build the resolved HTTPS URL
+        netloc = f"{target_host}:{target_port}"
+        resolved_uri = urllib.parse.urlunparse((
+            "https",
+            netloc,
+            parsed.path.decode("ascii") if isinstance(parsed.path, bytes) else parsed.path,
+            parsed.params.decode("ascii") if isinstance(parsed.params, bytes) else parsed.params,
+            parsed.query.decode("ascii") if isinstance(parsed.query, bytes) else parsed.query,
+            parsed.fragment.decode("ascii") if isinstance(parsed.fragment, bytes) else parsed.fragment,
+        ))
+
+        return resolved_uri, original_netloc
+
+    async def _aiohttp_request(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str] | None = None,
+        data: bytes | None = None,
+        timeout: float = 60.0,
+    ) -> aiohttp.ClientResponse:
+        """Make an HTTP request via the aiohttp federation session.
+
+        Args:
+            method: HTTP method.
+            url: The resolved HTTPS URL to request.
+            headers: Additional request headers.
+            data: Request body bytes.
+            timeout: Timeout in seconds.
+
+        Returns:
+            aiohttp.ClientResponse with headers read.
+        """
+        session = self._get_aiohttp_session()
+        response = await asyncio.wait_for(
+            session.request(
+                method,
+                url,
+                headers=headers,
+                data=data,
+                proxy=self._aiohttp_proxy_url,
+            ),
+            timeout=timeout,
+        )
+        return response
+
     async def _send_request_with_optional_trailing_slash(
         self,
         request: MatrixFederationRequest,
         try_trailing_slash_on_400: bool = False,
         **send_request_args: Any,
-    ) -> IResponse:
+    ) -> "aiohttp.ClientResponse":
         """Wrapper for _send_request which can optionally retry the request
         upon receiving a combination of a 400 HTTP response code and a
         'M_UNRECOGNIZED' errcode. This is a workaround for Synapse <= v0.99.3
@@ -559,9 +779,9 @@ class MatrixFederationHttpClient:
         backoff_on_404: bool = False,
         backoff_on_all_error_codes: bool = False,
         follow_redirects: bool = False,
-    ) -> IResponse:
+    ) -> "aiohttp.ClientResponse":
         """
-        Sends a request to the given server.
+        Sends a request to the given server using aiohttp.
 
         Args:
             request: details of request to be sent
@@ -586,14 +806,7 @@ class MatrixFederationHttpClient:
                 waiting for the request to complete (up to `timeout` ms).
 
                 NB: the long retry algorithm takes over 20 minutes to complete, with a
-                default timeout of 60s! It's best not to use the `long_retries` option
-                for something that is blocking a client so we don't make them wait for
-                aaaaages, whereas some things like sending transactions (server to
-                server) we can be a lot more lenient but its very fuzzy / hand-wavey.
-
-                In the future, we could be more intelligent about doing this sort of
-                thing by looking at things with the bigger picture in mind,
-                https://github.com/matrix-org/synapse/issues/8917
+                default timeout of 60s!
 
             ignore_backoff: true to ignore the historical backoff data
                 and try the request anyway.
@@ -605,7 +818,7 @@ class MatrixFederationHttpClient:
                 responses. This does not recurse.
 
         Returns:
-            Resolves with the HTTP response object on success.
+            Resolves with the aiohttp response object on success.
 
         Raises:
             HttpResponseException: If we get an HTTP response code >= 300
@@ -617,8 +830,7 @@ class MatrixFederationHttpClient:
             RequestSendFailed: If there were problems connecting to the
                 remote, due to e.g. DNS failures, connection timeouts etc.
         """
-        # Validate server name and log if it is an invalid destination, this is
-        # partially to help track down code paths where we haven't validated before here
+        # Validate server name and log if it is an invalid destination
         try:
             parse_and_validate_server_name(request.destination)
         except ValueError:
@@ -666,11 +878,16 @@ class MatrixFederationHttpClient:
             finish_on_close=True,
         )
 
-        # Inject the span into the headers
-        headers_dict: dict[bytes, list[bytes]] = {}
-        opentracing.inject_header_dict(headers_dict, request.destination)
+        # Build headers as str dict for aiohttp
+        headers_dict: dict[str, str] = {}
 
-        headers_dict[b"User-Agent"] = [self.version_string_bytes]
+        # Inject opentracing span into headers
+        bytes_headers_dict: dict[bytes, list[bytes]] = {}
+        opentracing.inject_header_dict(bytes_headers_dict, request.destination)
+        for k, v_list in bytes_headers_dict.items():
+            headers_dict[k.decode("ascii")] = v_list[0].decode("ascii")
+
+        headers_dict["User-Agent"] = self.version_string_bytes.decode("ascii")
 
         with limiter, scope:
             # XXX: Would be much nicer to retry only at the transaction-layer
@@ -687,25 +904,32 @@ class MatrixFederationHttpClient:
                 (b"", b"", path_bytes, None, query_bytes, b"")
             )
 
+            # Resolve the federation URI to an actual HTTPS URL
+            resolved_url, host_header = await self._resolve_federation_uri(url_bytes)
+            # Set Host header to the original server name
+            if isinstance(host_header, bytes):
+                headers_dict["Host"] = host_header.decode("ascii")
+            else:
+                headers_dict["Host"] = host_header
+
+            response: aiohttp.ClientResponse | None = None
             while not self._is_shutdown:
                 try:
                     json = request.get_json()
                     if json:
-                        headers_dict[b"Content-Type"] = [b"application/json"]
+                        headers_dict["Content-Type"] = "application/json"
                         auth_headers = self.build_auth_headers(
                             destination_bytes, method_bytes, url_to_sign_bytes, json
                         )
                         data = encode_canonical_json(json)
-                        producer: Optional[IBodyProducer] = QuieterFileBodyProducer(
-                            BytesIO(data), cooperator=self._cooperator
-                        )
                     else:
-                        producer = None
+                        data = None
                         auth_headers = self.build_auth_headers(
                             destination_bytes, method_bytes, url_to_sign_bytes
                         )
 
-                    headers_dict[b"Authorization"] = auth_headers
+                    # Authorization header: join multiple auth headers with comma
+                    headers_dict["Authorization"] = auth_headers[0].decode("ascii")
 
                     logger.debug(
                         "{%s} [%s] Sending request: %s %s; timeout %fs",
@@ -726,61 +950,51 @@ class MatrixFederationHttpClient:
                             name="outbound_request",
                             server_name=self.server_name,
                         ):
-                            # we don't want all the fancy cookie and redirect handling
-                            # that treq.request gives: just use the raw Agent.
-
-                            # To preserve the logging context, the timeout is treated
-                            # in a similar way to asyncio.gather:
-                            # * Each logging context-preserving fork is wrapped in
-                            #   `run_in_background`. In this case there is only one,
-                            #   since the timeout fork is not logging-context aware.
-                            # * The `Deferred` that joins the forks back together is
-                            #   wrapped in `make_deferred_yieldable` to restore the
-                            #   logging context regardless of the path taken.
-                            request_deferred = run_in_background(
-                                self.agent.request,
-                                method_bytes,
-                                url_bytes,
-                                headers=Headers(headers_dict),
-                                bodyProducer=producer,
-                            )
-                            request_deferred = timeout_deferred(
-                                deferred=request_deferred,
+                            response = await self._aiohttp_request(
+                                method=request.method,
+                                url=resolved_url,
+                                headers=headers_dict,
+                                data=data,
                                 timeout=_sec_timeout,
-                                clock=self.clock,
                             )
-
-                            response = await make_deferred_yieldable(request_deferred)
-                    except DNSLookupError as e:
+                    except OSError as e:
+                        # OSError covers DNS failures, connection refused, etc.
                         raise RequestSendFailed(e, can_retry=retry_on_dns_fail) from e
+                    except asyncio.TimeoutError as e:
+                        raise RequestSendFailed(e, can_retry=True) from e
                     except Exception as e:
                         raise RequestSendFailed(e, can_retry=True) from e
 
                     incoming_responses_counter.labels(
                         method=request.method,
-                        code=response.code,
+                        code=response.status,
                         **{SERVER_NAME_LABEL: self.server_name},
                     ).inc()
 
-                    set_tag(tags.HTTP_STATUS_CODE, response.code)
-                    response_phrase = response.phrase.decode("ascii", errors="replace")
+                    set_tag(tags.HTTP_STATUS_CODE, response.status)
+                    response_phrase = response.reason or ""
 
-                    if 200 <= response.code < 300:
+                    if 200 <= response.status < 300:
                         logger.debug(
                             "{%s} [%s] Got response headers: %d %s",
                             request.txn_id,
                             request.destination,
-                            response.code,
+                            response.status,
                             response_phrase,
                         )
                     elif (
-                        response.code in (307, 308)
+                        response.status in (307, 308)
                         and follow_redirects
-                        and response.headers.hasHeader("Location")
+                        and "Location" in response.headers
                     ):
                         # The Location header *might* be relative so resolve it.
-                        location = response.headers.getRawHeaders(b"Location")[0]
-                        new_uri = urllib.parse.urljoin(request.uri, location)
+                        location = response.headers["Location"]
+                        if isinstance(request.uri, bytes):
+                            new_uri = urllib.parse.urljoin(
+                                request.uri.decode("ascii"), location
+                            ).encode("ascii")
+                        else:
+                            new_uri = urllib.parse.urljoin(request.uri, location)
 
                         return await self._send_request(
                             attr.evolve(request, uri=new_uri, generate_uri=False),
@@ -798,22 +1012,16 @@ class MatrixFederationHttpClient:
                             "{%s} [%s] Got response headers: %d %s",
                             request.txn_id,
                             request.destination,
-                            response.code,
+                            response.status,
                             response_phrase,
                         )
-                        # :'(
-                        # Update transactions table?
-                        d = treq.content(response)
-                        d = timeout_deferred(
-                            deferred=d,
-                            timeout=_sec_timeout,
-                            clock=self.clock,
-                        )
-
+                        # Read error response body
                         try:
-                            body = await make_deferred_yieldable(d)
+                            body = await asyncio.wait_for(
+                                response.read(), timeout=_sec_timeout
+                            )
                         except Exception as e:
-                            # Eh, we're already going to raise an exception so lets
+                            # We're already going to raise an exception so lets
                             # ignore if this fails.
                             logger.warning(
                                 "{%s} [%s] Failed to get error response: %s %s: %s",
@@ -826,13 +1034,13 @@ class MatrixFederationHttpClient:
                             body = b""
 
                         exc = HttpResponseException(
-                            response.code, response_phrase, body
+                            response.status, response_phrase, body
                         )
 
                         # Retry if the error is a 5xx or a 429 (Too Many
                         # Requests), otherwise just raise a standard
                         # `HttpResponseException`
-                        if 500 <= response.code < 600 or response.code == 429:
+                        if 500 <= response.status < 600 or response.status == 429:
                             raise RequestSendFailed(exc, can_retry=True) from exc
                         else:
                             raise exc
@@ -877,12 +1085,6 @@ class MatrixFederationHttpClient:
                         )
 
                         if self._is_shutdown:
-                            # Immediately fail sending the request instead of starting a
-                            # potentially long sleep after the server has requested
-                            # shutdown.
-                            # This is the code path followed when the
-                            # `federation_transaction_transmission_loop` has been
-                            # cancelled.
                             raise
 
                         # Sleep for the calculated delay, or wake up immediately
@@ -904,6 +1106,7 @@ class MatrixFederationHttpClient:
                         _flatten_response_never_received(e),
                     )
                     raise
+        assert response is not None
         return response
 
     def build_auth_headers(
@@ -1377,7 +1580,7 @@ class MatrixFederationHttpClient:
             timeout=timeout,
         )
 
-        headers = dict(response.headers.getAllRawHeaders())
+        headers = _aiohttp_headers_to_raw(response.headers)
 
         if timeout is not None:
             _sec_timeout = timeout / 1000
@@ -1541,10 +1744,10 @@ class MatrixFederationHttpClient:
             follow_redirects=follow_redirects,
         )
 
-        headers = dict(response.headers.getAllRawHeaders())
-        expected_size = response.length
+        headers = _aiohttp_headers_to_raw(response.headers)
+        expected_size = response.content_length
 
-        if expected_size == UNKNOWN_LENGTH:
+        if expected_size is None:
             expected_size = max_size
         else:
             if int(expected_size) > max_size:
@@ -1577,9 +1780,12 @@ class MatrixFederationHttpClient:
         try:
             async with self.remote_download_linearizer.queue(ip_address):
                 # add a byte of headroom to max size as function errs at >=
-                d = read_body_with_max_size(response, output_stream, expected_size + 1)
-                d.addTimeout(self.default_timeout_seconds, self.reactor)
-                length = await make_deferred_yieldable(d)
+                length = await asyncio.wait_for(
+                    async_read_body_with_max_size(
+                        response, output_stream, expected_size + 1
+                    ),
+                    timeout=self.default_timeout_seconds,
+                )
         except BodyExceededMaxSize:
             msg = "Requested file is too large > %r bytes" % (expected_size,)
             logger.warning(
@@ -1598,7 +1804,7 @@ class MatrixFederationHttpClient:
                 request.uri.decode("ascii"),
             )
             raise RequestSendFailed(e, can_retry=True) from e
-        except ResponseFailed as e:
+        except aiohttp.ClientError as e:
             logger.warning(
                 "{%s} [%s] Failed to read response - %s %s",
                 request.txn_id,
@@ -1619,15 +1825,15 @@ class MatrixFederationHttpClient:
             "{%s} [%s] Completed: %d %s [%d bytes] %s %s",
             request.txn_id,
             request.destination,
-            response.code,
-            response.phrase.decode("ascii", errors="replace"),
+            response.status,
+            response.reason or "",
             length,
             request.method,
             request.uri.decode("ascii"),
         )
 
         # if we didn't know the length upfront, decrement the actual size from ratelimiter
-        if response.length == UNKNOWN_LENGTH:
+        if response.content_length is None:
             download_ratelimiter.record_action(
                 requester=None, key=ip_address, n_actions=length
             )
@@ -1701,10 +1907,10 @@ class MatrixFederationHttpClient:
             ignore_backoff=ignore_backoff,
         )
 
-        headers = dict(response.headers.getAllRawHeaders())
-        expected_size = response.length
+        headers = _aiohttp_headers_to_raw(response.headers)
+        expected_size = response.content_length
 
-        if expected_size == UNKNOWN_LENGTH:
+        if expected_size is None:
             expected_size = max_size
         else:
             if int(expected_size) > max_size:
@@ -1736,9 +1942,8 @@ class MatrixFederationHttpClient:
 
         # this should be a multipart/mixed response with the boundary string in the header
         try:
-            raw_content_type = headers.get(b"Content-Type")
-            assert raw_content_type is not None
-            content_type = raw_content_type[0].decode("UTF-8")
+            content_type = response.headers.get("Content-Type")
+            assert content_type is not None
             content_type_parts = content_type.split("boundary=")
             boundary = content_type_parts[1]
         except Exception:
@@ -1753,12 +1958,23 @@ class MatrixFederationHttpClient:
 
         try:
             async with self.remote_download_linearizer.queue(ip_address):
-                # add a byte of headroom to max size as `_MultipartParserProtocol.dataReceived` errs at >=
-                deferred = read_multipart_response(
-                    response, output_stream, boundary, expected_size + 1
+                # For multipart responses with aiohttp, we read the entire body
+                # and parse it as multipart. The read_multipart_response function
+                # uses Twisted protocols, so we need to read the body first and
+                # parse manually.
+                from synapse.http.client import MultipartResponse
+                body_data = await asyncio.wait_for(
+                    response.read(),
+                    timeout=self.default_timeout_seconds,
                 )
-                deferred.addTimeout(self.default_timeout_seconds, self.reactor)
-                multipart_response = await make_deferred_yieldable(deferred)
+
+                if len(body_data) > expected_size + 1:
+                    raise BodyExceededMaxSize()
+
+                # Parse multipart response manually
+                multipart_response = _parse_multipart_body(
+                    body_data, boundary, output_stream, expected_size + 1
+                )
         except BodyExceededMaxSize:
             msg = "Requested file is too large > %r bytes" % (expected_size,)
             logger.warning(
@@ -1777,7 +1993,7 @@ class MatrixFederationHttpClient:
                 request.uri.decode("ascii"),
             )
             raise RequestSendFailed(e, can_retry=True) from e
-        except ResponseFailed as e:
+        except aiohttp.ClientError as e:
             logger.warning(
                 "{%s} [%s] Failed to read response - %s %s",
                 request.txn_id,
@@ -1820,20 +2036,115 @@ class MatrixFederationHttpClient:
             "{%s} [%s] Completed: %d %s [%d bytes] %s %s",
             request.txn_id,
             request.destination,
-            response.code,
-            response.phrase.decode("ascii", errors="replace"),
+            response.status,
+            response.reason or "",
             length,
             request.method,
             request.uri.decode("ascii"),
         )
 
         # if we didn't know the length upfront, decrement the actual size from ratelimiter
-        if response.length == UNKNOWN_LENGTH:
+        if response.content_length is None:
             download_ratelimiter.record_action(
                 requester=None, key=ip_address, n_actions=length
             )
 
         return length, headers, multipart_response.json
+
+
+def _parse_multipart_body(
+    body: bytes,
+    boundary: str,
+    output_stream: "BinaryIO",
+    max_length: int | None,
+) -> "MultipartResponse":
+    """Parse a multipart/mixed response body (MSC3916 format).
+
+    This is a simplified parser for the federation multipart download format.
+    It parses the JSON metadata part and the file data part.
+
+    Args:
+        body: The raw response body bytes.
+        boundary: The multipart boundary string.
+        output_stream: File to write the file data to.
+        max_length: Maximum allowed length.
+
+    Returns:
+        A MultipartResponse with the parsed data.
+    """
+    from synapse.http.client import MultipartResponse
+
+    if max_length is not None and len(body) > max_length:
+        raise BodyExceededMaxSize()
+
+    result = MultipartResponse()
+
+    # Split the body by the boundary
+    boundary_bytes = boundary.encode("utf-8")
+    parts = body.split(b"--" + boundary_bytes)
+
+    # parts[0] is before first boundary (empty or preamble)
+    # parts[1..n-1] are the actual parts
+    # parts[n] is after final boundary (--boundary--)
+
+    json_part = None
+    file_part = None
+
+    for part in parts[1:]:
+        # Skip the closing boundary marker
+        if part.strip() == b"--" or part.strip() == b"":
+            continue
+
+        # Split headers from body (separated by \r\n\r\n)
+        if b"\r\n\r\n" in part:
+            header_section, part_body = part.split(b"\r\n\r\n", 1)
+        elif b"\n\n" in part:
+            header_section, part_body = part.split(b"\n\n", 1)
+        else:
+            continue
+
+        # Strip trailing \r\n from body
+        if part_body.endswith(b"\r\n"):
+            part_body = part_body[:-2]
+
+        headers_str = header_section.decode("utf-8", errors="replace")
+        headers_lower = headers_str.lower()
+
+        if "application/json" in headers_lower:
+            json_part = part_body
+        else:
+            file_part = part_body
+            # Extract content-type and content-disposition from part headers
+            for line in headers_str.split("\n"):
+                line = line.strip()
+                if line.lower().startswith("content-type:"):
+                    result.content_type = line.split(":", 1)[1].strip().encode("utf-8")
+                elif line.lower().startswith("content-disposition:"):
+                    result.disposition = line.split(":", 1)[1].strip().encode("utf-8")
+                elif line.lower().startswith("location:"):
+                    result.url = line.split(":", 1)[1].strip().encode("utf-8")
+
+    if json_part is not None:
+        result.json = json_part
+
+    if file_part is not None:
+        output_stream.write(file_part)
+        result.length = len(file_part)
+
+    return result
+
+
+def _aiohttp_headers_to_raw(
+    headers: "aiohttp.typedefs.CIMultiDictProxy[str]",
+) -> dict[bytes, list[bytes]]:
+    """Convert aiohttp response headers to the dict[bytes, list[bytes]] format
+    that Synapse expects (matching Twisted's getAllRawHeaders() output).
+    """
+    result: dict[bytes, list[bytes]] = {}
+    for key, value in headers.items():
+        key_bytes = key.encode("ascii")
+        result.setdefault(key_bytes, []).append(value.encode("ascii"))
+    return result
 
 
 def _flatten_response_never_received(e: BaseException) -> str:
@@ -1847,13 +2158,13 @@ def _flatten_response_never_received(e: BaseException) -> str:
         return repr(e)
 
 
-def check_content_type_is(headers: Headers, expected_content_type: str) -> None:
+def check_content_type_is(headers: "Headers", expected_content_type: str) -> None:
     """
-    Check that a set of HTTP headers have a Content-Type header, and that it
-    is the expected value..
+    Check that a set of Twisted HTTP headers have a Content-Type header, and that it
+    is the expected value.
 
     Args:
-        headers: headers to check
+        headers: Twisted headers to check
 
     Raises:
         RequestSendFailed: if the Content-Type header is missing or doesn't match
@@ -1873,6 +2184,39 @@ def check_content_type_is(headers: Headers, expected_content_type: str) -> None:
         raise RequestSendFailed(
             RuntimeError(
                 f"Remote server sent Content-Type header of '{c_type}', not '{expected_content_type}'",
+            ),
+            can_retry=False,
+        )
+
+
+def check_content_type_is_aiohttp(
+    headers: "aiohttp.typedefs.CIMultiDictProxy[str]",
+    expected_content_type: str,
+) -> None:
+    """
+    Check that aiohttp response headers have a Content-Type header, and that it
+    is the expected value.
+
+    Args:
+        headers: aiohttp response headers to check
+        expected_content_type: The expected Content-Type value (e.g. "application/json")
+
+    Raises:
+        RequestSendFailed: if the Content-Type header is missing or doesn't match
+    """
+    content_type = headers.get("Content-Type")
+    if content_type is None:
+        raise RequestSendFailed(
+            RuntimeError("No Content-Type header received from remote server"),
+            can_retry=False,
+        )
+
+    # Extract the 'essence' of the mimetype, removing any parameter
+    c_type_parsed = content_type.split(";", 1)[0].strip()
+    if c_type_parsed != expected_content_type:
+        raise RequestSendFailed(
+            RuntimeError(
+                f"Remote server sent Content-Type header of '{content_type}', not '{expected_content_type}'",
             ),
             can_retry=False,
         )

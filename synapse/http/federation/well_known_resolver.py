@@ -18,12 +18,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import asyncio
 import logging
 import random
 import time
 from io import BytesIO
 from typing import Callable
 
+import aiohttp
 import attr
 
 try:
@@ -35,7 +37,11 @@ try:
 except ImportError:
     pass
 
-from synapse.http.client import BodyExceededMaxSize, read_body_with_max_size
+from synapse.http.client import (
+    BodyExceededMaxSize,
+    async_read_body_with_max_size,
+    read_body_with_max_size,
+)
 from synapse.logging.context import make_deferred_yieldable
 from synapse.types import ISynapseThreadlessReactor
 from synapse.util.caches.ttlcache import TTLCache
@@ -131,6 +137,18 @@ class WellKnownResolver:
         self._well_known_agent = RedirectAgent(agent)
         self.user_agent = user_agent
 
+        # Lazily create aiohttp session for well-known lookups
+        self._aiohttp_session: aiohttp.ClientSession | None = None
+
+    def _get_aiohttp_session(self) -> aiohttp.ClientSession:
+        """Lazily create the aiohttp session on first use."""
+        if self._aiohttp_session is None:
+            ua = self.user_agent.decode("ascii") if isinstance(self.user_agent, bytes) else self.user_agent
+            self._aiohttp_session = aiohttp.ClientSession(
+                headers={"User-Agent": ua},
+            )
+        return self._aiohttp_session
+
     async def get_well_known(self, server_name: bytes) -> WellKnownLookupResult:
         """Attempt to fetch and parse a .well-known file for the given server
 
@@ -216,8 +234,8 @@ class WellKnownResolver:
         )
 
         try:
-            if response.code != 200:
-                raise Exception("Non-200 response %s" % (response.code,))
+            if response.status != 200:
+                raise Exception("Non-200 response %s" % (response.status,))
 
             parsed_body = json_decoder.decode(body.decode("utf-8"))
             logger.info("Response from .well-known: %s", parsed_body)
@@ -230,7 +248,7 @@ class WellKnownResolver:
             logger.info("Error parsing well-known for %s: %s", server_name, e)
             raise _FetchWellKnownFailure(temporary=False)
 
-        cache_period = _cache_period_from_headers(
+        cache_period = _cache_period_from_headers_aiohttp(
             response.headers, time_now=self._reactor.seconds
         )
         if cache_period is None:
@@ -256,8 +274,8 @@ class WellKnownResolver:
 
     async def _make_well_known_request(
         self, server_name: bytes, retry: bool
-    ) -> tuple[IResponse, bytes]:
-        """Make the well known request.
+    ) -> tuple[aiohttp.ClientResponse, bytes]:
+        """Make the well known request using aiohttp.
 
         This will retry the request if requested and it fails (with unable
         to connect or receives a 5xx error).
@@ -270,14 +288,9 @@ class WellKnownResolver:
             _FetchWellKnownFailure if we fail to lookup a result
 
         Returns:
-            Returns the response object and body. Response may be a non-200 response.
+            Returns the aiohttp response object and body. Response may be a non-200 response.
         """
-        uri = b"https://%s/.well-known/matrix/server" % (server_name,)
-        uri_str = uri.decode("ascii")
-
-        headers = {
-            b"User-Agent": [self.user_agent],
-        }
+        uri_str = "https://%s/.well-known/matrix/server" % (server_name.decode("ascii"),)
 
         i = 0
         while True:
@@ -285,19 +298,18 @@ class WellKnownResolver:
 
             logger.info("Fetching %s", uri_str)
             try:
-                response = await make_deferred_yieldable(
-                    self._well_known_agent.request(
-                        b"GET", uri, headers=Headers(headers)
-                    )
+                response = await asyncio.wait_for(
+                    self._get_aiohttp_session().get(uri_str, allow_redirects=True),
+                    timeout=10.0,
                 )
                 body_stream = BytesIO()
-                await make_deferred_yieldable(
-                    read_body_with_max_size(response, body_stream, WELL_KNOWN_MAX_SIZE)
+                length = await async_read_body_with_max_size(
+                    response, body_stream, WELL_KNOWN_MAX_SIZE
                 )
                 body = body_stream.getvalue()
 
-                if 500 <= response.code < 600:
-                    raise Exception("Non-200 response %s" % (response.code,))
+                if 500 <= response.status < 600:
+                    raise Exception("Non-200 response %s" % (response.status,))
 
                 return response, body
             except CancelledError:
@@ -359,6 +371,50 @@ def _parse_cache_control(headers: Headers) -> dict[bytes, bytes | None]:
     for hdr in cache_control_headers:
         for directive in hdr.split(b","):
             splits = [x.strip() for x in directive.split(b"=", 1)]
+            k = splits[0].lower()
+            v = splits[1] if len(splits) > 1 else None
+            cache_controls[k] = v
+    return cache_controls
+
+
+def _cache_period_from_headers_aiohttp(
+    headers: "aiohttp.typedefs.CIMultiDictProxy[str]",
+    time_now: Callable[[], float] = time.time,
+) -> float | None:
+    """Extract cache period from aiohttp response headers."""
+    cache_controls = _parse_cache_control_aiohttp(headers)
+
+    if "no-store" in cache_controls:
+        return 0
+
+    if "max-age" in cache_controls:
+        max_age = cache_controls["max-age"]
+        if max_age:
+            try:
+                return int(max_age)
+            except ValueError:
+                pass
+
+    expires = headers.get("expires")
+    if expires is not None:
+        try:
+            expires_date = stringToDatetime(expires.encode("ascii"))
+            return expires_date - time_now()
+        except ValueError:
+            return 0
+
+    return None
+
+
+def _parse_cache_control_aiohttp(
+    headers: "aiohttp.typedefs.CIMultiDictProxy[str]",
+) -> dict[str, str | None]:
+    """Parse Cache-Control headers from an aiohttp response."""
+    cache_controls: dict[str, str | None] = {}
+    cache_control_headers = headers.getall("cache-control", [])
+    for hdr in cache_control_headers:
+        for directive in hdr.split(","):
+            splits = [x.strip() for x in directive.split("=", 1)]
             k = splits[0].lower()
             v = splits[1] if len(splits) > 1 else None
             cache_controls[k] = v

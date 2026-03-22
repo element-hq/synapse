@@ -21,6 +21,8 @@ import asyncio
 #
 import logging
 import urllib.parse
+
+import aiohttp
 from http import HTTPStatus
 from io import BytesIO
 from typing import (
@@ -1281,6 +1283,36 @@ def read_body_with_max_size(
 
     response.deliverBody(_ReadBodyWithMaxSizeProtocol(stream, d, max_size))
     return d
+
+
+async def async_read_body_with_max_size(
+    response: aiohttp.ClientResponse,
+    stream: ByteWriteable,
+    max_size: int | None,
+) -> int:
+    """Read an aiohttp response body, streaming to `stream`, with size limit.
+
+    Args:
+        response: The aiohttp response to read from.
+        stream: The file-object to write to.
+        max_size: The maximum file size to allow, or None for no limit.
+
+    Returns:
+        The length of the read body.
+
+    Raises:
+        BodyExceededMaxSize: if the body exceeds the max size.
+    """
+    length = 0
+    if max_size is not None and response.content_length is not None:
+        if response.content_length > max_size:
+            raise BodyExceededMaxSize()
+    async for chunk in response.content.iter_any():
+        length += len(chunk)
+        if max_size is not None and length > max_size:
+            raise BodyExceededMaxSize()
+        stream.write(chunk)
+    return length
 
 
 def read_multipart_response(

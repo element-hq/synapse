@@ -147,7 +147,7 @@ from synapse.http.client import (
     ReplicationClient,
     SimpleHttpClient,
 )
-from synapse.http.native_client import NativeSimpleHttpClient
+from synapse.http.native_client import NativeReplicationClient, NativeSimpleHttpClient
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
@@ -803,11 +803,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         return MatrixFederationHttpClient(self, tls_client_options_factory)
 
     @cache_in_self
-    def get_replication_client(self) -> ReplicationClient:
+    def get_replication_client(self) -> NativeReplicationClient:
         """
         An HTTP client for HTTP replication.
         """
-        return ReplicationClient(self)
+        return NativeReplicationClient(self)
 
     @cache_in_self
     def get_room_creation_handler(self) -> RoomCreationHandler:

@@ -594,5 +594,120 @@ class NativeSimpleHttpClient:
         return h
 
 
+class NativeReplicationClient(NativeSimpleHttpClient):
+    """asyncio-native replication HTTP client.
+
+    Routes requests with the `synapse-replication://` scheme to the appropriate
+    worker instance (TCP or UNIX socket) based on the instance_map config.
+    """
+
+    def __init__(self, hs: "HomeServer") -> None:
+        super().__init__(hs)
+        self.server_name = hs.hostname
+        self._instance_map = hs.config.worker.instance_map
+
+    def _get_session(self) -> aiohttp.ClientSession:
+        """Lazily create the aiohttp session for replication."""
+        if self._session is None:
+            connector = aiohttp.TCPConnector(
+                limit_per_host=5,
+                ssl=False,
+            )
+            timeout = aiohttp.ClientTimeout(
+                sock_connect=15,
+                total=None,
+            )
+            self._session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+                headers={"User-Agent": self.user_agent},
+            )
+        return self._session
+
+    async def request(
+        self,
+        method: str,
+        uri: str,
+        data: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> aiohttp.ClientResponse:
+        """Make a replication request.
+
+        Translates synapse-replication:// URIs to actual worker endpoints.
+        """
+        from synapse.config.workers import (
+            InstanceTcpLocationConfig,
+            InstanceUnixLocationConfig,
+        )
+        from synapse.http.client import RequestTimedOutError
+
+        outgoing_requests_counter.labels(method=method).inc()
+        logger.debug("Sending replication request %s %s", method, uri)
+
+        # Parse the synapse-replication:// URI to get the instance name
+        parsed = urllib.parse.urlparse(uri)
+        instance_name = parsed.hostname or ""
+        path = parsed.path
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+
+        # Look up the instance in the config
+        location = self._instance_map.get(instance_name)
+        if location is None:
+            raise Exception(f"Instance {instance_name!r} not in instance_map config")
+
+        # Build the actual URL
+        if isinstance(location, InstanceTcpLocationConfig):
+            scheme = "https" if location.tls else "http"
+            actual_url = f"{scheme}://{location.host}:{location.port}{path}"
+        elif isinstance(location, InstanceUnixLocationConfig):
+            # aiohttp supports UNIX sockets via a UnixConnector, but we need
+            # a separate session for that. For simplicity, use the HTTP URL
+            # format that aiohttp's UnixConnector expects.
+            actual_url = f"http://localhost{path}"
+        else:
+            raise Exception(f"Unknown location type for {instance_name}: {type(location)}")
+
+        try:
+            # For UNIX sockets, we need a different connector
+            if isinstance(location, InstanceUnixLocationConfig):
+                connector = aiohttp.UnixConnector(path=location.path)
+                async with aiohttp.ClientSession(
+                    connector=connector,
+                    headers={"User-Agent": self.user_agent},
+                ) as session:
+                    response = await asyncio.wait_for(
+                        session.request(method, actual_url, data=data, headers=headers),
+                        timeout=60,
+                    )
+            else:
+                session = self._get_session()
+                response = await asyncio.wait_for(
+                    session.request(method, actual_url, data=data, headers=headers),
+                    timeout=60,
+                )
+
+            incoming_responses_counter.labels(
+                method=method, code=response.status
+            ).inc()
+            logger.info(
+                "Received replication response to %s %s: %s",
+                method, uri, response.status,
+            )
+            return response
+
+        except asyncio.TimeoutError:
+            incoming_responses_counter.labels(method=method, code="ERR").inc()
+            logger.warning("Timeout on replication request %s %s", method, uri)
+            raise RequestTimedOutError(None)
+        except Exception as e:
+            incoming_responses_counter.labels(method=method, code="ERR").inc()
+            logger.info(
+                "Error on replication request %s %s: %s %s",
+                method, uri, type(e).__name__, e,
+            )
+            raise
+
+
 # Alias for drop-in replacement of synapse.http.client.SimpleHttpClient
 SimpleHttpClient = NativeSimpleHttpClient
