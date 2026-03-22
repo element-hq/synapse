@@ -94,8 +94,15 @@ class FutureCache(Generic[VT]):
 
     def __init__(
         self,
-        name: str,
+        name: str = "",
         max_entries: int = 1000,
+        # Extra args accepted for DeferredCache compatibility
+        clock: Any = None,
+        server_name: str = "",
+        tree: bool = False,
+        iterable: bool = False,
+        apply_cache_factor_from_config: bool = True,
+        prune_unread_entries: bool = True,
     ) -> None:
         self.name = name
         self._max_entries = max_entries
@@ -244,6 +251,99 @@ class FutureCache(Generic[VT]):
 
     def __len__(self) -> int:
         return len(self._pending) + len(self._completed)
+
+    def prefill(
+        self, key: Hashable, value: VT, callback: Callable[[], None] | None = None
+    ) -> None:
+        """Insert a completed value directly into the cache."""
+        self.invalidate(key)
+        self._completed[key] = value
+        if callback:
+            self._completed_callbacks.setdefault(key, []).append(callback)
+        self._maybe_evict()
+
+    def get_immediate(
+        self, key: Hashable, default: Any = None, update_metrics: bool = True
+    ) -> Any:
+        """Get a completed value synchronously, or return default."""
+        if key in self._completed:
+            return self._completed[key]
+        return default
+
+    def get_bulk(
+        self, keys: list[Hashable]
+    ) -> tuple[dict[Hashable, VT], "asyncio.Future[dict[Hashable, VT]] | None", list[Hashable]]:
+        """Look up multiple keys, returning cached, pending, and missing.
+
+        Returns:
+            Tuple of (cached_results, pending_future_or_None, missing_keys)
+        """
+        cached: dict[Hashable, VT] = {}
+        pending_keys: list[Hashable] = []
+        missing: list[Hashable] = []
+
+        for key in keys:
+            if key in self._completed:
+                cached[key] = self._completed[key]
+            elif key in self._pending:
+                pending_keys.append(key)
+            else:
+                missing.append(key)
+
+        pending_future = None
+        if pending_keys:
+            # Create a future that resolves when all pending keys resolve
+            async def _gather_pending() -> dict[Hashable, VT]:
+                results: dict[Hashable, VT] = {}
+                for k in pending_keys:
+                    entry = self._pending.get(k)
+                    if entry:
+                        results[k] = await entry.observe()
+                return results
+
+            pending_future = asyncio.ensure_future(_gather_pending())
+
+        return cached, pending_future, missing
+
+    def start_bulk_input(
+        self, keys: list[Hashable], callback: Callable[[], None] | None = None
+    ) -> "FutureCacheEntry[VT]":
+        """Start a bulk insert operation for the given keys.
+
+        Returns a FutureCacheEntry that can be resolved with the results.
+        """
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[dict[Hashable, VT]] = loop.create_future()
+
+        entry = FutureCacheEntry(future)
+        if callback:
+            entry.add_invalidation_callback(callback)
+
+        # Store pending entries for each key
+        for key in keys:
+            self._pending[key] = entry
+
+        def _on_complete(f: asyncio.Future) -> None:  # type: ignore[type-arg]
+            if f.cancelled():
+                for key in keys:
+                    self._pending.pop(key, None)
+                return
+
+            exc = f.exception()
+            if exc is not None:
+                for key in keys:
+                    self._pending.pop(key, None)
+                return
+
+            results = f.result()
+            for key in keys:
+                self._pending.pop(key, None)
+                if key in results:
+                    self._completed[key] = results[key]
+            self._maybe_evict()
+
+        future.add_done_callback(_on_complete)
+        return entry
 
     def _maybe_evict(self) -> None:
         """Evict oldest completed entries if over the max size."""

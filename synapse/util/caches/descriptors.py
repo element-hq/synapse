@@ -48,7 +48,7 @@ except ImportError:
 from synapse.logging.context import make_deferred_yieldable, preserve_fn
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import delay_cancellation
-from synapse.util.caches.deferred_cache import DeferredCache
+from synapse.util.caches.future_cache import FutureCache as DeferredCache
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.clock import Clock
 
@@ -245,7 +245,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
 
     def __get__(
         self, obj: HasServerNameAndClock | None, owner: type | None
-    ) -> Callable[..., "defer.Deferred[Any]"]:
+    ) -> Callable[..., Any]:
         # We need access to instance-level `obj.server_name` attribute
         assert obj is not None, (
             "Cannot call cached method from class (❌ `MyClass.cached_method()`) "
@@ -271,7 +271,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         get_cache_key = self.cache_key_builder
 
         @functools.wraps(self.orig)
-        def _wrapped(*args: Any, **kwargs: Any) -> "defer.Deferred[Any]":
+        def _wrapped(*args: Any, **kwargs: Any) -> Any:
             # If we're passed a cache_context then we'll want to call its invalidate()
             # whenever we are invalidated
             invalidate_callback = kwargs.pop("on_invalidate", None)
@@ -288,7 +288,19 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
                         cache, cache_key
                     )
 
-                ret = defer.maybeDeferred(preserve_fn(self.orig), obj, *args, **kwargs)
+                # Call the function and ensure result is an asyncio.Future
+                import asyncio as _asyncio
+                result = preserve_fn(self.orig)(obj, *args, **kwargs)
+                if _asyncio.isfuture(result) or _asyncio.iscoroutine(result):
+                    ret = _asyncio.ensure_future(result)
+                elif hasattr(result, '__await__'):
+                    ret = _asyncio.ensure_future(result.__await__())
+                else:
+                    # Plain value — wrap in resolved future
+                    loop = _asyncio.get_event_loop()
+                    f = loop.create_future()
+                    f.set_result(result)
+                    ret = f
                 ret = cache.set(cache_key, ret, callback=invalidate_callback)
 
                 # We started a new call to `self.orig`, so we must always wait for it to
@@ -361,7 +373,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
 
     def __get__(
         self, obj: Any | None, objtype: type | None = None
-    ) -> Callable[..., "defer.Deferred[dict[Hashable, Any]]"]:
+    ) -> Callable[..., Any]:
         cached_method = getattr(obj, self.cached_method_name)
         cache: DeferredCache[CacheKey, Any] = cached_method.cache
         num_args = cached_method.num_args
@@ -373,7 +385,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             )
 
         @functools.wraps(self.orig)
-        def wrapped(*args: Any, **kwargs: Any) -> "defer.Deferred[dict]":
+        async def wrapped(*args: Any, **kwargs: Any) -> Any:
             # If we're passed a cache_context then we'll want to call its
             # invalidate() whenever we are invalidated
             invalidate_callback = kwargs.pop("on_invalidate", None)
@@ -402,63 +414,48 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
                 def cache_key_to_arg(key: tuple) -> Hashable:
                     return key[self.list_pos]
 
+            import asyncio as _asyncio
+
             cache_keys = [arg_to_cache_key(arg) for arg in list_args]
-            immediate_results, pending_deferred, missing = cache.get_bulk(
-                cache_keys, callback=invalidate_callback
-            )
 
-            results = {cache_key_to_arg(key): v for key, v in immediate_results.items()}
+            # Look up cached and missing keys
+            results: dict[Hashable, Any] = {}
+            missing_keys: list[Hashable] = []
 
-            cached_defers: list["defer.Deferred[Any]"] = []
-            if pending_deferred:
+            for cache_key in cache_keys:
+                try:
+                    future = cache.get(cache_key, callback=invalidate_callback)
+                    if hasattr(future, 'done') and future.done():
+                        results[cache_key_to_arg(cache_key)] = future.result()
+                    else:
+                        # Pending — we'll await it
+                        val = await make_deferred_yieldable(future)
+                        results[cache_key_to_arg(cache_key)] = val
+                except KeyError:
+                    missing_keys.append(cache_key)
 
-                def update_results(r: dict) -> None:
-                    for k, v in r.items():
-                        results[cache_key_to_arg(k)] = v
-
-                pending_deferred.addCallback(update_results)
-                cached_defers.append(pending_deferred)
-
-            if missing:
-                cache_entry = cache.start_bulk_input(missing, invalidate_callback)
-
-                def complete_all(res: dict[Hashable, Any]) -> None:
-                    missing_results = {}
-                    for key in missing:
-                        arg = cache_key_to_arg(key)
-                        val = res.get(arg, None)
-
-                        results[arg] = val
-                        missing_results[key] = val
-
-                    cache_entry.complete_bulk(cache, missing_results)
-
-                def errback_all(f: Failure) -> None:
-                    cache_entry.error_bulk(cache, missing, f)
-
+            if missing_keys:
                 args_to_call = dict(arg_dict)
                 args_to_call[self.list_name] = {
-                    cache_key_to_arg(key) for key in missing
+                    cache_key_to_arg(key) for key in missing_keys
                 }
 
-                # dispatch the call, and attach the two handlers
-                missing_d = defer.maybeDeferred(
-                    preserve_fn(self.orig), **args_to_call
-                ).addCallbacks(complete_all, errback_all)
-                cached_defers.append(missing_d)
+                # Call the original function for missing keys
+                missing_results = await self.orig(**args_to_call)
 
-            if cached_defers:
-                d = defer.gatherResults(cached_defers, consumeErrors=True).addCallbacks(
-                    lambda _: results, unwrapFirstError
-                )
-                if missing:
-                    # We started a new call to `self.orig`, so we must always wait for it to
-                    # complete. Otherwise we might mark our current logging context as
-                    # finished while `self.orig` is still using it in the background.
-                    d = delay_cancellation(d)
-                return make_deferred_yieldable(d)
-            else:
-                return defer.succeed(results)
+                # Store results in cache
+                for key in missing_keys:
+                    arg = cache_key_to_arg(key)
+                    val = missing_results.get(arg, None)
+                    results[arg] = val
+
+                    # Prefill the cache
+                    cache.prefill(key, val, callback=invalidate_callback)
+
+                missing_d = None  # No longer needed
+
+            # All results are now resolved
+            return results
 
         obj.__dict__[self.name] = wrapped
 
