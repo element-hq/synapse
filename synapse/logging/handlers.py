@@ -3,7 +3,7 @@ import time
 from logging import Handler, LogRecord
 from logging.handlers import MemoryHandler
 from threading import Thread
-from typing import Optional, cast
+from typing import Any, Optional
 
 
 class PeriodicallyFlushingMemoryHandler(MemoryHandler):
@@ -24,21 +24,20 @@ class PeriodicallyFlushingMemoryHandler(MemoryHandler):
         target: Handler | None = None,
         flushOnClose: bool = True,
         period: float = 5.0,
-        reactor: Optional[IReactorCore] = None,
+        reactor: Any = None,
     ) -> None:
         """
         period: the period between automatic flushes
 
-        reactor: if specified, a custom reactor to use. If not specifies,
-            defaults to the globally-installed reactor.
-            Log entries will be flushed immediately until this reactor has
-            started.
+        reactor: legacy parameter, ignored. Kept for config compat.
         """
         super().__init__(capacity, flushLevel, target, flushOnClose)
 
         self._flush_period: float = period
         self._active: bool = True
-        self._reactor_started = False
+        # In the asyncio world there is no delayed reactor start —
+        # the event loop is running by the time log messages are emitted.
+        self._reactor_started = True
 
         self._flushing_thread: Thread = Thread(
             name="PeriodicallyFlushingMemoryHandler flushing thread",
@@ -46,28 +45,6 @@ class PeriodicallyFlushingMemoryHandler(MemoryHandler):
             daemon=True,
         )
         self._flushing_thread.start()
-
-        def on_reactor_running() -> None:
-            self._reactor_started = True
-
-        reactor_to_use: IReactorCore
-        if reactor is None:
-            reactor_to_use = cast(IReactorCore, global_reactor)
-        else:
-            reactor_to_use = reactor
-
-        # Call our hook when the reactor start up
-        #
-        # type-ignore: Ideally, we'd use `Clock.call_when_running(...)`, but
-        # `PeriodicallyFlushingMemoryHandler` is instantiated via Python logging
-        # configuration, so it's not straightforward to pass in the homeserver's clock
-        # (and we don't want to burden other peoples logging config with the details).
-        #
-        # The important reason why we want to use `Clock.call_when_running` is so that
-        # the callback runs with a logcontext as we want to know which server the logs
-        # came from. But since we don't log anything in the callback, it's safe to
-        # ignore the lint here.
-        reactor_to_use.callWhenRunning(on_reactor_running)  # type: ignore[prefer-synapse-clock-call-when-running]
 
     def shouldFlush(self, record: LogRecord) -> bool:
         """

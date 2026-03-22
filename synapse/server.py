@@ -326,9 +326,10 @@ class HomeServer(metaclass=abc.ABCMeta):
             config: The full config for the homeserver.
         """
 
-        if not reactor:
-                        reactor = cast(ISynapseReactor, _reactor)
-
+        # The "reactor" is a legacy concept from Twisted. In the asyncio
+        # world it's just a handle that some code passes around. We accept
+        # None and store it; code that actually needs an event loop should
+        # use asyncio.get_running_loop() at call time.
         self._reactor = reactor
         self.hostname = hostname
         # the key we use to sign events and requests

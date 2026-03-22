@@ -632,21 +632,51 @@ except ImportError:
 from synapse.http.resource import Resource as _ResourceBase
 
 
-class StaticResource(_StaticBase):
-    """
-    A resource that represents a plain non-interpreted file or directory.
+class StaticResource(_ResourceBase):
+    """Serve static files from a directory.
 
-    Differs from the File resource by adding clickjacking protection.
+    Pure-Python replacement for Twisted's ``twisted.web.static.File``.
+    Adds clickjacking protection headers.
     """
 
-    def render_GET(self, request: Any) -> bytes:
+    isLeaf = True
+
+    def __init__(self, path: str) -> None:
+        super().__init__()
+        self._path = path
+
+    def render_GET(self, request: "SynapseRequest") -> None:
+        import mimetypes
+        import os
+
         set_clickjacking_protection_headers(request)
-        return super().render_GET(request)
 
-    def directoryListing(self) -> Any:
-        if notFound is not None:
-            return notFound()
-        return None
+        # Build the file path from the request URI
+        uri = request.path
+        if isinstance(uri, bytes):
+            uri = uri.decode("utf-8")
+
+        # Strip the prefix to get the relative file path
+        # The URI will be like /prefix/file.css — we need just the filename
+        parts = uri.rstrip("/").split("/")
+        filename = parts[-1] if parts else "index.html"
+
+        filepath = os.path.join(self._path, filename)
+        if not os.path.isfile(filepath):
+            request.setResponseCode(404)
+            request.write(b"Not Found")
+            request.finish()
+            return
+
+        content_type, _ = mimetypes.guess_type(filepath)
+        if content_type:
+            request.setHeader(b"Content-Type", content_type.encode("ascii"))
+
+        with open(filepath, "rb") as f:
+            data = f.read()
+        request.setHeader(b"Content-Length", str(len(data)).encode("ascii"))
+        request.write(data)
+        request.finish()
 
 
 class UnrecognizedRequestResource(_ResourceBase):

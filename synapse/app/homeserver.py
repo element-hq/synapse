@@ -475,6 +475,13 @@ def start_reactor(
 def main() -> None:
     homeserver_config = load_or_generate_config(sys.argv[1:])
 
+    # Create an asyncio event loop early so that NativeClock.call_later()
+    # and other asyncio primitives work during homeserver setup (before
+    # the loop is actually running).
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     # Create a logging context as soon as possible so we can start associating
     # everything with this homeserver.
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
