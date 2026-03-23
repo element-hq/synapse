@@ -24,12 +24,11 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from twisted.internet.defer import CancelledError
 
 from synapse.api.errors import ModuleFailedException, SynapseError
-from synapse.events import EventBase
+from synapse.events import EventBase, freeze_event
 from synapse.events.snapshot import UnpersistedEventContextBase
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import Requester, StateMap
 from synapse.util.async_helpers import delay_cancellation, maybe_awaitable
-from synapse.util.frozenutils import unfreeze
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -287,46 +286,43 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         # Ensure that the event is frozen, to make sure that the module is not tempted
         # to try to modify it. Any attempt to modify it at this point will invalidate
         # the hashes and signatures.
-        event.freeze()
-
-        allow = True
-        event_dict = None
-
-        for callback in self._check_event_allowed_callbacks:
-            try:
-                res, replacement_data = await delay_cancellation(
-                    callback(event, state_events)
-                )
-            except CancelledError:
-                raise
-            except SynapseError as e:
-                # FIXME: Being able to throw SynapseErrors is relied upon by
-                # some modules. PR https://github.com/matrix-org/synapse/pull/10386
-                # accidentally broke this ability.
-                # That said, we aren't keen on exposing this implementation detail
-                # to modules and we should one day have a proper way to do what
-                # is wanted.
-                # This module callback needs a rework so that hacks such as
-                # this one are not necessary.
-                raise e
-            except Exception:
-                raise ModuleFailedException(
-                    "Failed to run `check_event_allowed` module API callback"
-                )
-
-            # Return if the event shouldn't be allowed or if the module came up with a
-            # replacement dict for the event.
-            if res is False:
-                allow = False
-                break
-            elif isinstance(replacement_data, dict):
-                event_dict = replacement_data
-                break
-
-        # Unfreeze the event dict to avoid potential issues with frozen dicts further
-        # down the code. Pydantic for example is not happy with frozen dicts.
+        # The event dict is unfrozen after callbacks are called to avoid potential issues with
+        # frozen dicts further down the code. Pydantic for example is not happy with frozen dicts.
         # cf https://github.com/element-hq/synapse/issues/18117
-        event._dict = unfreeze(event._dict)
+        with freeze_event(event):
+            allow = True
+            event_dict = None
+
+            for callback in self._check_event_allowed_callbacks:
+                try:
+                    res, replacement_data = await delay_cancellation(
+                        callback(event, state_events)
+                    )
+                except CancelledError:
+                    raise
+                except SynapseError as e:
+                    # FIXME: Being able to throw SynapseErrors is relied upon by
+                    # some modules. PR https://github.com/matrix-org/synapse/pull/10386
+                    # accidentally broke this ability.
+                    # That said, we aren't keen on exposing this implementation detail
+                    # to modules and we should one day have a proper way to do what
+                    # is wanted.
+                    # This module callback needs a rework so that hacks such as
+                    # this one are not necessary.
+                    raise e
+                except Exception:
+                    raise ModuleFailedException(
+                        "Failed to run `check_event_allowed` module API callback"
+                    )
+
+                # Return if the event shouldn't be allowed or if the module came up with a
+                # replacement dict for the event.
+                if res is False:
+                    allow = False
+                    break
+                elif isinstance(replacement_data, dict):
+                    event_dict = replacement_data
+                    break
 
         return allow, event_dict
 

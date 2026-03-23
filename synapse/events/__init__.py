@@ -22,9 +22,11 @@
 
 import abc
 import collections.abc
+from types import TracebackType
 from typing import (
     TYPE_CHECKING,
     Any,
+    ContextManager,
     Generic,
     Iterable,
     Literal,
@@ -50,7 +52,7 @@ from synapse.types import (
 )
 from synapse.util.caches import intern_dict
 from synapse.util.duration import Duration
-from synapse.util.frozenutils import freeze
+from synapse.util.frozenutils import freeze, unfreeze
 
 if TYPE_CHECKING:
     from synapse.events.builder import EventBuilder
@@ -318,12 +320,6 @@ class EventBase(metaclass=abc.ABCMeta):
         """
         return [e for e, _ in self._dict["auth_events"]]
 
-    def freeze(self) -> None:
-        """'Freeze' the event dict, so it cannot be modified by accident"""
-
-        # this will be a no-op if the event dict is already frozen.
-        self._dict = freeze(self._dict)
-
     def sticky_duration(self) -> Duration | None:
         """
         Returns the effective sticky duration of this event, or None
@@ -577,6 +573,36 @@ class FrozenEventV4(FrozenEventV3):
         if self.type == EventTypes.Create and self.get_state_key() == "":
             return self._dict["auth_events"]  # should be []
         return [*self._dict["auth_events"], create_event_id]
+
+
+class FrozenEventContextManager(ContextManager[EventBase]):
+    """
+    Context manager that freezes the event dict while the event is being processed,
+    and unfreezes it when the context is exited.
+    """
+
+    def __init__(self, event: EventBase):
+        self.event = event
+
+    def __enter__(self) -> EventBase:
+        freeze(self.event._dict)
+        return self.event
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        unfreeze(self.event._dict)
+
+
+def freeze_event(event: EventBase) -> FrozenEventContextManager:
+    """
+    Context manager that freezes the event dict while the event is being processed,
+    and unfreezes it when the context is exited.
+    """
+    return FrozenEventContextManager(event)
 
 
 def _event_type_from_format_version(
