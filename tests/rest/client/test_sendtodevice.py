@@ -166,9 +166,11 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
         self.get_success(sender.send_device_messages([destination]))
 
-        json_cb = mock_send_transaction.call_args[0][1]
-        data = json_cb()
-        self.assertEqual(len(data["edus"]), 2)
+        number_of_edus_sent = 0
+        for call in mock_send_transaction.call_args_list:
+            number_of_edus_sent += len(call[0][1]()["edus"])
+
+        self.assertEqual(number_of_edus_sent, 2)
 
     def test_edu_small_messages_not_splitting(self) -> None:
         """
@@ -200,9 +202,11 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
         self.get_success(sender.send_device_messages([destination]))
 
-        json_cb = mock_send_transaction.call_args[0][1]
-        data = json_cb()
-        self.assertEqual(len(data["edus"]), 1)
+        number_of_edus_sent = 0
+        for call in mock_send_transaction.call_args_list:
+            number_of_edus_sent += len(call[0][1]()["edus"])
+
+        self.assertEqual(number_of_edus_sent, 1)
 
     def test_transaction_splitting(self) -> None:
         """Test that a bunch of to-device messages are split into multiple transactions if there are too many EDUs"""
@@ -218,9 +222,9 @@ class SendToDeviceTestCase(HomeserverTestCase):
         destination = "secondserver"
         messages = {}
 
-        nb_of_edus_to_send = MAX_EDUS_PER_TRANSACTION + 1
+        number_of_edus_to_send = MAX_EDUS_PER_TRANSACTION + 1
 
-        for i in range(nb_of_edus_to_send):
+        for i in range(number_of_edus_to_send):
             messages[f"@remote_user{i}:" + destination] = {
                 "device": {"foo": "a" * (MAX_EDU_SIZE - 1000)}
             }
@@ -238,11 +242,11 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # At least 2 transactions should be sent since we are over the EDU limit per transaction
         self.assertGreaterEqual(mock_send_transaction.call_count, 2)
 
-        first_call = mock_send_transaction.call_args_list[0][0][1]()
-        second_call = mock_send_transaction.call_args_list[1][0][1]()
-        self.assertEqual(
-            len(first_call["edus"]) + len(second_call["edus"]), nb_of_edus_to_send
-        )
+        number_of_edus_sent = 0
+        for call in mock_send_transaction.call_args_list:
+            number_of_edus_sent += len(call[0][1]()["edus"])
+
+        self.assertEqual(number_of_edus_sent, number_of_edus_to_send)
 
     @override_config({"rc_key_requests": {"per_second": 10, "burst_count": 2}})
     def test_local_room_key_request(self) -> None:
