@@ -13,7 +13,6 @@
 package synapse_tests
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,11 +22,11 @@ import (
 	"github.com/element-hq/synapse/tests/internal/dockerutil"
 	"github.com/matrix-org/complement"
 	"github.com/matrix-org/complement/client"
+	"github.com/matrix-org/complement/match"
 	"github.com/matrix-org/complement/must"
 )
 
 const OIDC_CONFIG string = `
-public_baseurl: "http://localhost:8008"
 oidc_providers:
  - idp_id: "test_provider"
    idp_name: "Test OIDC Provider"
@@ -45,7 +44,11 @@ oidc_providers:
 
 // Test that Synapse still starts up when configured with an OIDC provider that is unavailable.
 //
-// Instead of failing to start, Synapse will produce a 503 response on the
+// This is a regression test: Synapse previously would fail to start up
+// at all if the OIDC provider was down on startup.
+// https://github.com/element-hq/synapse/issues/8088
+//
+// Now instead of failing to start, Synapse will produce a 503 response on the
 // `/_matrix/client/v3/login/sso/redirect/oidc-test_provider` endpoint.
 func TestOIDCProviderUnavailable(t *testing.T) {
 	// Deploy a single homeserver
@@ -59,13 +62,11 @@ func TestOIDCProviderUnavailable(t *testing.T) {
 	)
 	must.NotError(t, "failed creating docker client", err)
 
-	containerID := deployment.ContainerID(t, "hs1")
-
 	// Configure the OIDC Provider by writing a config fragment
 	err = dockerutil.WriteFileIntoContainer(
 		t,
 		dc,
-		containerID,
+		deployment.ContainerID(t, "hs1"),
 		"/conf/homeserver.d/oidc_provider.yaml",
 		[]byte(OIDC_CONFIG),
 	)
@@ -73,27 +74,21 @@ func TestOIDCProviderUnavailable(t *testing.T) {
 		t.Fatalf("Failed to write updated config to container: %v", err)
 	}
 
-	// Wait for the homeserver to be ready again
-	unauthedClient := deployment.UnauthenticatedClient(t, "hs1")
-
-	res := unauthedClient.Do(t, "GET", []string{"_matrix", "client", "versions"})
-	if res != nil && res.StatusCode == http.StatusOK {
-		res.Body.Close()
-	}
-
 	// Restart the homeserver to apply the new config
 	deployment.StopServer(t, "hs1")
 	// Careful: port number changes here
 	deployment.StartServer(t, "hs1")
 	// Must get after the restart so the port number is correct
-	unauthedClient = deployment.UnauthenticatedClient(t, "hs1")
+	unauthedClient := deployment.UnauthenticatedClient(t, "hs1")
 
 	// Test that trying to log in with an OIDC provider that is down
-	// causes an HTML error page to be shown to the user instead of the redirect.
+	// causes an HTML error page to be shown to the user.
+	// (This replaces the redirect that would happen if the provider was
+	// up.)
 	//
 	// More importantly, implicitly tests that Synapse can start up
 	// and answer requests even though an OIDC provider is down.
-	t.Run("login_sso_redirect_shows_html_error", func(t *testing.T) {
+	t.Run("/login/sso/redirect shows HTML error", func(t *testing.T) {
 		t.Parallel()
 
 		// Build a request to the /redirect/ endpoint, that would normally be navigated to
@@ -104,20 +99,16 @@ func TestOIDCProviderUnavailable(t *testing.T) {
 			client.WithQueries(queryParams),
 		)
 
-		// Should get a 503
-		if res.StatusCode != http.StatusServiceUnavailable {
-			t.Fatalf("Expected 503 Service Unavailable, got %d.", res.StatusCode)
-		}
+		body := must.MatchResponse(t, res, match.HTTPResponse{
+			// Should get a 503
+			StatusCode: http.StatusServiceUnavailable,
 
-		// Should get a HTML page
-		if res.Header.Get("Content-Type") != "text/html; charset=utf-8" {
-			t.Fatalf("Expected Content-Type of 'text/html; charset=utf-8', got %s.", res.Header.Get("Content-Type"))
-		}
+			Headers: map[string]string{
+				// Should get an HTML page explaining the problem to the user
+				"Content-Type": "text/html; charset=utf-8",
+			},
+		})
 
-		body, err := io.ReadAll(res.Body)
-		if err != nil {
-			t.Fatalf("Couldn't read body: %s", err)
-		}
 		bodyText := string(body)
 
 		// The HTML page contains phrases from the template we expect
