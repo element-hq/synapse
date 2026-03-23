@@ -702,6 +702,7 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
         oidc = hs.get_oidc_handler()
         # Preload the provider metadata.
         # This will spawn fire-and-forget background processes.
+        # Loading the provider metadata also ensures the provider config is valid.
         oidc.preload_metadata()
 
     # Load the certificate from disk.
