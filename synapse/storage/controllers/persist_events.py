@@ -305,6 +305,12 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
                     self._event_persist_queues[room_id] = remaining_queue
                 self._currently_persisting_rooms.discard(room_id)
 
+                # If new items were added while we were running, kick off
+                # another processing round. Without this, items enqueued
+                # while we hold _currently_persisting_rooms would be orphaned.
+                if room_id in self._event_persist_queues:
+                    self._handle_queue(room_id)
+
         # set handle_queue_loop off in the background
         self.hs.run_as_background_process("persist_events", handle_queue_loop)
 

@@ -21,18 +21,18 @@ import os.path
 import subprocess
 
 from incremental import Version
-try:
-    from zope.interface import implementer
-except ImportError:
-    pass
-
-try:
-    import twisted
-except ImportError:
-    pass
 from OpenSSL import SSL
 from OpenSSL.SSL import Connection
+
+# The TLS test utilities (TestServerTLSConnectionFactory, wrap_server_factory_for_tls,
+# get_test_https_policy) require Twisted's TLS infrastructure. They are only used
+# by federation/HTTP-level protocol tests, not by REST API tests.
+# Guard everything so that importing tests.http doesn't fail without Twisted.
+_HAS_TWISTED_TLS = False
 try:
+    import twisted
+    from incremental import Version
+    from zope.interface import implementer
     from twisted.internet.address import IPv4Address
     from twisted.internet.interfaces import (
         IOpenSSLServerConnectionCreator,
@@ -43,22 +43,20 @@ try:
     from twisted.protocols.tls import TLSMemoryBIOFactory, TLSMemoryBIOProtocol
     from twisted.web.client import BrowserLikePolicyForHTTPS  # noqa: F401
     from twisted.web.iweb import IPolicyForHTTPS  # noqa: F401
+    _HAS_TWISTED_TLS = True
 except ImportError:
     pass
 
 
-def get_test_https_policy() -> BrowserLikePolicyForHTTPS:
-    """Get a test IPolicyForHTTPS which trusts the test CA cert
-
-    Returns:
-        IPolicyForHTTPS
-    """
-    ca_file = get_test_ca_cert_file()
-    with open(ca_file) as stream:
-        content = stream.read()
-    cert = Certificate.loadPEM(content)
-    trust_root = trustRootFromCertificates([cert])
-    return BrowserLikePolicyForHTTPS(trustRoot=trust_root)
+if _HAS_TWISTED_TLS:
+    def get_test_https_policy() -> "BrowserLikePolicyForHTTPS":
+        """Get a test IPolicyForHTTPS which trusts the test CA cert."""
+        ca_file = get_test_ca_cert_file()
+        with open(ca_file) as stream:
+            content = stream.read()
+        cert = Certificate.loadPEM(content)
+        trust_root = trustRootFromCertificates([cert])
+        return BrowserLikePolicyForHTTPS(trustRoot=trust_root)
 
 
 def get_test_ca_cert_file() -> str:
@@ -154,52 +152,41 @@ def create_test_cert_file(sanlist: list[bytes]) -> str:
     return cert_filename
 
 
-@implementer(IOpenSSLServerConnectionCreator)
-class TestServerTLSConnectionFactory:
-    """An SSL connection creator which returns connections which present a certificate
-    signed by our test CA."""
+if _HAS_TWISTED_TLS:
+    @implementer(IOpenSSLServerConnectionCreator)
+    class TestServerTLSConnectionFactory:
+        """An SSL connection creator which returns connections which present a certificate
+        signed by our test CA."""
 
-    def __init__(self, sanlist: list[bytes]):
-        """
-        Args:
-            sanlist: a list of subjectAltName values for the cert
-        """
-        self._cert_file = create_test_cert_file(sanlist)
+        def __init__(self, sanlist: list[bytes]):
+            self._cert_file = create_test_cert_file(sanlist)
 
-    def serverConnectionForTLS(self, tlsProtocol: TLSMemoryBIOProtocol) -> Connection:
-        ctx = SSL.Context(SSL.SSLv23_METHOD)
-        ctx.use_certificate_file(self._cert_file)
-        ctx.use_privatekey_file(get_test_key_file())
-        return Connection(ctx, None)
+        def serverConnectionForTLS(self, tlsProtocol: "TLSMemoryBIOProtocol") -> Connection:
+            ctx = SSL.Context(SSL.SSLv23_METHOD)
+            ctx.use_certificate_file(self._cert_file)
+            ctx.use_privatekey_file(get_test_key_file())
+            return Connection(ctx, None)
 
+    def wrap_server_factory_for_tls(
+        factory: "IProtocolFactory", clock: "IReactorTime", sanlist: list[bytes]
+    ) -> "TLSMemoryBIOFactory":
+        """Wrap an existing Protocol Factory with a test TLSMemoryBIOFactory."""
+        connection_creator = TestServerTLSConnectionFactory(sanlist=sanlist)
+        if twisted.version <= Version("Twisted", 23, 8, 0):
+            return TLSMemoryBIOFactory(
+                connection_creator, isClient=False, wrappedFactory=factory
+            )
+        else:
+            return TLSMemoryBIOFactory(
+                connection_creator, isClient=False, wrappedFactory=factory, clock=clock
+            )
 
-def wrap_server_factory_for_tls(
-    factory: IProtocolFactory, clock: IReactorTime, sanlist: list[bytes]
-) -> TLSMemoryBIOFactory:
-    """Wrap an existing Protocol Factory with a test TLSMemoryBIOFactory
-
-    The resultant factory will create a TLS server which presents a certificate
-    signed by our test CA, valid for the domains in `sanlist`
-
-    Args:
-        factory: protocol factory to wrap
-        sanlist: list of domains the cert should be valid for
-
-    Returns:
-        interfaces.IProtocolFactory
-    """
-    connection_creator = TestServerTLSConnectionFactory(sanlist=sanlist)
-    # Twisted > 23.8.0 has a different API that accepts a clock.
-    if twisted.version <= Version("Twisted", 23, 8, 0):
-        return TLSMemoryBIOFactory(
-            connection_creator, isClient=False, wrappedFactory=factory
-        )
-    else:
-        return TLSMemoryBIOFactory(
-            connection_creator, isClient=False, wrappedFactory=factory, clock=clock
-        )
-
-
-# A dummy address, useful for tests that use FakeTransport and don't care about where
-# packets are going to/coming from.
-dummy_address = IPv4Address("TCP", "127.0.0.1", 80)
+    # A dummy address, useful for tests that use FakeTransport
+    dummy_address = IPv4Address("TCP", "127.0.0.1", 80)
+else:
+    # Dummy address that doesn't require Twisted
+    class _DummyAddress:
+        type = "TCP"
+        host = "127.0.0.1"
+        port = 80
+    dummy_address = _DummyAddress()  # type: ignore[assignment]

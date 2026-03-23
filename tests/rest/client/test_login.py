@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import asyncio
 import time
 import urllib.parse
 from typing import (
@@ -183,8 +184,8 @@ class LoginRestServletTestCase(unittest.HomeserverTestCase):
         register.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.hs = self.setup_test_homeserver()
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.hs = await self.setup_test_homeserver()
         self.hs.config.registration.enable_registration = True
         self.hs.config.registration.registrations_require_3pid = []
         self.hs.config.registration.auto_join_rooms = []
@@ -340,11 +341,11 @@ class LoginRestServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, msg=channel.result)
 
     @override_config({"session_lifetime": "24h"})
-    def test_soft_logout(self) -> None:
-        self.register_user("kermit", "monkey")
+    async def test_soft_logout(self) -> None:
+        await self.register_user("kermit", "monkey")
 
         # we shouldn't be able to make requests without an access token
-        channel = self.make_request(b"GET", TEST_URL)
+        channel = await self.make_request(b"GET", TEST_URL)
         self.assertEqual(channel.code, 401, msg=channel.result)
         self.assertEqual(channel.json_body["errcode"], "M_MISSING_TOKEN")
 
@@ -354,21 +355,22 @@ class LoginRestServletTestCase(unittest.HomeserverTestCase):
             "identifier": {"type": "m.id.user", "user": "kermit"},
             "password": "monkey",
         }
-        channel = self.make_request(b"POST", LOGIN_URL, params)
+        channel = await self.make_request(b"POST", LOGIN_URL, params)
 
         self.assertEqual(channel.code, 200, channel.result)
         access_token = channel.json_body["access_token"]
         device_id = channel.json_body["device_id"]
 
         # we should now be able to make requests with the access token
-        channel = self.make_request(b"GET", TEST_URL, access_token=access_token)
+        channel = await self.make_request(b"GET", TEST_URL, access_token=access_token)
         self.assertEqual(channel.code, 200, channel.result)
 
-        # time passes
-        self.reactor.advance(24 * 3600)
+        # time passes — advance slightly past the session lifetime
+        # so the token is expired (valid_until_ms < clock.time_msec())
+        self.reactor.advance(24 * 3600 + 1)
 
         # ... and we should be soft-logouted
-        channel = self.make_request(b"GET", TEST_URL, access_token=access_token)
+        channel = await self.make_request(b"GET", TEST_URL, access_token=access_token)
         self.assertEqual(channel.code, 401, channel.result)
         self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
         self.assertEqual(channel.json_body["soft_logout"], True)
@@ -378,28 +380,28 @@ class LoginRestServletTestCase(unittest.HomeserverTestCase):
         #
 
         # we now log in as a different device
-        access_token_2 = self.login("kermit", "monkey")
+        access_token_2 = await self.login("kermit", "monkey")
 
         # more requests with the expired token should still return a soft-logout
         self.reactor.advance(3600)
-        channel = self.make_request(b"GET", TEST_URL, access_token=access_token)
+        channel = await self.make_request(b"GET", TEST_URL, access_token=access_token)
         self.assertEqual(channel.code, 401, channel.result)
         self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
         self.assertEqual(channel.json_body["soft_logout"], True)
 
         # ... but if we delete that device, it will be a proper logout
-        self._delete_device(access_token_2, "kermit", "monkey", device_id)
+        await self._delete_device(access_token_2, "kermit", "monkey", device_id)
 
-        channel = self.make_request(b"GET", TEST_URL, access_token=access_token)
+        channel = await self.make_request(b"GET", TEST_URL, access_token=access_token)
         self.assertEqual(channel.code, 401, channel.result)
         self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
         self.assertEqual(channel.json_body["soft_logout"], False)
 
-    def _delete_device(
+    async def _delete_device(
         self, access_token: str, user_id: str, password: str, device_id: str
     ) -> None:
         """Perform the UI-Auth to delete a device"""
-        channel = self.make_request(
+        channel = await self.make_request(
             b"DELETE", "devices/" + device_id, access_token=access_token
         )
         self.assertEqual(channel.code, 401, channel.result)
@@ -419,7 +421,7 @@ class LoginRestServletTestCase(unittest.HomeserverTestCase):
             "session": channel.json_body["session"],
         }
 
-        channel = self.make_request(
+        channel = await self.make_request(
             b"DELETE",
             "devices/" + device_id,
             access_token=access_token,

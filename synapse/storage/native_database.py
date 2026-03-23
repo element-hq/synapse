@@ -84,12 +84,22 @@ class NativeConnectionPool:
         self._thread_local = threading.local()
 
         # For in-memory SQLite or when an initial connection is provided,
-        # use a shared connection (not thread-local)
+        # use a shared connection (not thread-local).
+        # When using a shared connection, limit to 1 worker to avoid
+        # concurrent access deadlocks on the same SQLite connection.
         self._shared_conn: Connection | None = initial_connection
         if db_path == ":memory:" or db_path == "":
             self._use_shared_conn = True
         else:
             self._use_shared_conn = initial_connection is not None
+
+        if self._use_shared_conn and max_workers > 1:
+            # Recreate executor with single worker
+            self._executor.shutdown(wait=False)
+            self._executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix=f"synapse-db-{db_config.name}",
+            )
 
         self._closed = False
 

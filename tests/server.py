@@ -338,36 +338,29 @@ class FakeChannel:
     def transport(self) -> "FakeChannel":
         return self
 
-    def await_result(self, timeout_ms: int = 1000) -> None:
+    def await_result(self, timeout_ms: int = 5000) -> None:
         """
-        Wait until the request is finished.
+        Wait until the request is finished by driving the asyncio event loop.
         """
         import asyncio
         import time as _time
-
-        deadline = _time.monotonic() + timeout_ms / 1000.0
-        self._reactor.run()
+        from tests import pump_loop
 
         loop = asyncio.get_event_loop()
+        deadline = _time.monotonic() + timeout_ms / 1000.0
 
         while not self.is_finished():
             if _time.monotonic() > deadline:
                 raise TimedOutException("Timed out waiting for request to finish.")
 
-            # Advance fake time by a small amount per iteration.
-            # This fires pending sleeps (e.g., ratelimit pauses) while
-            # keeping time advancement predictable.  The old Twisted
-            # MemoryReactorClock.advance(0.1) did the same.
+            # Advance fake time OUTSIDE the event loop drive
             self._reactor.advance(0.1)
-            # Drive asyncio event loop for DB operations, task completions, etc.
-            if not loop.is_closed():
-                async def _drain() -> None:
-                    """Run multiple event loop ticks to drain pending work."""
-                    for _ in range(20):
-                        await asyncio.sleep(0.001)
-                        if self._clock is not None:
-                            self._clock.advance(0.0)
-                loop.run_until_complete(_drain())
+
+            # Drive the event loop briefly
+            try:
+                pump_loop(loop, timeout=0.05, tick=0.001)
+            except TimeoutError:
+                pass  # outer loop will retry
 
     def extract_cookies(self, cookies: MutableMapping[str, str]) -> None:
         """Process the contents of any Set-Cookie headers in the response
@@ -414,7 +407,7 @@ class FakeSite:
         return self._resource
 
 
-def make_request(
+async def make_request(
     reactor: MemoryReactorClock,
     site: Site | FakeSite,
     method: bytes | str,
@@ -544,8 +537,11 @@ def make_request(
     if root_resource is not None:
         req.dispatch(root_resource)
 
-    if await_result:
-        channel.await_result()
+    if await_result and req.render_deferred is not None:
+        # Await the handler task directly — the event loop drives
+        # all concurrent tasks (DB operations, background processes)
+        # naturally without needing nest_asyncio.
+        await req.render_deferred
 
     return channel
 

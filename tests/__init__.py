@@ -18,13 +18,3 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
-# Set up an asyncio event loop for tests.
-import asyncio as _asyncio
-import nest_asyncio as _nest_asyncio
-
-_test_asyncio_loop = _asyncio.new_event_loop()
-_asyncio.set_event_loop(_test_asyncio_loop)
-
-# Allow nested event loop calls (run_until_complete inside run_until_complete)
-_nest_asyncio.apply(_test_asyncio_loop)

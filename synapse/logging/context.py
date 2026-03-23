@@ -101,8 +101,20 @@ except Exception:
 
 
 # a hook which can be set during testing to assert that we aren't abusing logcontexts.
+_IN_LOGCONTEXT_ERROR = False
+
+
 def logcontext_error(msg: str) -> None:
-    logger.warning(msg)
+    # Guard against re-entrancy: logging can trigger context switches,
+    # which call start()/stop(), which call logcontext_error() again.
+    global _IN_LOGCONTEXT_ERROR
+    if _IN_LOGCONTEXT_ERROR:
+        return
+    _IN_LOGCONTEXT_ERROR = True
+    try:
+        logger.warning(msg)
+    finally:
+        _IN_LOGCONTEXT_ERROR = False
 
 
 # get an id for the current thread.
