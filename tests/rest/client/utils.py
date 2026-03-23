@@ -81,7 +81,7 @@ class RestHelper:
     auth_user_id: str | None
 
     @overload
-    def create_room_as(
+    async def create_room_as(
         self,
         room_creator: str | None = ...,
         is_public: bool | None = ...,
@@ -93,7 +93,7 @@ class RestHelper:
     ) -> str: ...
 
     @overload
-    def create_room_as(
+    async def create_room_as(
         self,
         room_creator: str | None = ...,
         is_public: bool | None = ...,
@@ -104,7 +104,7 @@ class RestHelper:
         custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = ...,
     ) -> str | None: ...
 
-    def create_room_as(
+    async def create_room_as(
         self,
         room_creator: str | None = None,
         is_public: bool | None = True,
@@ -149,7 +149,7 @@ class RestHelper:
         if tok:
             path = path + "?access_token=%s" % tok
 
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "POST",
@@ -166,7 +166,7 @@ class RestHelper:
         else:
             return None
 
-    def invite(
+    async def invite(
         self,
         room: str,
         src: str | None = None,
@@ -175,7 +175,7 @@ class RestHelper:
         tok: str | None = None,
         extra_data: dict | None = None,
     ) -> JsonDict:
-        return self.change_membership(
+        return await self.change_membership(
             room=room,
             src=src,
             targ=targ,
@@ -185,7 +185,7 @@ class RestHelper:
             extra_data=extra_data,
         )
 
-    def join(
+    async def join(
         self,
         room: str,
         user: str,
@@ -195,7 +195,7 @@ class RestHelper:
         expect_errcode: Codes | None = None,
         expect_additional_fields: dict | None = None,
     ) -> JsonDict:
-        return self.change_membership(
+        return await self.change_membership(
             room=room,
             src=user,
             targ=user,
@@ -207,7 +207,7 @@ class RestHelper:
             expect_additional_fields=expect_additional_fields,
         )
 
-    def knock(
+    async def knock(
         self,
         room: str | None = None,
         user: str | None = None,
@@ -225,7 +225,7 @@ class RestHelper:
         if reason:
             data["reason"] = reason
 
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "POST",
@@ -241,14 +241,14 @@ class RestHelper:
 
         self.auth_user_id = temp_id
 
-    def leave(
+    async def leave(
         self,
         room: str,
         user: str | None = None,
         expect_code: int = HTTPStatus.OK,
         tok: str | None = None,
     ) -> JsonDict:
-        return self.change_membership(
+        return await self.change_membership(
             room=room,
             src=user,
             targ=user,
@@ -257,7 +257,7 @@ class RestHelper:
             expect_code=expect_code,
         )
 
-    def ban(
+    async def ban(
         self,
         room: str,
         src: str,
@@ -266,7 +266,7 @@ class RestHelper:
         tok: str | None = None,
     ) -> JsonDict:
         """A convenience helper: `change_membership` with `membership` preset to "ban"."""
-        return self.change_membership(
+        return await self.change_membership(
             room=room,
             src=src,
             targ=targ,
@@ -275,7 +275,7 @@ class RestHelper:
             expect_code=expect_code,
         )
 
-    def change_membership(
+    async def change_membership(
         self,
         room: str,
         src: str | None,
@@ -325,7 +325,7 @@ class RestHelper:
         data = {"membership": membership}
         data.update(extra_data or {})
 
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "PUT",
@@ -372,7 +372,7 @@ class RestHelper:
         self.auth_user_id = temp_id
         return channel.json_body
 
-    def send(
+    async def send(
         self,
         room_id: str,
         body: str | None = None,
@@ -387,7 +387,7 @@ class RestHelper:
 
         content = {"msgtype": "m.text", "body": body}
 
-        return self.send_event(
+        return await self.send_event(
             room_id,
             type,
             content,
@@ -397,7 +397,7 @@ class RestHelper:
             custom_headers=custom_headers,
         )
 
-    def send_messages(
+    async def send_messages(
         self,
         room_id: str,
         num_events: int,
@@ -413,7 +413,7 @@ class RestHelper:
         event_ids = []
 
         for event_index in range(num_events):
-            response = self.send_event(
+            response = await self.send_event(
                 room_id,
                 EventTypes.Message,
                 content_fn(event_index),
@@ -423,7 +423,7 @@ class RestHelper:
 
         return event_ids
 
-    def send_event(
+    async def send_event(
         self,
         room_id: str,
         type: str,
@@ -440,7 +440,7 @@ class RestHelper:
         if tok:
             path = path + "?access_token=%s" % tok
 
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "PUT",
@@ -457,7 +457,7 @@ class RestHelper:
 
         return channel.json_body
 
-    def send_sticky_event(
+    async def send_sticky_event(
         self,
         room_id: str,
         type: str,
@@ -480,7 +480,7 @@ class RestHelper:
         if tok:
             path = path + f"&access_token={tok}"
 
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "PUT",
@@ -495,7 +495,7 @@ class RestHelper:
 
         return channel.json_body
 
-    def get_event(
+    async def get_event(
         self,
         room_id: str,
         event_id: str,
@@ -517,7 +517,7 @@ class RestHelper:
         if tok:
             path = path + f"?access_token={tok}"
 
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "GET",
@@ -532,7 +532,7 @@ class RestHelper:
 
         return channel.json_body
 
-    def _read_write_state(
+    async def _read_write_state(
         self,
         room_id: str,
         event_type: str,
@@ -573,7 +573,7 @@ class RestHelper:
         if body is not None:
             content = json.dumps(body).encode("utf8")
 
-        channel = make_request(self.reactor, self.site, method, path, content)
+        channel = await make_request(self.reactor, self.site, method, path, content)
 
         assert channel.code == expect_code, "Expected: %d, got: %d, resp: %r" % (
             expect_code,
@@ -583,7 +583,7 @@ class RestHelper:
 
         return channel.json_body
 
-    def get_state(
+    async def get_state(
         self,
         room_id: str,
         event_type: str,
@@ -606,11 +606,11 @@ class RestHelper:
         Raises:
             AssertionError: if expect_code doesn't match the HTTP code we received
         """
-        return self._read_write_state(
+        return await self._read_write_state(
             room_id, event_type, None, tok, expect_code, state_key, method="GET"
         )
 
-    def send_state(
+    async def send_state(
         self,
         room_id: str,
         event_type: str,
@@ -635,11 +635,11 @@ class RestHelper:
         Raises:
             AssertionError: if expect_code doesn't match the HTTP code we received
         """
-        return self._read_write_state(
+        return await self._read_write_state(
             room_id, event_type, body, tok, expect_code, state_key, method="PUT"
         )
 
-    def upload_media(
+    async def upload_media(
         self,
         image_data: bytes,
         tok: str,
@@ -655,7 +655,7 @@ class RestHelper:
             expect_code: The return code to expect from attempting to upload the media
         """
         path = "/_matrix/media/r0/upload?filename=%s" % (filename,)
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "POST",
@@ -672,7 +672,7 @@ class RestHelper:
 
         return channel.json_body
 
-    def whoami(
+    async def whoami(
         self,
         access_token: str,
         expect_code: Literal[HTTPStatus.OK, HTTPStatus.UNAUTHORIZED] = HTTPStatus.OK,
@@ -684,7 +684,7 @@ class RestHelper:
             access_token: The user token to use during the request
             expect_code: The return code to expect from attempting the whoami request
         """
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "GET",
@@ -714,7 +714,7 @@ class RestHelper:
             issuer=issuer,
         )
 
-    def login_via_oidc(
+    async def login_via_oidc(
         self,
         fake_server: FakeOidcServer,
         remote_user_id: str,
@@ -735,7 +735,7 @@ class RestHelper:
         """
         client_redirect_url = "https://x"
         userinfo = {"sub": remote_user_id}
-        channel, grant = self.auth_via_oidc(
+        channel, grant = await self.auth_via_oidc(
             fake_server,
             userinfo,
             client_redirect_url,
@@ -754,9 +754,9 @@ class RestHelper:
         assert m, channel.text_body
         login_token = m.group(1)
 
-        return self.login_via_token(login_token, expected_status), grant
+        return await self.login_via_token(login_token, expected_status), grant
 
-    def login_via_token(
+    async def login_via_token(
         self,
         login_token: str,
         expected_status: int = 200,
@@ -774,7 +774,7 @@ class RestHelper:
         the normal places.
         """
 
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "POST",
@@ -786,7 +786,7 @@ class RestHelper:
         )
         return channel.json_body
 
-    def auth_via_oidc(
+    async def auth_via_oidc(
         self,
         fake_server: FakeOidcServer,
         user_info_dict: JsonDict,
@@ -834,10 +834,10 @@ class RestHelper:
             if ui_auth_session_id:
                 # can't set the client redirect url for UI Auth
                 assert client_redirect_url is None
-                oauth_uri = self.initiate_sso_ui_auth(ui_auth_session_id, cookies)
+                oauth_uri = await self.initiate_sso_ui_auth(ui_auth_session_id, cookies)
             else:
                 # otherwise, hit the login redirect endpoint
-                oauth_uri = self.initiate_sso_login(
+                oauth_uri = await self.initiate_sso_login(
                     client_redirect_url, cookies, idp_id=idp_id
                 )
 
@@ -850,11 +850,11 @@ class RestHelper:
         assert oauth_uri_path == fake_server.authorization_endpoint, (
             "unexpected SSO URI " + oauth_uri_path
         )
-        return self.complete_oidc_auth(
+        return await self.complete_oidc_auth(
             fake_server, oauth_uri, cookies, user_info_dict, with_sid=with_sid
         )
 
-    def complete_oidc_auth(
+    async def complete_oidc_auth(
         self,
         fake_serer: FakeOidcServer,
         oauth_uri: str,
@@ -904,7 +904,7 @@ class RestHelper:
 
         with fake_serer.patch_homeserver(hs=self.hs):
             # now hit the callback URI with the right params and a made-up code
-            channel = make_request(
+            channel = await make_request(
                 self.reactor,
                 self.site,
                 "GET",
@@ -915,7 +915,7 @@ class RestHelper:
             )
         return channel, grant
 
-    def initiate_sso_login(
+    async def initiate_sso_login(
         self,
         client_redirect_url: str | None,
         cookies: MutableMapping[str, str],
@@ -948,7 +948,7 @@ class RestHelper:
         # hit the redirect url (which should redirect back to the redirect url. This
         # is the easiest way of figuring out what the Host header ought to be set to
         # to keep Synapse happy.
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "GET",
@@ -967,7 +967,7 @@ class RestHelper:
         location = get_location(channel)
         parts = urllib.parse.urlsplit(location)
         next_uri = urllib.parse.urlunsplit(("", "") + parts[2:])
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             "GET",
@@ -981,7 +981,7 @@ class RestHelper:
         channel.extract_cookies(cookies)
         return get_location(channel)
 
-    def initiate_sso_ui_auth(
+    async def initiate_sso_ui_auth(
         self, ui_auth_session_id: str, cookies: MutableMapping[str, str]
     ) -> str:
         """Make a request to the ui-auth-via-sso endpoint, and return the target
@@ -1001,7 +1001,7 @@ class RestHelper:
             + urllib.parse.urlencode({"session": ui_auth_session_id})
         )
         # hit the redirect url (which will issue a cookie and state)
-        channel = make_request(self.reactor, self.site, "GET", sso_redirect_endpoint)
+        channel = await make_request(self.reactor, self.site, "GET", sso_redirect_endpoint)
         # that should serve a confirmation page
         assert channel.code == HTTPStatus.OK, channel.text_body
         channel.extract_cookies(cookies)
@@ -1014,9 +1014,9 @@ class RestHelper:
         oauth_uri = p.links[0]
         return oauth_uri
 
-    def send_read_receipt(self, room_id: str, event_id: str, *, tok: str) -> None:
+    async def send_read_receipt(self, room_id: str, event_id: str, *, tok: str) -> None:
         """Send a read receipt into the room at the given event"""
-        channel = make_request(
+        channel = await make_request(
             self.reactor,
             self.site,
             method="POST",

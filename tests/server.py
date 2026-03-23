@@ -538,10 +538,26 @@ async def make_request(
         req.dispatch(root_resource)
 
     if await_result and req.render_deferred is not None:
-        # Await the handler task directly — the event loop drives
-        # all concurrent tasks (DB operations, background processes)
-        # naturally without needing nest_asyncio.
-        await req.render_deferred
+        import asyncio
+
+        # Advance fake time in a background task so that any
+        # clock.sleep() calls in the handler (e.g., ratelimit pauses)
+        # get resolved.  We advance by 0.1s per tick.
+        async def _advance_time() -> None:
+            while not req.render_deferred.done():
+                if clock is not None:
+                    clock.advance(0.1)
+                await asyncio.sleep(0.01)
+
+        advancer = asyncio.ensure_future(_advance_time())
+        try:
+            await req.render_deferred
+        finally:
+            advancer.cancel()
+            try:
+                await advancer
+            except asyncio.CancelledError:
+                pass
 
     return channel
 
