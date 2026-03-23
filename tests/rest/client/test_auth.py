@@ -58,9 +58,9 @@ class DummyRecaptchaChecker(UserInteractiveAuthChecker):
     def is_enabled(self) -> bool:
         return True
 
-    def check_auth(self, authdict: dict, clientip: str) -> Any:
+    async def check_auth(self, authdict: dict, clientip: str) -> bool:
         self.recaptcha_attempts.append((authdict, clientip))
-        return succeed(True)
+        return True
 
 
 class FallbackAuthTests(unittest.HomeserverTestCase):
