@@ -26,7 +26,7 @@ import (
 	"github.com/matrix-org/complement/must"
 )
 
-const OIDC_CONFIG string = `
+const OIDC_HOMESERVER_CONFIG string = `
 oidc_providers:
  - idp_id: "test_provider"
    idp_name: "Test OIDC Provider"
@@ -68,7 +68,7 @@ func TestOIDCProviderUnavailable(t *testing.T) {
 		dc,
 		deployment.ContainerID(t, "hs1"),
 		"/conf/homeserver.d/oidc_provider.yaml",
-		[]byte(OIDC_CONFIG),
+		[]byte(OIDC_HOMESERVER_CONFIG),
 	)
 	if err != nil {
 		t.Fatalf("Failed to write updated config to container: %v", err)
