@@ -744,7 +744,8 @@ jobs:
       - name: Formatted sanity check Complement test logs
         # Always run this step if we attempted to run the Complement tests.
         if: always() && steps.run_sanity_check_complement_image_test.outcome != 'skipped'
-        # We do not hide successful tests in `gotestfmt` here as the list of sanity check tests is so short.
+        # We do not hide successful tests in `gotestfmt` here as the list of sanity
+        # check tests is so short. Feel free to change this when we get more tests.
         # Note that the `-hide` argument is interpreted by our custom `.ci/complement_package.gotpl` template.
         run: cat /tmp/gotest-sanity-check-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
 
