@@ -701,8 +701,8 @@ class HomeserverTestCase(TestCase):
 
         To demystify, this function, it simply advances time by the number of seconds
         specified (defaults to `0`, for some reason we also multiply by 100, so
-        `pump(1)` is 100 seconds) and run whatever tasks are queued/pending and now
-        ready to run because enough time as passed.
+        `pump(1)` is 100 seconds in 1 second increments) and run whatever tasks are
+        queued/pending and now ready to run because enough time as passed.
 
         It doesn't have anything to do with making the reactor run or magic like that.
 
@@ -712,6 +712,9 @@ class HomeserverTestCase(TestCase):
         callback to be ready to run now. Same for `clock.sleep(...)` ,
         `clock.looping_call(...)`, and whatever other clock utilities for scheduling
         tasks.
+
+        XXX: If you're having to call this function, please call out in comments, which
+        scheduled thing you're aiming to trigger.
         """
         self.reactor.pump([by] * 100)
 
