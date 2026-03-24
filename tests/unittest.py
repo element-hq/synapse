@@ -704,8 +704,8 @@ class HomeserverTestCase(TestCase):
 
         To demystify this function, it simply advances time by the number of seconds
         specified (defaults to `0`, we also multiply by 100, so `pump(1)` is 100 seconds
-        in 1 second steps/increments) which allows any queued/pending tasks to run
-        because enough time has passed.
+        in 1 second steps/increments) whilst calling any pending callbacks, allowing any
+        queued/pending tasks to run because enough time has passed.
 
         So for example, if you have some Synapse code that does
         `clock.call_later(Duration(seconds=2), callback)`, then calling
