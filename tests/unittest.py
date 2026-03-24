@@ -699,7 +699,7 @@ class HomeserverTestCase(TestCase):
         """
         Pump the reactor enough that scheduled Deferreds will fire.
 
-        To demystify, this function, it simply advances time by the number of seconds
+        To demystify, this function simply advances time by the number of seconds
         specified (defaults to `0`, for some reason we also multiply by 100, so
         `pump(1)` is 100 seconds in 1 second increments) and run whatever tasks are
         queued/pending and now ready to run because enough time as passed.
