@@ -2717,6 +2717,13 @@ class PublicRoomsRoomTypeFilterTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )
 
+        # Let the stats handler process room creation events so that
+        # room_stats_state/room_stats_current are populated (needed for
+        # the public rooms query's INNER JOIN).
+        import asyncio
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+
     def default_config(self) -> JsonDict:
         config = default_config("test")
         config["room_list_publication_rules"] = [{"action": "allow"}]
