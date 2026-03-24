@@ -89,8 +89,6 @@ func TestOIDCProviderUnavailable(t *testing.T) {
 	// More importantly, implicitly tests that Synapse can start up
 	// and answer requests even though an OIDC provider is down.
 	t.Run("/login/sso/redirect shows HTML error", func(t *testing.T) {
-		t.Parallel()
-
 		// Build a request to the /redirect/ endpoint, that would normally be navigated to
 		// by the user's browser in order to start the login flow.
 		queryParams := url.Values{}
