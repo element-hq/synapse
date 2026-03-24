@@ -697,7 +697,21 @@ class HomeserverTestCase(TestCase):
 
     def pump(self, by: float = 0.0) -> None:
         """
-        Pump the reactor enough that Deferreds will fire.
+        Pump the reactor enough that scheduled Deferreds will fire.
+
+        To demystify, this function, it simply advances time by the number of seconds
+        specified (defaults to `0`, for some reason we also multiply by 100, so
+        `pump(1)` is 100 seconds) and run whatever tasks are queued/pending and now
+        ready to run because enough time as passed.
+
+        It doesn't have anything to do with making the reactor run or magic like that.
+
+        So for example, if you have some Synapse code that does
+        `clock.call_later(Duration(seconds=2), callback)`, then calling
+        `self.pump(0.02)` will advance time by 2 seconds, which is enough for that
+        callback to be ready to run now. Same for `clock.sleep(...)` ,
+        `clock.looping_call(...)`, and whatever other clock utilities for scheduling
+        tasks.
         """
         self.reactor.pump([by] * 100)
 
