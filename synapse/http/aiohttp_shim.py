@@ -501,16 +501,21 @@ class SynapseRequest:
         obj.method = method
         obj.uri = uri  # full URI including query string
 
-        # Split URI into path (no query) and query args
+        # Split URI into path (no query). HTTP URIs don't have fragments,
+        # so we must NOT let urlparse interpret '#' as a fragment delimiter.
+        # Instead, split on '?' manually.
         uri_str = uri.decode("utf-8") if isinstance(uri, bytes) else uri
-        parsed = urlparse(uri_str)
-        obj.path = parsed.path.encode("utf-8")
+        if "?" in uri_str:
+            path_str, query_str = uri_str.split("?", 1)
+        else:
+            path_str, query_str = uri_str, ""
+        obj.path = path_str.encode("utf-8")
         obj.clientproto = b"HTTP/1.1"
 
         # Parse query string into args (bytes-keyed, like Twisted)
         obj.args: dict[bytes, list[bytes]] = {}
-        if parsed.query:
-            for k, vs in parse_qs(parsed.query, keep_blank_values=True).items():
+        if query_str:
+            for k, vs in parse_qs(query_str, keep_blank_values=True).items():
                 bk = k.encode("utf-8")
                 obj.args[bk] = [v.encode("utf-8") for v in vs]
 

@@ -321,14 +321,14 @@ class RoomPermissionsTestCase(RoomBase):
         await self.helper.invite(
             room=room, src=self.user_id, targ=self.rmcreator_id, expect_code=403
         )
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.user_id,
             targ=self.rmcreator_id,
             membership=Membership.JOIN,
             expect_code=HTTPStatus.FORBIDDEN,
         )
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.user_id,
             targ=self.rmcreator_id,
@@ -354,7 +354,7 @@ class RoomPermissionsTestCase(RoomBase):
         await self.helper.invite(room=room, src=self.user_id, targ=other, expect_code=200)
 
         # set joined of other, expect 403
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.user_id,
             targ=other,
@@ -363,7 +363,7 @@ class RoomPermissionsTestCase(RoomBase):
         )
 
         # set left of other, expect 403
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.user_id,
             targ=other,
@@ -383,7 +383,7 @@ class RoomPermissionsTestCase(RoomBase):
         # set [invite/join/left] of self, set [invite/join/left] of other,
         # expect all 403s
         for usr in [self.user_id, self.rmcreator_id]:
-            self.helper.change_membership(
+            await self.helper.change_membership(
                 room=room,
                 src=self.user_id,
                 targ=usr,
@@ -391,7 +391,7 @@ class RoomPermissionsTestCase(RoomBase):
                 expect_code=HTTPStatus.FORBIDDEN,
             )
 
-            self.helper.change_membership(
+            await self.helper.change_membership(
                 room=room,
                 src=self.user_id,
                 targ=usr,
@@ -400,7 +400,7 @@ class RoomPermissionsTestCase(RoomBase):
             )
 
         # It is always valid to LEAVE if you've already left (currently.)
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.user_id,
             targ=self.rmcreator_id,
@@ -417,7 +417,7 @@ class RoomPermissionsTestCase(RoomBase):
         other = "@burgundy:red"
 
         # User cannot ban other since they do not have required power level
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.user_id,
             targ=other,
@@ -427,7 +427,7 @@ class RoomPermissionsTestCase(RoomBase):
         )
 
         # Admin bans other
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.rmcreator_id,
             targ=other,
@@ -436,7 +436,7 @@ class RoomPermissionsTestCase(RoomBase):
         )
 
         # from ban to invite: Must never happen.
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.rmcreator_id,
             targ=other,
@@ -446,7 +446,7 @@ class RoomPermissionsTestCase(RoomBase):
         )
 
         # from ban to join: Must never happen.
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=other,
             targ=other,
@@ -456,7 +456,7 @@ class RoomPermissionsTestCase(RoomBase):
         )
 
         # from ban to ban: No change.
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.rmcreator_id,
             targ=other,
@@ -465,7 +465,7 @@ class RoomPermissionsTestCase(RoomBase):
         )
 
         # from ban to knock: Must never happen.
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.rmcreator_id,
             targ=other,
@@ -475,7 +475,7 @@ class RoomPermissionsTestCase(RoomBase):
         )
 
         # User cannot unban other since they do not have required power level
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.user_id,
             targ=other,
@@ -485,7 +485,7 @@ class RoomPermissionsTestCase(RoomBase):
         )
 
         # from ban to leave: User was unbanned.
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room,
             src=self.rmcreator_id,
             targ=other,
@@ -654,7 +654,7 @@ class RoomsMemberListTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
 
         # ban the user
-        self.helper.change_membership(room_id, "@alice:red", self.user_id, "ban")
+        await self.helper.change_membership(room_id, "@alice:red", self.user_id, "ban")
 
         # check the user can no longer see the member list
         channel = await self.make_request("GET", "/rooms/%s/members" % room_id)
@@ -683,7 +683,7 @@ class RoomsMemberListTestCase(RoomBase):
 
         # ban the user (Note: the user is actually allowed to see this event and
         # state so that they know they're banned!)
-        self.helper.change_membership(room_id, "@alice:red", self.user_id, "ban")
+        await self.helper.change_membership(room_id, "@alice:red", self.user_id, "ban")
 
         # invite a third user and let them join
         await self.helper.invite(room_id, "@alice:red", "@bob:red")
@@ -1940,7 +1940,7 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
             {
                 "custom.event": 0,
             },
-            await self.power_levels(room_id)["events"],
+            (await self.power_levels(room_id))["events"],
         )
 
     @unittest.override_config(
@@ -1965,7 +1965,7 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
             {
                 "custom.event": 0,
             },
-            await self.power_levels(room_id)["events"],
+            (await self.power_levels(room_id))["events"],
         )
 
     @unittest.override_config(
@@ -1996,11 +1996,11 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
         # Room override wins over server config
         self.assertEqual(
             {"room.event": 0},
-            await self.power_levels(room_id)["events"],
+            (await self.power_levels(room_id))["events"],
         )
 
         # But where there is no room override, server config wins
-        self.assertEqual(13, await self.power_levels(room_id)["ban"])
+        self.assertEqual(13, (await self.power_levels(room_id))["ban"])
 
 
 class RoomPowerLevelOverridesInPracticeTestCase(RoomBase):
@@ -2271,7 +2271,7 @@ class RoomMessageListTestCase(RoomBase):
         pagination_handler = self.hs.get_pagination_handler()
 
         # Send a first message in the room, which will be removed by the purge.
-        first_event_id = await self.helper.send(self.room_id, "message 1")["event_id"]
+        first_event_id = (await self.helper.send(self.room_id, "message 1"))["event_id"]
         first_token = await self.get_success(
             store.get_topological_token_for_event(first_event_id)
         )
@@ -2279,7 +2279,7 @@ class RoomMessageListTestCase(RoomBase):
 
         # Send a second message in the room, which won't be removed, and which we'll
         # use as the marker to purge events before.
-        second_event_id = await self.helper.send(self.room_id, "message 2")["event_id"]
+        second_event_id = (await self.helper.send(self.room_id, "message 2"))["event_id"]
         second_token = await self.get_success(
             store.get_topological_token_for_event(second_event_id)
         )
@@ -3084,7 +3084,7 @@ class RoomForgottenTestCase(unittest.HomeserverTestCase):
         self.assertIncludes(forgotten_room_ids, {room_id}, exact=True)
 
         # Unban user1
-        self.helper.change_membership(
+        await self.helper.change_membership(
             room=room_id,
             src=user2_id,
             targ=user1_id,
@@ -3515,7 +3515,7 @@ class ContextTestCase(unittest.HomeserverTestCase):
 
         await self.helper.send(self.room_id, "message 1", tok=self.tok)
         await self.helper.send(self.room_id, "message 2", tok=self.tok)
-        event_id = await self.helper.send(self.room_id, "message 3", tok=self.tok)["event_id"]
+        event_id = (await self.helper.send(self.room_id, "message 3", tok=self.tok))["event_id"]
         await self.helper.send(self.room_id, "message 4", tok=self.tok)
         await self.helper.send(self.room_id, "message 5", tok=self.tok)
 
@@ -3614,7 +3614,7 @@ class ContextTestCase(unittest.HomeserverTestCase):
     async def test_room_event_context_filter_query_validation(self) -> None:
         # Test json validation in (filter) query parameter.
         # Does not test the validity of the filter, only the json validation.
-        event_id = await self.helper.send(self.room_id, "message 7", tok=self.tok)["event_id"]
+        event_id = (await self.helper.send(self.room_id, "message 7", tok=self.tok))["event_id"]
 
         # Check Get with valid json filter parameter, expect 200.
         valid_filter_str = '{"types": ["m.room.message"]}'
@@ -4609,7 +4609,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             "reason": "flooding",
             "org.matrix.msc4293.redact_events": True,
         }
-        self.helper.change_membership(
+        await self.helper.change_membership(
             self.room_id,
             self.creator,
             self.bad_user_id,
@@ -4694,7 +4694,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             "reason": "bummer messages",
             "org.matrix.msc4293.redact_events": True,
         }
-        res = self.helper.change_membership(
+        res = await self.helper.change_membership(
             self.room_id, self.creator, bad_user, "ban", content, self.creator_tok
         )
         ban_event_id = res["event_id"]
@@ -4813,7 +4813,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             "reason": "this dude sucks",
             "org.matrix.msc4293.redact_events": True,
         }
-        self.helper.change_membership(
+        await self.helper.change_membership(
             self.room_id, self.creator, bad_user, "ban", content, self.creator_tok
         )
 
@@ -4832,7 +4832,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         )
 
         # unban user
-        self.helper.change_membership(
+        await self.helper.change_membership(
             self.room_id, self.creator, bad_user, "unban", {}, self.creator_tok
         )
 
@@ -4935,7 +4935,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             "reason": "flooding",
             "org.matrix.msc4293.redact_events": True,
         }
-        self.helper.change_membership(
+        await self.helper.change_membership(
             self.room_id,
             self.creator,
             self.bad_user_id,
@@ -4974,7 +4974,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             "reason": "flooding",
             "org.matrix.msc4293.redact_events": True,
         }
-        self.helper.change_membership(
+        await self.helper.change_membership(
             self.room_id,
             self.creator,
             self.bad_user_id,
@@ -5059,7 +5059,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             "reason": "bummer messages",
             "org.matrix.msc4293.redact_events": True,
         }
-        res = self.helper.change_membership(
+        res = await self.helper.change_membership(
             self.room_id, self.creator, bad_user, "kick", content, self.creator_tok
         )
         ban_event_id = res["event_id"]
@@ -5175,7 +5175,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             "reason": "this dude sucks",
             "org.matrix.msc4293.redact_events": True,
         }
-        self.helper.change_membership(
+        await self.helper.change_membership(
             self.room_id, self.creator, bad_user, "kick", content, self.creator_tok
         )
 
@@ -5292,7 +5292,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             "reason": "flooding",
             "org.matrix.msc4293.redact_events": True,
         }
-        self.helper.change_membership(
+        await self.helper.change_membership(
             self.room_id,
             self.creator,
             self.bad_user_id,
@@ -5330,7 +5330,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         content = {
             "org.matrix.msc4293.redact_events": True,
         }
-        self.helper.change_membership(
+        await self.helper.change_membership(
             self.room_id,
             self.bad_user_id,
             self.bad_user_id,
@@ -5353,7 +5353,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         content = {
             "org.matrix.msc4293.redact_events": True,
         }
-        self.helper.change_membership(
+        await self.helper.change_membership(
             self.room_id,
             self.creator,
             self.bad_user_id,
@@ -5376,7 +5376,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         content = {
             "org.matrix.msc4293.redact_events": True,
         }
-        self.helper.change_membership(
+        await self.helper.change_membership(
             self.room_id,
             self.bad_user_id,
             self.bad_user_id,
