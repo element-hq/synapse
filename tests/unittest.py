@@ -22,6 +22,7 @@
 import functools
 import gc
 import hashlib
+import inspect
 import hmac
 import json
 import logging
@@ -571,7 +572,9 @@ class HomeserverTestCase(TestCase):
             self.reactor.threadpool.start()
 
         if hasattr(self, "prepare"):
-            self.prepare(self.reactor, self.clock, self.hs)
+            res = self.prepare(self.reactor, self.clock, self.hs)
+            if inspect.isawaitable(res):
+                await res
 
     def tearDown(self) -> None:
         # Reset to not use frozen dicts.
@@ -1016,7 +1019,7 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
     OTHER_SERVER_NAME = "other.example.com"
     OTHER_SERVER_SIGNATURE_KEY = signedjson.key.generate_signing_key("test")
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
 
         # poke the other server's signing key into the key store, so that we don't
@@ -1024,7 +1027,7 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
         verify_key = signedjson.key.get_verify_key(self.OTHER_SERVER_SIGNATURE_KEY)
         verify_key_id = "%s:%s" % (verify_key.alg, verify_key.version)
 
-        self.get_success(
+        await self.get_success(
             hs.get_datastores().main.store_server_keys_response(
                 self.OTHER_SERVER_NAME,
                 from_server=self.OTHER_SERVER_NAME,

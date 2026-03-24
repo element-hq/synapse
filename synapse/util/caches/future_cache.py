@@ -312,7 +312,7 @@ class FutureCache(Generic[VT]):
 
         Returns a FutureCacheEntry that can be resolved with the results.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[Hashable, VT]] = loop.create_future()
 
         entry = FutureCacheEntry(future)

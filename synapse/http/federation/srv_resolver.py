@@ -189,7 +189,7 @@ class SrvResolver:
 
     async def _lookup_dnspython(self, name: str) -> list[dict]:
         """Use dnspython to resolve SRV records."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _resolve() -> list[dict]:
             try:

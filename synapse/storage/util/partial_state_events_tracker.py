@@ -91,7 +91,7 @@ class PartialStateEventsTracker:
         )
 
         # create an observer for each lazy-joined event
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         observers: dict[str, asyncio.Future[None]] = {
             event_id: loop.create_future() for event_id in partial_state_event_ids
         }
@@ -162,7 +162,7 @@ class PartialCurrentStateTracker:
     async def await_full_state(self, room_id: str) -> None:
         # We add the future immediately so that the DB call to check for
         # partial state doesn't race when we unpartial the room.
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         d: asyncio.Future[None] = loop.create_future()
         self._observers.setdefault(room_id, set()).add(d)
 

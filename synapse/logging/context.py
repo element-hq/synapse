@@ -854,7 +854,7 @@ def run_in_background(
         res = f(*args, **kwargs)
     except Exception as e:
         # Return a failed Task so callers can handle it asynchronously
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future: asyncio.Future[Any] = loop.create_future()
         future.set_exception(e)
         return future
@@ -863,7 +863,7 @@ def run_in_background(
         # Schedule the coroutine as a Task on the event loop.
         # This ensures fire-and-forget callers actually run the coroutine.
         coro = run_coroutine_in_background(res)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return loop.create_task(coro)
 
     if isinstance(res, (asyncio.Task, asyncio.Future)):
@@ -875,7 +875,7 @@ def run_in_background(
         return res
 
     # Plain value — return a resolved Future so callers can await it
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     future: asyncio.Future[Any] = loop.create_future()
     future.set_result(res)
     return future

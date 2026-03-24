@@ -291,7 +291,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
                     ret = _asyncio.ensure_future(result.__await__())
                 else:
                     # Plain value — wrap in resolved future
-                    loop = _asyncio.get_event_loop()
+                    loop = _asyncio.get_running_loop()
                     f = loop.create_future()
                     f.set_result(result)
                     ret = f

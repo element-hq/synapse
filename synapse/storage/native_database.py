@@ -176,7 +176,7 @@ class NativeConnectionPool:
             return func(conn, *args, **kwargs)
 
         # Run in thread pool via asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, _inner)
 
     async def runInteraction(
@@ -212,7 +212,7 @@ class NativeConnectionPool:
                 raise
 
         # Run in thread pool via asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, _inner)
 
     def close(self) -> None:

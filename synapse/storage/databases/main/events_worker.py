@@ -869,7 +869,7 @@ class EventsWorkerStore(SQLBaseStore):
                 # to all the events we pulled from the DB (this will result in this
                 # function returning more events than requested, but that can happen
                 # already due to `_get_events_from_db`).
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 _fetching_future: asyncio.Future[dict[str, EventCacheEntry]] = loop.create_future()
                 fetching_deferred: ObservableDeferred[dict[str, EventCacheEntry]] = (
                     ObservableDeferred(_fetching_future, consumeErrors=True)
@@ -1167,6 +1167,9 @@ class EventsWorkerStore(SQLBaseStore):
 
     async def _fetch_thread(self) -> None:
         """Services requests for events from `_event_fetch_list`."""
+        # Capture the event loop here (in the async context) so that
+        # _fetch_loop/_fetch_event_list can use it from the DB thread.
+        self._fetch_event_loop = asyncio.get_running_loop()
         exc = None
         try:
             await self.db_pool.runWithConnection(self._fetch_loop)
@@ -1302,7 +1305,7 @@ class EventsWorkerStore(SQLBaseStore):
                 )
 
                 # We only want to resolve futures from the main thread
-                loop = asyncio.get_event_loop()
+                loop = self._fetch_event_loop
 
                 def fire() -> None:
                     for _, d in event_list:
@@ -1314,7 +1317,7 @@ class EventsWorkerStore(SQLBaseStore):
                 logger.exception("do_fetch")
 
                 # We only want to resolve futures from the main thread
-                loop = asyncio.get_event_loop()
+                loop = self._fetch_event_loop
 
                 def fire_errback(exc: Exception) -> None:
                     for _, d in event_list:
