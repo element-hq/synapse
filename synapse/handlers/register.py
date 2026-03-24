@@ -163,12 +163,12 @@ class RegistrationHandler:
         assigned_user_id: str | None = None,
         inhibit_user_in_use_error: bool = False,
     ) -> None:
-        if types.contains_invalid_mxid_characters(localpart):
-            raise SynapseError(
-                400,
-                "User ID can only contain characters a-z, 0-9, or '=_-./+'",
-                Codes.INVALID_USERNAME,
-            )
+        # if types.contains_invalid_mxid_characters(localpart):
+        #     raise SynapseError(
+        #         400,
+        #         "User ID can only contain characters a-z, 0-9, or '=_-./+'",
+        #         Codes.INVALID_USERNAME,
+        #     )
 
         if not localpart:
             raise SynapseError(400, "User ID cannot be empty", Codes.INVALID_USERNAME)

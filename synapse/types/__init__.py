@@ -445,7 +445,7 @@ class EventID(DomainSpecificString):
 
 
 MXID_LOCALPART_ALLOWED_CHARACTERS = set(
-    "_-./=+" + string.ascii_lowercase + string.digits
+    "_-./=+" + string.ascii_lowercase + string.ascii_uppercase + string.digits
 )
 
 # Guest user IDs are purely numeric.
