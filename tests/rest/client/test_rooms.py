@@ -519,12 +519,13 @@ class RoomStateTestCase(RoomBase):
     async def test_get_state_cancellation(self) -> None:
         """Test cancellation of a `/rooms/$room_id/state` request."""
         room_id = await self.helper.create_room_as(self.user_id)
-        channel = make_request_with_cancellation_test(
+        channel = await make_request_with_cancellation_test(
             "test_state_cancellation",
             self.reactor,
             self.site,
             "GET",
             "/rooms/%s/state" % room_id,
+            clock=self.clock,
         )
 
         self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
@@ -542,12 +543,13 @@ class RoomStateTestCase(RoomBase):
     async def test_get_state_event_cancellation(self) -> None:
         """Test cancellation of a `/rooms/$room_id/state/$event_type` request."""
         room_id = await self.helper.create_room_as(self.user_id)
-        channel = make_request_with_cancellation_test(
+        channel = await make_request_with_cancellation_test(
             "test_state_cancellation",
             self.reactor,
             self.site,
             "GET",
             "/rooms/%s/state/m.room.member/%s" % (room_id, self.user_id),
+            clock=self.clock,
         )
 
         self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
@@ -722,12 +724,13 @@ class RoomsMemberListTestCase(RoomBase):
     async def test_get_member_list_cancellation(self) -> None:
         """Test cancellation of a `/rooms/$room_id/members` request."""
         room_id = await self.helper.create_room_as(self.user_id)
-        channel = make_request_with_cancellation_test(
+        channel = await make_request_with_cancellation_test(
             "test_get_member_list_cancellation",
             self.reactor,
             self.site,
             "GET",
             "/rooms/%s/members" % room_id,
+            clock=self.clock,
         )
 
         self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
@@ -753,12 +756,13 @@ class RoomsMemberListTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code)
         sync_token = channel.json_body["next_batch"]
 
-        channel = make_request_with_cancellation_test(
+        channel = await make_request_with_cancellation_test(
             "test_get_member_list_with_at_token_cancellation",
             self.reactor,
             self.site,
             "GET",
             "/rooms/%s/members?at=%s" % (room_id, sync_token),
+            clock=self.clock,
         )
 
         self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
