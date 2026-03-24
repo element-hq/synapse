@@ -86,6 +86,14 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
     def convert_param_style(self, sql: str) -> str:
         return sql
 
+    def register_custom_functions(self, raw_conn: sqlite3.Connection) -> None:
+        """Register custom SQLite functions on a raw connection.
+
+        This must be called on any connection created outside the normal
+        on_new_connection path (e.g. connections created via backup()).
+        """
+        raw_conn.create_function("rank", 1, _rank)
+
     def on_new_connection(self, db_conn: "LoggingDatabaseConnection") -> None:
         # We need to import here to avoid an import loop.
         from synapse.storage.prepare_database import prepare_database

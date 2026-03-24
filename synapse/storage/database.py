@@ -607,6 +607,8 @@ class DatabasePool:
             # Create a new in-memory DB and copy schema+data from the template
             fresh_conn = sqlite3.connect(":memory:", check_same_thread=False)
             source_conn.backup(fresh_conn)
+            # Re-register custom functions that don't survive backup()
+            engine.register_custom_functions(fresh_conn)
             initial_conn = fresh_conn
 
         self._db_pool = NativeConnectionPool(

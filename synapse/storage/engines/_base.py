@@ -84,6 +84,12 @@ class BaseDatabaseEngine(Generic[ConnectionType, CursorType], metaclass=abc.ABCM
     @abc.abstractmethod
     def on_new_connection(self, db_conn: "LoggingDatabaseConnection") -> None: ...
 
+    def register_custom_functions(self, raw_conn: "Any") -> None:
+        """Register custom database functions on a raw connection.
+
+        Override in subclasses that need custom functions (e.g. SQLite rank()).
+        """
+
     @abc.abstractmethod
     def is_deadlock(self, error: Exception) -> bool: ...
 
