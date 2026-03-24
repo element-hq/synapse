@@ -43,18 +43,18 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
         mutual_rooms.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
-        return self.setup_test_homeserver(config=config)
+        return await self.setup_test_homeserver(config=config)
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         mutual_rooms.MUTUAL_ROOMS_BATCH_LIMIT = 10
 
-    def _get_mutual_rooms(
+    async def _get_mutual_rooms(
         self, token: str, other_user: str, since_token: str | None = None
     ) -> FakeChannel:
-        return self.make_request(
+        return await self.make_request(
             "GET",
             "/_matrix/client/v1/mutual_rooms"
             f"?user_id={quote(other_user)}"
@@ -62,183 +62,183 @@ class UserMutualRoomsTest(unittest.HomeserverTestCase):
             access_token=token,
         )
 
-    def test_shared_room_list_public(self) -> None:
+    async def test_shared_room_list_public(self) -> None:
         """
         A room should show up in the shared list of rooms between two users
         if it is public.
         """
-        self._check_mutual_rooms_with(room_one_is_public=True, room_two_is_public=True)
+        await self._check_mutual_rooms_with(room_one_is_public=True, room_two_is_public=True)
 
-    def test_shared_room_list_private(self) -> None:
+    async def test_shared_room_list_private(self) -> None:
         """
         A room should show up in the shared list of rooms between two users
         if it is private.
         """
-        self._check_mutual_rooms_with(
+        await self._check_mutual_rooms_with(
             room_one_is_public=False, room_two_is_public=False
         )
 
-    def test_shared_room_list_mixed(self) -> None:
+    async def test_shared_room_list_mixed(self) -> None:
         """
         The shared room list between two users should contain both public and private
         rooms.
         """
-        self._check_mutual_rooms_with(room_one_is_public=True, room_two_is_public=False)
+        await self._check_mutual_rooms_with(room_one_is_public=True, room_two_is_public=False)
 
-    def _check_mutual_rooms_with(
+    async def _check_mutual_rooms_with(
         self, room_one_is_public: bool, room_two_is_public: bool
     ) -> None:
         """Checks that shared public or private rooms between two users appear in
         their shared room lists
         """
-        u1 = self.register_user("user1", "pass")
-        u1_token = self.login(u1, "pass")
-        u2 = self.register_user("user2", "pass")
-        u2_token = self.login(u2, "pass")
+        u1 = await self.register_user("user1", "pass")
+        u1_token = await self.login(u1, "pass")
+        u2 = await self.register_user("user2", "pass")
+        u2_token = await self.login(u2, "pass")
 
         # Create a room. user1 invites user2, who joins
-        room_id_one = self.helper.create_room_as(
+        room_id_one = await self.helper.create_room_as(
             u1, is_public=room_one_is_public, tok=u1_token
         )
-        self.helper.invite(room_id_one, src=u1, targ=u2, tok=u1_token)
-        self.helper.join(room_id_one, user=u2, tok=u2_token)
+        await self.helper.invite(room_id_one, src=u1, targ=u2, tok=u1_token)
+        await self.helper.join(room_id_one, user=u2, tok=u2_token)
 
         # Check shared rooms from user1's perspective.
         # We should see the one room in common
-        channel = self._get_mutual_rooms(u1_token, u2)
+        channel = await self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 1)
         self.assertEqual(channel.json_body["count"], 1)
         self.assertEqual(channel.json_body["joined"][0], room_id_one)
 
         # Create another room and invite user2 to it
-        room_id_two = self.helper.create_room_as(
+        room_id_two = await self.helper.create_room_as(
             u1, is_public=room_two_is_public, tok=u1_token
         )
-        self.helper.invite(room_id_two, src=u1, targ=u2, tok=u1_token)
-        self.helper.join(room_id_two, user=u2, tok=u2_token)
+        await self.helper.invite(room_id_two, src=u1, targ=u2, tok=u1_token)
+        await self.helper.join(room_id_two, user=u2, tok=u2_token)
 
         # Check shared rooms again. We should now see both rooms.
-        channel = self._get_mutual_rooms(u1_token, u2)
+        channel = await self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 2)
         self.assertEqual(channel.json_body["count"], 2)
         for room_id_id in channel.json_body["joined"]:
             self.assertIn(room_id_id, [room_id_one, room_id_two])
 
-    def _create_rooms_for_pagination_test(
+    async def _create_rooms_for_pagination_test(
         self, count: int
     ) -> tuple[str, str, list[str]]:
-        u1 = self.register_user("user1", "pass")
-        u1_token = self.login(u1, "pass")
-        u2 = self.register_user("user2", "pass")
-        u2_token = self.login(u2, "pass")
+        u1 = await self.register_user("user1", "pass")
+        u1_token = await self.login(u1, "pass")
+        u2 = await self.register_user("user2", "pass")
+        u2_token = await self.login(u2, "pass")
         room_ids = []
         for i in range(count):
-            room_id = self.helper.create_room_as(u1, is_public=i % 2 == 0, tok=u1_token)
-            self.helper.invite(room_id, src=u1, targ=u2, tok=u1_token)
-            self.helper.join(room_id, user=u2, tok=u2_token)
+            room_id = await self.helper.create_room_as(u1, is_public=i % 2 == 0, tok=u1_token)
+            await self.helper.invite(room_id, src=u1, targ=u2, tok=u1_token)
+            await self.helper.join(room_id, user=u2, tok=u2_token)
             room_ids.append(room_id)
         room_ids.sort()
         return u1_token, u2, room_ids
 
-    def test_shared_room_list_pagination_two_pages(self) -> None:
-        u1_token, u2, room_ids = self._create_rooms_for_pagination_test(15)
+    async def test_shared_room_list_pagination_two_pages(self) -> None:
+        u1_token, u2, room_ids = await self._create_rooms_for_pagination_test(15)
 
-        channel = self._get_mutual_rooms(u1_token, u2)
+        channel = await self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(channel.json_body["joined"], room_ids[0:10])
         self.assertEqual(channel.json_body["count"], 15)
         self.assertIn("next_batch", channel.json_body)
 
-        channel = self._get_mutual_rooms(u1_token, u2, channel.json_body["next_batch"])
+        channel = await self._get_mutual_rooms(u1_token, u2, channel.json_body["next_batch"])
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(channel.json_body["joined"], room_ids[10:20])
         self.assertEqual(channel.json_body["count"], 15)
         self.assertNotIn("next_batch", channel.json_body)
 
-    def test_shared_room_list_pagination_one_page(self) -> None:
-        u1_token, u2, room_ids = self._create_rooms_for_pagination_test(10)
+    async def test_shared_room_list_pagination_one_page(self) -> None:
+        u1_token, u2, room_ids = await self._create_rooms_for_pagination_test(10)
 
-        channel = self._get_mutual_rooms(u1_token, u2)
+        channel = await self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(channel.json_body["joined"], room_ids)
         self.assertEqual(channel.json_body["count"], 10)
         self.assertNotIn("next_batch", channel.json_body)
 
-    def test_shared_room_list_pagination_invalid_token(self) -> None:
-        u1_token, u2, room_ids = self._create_rooms_for_pagination_test(10)
+    async def test_shared_room_list_pagination_invalid_token(self) -> None:
+        u1_token, u2, room_ids = await self._create_rooms_for_pagination_test(10)
 
-        channel = self._get_mutual_rooms(u1_token, u2, "!<>##faketoken")
+        channel = await self._get_mutual_rooms(u1_token, u2, "!<>##faketoken")
         self.assertEqual(400, channel.code, channel.result)
         self.assertEqual(
             "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
         )
 
-    def test_shared_room_list_after_leave(self) -> None:
+    async def test_shared_room_list_after_leave(self) -> None:
         """
         A room should no longer be considered shared if the other
         user has left it.
         """
-        u1 = self.register_user("user1", "pass")
-        u1_token = self.login(u1, "pass")
-        u2 = self.register_user("user2", "pass")
-        u2_token = self.login(u2, "pass")
+        u1 = await self.register_user("user1", "pass")
+        u1_token = await self.login(u1, "pass")
+        u2 = await self.register_user("user2", "pass")
+        u2_token = await self.login(u2, "pass")
 
-        room = self.helper.create_room_as(u1, is_public=True, tok=u1_token)
-        self.helper.invite(room, src=u1, targ=u2, tok=u1_token)
-        self.helper.join(room, user=u2, tok=u2_token)
+        room = await self.helper.create_room_as(u1, is_public=True, tok=u1_token)
+        await self.helper.invite(room, src=u1, targ=u2, tok=u1_token)
+        await self.helper.join(room, user=u2, tok=u2_token)
 
         # Assert user directory is not empty
-        channel = self._get_mutual_rooms(u1_token, u2)
+        channel = await self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 1)
         self.assertEqual(channel.json_body["count"], 1)
         self.assertEqual(channel.json_body["joined"][0], room)
 
-        self.helper.leave(room, user=u1, tok=u1_token)
+        await self.helper.leave(room, user=u1, tok=u1_token)
 
         # Check user1's view of shared rooms with user2
-        channel = self._get_mutual_rooms(u1_token, u2)
+        channel = await self._get_mutual_rooms(u1_token, u2)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 0)
         self.assertEqual(channel.json_body["count"], 0)
 
         # Check user2's view of shared rooms with user1
-        channel = self._get_mutual_rooms(u2_token, u1)
+        channel = await self._get_mutual_rooms(u2_token, u1)
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 0)
         self.assertEqual(channel.json_body["count"], 0)
 
-    def test_shared_room_list_nonexistent_user(self) -> None:
-        u1 = self.register_user("user1", "pass")
-        u1_token = self.login(u1, "pass")
+    async def test_shared_room_list_nonexistent_user(self) -> None:
+        u1 = await self.register_user("user1", "pass")
+        u1_token = await self.login(u1, "pass")
 
         # Check shared rooms from user1's perspective.
         # We should see the one room in common
-        channel = self._get_mutual_rooms(u1_token, "@meow:example.com")
+        channel = await self._get_mutual_rooms(u1_token, "@meow:example.com")
         self.assertEqual(200, channel.code, channel.result)
         self.assertEqual(len(channel.json_body["joined"]), 0)
         self.assertEqual(channel.json_body["count"], 0)
         self.assertNotIn("next_batch", channel.json_body)
 
-    def test_shared_room_list_invalid_user(self) -> None:
-        u1 = self.register_user("user1", "pass")
-        u1_token = self.login(u1, "pass")
+    async def test_shared_room_list_invalid_user(self) -> None:
+        u1 = await self.register_user("user1", "pass")
+        u1_token = await self.login(u1, "pass")
 
-        channel = self._get_mutual_rooms(u1_token, "@:example.com")
+        channel = await self._get_mutual_rooms(u1_token, "@:example.com")
         self.assertEqual(400, channel.code, channel.result)
         self.assertEqual(
             "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
         )
 
-        channel = self._get_mutual_rooms(u1_token, "@" + "a" * 255 + ":example.com")
+        channel = await self._get_mutual_rooms(u1_token, "@" + "a" * 255 + ":example.com")
         self.assertEqual(400, channel.code, channel.result)
         self.assertEqual(
             "M_INVALID_PARAM", channel.json_body["errcode"], channel.result
         )
 
-        channel = self._get_mutual_rooms(u1_token, "@🐈️:example.com")
+        channel = await self._get_mutual_rooms(u1_token, "@🐈️:example.com")
         self.assertEqual(400, channel.code, channel.result)
         self.assertEqual(
             "M_INVALID_PARAM", channel.json_body["errcode"], channel.result

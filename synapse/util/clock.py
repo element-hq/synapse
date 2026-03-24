@@ -165,10 +165,10 @@ class NativeClock:
         self._loop: asyncio.AbstractEventLoop | None = None
 
         # Internal timer system for fake time support.
-        # Pending sleeps: list of (wake_time, future)
         import heapq
         self._fake_time: float = time_mod.time()
         self._pending_sleeps: list[tuple[float, int, asyncio.Future]] = []
+        self._pending_call_laters: list[tuple[float, int, Callable, tuple, dict]] = []
         self._sleep_seq = 0  # tiebreaker for heapq when wake_times are equal
         self._use_fake_time = False  # Set to True by tests
 
@@ -206,19 +206,25 @@ class NativeClock:
             await asyncio.sleep(duration.as_secs())
 
     def advance(self, seconds: float) -> None:
-        """Advance fake time by seconds, firing any due sleeps.
+        """Advance fake time by seconds, firing any due sleeps and call_laters.
 
         Used by tests to control time deterministically.
         """
+        import heapq
+
         self._use_fake_time = True
         self._fake_time += seconds
 
         # Fire any sleeps that are now due
         while self._pending_sleeps and self._pending_sleeps[0][0] <= self._fake_time:
-            import heapq
             _, _, future = heapq.heappop(self._pending_sleeps)
             if not future.done():
                 future.set_result(None)
+
+        # Fire any call_laters that are now due
+        while self._pending_call_laters and self._pending_call_laters[0][0] <= self._fake_time:
+            _, _, callback, args, kwargs = heapq.heappop(self._pending_call_laters)
+            callback(*args, **kwargs)
 
 
     def looping_call(
@@ -310,6 +316,8 @@ class NativeClock:
         call_later_cancel_on_shutdown: bool = True,
         **kwargs: Any,
     ) -> NativeDelayedCallWrapper:
+        import heapq
+
         call_id = self._delayed_call_id
         self._delayed_call_id += 1
 
@@ -331,8 +339,19 @@ class NativeClock:
                 if call_later_cancel_on_shutdown:
                     self._call_id_to_delayed_call.pop(call_id, None)
 
-        scheduled_time = loop.time() + delay.as_secs()
-        handle = loop.call_later(delay.as_secs(), wrapped_callback, *args, **kwargs)
+        if self._use_fake_time:
+            # In fake-time mode, store in pending list for advance() to fire.
+            scheduled_time = self._fake_time + delay.as_secs()
+            self._sleep_seq += 1
+            heapq.heappush(
+                self._pending_call_laters,
+                (scheduled_time, self._sleep_seq, wrapped_callback, args, kwargs),
+            )
+            # Create a no-op handle for the wrapper
+            handle = loop.call_later(86400, lambda: None)  # dummy, never fires
+        else:
+            scheduled_time = loop.time() + delay.as_secs()
+            handle = loop.call_later(delay.as_secs(), wrapped_callback, *args, **kwargs)
 
         clock_debug_logger.debug(
             "call_later(%s): Scheduled call for %ss later (tracked: %s)",

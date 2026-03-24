@@ -43,7 +43,7 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         admin.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
 
         # merge this default retention config with anything that was specified in
@@ -56,27 +56,27 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         retention_config.update(config.get("retention", {}))
         config["retention"] = retention_config
 
-        self.hs = self.setup_test_homeserver(config=config)
+        self.hs = await self.setup_test_homeserver(config=config)
 
         return self.hs
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.owner = self.register_user("owner", "pass")
-        self.owner_tok = self.login("owner", "pass")
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.owner = await self.register_user("owner", "pass")
+        self.owner_tok = await self.login("owner", "pass")
         self.store = self.hs.get_datastores().main
         self.clock = self.hs.get_clock()
 
-    def test_send_read_marker(self) -> None:
-        room_id = self.helper.create_room_as(self.owner, tok=self.owner_tok)
+    async def test_send_read_marker(self) -> None:
+        room_id = await self.helper.create_room_as(self.owner, tok=self.owner_tok)
 
-        def send_message() -> str:
-            res = self.helper.send(room_id=room_id, body="1", tok=self.owner_tok)
+        async def send_message() -> str:
+            res = await self.helper.send(room_id=room_id, body="1", tok=self.owner_tok)
             return res["event_id"]
 
         # Test setting the read marker on the room
-        event_id_1 = send_message()
+        event_id_1 = await send_message()
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "POST",
             f"/rooms/{room_id}/read_markers",
             content={
@@ -87,8 +87,8 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
 
         # Test moving the read marker to a newer event
-        event_id_2 = send_message()
-        channel = self.make_request(
+        event_id_2 = await send_message()
+        channel = await self.make_request(
             "POST",
             f"/rooms/{room_id}/read_markers",
             content={
@@ -98,30 +98,30 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-    def test_send_read_marker_missing_previous_event(self) -> None:
+    async def test_send_read_marker_missing_previous_event(self) -> None:
         """
         Test moving a read marker from an event that previously existed but was
         later removed due to retention rules.
         """
 
-        room_id = self.helper.create_room_as(self.owner, tok=self.owner_tok)
+        room_id = await self.helper.create_room_as(self.owner, tok=self.owner_tok)
 
         # Set retention rule on the room so we remove old events to test this case
-        self.helper.send_state(
+        await self.helper.send_state(
             room_id=room_id,
             event_type=EventTypes.Retention,
             body={"max_lifetime": ONE_DAY_MS},
             tok=self.owner_tok,
         )
 
-        def send_message() -> str:
-            res = self.helper.send(room_id=room_id, body="1", tok=self.owner_tok)
+        async def send_message() -> str:
+            res = await self.helper.send(room_id=room_id, body="1", tok=self.owner_tok)
             return res["event_id"]
 
         # Test setting the read marker on the room
-        event_id_1 = send_message()
+        event_id_1 = await send_message()
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "POST",
             f"/rooms/{room_id}/read_markers",
             content={
@@ -131,16 +131,16 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         )
 
         # Send a second message (retention will not remove the latest event ever)
-        send_message()
+        await send_message()
         # And then advance so retention rules remove the first event (where the marker is)
-        self.reactor.advance(ONE_DAY_MS * 2 / 1000)
+        await self.pump(ONE_DAY_MS * 2 / 1000)
 
-        event = self.get_success(self.store.get_event(event_id_1, allow_none=True))
+        event = await self.get_success(self.store.get_event(event_id_1, allow_none=True))
         assert event is None
 
         # Test moving the read marker to a newer event
-        event_id_2 = send_message()
-        channel = self.make_request(
+        event_id_2 = await send_message()
+        channel = await self.make_request(
             "POST",
             f"/rooms/{room_id}/read_markers",
             content={

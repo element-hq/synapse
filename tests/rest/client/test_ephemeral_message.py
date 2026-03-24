@@ -39,18 +39,18 @@ class EphemeralMessageTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
 
         config["enable_ephemeral_messages"] = True
 
-        self.hs = self.setup_test_homeserver(config=config)
+        self.hs = await self.setup_test_homeserver(config=config)
         return self.hs
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.room_id = self.helper.create_room_as(self.user_id)
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.room_id = await self.helper.create_room_as(self.user_id)
 
-    def test_message_expiry_no_delay(self) -> None:
+    async def test_message_expiry_no_delay(self) -> None:
         """Tests that sending a message sent with a m.self_destruct_after field set to the
         past results in that event being deleted right away.
         """
@@ -58,7 +58,7 @@ class EphemeralMessageTestCase(unittest.HomeserverTestCase):
         # at 200ms, so 0 is in the past, and even if that wasn't the case and the clock
         # is at 0ms the code path is the same if the event's expiry timestamp is the
         # current timestamp.
-        res = self.helper.send_event(
+        res = await self.helper.send_event(
             room_id=self.room_id,
             type=EventTypes.Message,
             content={
@@ -70,16 +70,16 @@ class EphemeralMessageTestCase(unittest.HomeserverTestCase):
         event_id = res["event_id"]
 
         # Check that we can't retrieve the content of the event.
-        event_content = self.get_event(self.room_id, event_id)["content"]
+        event_content = (await self.get_event(self.room_id, event_id))["content"]
         self.assertFalse(bool(event_content), event_content)
 
-    def test_message_expiry_delay(self) -> None:
+    async def test_message_expiry_delay(self) -> None:
         """Tests that sending a message with a m.self_destruct_after field set to the
         future results in that event not being deleted right away, but advancing the
         clock to after that expiry timestamp causes the event to be deleted.
         """
         # Send a message in the room that'll expire in 1s.
-        res = self.helper.send_event(
+        res = await self.helper.send_event(
             room_id=self.room_id,
             type=EventTypes.Message,
             content={
@@ -91,22 +91,22 @@ class EphemeralMessageTestCase(unittest.HomeserverTestCase):
         event_id = res["event_id"]
 
         # Check that we can retrieve the content of the event before it has expired.
-        event_content = self.get_event(self.room_id, event_id)["content"]
+        event_content = (await self.get_event(self.room_id, event_id))["content"]
         self.assertTrue(bool(event_content), event_content)
 
-        # Advance the clock to after the deletion.
-        self.reactor.advance(1)
+        # Advance the clock to after the deletion and let the expiry handler run.
+        await self.pump(1)
 
         # Check that we can't retrieve the content of the event anymore.
-        event_content = self.get_event(self.room_id, event_id)["content"]
+        event_content = (await self.get_event(self.room_id, event_id))["content"]
         self.assertFalse(bool(event_content), event_content)
 
-    def get_event(
+    async def get_event(
         self, room_id: str, event_id: str, expected_code: int = HTTPStatus.OK
     ) -> JsonDict:
         url = "/_matrix/client/r0/rooms/%s/event/%s" % (room_id, event_id)
 
-        channel = self.make_request("GET", url)
+        channel = await self.make_request("GET", url)
 
         self.assertEqual(channel.code, expected_code, channel.result)
 

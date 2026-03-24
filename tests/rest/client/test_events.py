@@ -44,41 +44,41 @@ class EventStreamPermissionsTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
         config["enable_registration_captcha"] = False
         config["enable_registration"] = True
         config["auto_join_rooms"] = []
 
-        hs = self.setup_test_homeserver(config=config)
+        hs = await self.setup_test_homeserver(config=config)
 
         hs.get_federation_handler = Mock()  # type: ignore[method-assign]
 
         return hs
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         # register an account
-        self.user_id = self.register_user("sid1", "pass")
-        self.token = self.login(self.user_id, "pass")
+        self.user_id = await self.register_user("sid1", "pass")
+        self.token = await self.login(self.user_id, "pass")
 
         # register a 2nd account
-        self.other_user = self.register_user("other2", "pass")
-        self.other_token = self.login(self.other_user, "pass")
+        self.other_user = await self.register_user("other2", "pass")
+        self.other_token = await self.login(self.other_user, "pass")
 
-    def test_stream_basic_permissions(self) -> None:
+    async def test_stream_basic_permissions(self) -> None:
         # invalid token, expect 401
         # note: this is in violation of the original v1 spec, which expected
         # 403. However, since the v1 spec no longer exists and the v1
         # implementation is now part of the r0 implementation, the newer
         # behaviour is used instead to be consistent with the r0 spec.
         # see issue https://github.com/matrix-org/synapse/issues/2602
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET", "/events?access_token=%s" % ("invalid" + self.token,)
         )
         self.assertEqual(channel.code, 401, msg=channel.result)
 
         # valid token, expect content
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET", "/events?access_token=%s&timeout=0" % (self.token,)
         )
         self.assertEqual(channel.code, 200, msg=channel.result)
@@ -86,17 +86,17 @@ class EventStreamPermissionsTestCase(unittest.HomeserverTestCase):
         self.assertTrue("start" in channel.json_body)
         self.assertTrue("end" in channel.json_body)
 
-    def test_stream_room_permissions(self) -> None:
-        room_id = self.helper.create_room_as(self.other_user, tok=self.other_token)
-        self.helper.send(room_id, tok=self.other_token)
+    async def test_stream_room_permissions(self) -> None:
+        room_id = await self.helper.create_room_as(self.other_user, tok=self.other_token)
+        await self.helper.send(room_id, tok=self.other_token)
 
         # invited to room (expect no content for room)
-        self.helper.invite(
+        await self.helper.invite(
             room_id, src=self.other_user, targ=self.user_id, tok=self.other_token
         )
 
         # valid token, expect content
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET", "/events?access_token=%s&timeout=0" % (self.token,)
         )
         self.assertEqual(channel.code, 200, msg=channel.result)
@@ -117,7 +117,7 @@ class EventStreamPermissionsTestCase(unittest.HomeserverTestCase):
         )
 
         # joined room (expect all content for room)
-        self.helper.join(room=room_id, user=self.user_id, tok=self.token)
+        await self.helper.join(room=room_id, user=self.user_id, tok=self.token)
 
         # left to room (expect no content for room)
 
@@ -146,18 +146,18 @@ class GetEventsTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
     ]
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         # register an account
-        self.user_id = self.register_user("sid1", "pass")
-        self.token = self.login(self.user_id, "pass")
+        self.user_id = await self.register_user("sid1", "pass")
+        self.token = await self.login(self.user_id, "pass")
 
-        self.room_id = self.helper.create_room_as(self.user_id, tok=self.token)
+        self.room_id = await self.helper.create_room_as(self.user_id, tok=self.token)
 
-    def test_get_event_via_events(self) -> None:
-        resp = self.helper.send(self.room_id, tok=self.token)
+    async def test_get_event_via_events(self) -> None:
+        resp = await self.helper.send(self.room_id, tok=self.token)
         event_id = resp["event_id"]
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             "/events/" + event_id,
             access_token=self.token,

@@ -40,11 +40,11 @@ class PresenceTestCase(unittest.HomeserverTestCase):
     user = UserID.from_string(user_id)
     servlets = [presence.register_servlets]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.presence_handler = Mock(spec=PresenceHandler)
         self.presence_handler.set_state = AsyncMock(return_value=None)
 
-        hs = self.setup_test_homeserver(
+        hs = await self.setup_test_homeserver(
             "red",
             federation_client=Mock(),
             presence_handler=self.presence_handler,
@@ -52,7 +52,7 @@ class PresenceTestCase(unittest.HomeserverTestCase):
 
         return hs
 
-    def test_put_presence(self) -> None:
+    async def test_put_presence(self) -> None:
         """
         PUT to the status endpoint with use_presence enabled will call
         set_state on the presence handler.
@@ -60,7 +60,7 @@ class PresenceTestCase(unittest.HomeserverTestCase):
         self.hs.config.server.presence_enabled = True
 
         body = {"presence": "here", "status_msg": "beep boop"}
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT", "/presence/%s/status" % (self.user_id,), body
         )
 
@@ -68,14 +68,14 @@ class PresenceTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self.presence_handler.set_state.call_count, 1)
 
     @unittest.override_config({"use_presence": False})
-    def test_put_presence_disabled(self) -> None:
+    async def test_put_presence_disabled(self) -> None:
         """
         PUT to the status endpoint with presence disabled will NOT call
         set_state on the presence handler.
         """
 
         body = {"presence": "here", "status_msg": "beep boop"}
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT", "/presence/%s/status" % (self.user_id,), body
         )
 
@@ -83,14 +83,14 @@ class PresenceTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self.presence_handler.set_state.call_count, 0)
 
     @unittest.override_config({"presence": {"enabled": "untracked"}})
-    def test_put_presence_untracked(self) -> None:
+    async def test_put_presence_untracked(self) -> None:
         """
         PUT to the status endpoint with presence untracked will NOT call
         set_state on the presence handler.
         """
 
         body = {"presence": "here", "status_msg": "beep boop"}
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT", "/presence/%s/status" % (self.user_id,), body
         )
 
@@ -100,21 +100,21 @@ class PresenceTestCase(unittest.HomeserverTestCase):
     @override_config(
         {"rc_presence": {"per_user": {"per_second": 0.1, "burst_count": 1}}}
     )
-    def test_put_presence_over_ratelimit(self) -> None:
+    async def test_put_presence_over_ratelimit(self) -> None:
         """
         Multiple PUTs to the status endpoint without sufficient delay will be rate limited.
         """
         self.hs.config.server.presence_enabled = True
 
         body = {"presence": "here", "status_msg": "beep boop"}
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT", "/presence/%s/status" % (self.user_id,), body
         )
 
         self.assertEqual(channel.code, HTTPStatus.OK)
 
         body = {"presence": "here", "status_msg": "beep boop"}
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT", "/presence/%s/status" % (self.user_id,), body
         )
 
@@ -124,14 +124,14 @@ class PresenceTestCase(unittest.HomeserverTestCase):
     @override_config(
         {"rc_presence": {"per_user": {"per_second": 0.1, "burst_count": 1}}}
     )
-    def test_put_presence_within_ratelimit(self) -> None:
+    async def test_put_presence_within_ratelimit(self) -> None:
         """
         Multiple PUTs to the status endpoint with sufficient delay should all call set_state.
         """
         self.hs.config.server.presence_enabled = True
 
         body = {"presence": "here", "status_msg": "beep boop"}
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT", "/presence/%s/status" % (self.user_id,), body
         )
 
@@ -141,7 +141,7 @@ class PresenceTestCase(unittest.HomeserverTestCase):
         self.reactor.advance(30)
 
         body = {"presence": "here", "status_msg": "beep boop"}
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT", "/presence/%s/status" % (self.user_id,), body
         )
 

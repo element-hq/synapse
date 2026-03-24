@@ -39,7 +39,7 @@ class HTTPPusherTests(HomeserverTestCase):
         notifications.register_servlets,
     ]
 
-    def prepare(
+    async def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:
         self.store = homeserver.get_datastores().main
@@ -48,32 +48,32 @@ class HTTPPusherTests(HomeserverTestCase):
         self.sync_handler = homeserver.get_sync_handler()
         self.auth_handler = homeserver.get_auth_handler()
 
-        self.user_id = self.register_user("user", "pass")
-        self.access_token = self.login("user", "pass")
-        self.other_user_id = self.register_user("otheruser", "pass")
-        self.other_access_token = self.login("otheruser", "pass")
+        self.user_id = await self.register_user("user", "pass")
+        self.access_token = await self.login("user", "pass")
+        self.other_user_id = await self.register_user("otheruser", "pass")
+        self.other_access_token = await self.login("otheruser", "pass")
 
         # Create a room
-        self.room_id = self.helper.create_room_as(self.user_id, tok=self.access_token)
+        self.room_id = await self.helper.create_room_as(self.user_id, tok=self.access_token)
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         # Mock out the calls over federation.
         fed_transport_client = Mock(spec=["send_transaction"])
         fed_transport_client.send_transaction = AsyncMock(return_value={})
 
-        return self.setup_test_homeserver(
+        return await self.setup_test_homeserver(
             federation_transport_client=fed_transport_client,
         )
 
-    def test_notify_for_local_invites(self) -> None:
+    async def test_notify_for_local_invites(self) -> None:
         """
         Local users will get notified for invites
         """
         # Check we start with no pushes
-        self._request_notifications(from_token=None, limit=1, expected_count=0)
+        await self._request_notifications(from_token=None, limit=1, expected_count=0)
 
         # Send an invite
-        self.helper.invite(
+        await self.helper.invite(
             room=self.room_id,
             src=self.user_id,
             targ=self.other_user_id,
@@ -81,7 +81,7 @@ class HTTPPusherTests(HomeserverTestCase):
         )
 
         # We should have a notification now
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             "/notifications",
             access_token=self.other_access_token,
@@ -94,26 +94,26 @@ class HTTPPusherTests(HomeserverTestCase):
             channel.json_body,
         )
 
-    def test_pagination_of_notifications(self) -> None:
+    async def test_pagination_of_notifications(self) -> None:
         """
         Check that pagination of notifications works.
         """
         # Check we start with no pushes
-        self._request_notifications(from_token=None, limit=1, expected_count=0)
+        await self._request_notifications(from_token=None, limit=1, expected_count=0)
 
         # Send an invite and have the other user join the room.
-        self.helper.invite(
+        await self.helper.invite(
             room=self.room_id,
             src=self.user_id,
             targ=self.other_user_id,
             tok=self.access_token,
         )
-        self.helper.join(self.room_id, self.other_user_id, tok=self.other_access_token)
+        await self.helper.join(self.room_id, self.other_user_id, tok=self.other_access_token)
 
         # Send 5 messages in the room and note down their event IDs.
         sent_event_ids = []
         for _ in range(5):
-            resp = self.helper.send_event(
+            resp = await self.helper.send_event(
                 self.room_id,
                 "m.room.message",
                 {"body": "honk", "msgtype": "m.text"},
@@ -127,7 +127,7 @@ class HTTPPusherTests(HomeserverTestCase):
         sent_event_ids.reverse()
 
         # We should have a few notifications now. Let's try and fetch the first 2.
-        notification_event_ids, _ = self._request_notifications(
+        notification_event_ids, _ = await self._request_notifications(
             from_token=None, limit=2, expected_count=2
         )
 
@@ -136,7 +136,7 @@ class HTTPPusherTests(HomeserverTestCase):
 
         # Try requesting again without a 'from' query parameter. We should get the
         # same two notifications back.
-        notification_event_ids, next_token = self._request_notifications(
+        notification_event_ids, next_token = await self._request_notifications(
             from_token=None, limit=2, expected_count=2
         )
         self.assertEqual(notification_event_ids, sent_event_ids[:2])
@@ -146,14 +146,14 @@ class HTTPPusherTests(HomeserverTestCase):
         #
         # We need to use the "next_token" from the response as the "from"
         # query parameter in the next request in order to paginate.
-        notification_event_ids, next_token = self._request_notifications(
+        notification_event_ids, next_token = await self._request_notifications(
             from_token=next_token, limit=5, expected_count=4
         )
         # Ensure we chop off the invite on the end.
         notification_event_ids = notification_event_ids[:-1]
         self.assertEqual(notification_event_ids, sent_event_ids[2:])
 
-    def _request_notifications(
+    async def _request_notifications(
         self, from_token: str | None, limit: int, expected_count: int
     ) -> tuple[list[str], str]:
         """
@@ -175,7 +175,7 @@ class HTTPPusherTests(HomeserverTestCase):
         if from_token is not None:
             path += f"&from={from_token}"
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             path,
             access_token=self.other_access_token,
@@ -194,12 +194,12 @@ class HTTPPusherTests(HomeserverTestCase):
 
         return event_ids, next_token
 
-    def test_parameters(self) -> None:
+    async def test_parameters(self) -> None:
         """
         Test that appropriate errors are returned when query parameters are malformed.
         """
         # Test that no parameters are required.
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             "/notifications",
             access_token=self.other_access_token,
@@ -207,7 +207,7 @@ class HTTPPusherTests(HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         # Test that limit cannot be negative
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             "/notifications?limit=-1",
             access_token=self.other_access_token,
@@ -215,7 +215,7 @@ class HTTPPusherTests(HomeserverTestCase):
         self.assertEqual(channel.code, 400)
 
         # Test that the 'limit' parameter must be an integer.
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             "/notifications?limit=foobar",
             access_token=self.other_access_token,
@@ -223,7 +223,7 @@ class HTTPPusherTests(HomeserverTestCase):
         self.assertEqual(channel.code, 400)
 
         # Test that the 'from' parameter must be an integer.
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             "/notifications?from=osborne",
             access_token=self.other_access_token,

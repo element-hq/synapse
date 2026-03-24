@@ -50,27 +50,27 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.hs = self.setup_test_homeserver()
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.hs = await self.setup_test_homeserver()
         return self.hs
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.owner = self.register_user("owner", "pass")
-        self.owner_tok = self.login("owner", "pass")
-        self.other = self.register_user("other", "pass", displayname="Bob")
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.owner = await self.register_user("owner", "pass")
+        self.owner_tok = await self.login("owner", "pass")
+        self.other = await self.register_user("other", "pass", displayname="Bob")
 
-    def test_get_displayname(self) -> None:
-        res = self._get_displayname()
+    async def test_get_displayname(self) -> None:
+        res = await self._get_displayname()
         self.assertEqual(res, "owner")
 
-    def test_get_displayname_rejects_bad_username(self) -> None:
-        channel = self.make_request(
+    async def test_get_displayname_rejects_bad_username(self) -> None:
+        channel = await self.make_request(
             "GET", f"/profile/{urllib.parse.quote('@alice:')}/displayname"
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
 
-    def test_set_displayname(self) -> None:
-        channel = self.make_request(
+    async def test_set_displayname(self) -> None:
+        channel = await self.make_request(
             "PUT",
             "/profile/%s/displayname" % (self.owner,),
             content={"displayname": "test"},
@@ -78,11 +78,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        res = self._get_displayname()
+        res = await self._get_displayname()
         self.assertEqual(res, "test")
 
-    def test_set_displayname_with_extra_spaces(self) -> None:
-        channel = self.make_request(
+    async def test_set_displayname_with_extra_spaces(self) -> None:
+        channel = await self.make_request(
             "PUT",
             "/profile/%s/displayname" % (self.owner,),
             content={"displayname": "  test  "},
@@ -90,20 +90,20 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        res = self._get_displayname()
+        res = await self._get_displayname()
         self.assertEqual(res, "test")
 
-    def test_set_displayname_noauth(self) -> None:
-        channel = self.make_request(
+    async def test_set_displayname_noauth(self) -> None:
+        channel = await self.make_request(
             "PUT",
             "/profile/%s/displayname" % (self.owner,),
             content={"displayname": "test"},
         )
         self.assertEqual(channel.code, 401, channel.result)
 
-    def test_set_displayname_too_long(self) -> None:
+    async def test_set_displayname_too_long(self) -> None:
         """Attempts to set a stupid displayname should get a 400"""
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             "/profile/%s/displayname" % (self.owner,),
             content={"displayname": "test" * 100},
@@ -111,15 +111,15 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 400, channel.result)
 
-        res = self._get_displayname()
+        res = await self._get_displayname()
         self.assertEqual(res, "owner")
 
-    def test_get_displayname_other(self) -> None:
-        res = self._get_displayname(self.other)
+    async def test_get_displayname_other(self) -> None:
+        res = await self._get_displayname(self.other)
         self.assertEqual(res, "Bob")
 
-    def test_set_displayname_other(self) -> None:
-        channel = self.make_request(
+    async def test_set_displayname_other(self) -> None:
+        channel = await self.make_request(
             "PUT",
             "/profile/%s/displayname" % (self.other,),
             content={"displayname": "test"},
@@ -127,12 +127,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 400, channel.result)
 
-    def test_get_avatar_url(self) -> None:
-        res = self._get_avatar_url()
+    async def test_get_avatar_url(self) -> None:
+        res = await self._get_avatar_url()
         self.assertIsNone(res)
 
-    def test_set_avatar_url(self) -> None:
-        channel = self.make_request(
+    async def test_set_avatar_url(self) -> None:
+        channel = await self.make_request(
             "PUT",
             "/profile/%s/avatar_url" % (self.owner,),
             content={"avatar_url": "http://my.server/pic.gif"},
@@ -140,20 +140,20 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        res = self._get_avatar_url()
+        res = await self._get_avatar_url()
         self.assertEqual(res, "http://my.server/pic.gif")
 
-    def test_set_avatar_url_noauth(self) -> None:
-        channel = self.make_request(
+    async def test_set_avatar_url_noauth(self) -> None:
+        channel = await self.make_request(
             "PUT",
             "/profile/%s/avatar_url" % (self.owner,),
             content={"avatar_url": "http://my.server/pic.gif"},
         )
         self.assertEqual(channel.code, 401, channel.result)
 
-    def test_set_avatar_url_too_long(self) -> None:
+    async def test_set_avatar_url_too_long(self) -> None:
         """Attempts to set a stupid avatar_url should get a 400"""
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             "/profile/%s/avatar_url" % (self.owner,),
             content={"avatar_url": "http://my.server/pic.gif" * 100},
@@ -161,15 +161,15 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 400, channel.result)
 
-        res = self._get_avatar_url()
+        res = await self._get_avatar_url()
         self.assertIsNone(res)
 
-    def test_get_avatar_url_other(self) -> None:
-        res = self._get_avatar_url(self.other)
+    async def test_get_avatar_url_other(self) -> None:
+        res = await self._get_avatar_url(self.other)
         self.assertIsNone(res)
 
-    def test_set_avatar_url_other(self) -> None:
-        channel = self.make_request(
+    async def test_set_avatar_url_other(self) -> None:
+        channel = await self.make_request(
             "PUT",
             "/profile/%s/avatar_url" % (self.other,),
             content={"avatar_url": "http://my.server/pic.gif"},
@@ -177,8 +177,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 400, channel.result)
 
-    def _get_displayname(self, name: str | None = None) -> str | None:
-        channel = self.make_request(
+    async def _get_displayname(self, name: str | None = None) -> str | None:
+        channel = await self.make_request(
             "GET", "/profile/%s/displayname" % (name or self.owner,)
         )
         self.assertEqual(channel.code, 200, channel.result)
@@ -187,8 +187,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         # https://github.com/matrix-org/synapse/issues/13137.
         return channel.json_body.get("displayname")
 
-    def _get_avatar_url(self, name: str | None = None) -> str | None:
-        channel = self.make_request(
+    async def _get_avatar_url(self, name: str | None = None) -> str | None:
+        channel = await self.make_request(
             "GET", "/profile/%s/avatar_url" % (name or self.owner,)
         )
         self.assertEqual(channel.code, 200, channel.result)
@@ -198,18 +198,18 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         return channel.json_body.get("avatar_url")
 
     @unittest.override_config({"max_avatar_size": 50})
-    def test_avatar_size_limit_global(self) -> None:
+    async def test_avatar_size_limit_global(self) -> None:
         """Tests that the maximum size limit for avatars is enforced when updating a
         global profile.
         """
-        self._setup_local_files(
+        await self._setup_local_files(
             {
                 "small": {"size": 40},
                 "big": {"size": 60},
             }
         )
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/profile/{self.owner}/avatar_url",
             content={"avatar_url": "mxc://test/big"},
@@ -220,7 +220,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             channel.json_body["errcode"], Codes.FORBIDDEN, channel.json_body
         )
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/profile/{self.owner}/avatar_url",
             content={"avatar_url": "mxc://test/small"},
@@ -229,20 +229,20 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
 
     @unittest.override_config({"max_avatar_size": 50})
-    def test_avatar_size_limit_per_room(self) -> None:
+    async def test_avatar_size_limit_per_room(self) -> None:
         """Tests that the maximum size limit for avatars is enforced when updating a
         per-room profile.
         """
-        self._setup_local_files(
+        await self._setup_local_files(
             {
                 "small": {"size": 40},
                 "big": {"size": 60},
             }
         )
 
-        room_id = self.helper.create_room_as(tok=self.owner_tok)
+        room_id = await self.helper.create_room_as(tok=self.owner_tok)
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/rooms/{room_id}/state/m.room.member/{self.owner}",
             content={"membership": "join", "avatar_url": "mxc://test/big"},
@@ -253,7 +253,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             channel.json_body["errcode"], Codes.FORBIDDEN, channel.json_body
         )
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/rooms/{room_id}/state/m.room.member/{self.owner}",
             content={"membership": "join", "avatar_url": "mxc://test/small"},
@@ -262,18 +262,18 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
 
     @unittest.override_config({"allowed_avatar_mimetypes": ["image/png"]})
-    def test_avatar_allowed_mime_type_global(self) -> None:
+    async def test_avatar_allowed_mime_type_global(self) -> None:
         """Tests that the MIME type whitelist for avatars is enforced when updating a
         global profile.
         """
-        self._setup_local_files(
+        await self._setup_local_files(
             {
                 "good": {"mimetype": "image/png"},
                 "bad": {"mimetype": "application/octet-stream"},
             }
         )
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/profile/{self.owner}/avatar_url",
             content={"avatar_url": "mxc://test/bad"},
@@ -284,7 +284,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             channel.json_body["errcode"], Codes.FORBIDDEN, channel.json_body
         )
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/profile/{self.owner}/avatar_url",
             content={"avatar_url": "mxc://test/good"},
@@ -293,20 +293,20 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
 
     @unittest.override_config({"allowed_avatar_mimetypes": ["image/png"]})
-    def test_avatar_allowed_mime_type_per_room(self) -> None:
+    async def test_avatar_allowed_mime_type_per_room(self) -> None:
         """Tests that the MIME type whitelist for avatars is enforced when updating a
         per-room profile.
         """
-        self._setup_local_files(
+        await self._setup_local_files(
             {
                 "good": {"mimetype": "image/png"},
                 "bad": {"mimetype": "application/octet-stream"},
             }
         )
 
-        room_id = self.helper.create_room_as(tok=self.owner_tok)
+        room_id = await self.helper.create_room_as(tok=self.owner_tok)
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/rooms/{room_id}/state/m.room.member/{self.owner}",
             content={"membership": "join", "avatar_url": "mxc://test/bad"},
@@ -317,7 +317,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             channel.json_body["errcode"], Codes.FORBIDDEN, channel.json_body
         )
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/rooms/{room_id}/state/m.room.member/{self.owner}",
             content={"membership": "join", "avatar_url": "mxc://test/good"},
@@ -328,12 +328,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     @unittest.override_config(
         {"experimental_features": {"msc4069_profile_inhibit_propagation": True}}
     )
-    def test_msc4069_inhibit_propagation(self) -> None:
+    async def test_msc4069_inhibit_propagation(self) -> None:
         """Tests to ensure profile update propagation can be inhibited."""
         for prop in ["avatar_url", "displayname"]:
-            room_id = self.helper.create_room_as(tok=self.owner_tok)
+            room_id = await self.helper.create_room_as(tok=self.owner_tok)
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/rooms/{room_id}/state/m.room.member/{self.owner}",
                 content={"membership": "join", prop: "mxc://my.server/existing"},
@@ -341,7 +341,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200, channel.result)
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/profile/{self.owner}/{prop}?org.matrix.msc4069.propagate=false",
                 content={prop: "http://my.server/pic.gif"},
@@ -350,13 +350,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.assertEqual(channel.code, 200, channel.result)
 
             res = (
-                self._get_avatar_url()
+                await self._get_avatar_url()
                 if prop == "avatar_url"
-                else self._get_displayname()
+                else await self._get_displayname()
             )
             self.assertEqual(res, "http://my.server/pic.gif")
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "GET",
                 f"/rooms/{room_id}/state/m.room.member/{self.owner}",
                 access_token=self.owner_tok,
@@ -364,14 +364,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.assertEqual(channel.code, 200, channel.result)
             self.assertEqual(channel.json_body.get(prop), "mxc://my.server/existing")
 
-    def test_msc4069_inhibit_propagation_disabled(self) -> None:
+    async def test_msc4069_inhibit_propagation_disabled(self) -> None:
         """Tests to ensure profile update propagation inhibit flags are ignored when the
         experimental flag is not enabled.
         """
         for prop in ["avatar_url", "displayname"]:
-            room_id = self.helper.create_room_as(tok=self.owner_tok)
+            room_id = await self.helper.create_room_as(tok=self.owner_tok)
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/rooms/{room_id}/state/m.room.member/{self.owner}",
                 content={"membership": "join", prop: "mxc://my.server/existing"},
@@ -379,7 +379,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200, channel.result)
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/profile/{self.owner}/{prop}?org.matrix.msc4069.propagate=false",
                 content={prop: "http://my.server/pic.gif"},
@@ -387,14 +387,16 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200, channel.result)
 
+            await self._wait_for_profile_propagation()
+
             res = (
-                self._get_avatar_url()
+                await self._get_avatar_url()
                 if prop == "avatar_url"
-                else self._get_displayname()
+                else await self._get_displayname()
             )
             self.assertEqual(res, "http://my.server/pic.gif")
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "GET",
                 f"/rooms/{room_id}/state/m.room.member/{self.owner}",
                 access_token=self.owner_tok,
@@ -405,12 +407,25 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             # isn't enabled.
             self.assertEqual(channel.json_body.get(prop), "http://my.server/pic.gif")
 
-    def test_msc4069_inhibit_propagation_default(self) -> None:
+    async def _wait_for_profile_propagation(self) -> None:
+        """Wait for the background task that propagates profile changes to rooms."""
+        import asyncio
+        from synapse.util.task_scheduler import TaskStatus
+        for _ in range(50):
+            tasks = await self.hs.get_task_scheduler().get_tasks(
+                actions=["update_join_states"],
+                statuses=[TaskStatus.ACTIVE, TaskStatus.SCHEDULED],
+            )
+            if not tasks:
+                break
+            await asyncio.sleep(0.05)
+
+    async def test_msc4069_inhibit_propagation_default(self) -> None:
         """Tests to ensure profile update propagation happens by default."""
         for prop in ["avatar_url", "displayname"]:
-            room_id = self.helper.create_room_as(tok=self.owner_tok)
+            room_id = await self.helper.create_room_as(tok=self.owner_tok)
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/rooms/{room_id}/state/m.room.member/{self.owner}",
                 content={"membership": "join", prop: "mxc://my.server/existing"},
@@ -418,7 +433,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200, channel.result)
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/profile/{self.owner}/{prop}",
                 content={prop: "http://my.server/pic.gif"},
@@ -426,14 +441,16 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200, channel.result)
 
+            await self._wait_for_profile_propagation()
+
             res = (
-                self._get_avatar_url()
+                await self._get_avatar_url()
                 if prop == "avatar_url"
-                else self._get_displayname()
+                else await self._get_displayname()
             )
             self.assertEqual(res, "http://my.server/pic.gif")
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "GET",
                 f"/rooms/{room_id}/state/m.room.member/{self.owner}",
                 access_token=self.owner_tok,
@@ -447,12 +464,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     @unittest.override_config(
         {"experimental_features": {"msc4069_profile_inhibit_propagation": True}}
     )
-    def test_msc4069_inhibit_propagation_like_default(self) -> None:
+    async def test_msc4069_inhibit_propagation_like_default(self) -> None:
         """Tests to ensure clients can request explicit profile propagation."""
         for prop in ["avatar_url", "displayname"]:
-            room_id = self.helper.create_room_as(tok=self.owner_tok)
+            room_id = await self.helper.create_room_as(tok=self.owner_tok)
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/rooms/{room_id}/state/m.room.member/{self.owner}",
                 content={"membership": "join", prop: "mxc://my.server/existing"},
@@ -460,7 +477,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200, channel.result)
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/profile/{self.owner}/{prop}?org.matrix.msc4069.propagate=true",
                 content={prop: "http://my.server/pic.gif"},
@@ -468,14 +485,16 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200, channel.result)
 
+            await self._wait_for_profile_propagation()
+
             res = (
-                self._get_avatar_url()
+                await self._get_avatar_url()
                 if prop == "avatar_url"
-                else self._get_displayname()
+                else await self._get_displayname()
             )
             self.assertEqual(res, "http://my.server/pic.gif")
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "GET",
                 f"/rooms/{room_id}/state/m.room.member/{self.owner}",
                 access_token=self.owner_tok,
@@ -485,32 +504,32 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             # The client requested ?propagate=true, so it should have happened.
             self.assertEqual(channel.json_body.get(prop), "http://my.server/pic.gif")
 
-    def test_get_missing_custom_field(self) -> None:
-        channel = self.make_request(
+    async def test_get_missing_custom_field(self) -> None:
+        channel = await self.make_request(
             "GET",
             f"/_matrix/client/v3/profile/{self.owner}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
 
-    def test_get_missing_custom_field_invalid_field_name(self) -> None:
-        channel = self.make_request(
+    async def test_get_missing_custom_field_invalid_field_name(self) -> None:
+        channel = await self.make_request(
             "GET",
             f"/_matrix/client/v3/profile/{self.owner}/[custom_field]",
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
 
-    def test_get_custom_field_rejects_bad_username(self) -> None:
-        channel = self.make_request(
+    async def test_get_custom_field_rejects_bad_username(self) -> None:
+        channel = await self.make_request(
             "GET",
             f"/_matrix/client/v3/profile/{urllib.parse.quote('@alice:')}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
 
-    def test_set_custom_field(self) -> None:
-        channel = self.make_request(
+    async def test_set_custom_field(self) -> None:
+        channel = await self.make_request(
             "PUT",
             f"/_matrix/client/v3/profile/{self.owner}/custom_field",
             content={"custom_field": "test"},
@@ -518,7 +537,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             f"/_matrix/client/v3/profile/{self.owner}/custom_field",
         )
@@ -526,7 +545,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body, {"custom_field": "test"})
 
         # Overwriting the field should work.
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/_matrix/client/v3/profile/{self.owner}/custom_field",
             content={"custom_field": "new_Value"},
@@ -534,7 +553,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             f"/_matrix/client/v3/profile/{self.owner}/custom_field",
         )
@@ -542,7 +561,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body, {"custom_field": "new_Value"})
 
         # Deleting the field should work.
-        channel = self.make_request(
+        channel = await self.make_request(
             "DELETE",
             f"/_matrix/client/v3/profile/{self.owner}/custom_field",
             content={},
@@ -550,14 +569,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             f"/_matrix/client/v3/profile/{self.owner}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
 
-    def test_non_string(self) -> None:
+    async def test_non_string(self) -> None:
         """Non-string fields are supported for custom fields."""
         fields = {
             "bool_field": True,
@@ -568,7 +587,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         }
 
         for key, value in fields.items():
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/_matrix/client/v3/profile/{self.owner}/{key}",
                 content={key: value},
@@ -576,7 +595,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200, channel.result)
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             f"/_matrix/client/v3/profile/{self.owner}",
         )
@@ -585,15 +604,15 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Check getting individual fields works.
         for key, value in fields.items():
-            channel = self.make_request(
+            channel = await self.make_request(
                 "GET",
                 f"/_matrix/client/v3/profile/{self.owner}/{key}",
             )
             self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
             self.assertEqual(channel.json_body, {key: value})
 
-    def test_set_custom_field_noauth(self) -> None:
-        channel = self.make_request(
+    async def test_set_custom_field_noauth(self) -> None:
+        channel = await self.make_request(
             "PUT",
             f"/_matrix/client/v3/profile/{self.owner}/custom_field",
             content={"custom_field": "test"},
@@ -601,12 +620,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 401, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.MISSING_TOKEN)
 
-    def test_set_custom_field_size(self) -> None:
+    async def test_set_custom_field_size(self) -> None:
         """
         Attempts to set a custom field name that is too long should get a 400 error.
         """
         # Key is missing.
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/_matrix/client/v3/profile/{self.owner}/",
             content={"": "test"},
@@ -617,7 +636,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Single key is too large.
         key = "c" * 500
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/_matrix/client/v3/profile/{self.owner}/{key}",
             content={key: "test"},
@@ -626,7 +645,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.KEY_TOO_LARGE)
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "DELETE",
             f"/_matrix/client/v3/profile/{self.owner}/{key}",
             content={key: "test"},
@@ -636,7 +655,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], Codes.KEY_TOO_LARGE)
 
         # Key doesn't match body.
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/_matrix/client/v3/profile/{self.owner}/custom_field",
             content={"diff_key": "test"},
@@ -645,7 +664,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.MISSING_PARAM)
 
-    def test_set_custom_field_profile_too_long(self) -> None:
+    async def test_set_custom_field_profile_too_long(self) -> None:
         """
         Attempts to set a custom field that would push the overall profile too large.
         """
@@ -665,7 +684,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             #   2 braces, 1 comma
             # 3 + 21 + 65498 = 65522 < 65536.
             key = "a"
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/_matrix/client/v3/profile/{self.owner}/{key}",
                 content={key: "a" * 65498},
@@ -674,7 +693,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.assertEqual(channel.code, 200, channel.result)
 
             # Get the entire profile.
-            channel = self.make_request(
+            channel = await self.make_request(
                 "GET",
                 f"/_matrix/client/v3/profile/{self.owner}",
                 access_token=self.owner_tok,
@@ -693,7 +712,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
             # The next one should fail, note the value has a (JSON) length of 2.
             key = "b"
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/_matrix/client/v3/profile/{self.owner}/{key}",
                 content={key: "1" + "a" * ADDITIONAL_CHARS},
@@ -703,7 +722,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
 
             # Setting an avatar or (longer) display name should not work.
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/profile/{self.owner}/displayname",
                 content={"displayname": "owner12345678" + "a" * ADDITIONAL_CHARS},
@@ -712,7 +731,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.assertEqual(channel.code, 400, channel.result)
             self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
 
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/profile/{self.owner}/avatar_url",
                 content={"avatar_url": "mxc://foo/bar"},
@@ -723,7 +742,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
             # Removing a single byte should work.
             key = "b"
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/_matrix/client/v3/profile/{self.owner}/{key}",
                 content={key: "" + "a" * ADDITIONAL_CHARS},
@@ -733,7 +752,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
             # Finally, setting a field that already exists to a value that is <= in length should work.
             key = "a"
-            channel = self.make_request(
+            channel = await self.make_request(
                 "PUT",
                 f"/_matrix/client/v3/profile/{self.owner}/{key}",
                 content={key: ""},
@@ -743,8 +762,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         finally:
             sql_logger.disabled = sql_logger_was_disabled
 
-    def test_set_custom_field_displayname(self) -> None:
-        channel = self.make_request(
+    async def test_set_custom_field_displayname(self) -> None:
+        channel = await self.make_request(
             "PUT",
             f"/_matrix/client/v3/profile/{self.owner}/displayname",
             content={"displayname": "test"},
@@ -752,11 +771,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        displayname = self._get_displayname()
+        displayname = await self._get_displayname()
         self.assertEqual(displayname, "test")
 
-    def test_set_custom_field_avatar_url(self) -> None:
-        channel = self.make_request(
+    async def test_set_custom_field_avatar_url(self) -> None:
+        channel = await self.make_request(
             "PUT",
             f"/_matrix/client/v3/profile/{self.owner}/avatar_url",
             content={"avatar_url": "mxc://test/good"},
@@ -764,12 +783,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        avatar_url = self._get_avatar_url()
+        avatar_url = await self._get_avatar_url()
         self.assertEqual(avatar_url, "mxc://test/good")
 
-    def test_set_custom_field_other(self) -> None:
+    async def test_set_custom_field_other(self) -> None:
         """Setting someone else's profile field should fail"""
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             f"/_matrix/client/v3/profile/{self.other}/custom_field",
             content={"custom_field": "test"},
@@ -778,7 +797,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
-    def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
+    async def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 
         Args:
@@ -790,7 +809,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         store = self.hs.get_datastores().main
 
         for name, props in names_and_props.items():
-            self.get_success(
+            await self.get_success(
                 store.store_local_media(
                     media_id=name,
                     media_type=props.get("mimetype", "image/png"),
@@ -810,68 +829,68 @@ class ProfilesRestrictedTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
         config["require_auth_for_profile_requests"] = True
         config["limit_profile_requests_to_users_who_share_rooms"] = True
-        self.hs = self.setup_test_homeserver(config=config)
+        self.hs = await self.setup_test_homeserver(config=config)
 
         return self.hs
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         # User owning the requested profile.
-        self.owner = self.register_user("owner", "pass")
-        self.owner_tok = self.login("owner", "pass")
+        self.owner = await self.register_user("owner", "pass")
+        self.owner_tok = await self.login("owner", "pass")
         self.profile_url = "/profile/%s" % (self.owner)
 
         # User requesting the profile.
-        self.requester = self.register_user("requester", "pass")
-        self.requester_tok = self.login("requester", "pass")
+        self.requester = await self.register_user("requester", "pass")
+        self.requester_tok = await self.login("requester", "pass")
 
-        self.room_id = self.helper.create_room_as(self.owner, tok=self.owner_tok)
+        self.room_id = await self.helper.create_room_as(self.owner, tok=self.owner_tok)
 
-    def test_no_auth(self) -> None:
-        self.try_fetch_profile(401)
+    async def test_no_auth(self) -> None:
+        await self.try_fetch_profile(401)
 
-    def test_not_in_shared_room(self) -> None:
-        self.ensure_requester_left_room()
+    async def test_not_in_shared_room(self) -> None:
+        await self.ensure_requester_left_room()
 
-        self.try_fetch_profile(403, access_token=self.requester_tok)
+        await self.try_fetch_profile(403, access_token=self.requester_tok)
 
-    def test_in_shared_room(self) -> None:
-        self.ensure_requester_left_room()
+    async def test_in_shared_room(self) -> None:
+        await self.ensure_requester_left_room()
 
-        self.helper.join(room=self.room_id, user=self.requester, tok=self.requester_tok)
+        await self.helper.join(room=self.room_id, user=self.requester, tok=self.requester_tok)
 
-        self.try_fetch_profile(200, self.requester_tok)
+        await self.try_fetch_profile(200, self.requester_tok)
 
-    def try_fetch_profile(
+    async def try_fetch_profile(
         self, expected_code: int, access_token: str | None = None
     ) -> None:
-        self.request_profile(expected_code, access_token=access_token)
+        await self.request_profile(expected_code, access_token=access_token)
 
-        self.request_profile(
+        await self.request_profile(
             expected_code, url_suffix="/displayname", access_token=access_token
         )
 
-        self.request_profile(
+        await self.request_profile(
             expected_code, url_suffix="/avatar_url", access_token=access_token
         )
 
-    def request_profile(
+    async def request_profile(
         self,
         expected_code: int,
         url_suffix: str = "",
         access_token: str | None = None,
     ) -> None:
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET", self.profile_url + url_suffix, access_token=access_token
         )
         self.assertEqual(channel.code, expected_code, channel.result)
 
-    def ensure_requester_left_room(self) -> None:
+    async def ensure_requester_left_room(self) -> None:
         try:
-            self.helper.leave(
+            await self.helper.leave(
                 room=self.room_id, user=self.requester, tok=self.requester_tok
             )
         except AssertionError:
@@ -888,36 +907,36 @@ class OwnProfileUnrestrictedTestCase(unittest.HomeserverTestCase):
         profile.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
         config["require_auth_for_profile_requests"] = True
         config["limit_profile_requests_to_users_who_share_rooms"] = True
-        self.hs = self.setup_test_homeserver(config=config)
+        self.hs = await self.setup_test_homeserver(config=config)
 
         return self.hs
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         # User requesting the profile.
-        self.requester = self.register_user("requester", "pass")
-        self.requester_tok = self.login("requester", "pass")
+        self.requester = await self.register_user("requester", "pass")
+        self.requester_tok = await self.login("requester", "pass")
 
-    def test_can_lookup_own_profile(self) -> None:
+    async def test_can_lookup_own_profile(self) -> None:
         """Tests that a user can lookup their own profile without having to be in a room
         if 'require_auth_for_profile_requests' is set to true in the server's config.
         """
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET", "/profile/" + self.requester, access_token=self.requester_tok
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             "/profile/" + self.requester + "/displayname",
             access_token=self.requester_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "GET",
             "/profile/" + self.requester + "/avatar_url",
             access_token=self.requester_tok,

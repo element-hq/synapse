@@ -42,18 +42,18 @@ class RoomTypingTestCase(unittest.HomeserverTestCase):
     user = UserID.from_string(user_id)
     servlets = [room.register_servlets]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        hs = self.setup_test_homeserver("red")
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        hs = await self.setup_test_homeserver("red")
         self.event_source = hs.get_event_sources().sources.typing
         return hs
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.room_id = self.helper.create_room_as(self.user_id)
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.room_id = await self.helper.create_room_as(self.user_id)
         # Need another user to make notifications actually work
-        self.helper.join(self.room_id, user="@jim:red")
+        await self.helper.join(self.room_id, user="@jim:red")
 
-    def test_set_typing(self) -> None:
-        channel = self.make_request(
+    async def test_set_typing(self) -> None:
+        channel = await self.make_request(
             "PUT",
             "/rooms/%s/typing/%s" % (self.room_id, self.user_id),
             b'{"typing": true, "timeout": 30000}',
@@ -61,7 +61,7 @@ class RoomTypingTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code)
 
         self.assertEqual(self.event_source.get_current_key(), 1)
-        events = self.get_success(
+        events = await self.get_success(
             self.event_source.get_new_events(
                 user=UserID.from_string(self.user_id),
                 from_key=0,
@@ -82,16 +82,16 @@ class RoomTypingTestCase(unittest.HomeserverTestCase):
             ],
         )
 
-    def test_set_not_typing(self) -> None:
-        channel = self.make_request(
+    async def test_set_not_typing(self) -> None:
+        channel = await self.make_request(
             "PUT",
             "/rooms/%s/typing/%s" % (self.room_id, self.user_id),
             b'{"typing": false}',
         )
         self.assertEqual(200, channel.code)
 
-    def test_typing_timeout(self) -> None:
-        channel = self.make_request(
+    async def test_typing_timeout(self) -> None:
+        channel = await self.make_request(
             "PUT",
             "/rooms/%s/typing/%s" % (self.room_id, self.user_id),
             b'{"typing": true, "timeout": 30000}',
@@ -100,11 +100,11 @@ class RoomTypingTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(self.event_source.get_current_key(), 1)
 
-        self.reactor.advance(36)
+        await self.pump(36)
 
         self.assertEqual(self.event_source.get_current_key(), 2)
 
-        channel = self.make_request(
+        channel = await self.make_request(
             "PUT",
             "/rooms/%s/typing/%s" % (self.room_id, self.user_id),
             b'{"typing": true, "timeout": 30000}',

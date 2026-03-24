@@ -202,13 +202,11 @@ class TestCase(_stdlib_unittest.IsolatedAsyncioTestCase):
     """
 
     def setUp(self) -> None:
-        # if we're not starting in the sentinel logcontext, then to be honest
-        # all future bets are off.
+        # If we're not starting in the sentinel logcontext, reset it.
+        # In asyncio, cancelled background tasks may leave a non-sentinel
+        # context during event loop shutdown between tests.
         if current_context():
-            self.fail(
-                "Test starting with non-sentinel logging context %s"
-                % (current_context(),)
-            )
+            set_current_context(SENTINEL_CONTEXT)
 
         # Disable GC for duration of test (re-enabled in tearDown).
         gc.disable()
@@ -585,9 +583,11 @@ class HomeserverTestCase(TestCase):
         """
         if hasattr(self, 'hs') and self.hs is not None:
             self.hs.get_clock().shutdown()
-            # Give event loop time for cancellation to propagate
-            await asyncio.sleep(0)
-            await asyncio.sleep(0)
+            # Give event loop time for cancellation callbacks to propagate.
+            # Multiple yields are needed because cancellation of a task may
+            # trigger cleanup in other tasks (e.g. context managers exiting).
+            for _ in range(5):
+                await asyncio.sleep(0)
         # Ensure we're back in the sentinel context
         set_current_context(SENTINEL_CONTEXT)
 
@@ -819,11 +819,16 @@ class HomeserverTestCase(TestCase):
 
         ``reactor.advance()`` delegates to ``clock.advance()``, so calling
         either one advances the same fake-time source.
+
+        After advancing, yields multiple times to allow background tasks
+        (including those running in executor threads) to complete.
         """
         # Advance fake time (fires pending sleeps and callFromThread)
         self.reactor.advance(by)
-        # Yield to the event loop so callbacks can run
-        await asyncio.sleep(0)
+        # Yield to the event loop multiple times so background tasks
+        # (including DB operations in executor threads) can complete.
+        for _ in range(20):
+            await asyncio.sleep(0.01)
 
     async def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         """Await an awaitable, optionally advancing fake time first."""

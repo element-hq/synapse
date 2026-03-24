@@ -103,6 +103,11 @@ class NativeConnectionPool:
 
         self._closed = False
 
+    @property
+    def running(self) -> bool:
+        """Whether the pool is running (not closed)."""
+        return not self._closed
+
     def _get_connection(self) -> Connection:
         """Get or create a connection for the current thread.
 

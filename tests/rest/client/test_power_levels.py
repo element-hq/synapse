@@ -42,33 +42,33 @@ class PowerLevelsTestCase(HomeserverTestCase):
         sync.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
 
-        return self.setup_test_homeserver(config=config)
+        return await self.setup_test_homeserver(config=config)
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         # register a room admin, moderator and regular user
-        self.admin_user_id = self.register_user("admin", "pass")
-        self.admin_access_token = self.login("admin", "pass")
-        self.mod_user_id = self.register_user("mod", "pass")
-        self.mod_access_token = self.login("mod", "pass")
-        self.user_user_id = self.register_user("user", "pass")
-        self.user_access_token = self.login("user", "pass")
+        self.admin_user_id = await self.register_user("admin", "pass")
+        self.admin_access_token = await self.login("admin", "pass")
+        self.mod_user_id = await self.register_user("mod", "pass")
+        self.mod_access_token = await self.login("mod", "pass")
+        self.user_user_id = await self.register_user("user", "pass")
+        self.user_access_token = await self.login("user", "pass")
 
         # Create a room
-        self.room_id = self.helper.create_room_as(
+        self.room_id = await self.helper.create_room_as(
             self.admin_user_id, tok=self.admin_access_token
         )
 
         # Invite the other users
-        self.helper.invite(
+        await self.helper.invite(
             room=self.room_id,
             src=self.admin_user_id,
             tok=self.admin_access_token,
             targ=self.mod_user_id,
         )
-        self.helper.invite(
+        await self.helper.invite(
             room=self.room_id,
             src=self.admin_user_id,
             tok=self.admin_access_token,
@@ -76,15 +76,15 @@ class PowerLevelsTestCase(HomeserverTestCase):
         )
 
         # Make the other users join the room
-        self.helper.join(
+        await self.helper.join(
             room=self.room_id, user=self.mod_user_id, tok=self.mod_access_token
         )
-        self.helper.join(
+        await self.helper.join(
             room=self.room_id, user=self.user_user_id, tok=self.user_access_token
         )
 
         # Mod the mod
-        room_power_levels = self.helper.get_state(
+        room_power_levels = await self.helper.get_state(
             self.room_id,
             "m.room.power_levels",
             tok=self.admin_access_token,
@@ -93,16 +93,16 @@ class PowerLevelsTestCase(HomeserverTestCase):
         # Update existing power levels with mod at PL50
         room_power_levels["users"].update({self.mod_user_id: 50})
 
-        self.helper.send_state(
+        await self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
             room_power_levels,
             tok=self.admin_access_token,
         )
 
-    def test_non_admins_cannot_enable_room_encryption(self) -> None:
+    async def test_non_admins_cannot_enable_room_encryption(self) -> None:
         # have the mod try to enable room encryption
-        self.helper.send_state(
+        await self.helper.send_state(
             self.room_id,
             "m.room.encryption",
             {"algorithm": "m.megolm.v1.aes-sha2"},
@@ -111,7 +111,7 @@ class PowerLevelsTestCase(HomeserverTestCase):
         )
 
         # have the user try to enable room encryption
-        self.helper.send_state(
+        await self.helper.send_state(
             self.room_id,
             "m.room.encryption",
             {"algorithm": "m.megolm.v1.aes-sha2"},
@@ -119,9 +119,9 @@ class PowerLevelsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.FORBIDDEN,  # expect failure
         )
 
-    def test_non_admins_cannot_send_server_acl(self) -> None:
+    async def test_non_admins_cannot_send_server_acl(self) -> None:
         # have the mod try to send a server ACL
-        self.helper.send_state(
+        await self.helper.send_state(
             self.room_id,
             "m.room.server_acl",
             {
@@ -134,7 +134,7 @@ class PowerLevelsTestCase(HomeserverTestCase):
         )
 
         # have the user try to send a server ACL
-        self.helper.send_state(
+        await self.helper.send_state(
             self.room_id,
             "m.room.server_acl",
             {
@@ -146,14 +146,14 @@ class PowerLevelsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.FORBIDDEN,  # expect failure
         )
 
-    def test_non_admins_cannot_tombstone_room(self) -> None:
+    async def test_non_admins_cannot_tombstone_room(self) -> None:
         # Create another room that will serve as our "upgraded room"
-        self.upgraded_room_id = self.helper.create_room_as(
+        self.upgraded_room_id = await self.helper.create_room_as(
             self.admin_user_id, tok=self.admin_access_token
         )
 
         # have the mod try to send a tombstone event
-        self.helper.send_state(
+        await self.helper.send_state(
             self.room_id,
             "m.room.tombstone",
             {
@@ -165,7 +165,7 @@ class PowerLevelsTestCase(HomeserverTestCase):
         )
 
         # have the user try to send a tombstone event
-        self.helper.send_state(
+        await self.helper.send_state(
             self.room_id,
             "m.room.tombstone",
             {
@@ -176,9 +176,9 @@ class PowerLevelsTestCase(HomeserverTestCase):
             expect_code=403,  # expect failure
         )
 
-    def test_admins_can_enable_room_encryption(self) -> None:
+    async def test_admins_can_enable_room_encryption(self) -> None:
         # have the admin try to enable room encryption
-        self.helper.send_state(
+        await self.helper.send_state(
             self.room_id,
             "m.room.encryption",
             {"algorithm": "m.megolm.v1.aes-sha2"},
@@ -186,9 +186,9 @@ class PowerLevelsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.OK,  # expect success
         )
 
-    def test_admins_can_send_server_acl(self) -> None:
+    async def test_admins_can_send_server_acl(self) -> None:
         # have the admin try to send a server ACL
-        self.helper.send_state(
+        await self.helper.send_state(
             self.room_id,
             "m.room.server_acl",
             {
@@ -200,14 +200,14 @@ class PowerLevelsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.OK,  # expect success
         )
 
-    def test_admins_can_tombstone_room(self) -> None:
+    async def test_admins_can_tombstone_room(self) -> None:
         # Create another room that will serve as our "upgraded room"
-        self.upgraded_room_id = self.helper.create_room_as(
+        self.upgraded_room_id = await self.helper.create_room_as(
             self.admin_user_id, tok=self.admin_access_token
         )
 
         # have the admin try to send a tombstone event
-        self.helper.send_state(
+        await self.helper.send_state(
             self.room_id,
             "m.room.tombstone",
             {
@@ -218,8 +218,8 @@ class PowerLevelsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.OK,  # expect success
         )
 
-    def test_cannot_set_string_power_levels(self) -> None:
-        room_power_levels = self.helper.get_state(
+    async def test_cannot_set_string_power_levels(self) -> None:
+        room_power_levels = await self.helper.get_state(
             self.room_id,
             "m.room.power_levels",
             tok=self.admin_access_token,
@@ -228,7 +228,7 @@ class PowerLevelsTestCase(HomeserverTestCase):
         # Update existing power levels with user at PL "0"
         room_power_levels["users"].update({self.user_user_id: "0"})
 
-        body = self.helper.send_state(
+        body = await self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
             room_power_levels,
@@ -242,8 +242,8 @@ class PowerLevelsTestCase(HomeserverTestCase):
             body,
         )
 
-    def test_cannot_set_unsafe_large_power_levels(self) -> None:
-        room_power_levels = self.helper.get_state(
+    async def test_cannot_set_unsafe_large_power_levels(self) -> None:
+        room_power_levels = await self.helper.get_state(
             self.room_id,
             "m.room.power_levels",
             tok=self.admin_access_token,
@@ -254,7 +254,7 @@ class PowerLevelsTestCase(HomeserverTestCase):
             {self.user_user_id: CANONICALJSON_MAX_INT + 1}
         )
 
-        body = self.helper.send_state(
+        body = await self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
             room_power_levels,
@@ -268,8 +268,8 @@ class PowerLevelsTestCase(HomeserverTestCase):
             body,
         )
 
-    def test_cannot_set_unsafe_small_power_levels(self) -> None:
-        room_power_levels = self.helper.get_state(
+    async def test_cannot_set_unsafe_small_power_levels(self) -> None:
+        room_power_levels = await self.helper.get_state(
             self.room_id,
             "m.room.power_levels",
             tok=self.admin_access_token,
@@ -280,7 +280,7 @@ class PowerLevelsTestCase(HomeserverTestCase):
             {self.user_user_id: CANONICALJSON_MIN_INT - 1}
         )
 
-        body = self.helper.send_state(
+        body = await self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
             room_power_levels,

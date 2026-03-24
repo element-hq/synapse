@@ -38,27 +38,27 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    async def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.url = b"/capabilities"
-        hs = self.setup_test_homeserver()
+        hs = await self.setup_test_homeserver()
         self.config = hs.config
         self.auth_handler = hs.get_auth_handler()
         return hs
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+    async def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.localpart = "user"
         self.password = "pass"
-        self.user = self.register_user(self.localpart, self.password)
+        self.user = await self.register_user(self.localpart, self.password)
 
-    def test_check_auth_required(self) -> None:
-        channel = self.make_request("GET", self.url)
+    async def test_check_auth_required(self) -> None:
+        channel = await self.make_request("GET", self.url)
 
         self.assertEqual(channel.code, 401)
 
-    def test_get_room_version_capabilities(self) -> None:
-        access_token = self.login(self.localpart, self.password)
+    async def test_get_room_version_capabilities(self) -> None:
+        access_token = await self.login(self.localpart, self.password)
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, 200)
@@ -70,48 +70,48 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
             capabilities["m.room_versions"]["default"],
         )
 
-    def test_get_change_password_capabilities_password_login(self) -> None:
-        access_token = self.login(self.localpart, self.password)
+    async def test_get_change_password_capabilities_password_login(self) -> None:
+        access_token = await self.login(self.localpart, self.password)
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, 200)
         self.assertTrue(capabilities["m.change_password"]["enabled"])
 
     @override_config({"password_config": {"localdb_enabled": False}})
-    def test_get_change_password_capabilities_localdb_disabled(self) -> None:
-        access_token = self.get_success(
+    async def test_get_change_password_capabilities_localdb_disabled(self) -> None:
+        access_token = await self.get_success(
             self.auth_handler.create_access_token_for_user_id(
                 self.user, device_id=None, valid_until_ms=None
             )
         )
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, 200)
         self.assertFalse(capabilities["m.change_password"]["enabled"])
 
     @override_config({"password_config": {"enabled": False}})
-    def test_get_change_password_capabilities_password_disabled(self) -> None:
-        access_token = self.get_success(
+    async def test_get_change_password_capabilities_password_disabled(self) -> None:
+        access_token = await self.get_success(
             self.auth_handler.create_access_token_for_user_id(
                 self.user, device_id=None, valid_until_ms=None
             )
         )
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, 200)
         self.assertFalse(capabilities["m.change_password"]["enabled"])
 
-    def test_get_change_users_attributes_capabilities(self) -> None:
+    async def test_get_change_users_attributes_capabilities(self) -> None:
         """Test that server returns capabilities by default."""
-        access_token = self.login(self.localpart, self.password)
+        access_token = await self.login(self.localpart, self.password)
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, HTTPStatus.OK)
@@ -121,11 +121,11 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         self.assertTrue(capabilities["m.3pid_changes"]["enabled"])
 
     @override_config({"enable_set_displayname": False})
-    def test_get_set_displayname_capabilities_displayname_disabled(self) -> None:
+    async def test_get_set_displayname_capabilities_displayname_disabled(self) -> None:
         """Test if set displayname is disabled that the server responds it."""
-        access_token = self.login(self.localpart, self.password)
+        access_token = await self.login(self.localpart, self.password)
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, HTTPStatus.OK)
@@ -136,11 +136,11 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         )
 
     @override_config({"enable_set_avatar_url": False})
-    def test_get_set_avatar_url_capabilities_avatar_url_disabled(self) -> None:
+    async def test_get_set_avatar_url_capabilities_avatar_url_disabled(self) -> None:
         """Test if set avatar_url is disabled that the server responds it."""
-        access_token = self.login(self.localpart, self.password)
+        access_token = await self.login(self.localpart, self.password)
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, HTTPStatus.OK)
@@ -154,13 +154,13 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
             "experimental_features": {"msc4133_enabled": True},
         }
     )
-    def test_get_set_displayname_capabilities_displayname_disabled_msc4133(
+    async def test_get_set_displayname_capabilities_displayname_disabled_msc4133(
         self,
     ) -> None:
         """Test if set displayname is disabled that the server responds it."""
-        access_token = self.login(self.localpart, self.password)
+        access_token = await self.login(self.localpart, self.password)
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, HTTPStatus.OK)
@@ -181,11 +181,11 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
             "experimental_features": {"msc4133_enabled": True},
         }
     )
-    def test_get_set_avatar_url_capabilities_avatar_url_disabled_msc4133(self) -> None:
+    async def test_get_set_avatar_url_capabilities_avatar_url_disabled_msc4133(self) -> None:
         """Test if set avatar_url is disabled that the server responds it."""
-        access_token = self.login(self.localpart, self.password)
+        access_token = await self.login(self.localpart, self.password)
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, HTTPStatus.OK)
@@ -199,39 +199,39 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         )
 
     @override_config({"enable_3pid_changes": False})
-    def test_get_change_3pid_capabilities_3pid_disabled(self) -> None:
+    async def test_get_change_3pid_capabilities_3pid_disabled(self) -> None:
         """Test if change 3pid is disabled that the server responds it."""
-        access_token = self.login(self.localpart, self.password)
+        access_token = await self.login(self.localpart, self.password)
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.3pid_changes"]["enabled"])
 
-    def test_get_get_token_login_fields_when_disabled(self) -> None:
+    async def test_get_get_token_login_fields_when_disabled(self) -> None:
         """By default login via an existing session is disabled."""
-        access_token = self.get_success(
+        access_token = await self.get_success(
             self.auth_handler.create_access_token_for_user_id(
                 self.user, device_id=None, valid_until_ms=None
             )
         )
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.get_login_token"]["enabled"])
 
     @override_config({"login_via_existing_session": {"enabled": True}})
-    def test_get_get_token_login_fields_when_enabled(self) -> None:
-        access_token = self.get_success(
+    async def test_get_get_token_login_fields_when_enabled(self) -> None:
+        access_token = await self.get_success(
             self.auth_handler.create_access_token_for_user_id(
                 self.user, device_id=None, valid_until_ms=None
             )
         )
 
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
 
         self.assertEqual(channel.code, HTTPStatus.OK)
@@ -243,14 +243,14 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
             "forget_rooms_on_leave": True,
         }
     )
-    def test_get_forget_forced_upon_leave_with_auto_forget(self) -> None:
+    async def test_get_forget_forced_upon_leave_with_auto_forget(self) -> None:
         # Server auto-forgets on /leave, expect enabled client capability
-        access_token = self.get_success(
+        access_token = await self.get_success(
             self.auth_handler.create_access_token_for_user_id(
                 self.user, device_id=None, valid_until_ms=None
             )
         )
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertTrue(
@@ -263,14 +263,14 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
             "forget_rooms_on_leave": False,
         }
     )
-    def test_get_forget_forced_upon_leave_without_auto_forget(self) -> None:
+    async def test_get_forget_forced_upon_leave_without_auto_forget(self) -> None:
         # Server doesn't auto-forget on /leave, expect disabled client capability
-        access_token = self.get_success(
+        access_token = await self.get_success(
             self.auth_handler.create_access_token_for_user_id(
                 self.user, device_id=None, valid_until_ms=None
             )
         )
-        channel = self.make_request("GET", self.url, access_token=access_token)
+        channel = await self.make_request("GET", self.url, access_token=access_token)
         capabilities = channel.json_body["capabilities"]
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(
