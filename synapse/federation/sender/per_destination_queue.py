@@ -30,7 +30,11 @@ from prometheus_client import Counter
 
 from twisted.internet import defer
 
-from synapse.api.constants import EduTypes
+from synapse.api.constants import (
+    MAX_EDUS_PER_TRANSACTION,
+    NUMBER_OF_RESERVED_EDUS_PER_TRANSACTION,
+    EduTypes,
+)
 from synapse.api.errors import (
     FederationDeniedError,
     HttpResponseException,
@@ -50,9 +54,6 @@ from synapse.visibility import filter_events_for_server
 
 if TYPE_CHECKING:
     import synapse.server
-
-# This is defined in the Matrix spec and enforced by the receiver.
-MAX_EDUS_PER_TRANSACTION = 100
 
 logger = logging.getLogger(__name__)
 
@@ -798,7 +799,9 @@ class _TransactionQueueManager:
         (
             to_device_edus,
             device_stream_id,
-        ) = await self.queue._get_to_device_message_edus(edu_limit - 10)
+        ) = await self.queue._get_to_device_message_edus(
+            edu_limit - NUMBER_OF_RESERVED_EDUS_PER_TRANSACTION
+        )
 
         if to_device_edus:
             self._device_stream_id = device_stream_id
