@@ -697,25 +697,41 @@ class HomeserverTestCase(TestCase):
 
     def pump(self, by: float = 0.0) -> None:
         """
+        XXX: Deprecated: This method is deprecated. Use `self.reactor.advance(...)`
+        directly instead.
+
         Pump the reactor enough that scheduled Deferreds will fire.
 
-        To demystify, this function simply advances time by the number of seconds
-        specified (defaults to `0`, for some reason we also multiply by 100, so
-        `pump(1)` is 100 seconds in 1 second increments) and run whatever tasks are
-        queued/pending and now ready to run because enough time as passed.
-
-        It doesn't have anything to do with making the reactor run or magic like that.
+        To demystify this function, it simply advances time by the number of seconds
+        specified (defaults to `0`, we also multiply by 100, so `pump(1)` is 100 seconds
+        in 1 second increments) which allows any queued/pending tasks to run because
+        enough time has passed.
 
         So for example, if you have some Synapse code that does
         `clock.call_later(Duration(seconds=2), callback)`, then calling
-        `self.pump(0.02)` will advance time by 2 seconds, which is enough for that
+        `self.pump(by=0.02)` will advance time by 2 seconds, which is enough for that
         callback to be ready to run now. Same for `clock.sleep(...)` ,
         `clock.looping_call(...)`, and whatever other clock utilities for scheduling
-        tasks.
+        tasks. Trying to use `pump(by=...)` with exact math to meet a specific deadline
+        feels pretty dirty though which is why we recommend using
+        `self.reactor.advance(...)` directly nowadays.
+
+        We don't have any exact historical context for why `pump()` was introduced into
+        the codebase beyond the code itself. We assume that we multiply by 100 so that
+        when you create a Deferred that create more Deferreds, it tries to run the whole
+        chain to completion.
 
         XXX: If you're having to call this function, please call out in comments, which
-        scheduled thing you're aiming to trigger.
+        scheduled thing you're aiming to trigger. Please also check whether the
+        `pump(...)` is even necessary as it was often misused.
+
+        Args:
+            by: The time increment in seconds to advance time by. We will advance time
+                100x by this value.
         """
+        # We multiply by 100, so `pump(1)` actually advances time by 100 seconds in 1
+        # second increments. We assume this was done so that when you create a Deferred
+        # that create more Deferreds, it tries to run the whole chain to completion.
         self.reactor.pump([by] * 100)
 
     def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
