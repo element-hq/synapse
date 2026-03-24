@@ -739,18 +739,15 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         )
 
     @trace
-    async def add_messages_to_device_inbox(
+    async def add_local_messages_from_client_to_device_inbox(
         self,
         local_messages_by_user_then_device: dict[str, dict[str, JsonDict]],
-        remote_messages_by_destination: dict[str, JsonDict],
     ) -> int:
-        """Used to send messages from this server.
+        """Queue local device messages that will be sent to devices of local users.
 
         Args:
             local_messages_by_user_then_device:
                 Dictionary of recipient user_id to recipient device_id to message.
-            remote_messages_by_destination:
-                Dictionary of destination server_name to the EDU JSON to send.
 
         Returns:
             The new stream_id.
@@ -766,6 +763,39 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 txn, stream_id, local_messages_by_user_then_device
             )
 
+        async with self._to_device_msg_id_gen.get_next() as stream_id:
+            now_ms = self.clock.time_msec()
+            await self.db_pool.runInteraction(
+                "add_local_messages_from_client_to_device_inbox",
+                add_messages_txn,
+                now_ms,
+                stream_id,
+            )
+            for user_id in local_messages_by_user_then_device.keys():
+                self._device_inbox_stream_cache.entity_has_changed(user_id, stream_id)
+
+        return self._to_device_msg_id_gen.get_current_token()
+
+    @trace
+    async def add_remote_messages_from_client_to_device_inbox(
+        self,
+        remote_messages_by_destination: dict[str, JsonDict],
+    ) -> int:
+        """Queue device messages that will be sent to remote servers.
+
+        Args:
+            remote_messages_by_destination:
+                Dictionary of destination server_name to the EDU JSON to send.
+
+        Returns:
+            The new stream_id.
+        """
+
+        assert self._can_write_to_device
+
+        def add_messages_txn(
+            txn: LoggingTransaction, now_ms: int, stream_id: int
+        ) -> None:
             # Add the remote messages to the federation outbox.
             # We'll send them to a remote server when we next send a
             # federation transaction to that destination.
@@ -824,10 +854,11 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         async with self._to_device_msg_id_gen.get_next() as stream_id:
             now_ms = self.clock.time_msec()
             await self.db_pool.runInteraction(
-                "add_messages_to_device_inbox", add_messages_txn, now_ms, stream_id
+                "add_remote_messages_from_client_to_device_inbox",
+                add_messages_txn,
+                now_ms,
+                stream_id,
             )
-            for user_id in local_messages_by_user_then_device.keys():
-                self._device_inbox_stream_cache.entity_has_changed(user_id, stream_id)
             for destination in remote_messages_by_destination.keys():
                 self._device_federation_outbox_stream_cache.entity_has_changed(
                     destination, stream_id

@@ -17,13 +17,14 @@
 import logging
 from typing import TYPE_CHECKING
 
+import attr
 from signedjson.key import decode_verify_key_bytes
 from unpaddedbase64 import decode_base64
 
-from synapse.api.errors import SynapseError
+from synapse.api.constants import EventTypes
+from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.crypto.keyring import VerifyJsonRequest
 from synapse.events import EventBase
-from synapse.types.handlers.policy_server import RECOMMENDATION_OK
 from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
@@ -31,8 +32,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-POLICY_SERVER_EVENT_TYPE = "org.matrix.msc4284.policy"
 POLICY_SERVER_KEY_ID = "ed25519:policy_server"
+
+
+@attr.s(slots=True, auto_attribs=True)
+class PolicyServerInfo:
+    # name of the server.
+    server_name: str
+
+    # the unpadded base64-encoded Ed25519 public key of the server.
+    public_key: str
 
 
 class RoomPolicyHandler:
@@ -42,6 +51,86 @@ class RoomPolicyHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._event_auth_handler = hs.get_event_auth_handler()
         self._federation_client = hs.get_federation_client()
+
+    def _is_policy_server_state_event(self, event: EventBase) -> bool:
+        state_key = event.get_state_key()
+        if state_key is not None and state_key == "":
+            # TODO: Remove unstable MSC4284 support
+            # https://github.com/element-hq/synapse/issues/19502
+            # Note: we can probably drop this whole function when we remove unstable support
+            return event.type in [EventTypes.RoomPolicy, "org.matrix.msc4284.policy"]
+        return False
+
+    async def _get_policy_server(self, room_id: str) -> PolicyServerInfo | None:
+        """Get the policy server's name and Ed25519 public key for the room, if set.
+
+        If the `m.room.policy` state event is invalid, then a policy server is not set. It
+        can be invalid if:
+        - The room doesn't have an `m.room.policy` state event with empty state key.
+        - The policy state event is missing the `via` or `public_keys` field.
+        - The policy state event's public keys is missing an `ed25519` key.
+        - The via server is not a valid server name.
+        - The via server is not in the room.
+        - The via server is Synapse itself.
+
+        TODO: Remove unstable MSC4284 support - https://github.com/element-hq/synapse/issues/19502
+        This function also checks for the unstable `org.matrix.msc4284.policy` state event.
+
+        Args:
+            room_id: The room ID to get the policy server for.
+
+        Returns:
+            A tuple of policy server name and its Ed25519 public key (unpadded base64).
+            Both values will be None if no policy server is configured or the configration
+            is invalid.
+        """
+        policy_event = await self._storage_controllers.state.get_current_state_event(
+            room_id, EventTypes.RoomPolicy, ""
+        )
+        public_key = None
+        if not policy_event:
+            # TODO: Remove unstable MSC4284 support
+            # https://github.com/element-hq/synapse/issues/19502
+            policy_event = (
+                await self._storage_controllers.state.get_current_state_event(
+                    room_id, "org.matrix.msc4284.policy", ""
+                )
+            )
+            if not policy_event:
+                return None  # neither stable or unstable configured
+
+            # Unstable configured, grab its public key
+            public_key = policy_event.content.get("public_key", None)
+        else:
+            # Stable configured, grab its public key
+            public_keys = policy_event.content.get("public_keys")
+            if isinstance(public_keys, dict):
+                ed25519_key = public_keys.get("ed25519")
+                if isinstance(ed25519_key, str):
+                    public_key = ed25519_key
+
+        if public_key is None or not isinstance(public_key, str):
+            return None  # no public key means no policy server
+
+        policy_server = policy_event.content.get("via", "")
+        if policy_server is None or not isinstance(policy_server, str):
+            return None  # no policy server
+
+        if policy_server == self._hs.hostname:
+            return None  # Synapse itself can't be a policy server (currently)
+
+        try:
+            parse_and_validate_server_name(policy_server)
+        except ValueError:
+            return None  # invalid policy server
+
+        is_in_room = await self._event_auth_handler.is_host_in_room(
+            room_id, policy_server
+        )
+        if not is_in_room:
+            return None  # policy server not in room
+
+        return PolicyServerInfo(policy_server, public_key)
 
     async def is_event_allowed(self, event: EventBase) -> bool:
         """Check if the given event is allowed in the room by the policy server.
@@ -62,58 +151,32 @@ class RoomPolicyHandler:
         Returns:
             bool: True if the event is allowed in the room, False otherwise.
         """
-        if event.type == POLICY_SERVER_EVENT_TYPE and event.state_key is not None:
+        if self._is_policy_server_state_event(event):
             return True  # always allow policy server change events
 
-        policy_event = await self._storage_controllers.state.get_current_state_event(
-            event.room_id, POLICY_SERVER_EVENT_TYPE, ""
+        policy_server = await self._get_policy_server(event.room_id)
+        if policy_server is None:
+            return True  # no policy server configured, so allow
+
+        # Check if the event has been signed with the public key in the policy server
+        # state event. If it is, the event is valid according to the policy server and
+        # we don't need to request a fresh signature.
+        valid = await self._verify_policy_server_signature(
+            event, policy_server.server_name, policy_server.public_key
         )
-        if not policy_event:
-            return True  # no policy server == default allow
+        if valid:
+            return True  # valid signature == allow
 
-        policy_server = policy_event.content.get("via", "")
-        if policy_server is None or not isinstance(policy_server, str):
-            return True  # no policy server == default allow
-
-        if policy_server == self._hs.hostname:
-            return True  # Synapse itself can't be a policy server (currently)
-
+        # We couldn't save the HTTP hit, so do that hit.
         try:
-            parse_and_validate_server_name(policy_server)
-        except ValueError:
-            return True  # invalid policy server == default allow
-
-        is_in_room = await self._event_auth_handler.is_host_in_room(
-            event.room_id, policy_server
-        )
-        if not is_in_room:
-            return True  # policy server not in room == default allow
-
-        # Check if the event has been signed with the public key in the policy server state event.
-        # If it is, we can save an HTTP hit.
-        # We actually want to get the policy server state event BEFORE THE EVENT rather than
-        # the current state value, else changing the public key will cause all of these checks to fail.
-        # However, if we are checking outlier events (which we will due to is_event_allowed being called
-        # near the edges at _check_sigs_and_hash) we won't know the state before the event, so the
-        # only safe option is to use the current state
-        public_key = policy_event.content.get("public_key", None)
-        if public_key is not None and isinstance(public_key, str):
-            valid = await self._verify_policy_server_signature(
-                event, policy_server, public_key
-            )
-            if valid:
-                return True
-            # fallthrough to hit /check manually
-
-        # At this point, the server appears valid and is in the room, so ask it to check
-        # the event.
-        recommendation = await self._federation_client.get_pdu_policy_recommendation(
-            policy_server, event
-        )
-        if recommendation != RECOMMENDATION_OK:
+            await self.ask_policy_server_to_sign_event(event, verify=True)
+        except Exception as ex:
+            # We probably caught either a refusal to sign, an invalid signature, or
+            # some other transient or network error. These are all rejection cases.
+            logger.warning("Failed to get a signature from the policy server: %s", ex)
             return False
 
-        return True  # default allow
+        return True  # passed all verifications and checks, so allow
 
     async def _verify_policy_server_signature(
         self, event: EventBase, policy_server: str, public_key: str
@@ -140,47 +203,71 @@ class RoomPolicyHandler:
         """Ask the policy server to sign this event. The signature is added to the event signatures block.
 
         Does nothing if there is no policy server state event in the room. If the policy server
-        refuses to sign the event (as it's marked as spam) does nothing.
+        refuses to sign the event (as it's marked as spam), an error is raised.
 
         Args:
-            event: The event to sign
-            verify: If True, verify that the signature is correctly signed by the public_key in the
-            policy server state event.
+            event: The event to sign.
+            verify: If True, verify that the signature is correctly signed by the policy server's
+                defined public key.
         Raises:
-            if verify=True and the policy server signed the event with an invalid signature. Does
-            not raise if the policy server refuses to sign the event.
+            When the policy server refuses to sign the event, or when verify is True and the
+            signature is invalid.
         """
-        policy_event = await self._storage_controllers.state.get_current_state_event(
-            event.room_id, POLICY_SERVER_EVENT_TYPE, ""
-        )
-        if not policy_event:
+        if self._is_policy_server_state_event(event):
+            # per spec, policy servers aren't asked to sign `m.room.policy` state events
+            # with empty state keys
             return
-        policy_server = policy_event.content.get("via", None)
-        if policy_server is None or not isinstance(policy_server, str):
-            return
-        # Only ask to sign events if the policy state event has a public_key (so they can be subsequently verified)
-        public_key = policy_event.content.get("public_key", None)
-        if public_key is None or not isinstance(public_key, str):
+
+        policy_server = await self._get_policy_server(event.room_id)
+        if policy_server is None:
             return
 
         # Ask the policy server to sign this event.
         # We set a smallish timeout here as we don't want to block event sending too long.
-        signature = await self._federation_client.ask_policy_server_to_sign_event(
-            policy_server,
-            event,
-            timeout=3000,
-        )
-        if (
-            # the policy server returns {} if it refuses to sign the event.
-            signature and len(signature) > 0
-        ):
-            event.signatures.update(signature)
-            if verify:
-                is_valid = await self._verify_policy_server_signature(
-                    event, policy_server, public_key
+        try:
+            signature = await self._federation_client.ask_policy_server_to_sign_event(
+                policy_server.server_name,
+                event,
+                timeout=3000,
+            )
+            # TODO: We can *probably* remove this when we remove unstable MSC4284 support.
+            # The server *should* be returning either a signature or an error, but there could
+            # also be implementation bugs. Whoever reads this when removing unstable MSC4284
+            # stuff, make a decision on whether to remove this bit.
+            # https://github.com/element-hq/synapse/issues/19502
+            if not signature or len(signature) == 0:
+                raise SynapseError(
+                    403,
+                    "This event has been rejected as probable spam by the policy server",
+                    Codes.FORBIDDEN,
                 )
-                if not is_valid:
-                    raise SynapseError(
-                        500,
-                        f"policy server {policy_server} failed to sign event correctly",
-                    )
+
+            # Note: if the policy server and event sender are the same server, the sender
+            # might not have added policy server signatures to the event for whatever reason.
+            # When this happens, we don't want to obliterate the event's existing signatures
+            # because the event will fail authorization. This is why we add defaults rather
+            # than simply `update` the signatures on the event.
+            #
+            # This situation can happen if the homeserver and policy server parts are
+            # logically the same server, but run by different software. For example, Synapse
+            # will not ask "itself" for a policy server signature, even if its server name
+            # is the designated policy server, so it could send an event outwards that other
+            # servers need to manually fetch signatures for. This is the code that allows
+            # those events to continue working (because they're legally sent, even if missing
+            # the policy server signature).
+            event.signatures.setdefault(policy_server.server_name, {}).update(
+                signature.get(policy_server.server_name, {})
+            )
+        except HttpResponseException as ex:
+            # re-wrap HTTP errors as `SynapseError` so they can be proxied to clients directly
+            raise ex.to_synapse_error() from ex
+
+        if verify:
+            is_valid = await self._verify_policy_server_signature(
+                event, policy_server.server_name, policy_server.public_key
+            )
+            if not is_valid:
+                raise SynapseError(
+                    500,
+                    f"policy server {policy_server.server_name} failed to sign event correctly",
+                )

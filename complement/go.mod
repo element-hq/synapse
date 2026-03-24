@@ -10,7 +10,7 @@ require (
 )
 
 require (
-	github.com/docker/docker v28.3.3+incompatible // indirect
+	github.com/docker/docker v28.3.3+incompatible
 	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/hashicorp/go-set/v3 v3.0.0 // indirect
 	github.com/moby/sys/atomicwriter v0.1.0 // indirect
