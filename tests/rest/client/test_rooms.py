@@ -1692,6 +1692,19 @@ class RoomJoinRatelimitTestCase(RoomBase):
         channel = await self.make_request("PUT", path, {"displayname": "John Doe"})
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
+        # The profile update schedules a background task to update member
+        # events in all joined rooms. Wait for it to complete by polling.
+        import asyncio
+        from synapse.util.task_scheduler import TaskStatus
+        for _ in range(50):
+            tasks = await self.hs.get_task_scheduler().get_tasks(
+                actions=["update_join_states"],
+                statuses=[TaskStatus.ACTIVE, TaskStatus.SCHEDULED],
+            )
+            if not tasks:
+                break
+            await asyncio.sleep(0.05)
+
         # Check that all the rooms have been sent a profile update into.
         for room_id in room_ids:
             path = "/_matrix/client/r0/rooms/%s/state/m.room.member/%s" % (
