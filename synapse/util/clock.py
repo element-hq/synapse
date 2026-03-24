@@ -174,7 +174,13 @@ class NativeClock:
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is None:
-            self._loop = asyncio.get_running_loop()
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No running loop yet (e.g. during startup before the
+                # event loop is started). Fall back to get_event_loop()
+                # which returns the current thread's loop.
+                self._loop = asyncio.get_event_loop()
         return self._loop
 
     def shutdown(self) -> None:
@@ -285,7 +291,7 @@ class NativeClock:
 
                 await self.sleep(Duration(seconds=interval))
 
-        loop = asyncio.get_running_loop()
+        loop = self._get_loop()
         task_obj = loop.create_task(_loop())
         call = NativeLoopingCall(task_obj)
         self._looping_calls.add(call)
