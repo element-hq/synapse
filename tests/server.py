@@ -537,17 +537,23 @@ async def make_request(
     if root_resource is not None:
         req.dispatch(root_resource)
 
+    # Auto-detect clock from reactor if not explicitly provided.
+    # This ensures fake time works even when callers don't pass clock=.
+    if clock is None and hasattr(reactor, '_clock'):
+        clock = reactor._clock
+
     if await_result and req.render_deferred is not None:
         import asyncio
 
-        # Advance fake time in a background task so that any
-        # clock.sleep() calls in the handler (e.g., ratelimit pauses)
-        # get resolved.  We advance by 0.1s per tick.
+        # Advance fake time in tiny increments (1ms). This is small enough
+        # that ratelimit token buckets don't noticeably refill (0.2/s × 1ms
+        # = 0.0002 tokens per iteration), yet large enough that ratelimit
+        # pauses (0.5s) complete in ~500 iterations.
         async def _advance_time() -> None:
             while not req.render_deferred.done():
                 if clock is not None:
-                    clock.advance(0.1)
-                await asyncio.sleep(0.01)
+                    clock.advance(0.001)
+                await asyncio.sleep(0)
 
         advancer = asyncio.ensure_future(_advance_time())
         try:

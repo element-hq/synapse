@@ -220,6 +220,7 @@ class NativeClock:
             if not future.done():
                 future.set_result(None)
 
+
     def looping_call(
         self,
         f: Callable[P, object],
