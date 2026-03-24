@@ -904,14 +904,16 @@ class SynapseRequest:
 
         This mirrors ``SynapseRequest.processing()`` from ``site.py``.
         While the context manager is active the request is considered "in
-        progress" and completion logging is deferred until exit.
+        progress", the request's LoggingContext is active, and completion
+        logging is deferred until exit.
         """
         if self._is_processing:
             raise RuntimeError("Request is already processing")
         self._is_processing = True
 
         try:
-            yield
+            with PreserveLoggingContext(self.logcontext):
+                yield
         except Exception:
             logger.exception(
                 "Asynchronous message handler raised an uncaught exception"
@@ -931,9 +933,13 @@ class SynapseRequest:
         """Record that request processing has begun (for metrics/logging)."""
         self.start_time = time.time()
         self.request_metrics = RequestMetrics(our_server_name=self.our_server_name)
-        self.request_metrics.start(
-            self.start_time, name=servlet_name, method=self.get_method()
-        )
+
+        # Temporarily activate the request's logcontext for metrics.start()
+        # which reads current_context() to track resource usage.
+        with PreserveLoggingContext(self.logcontext):
+            self.request_metrics.start(
+                self.start_time, name=servlet_name, method=self.get_method()
+            )
 
         self.synapse_site.access_logger.debug(
             "%s - %s - Received request: %s %s",

@@ -746,17 +746,20 @@ class PreserveLoggingContext:
                 )
 
 
-_thread_local = threading.local()
-_thread_local.current_context = SENTINEL_CONTEXT
-
 _current_context_var: contextvars.ContextVar[
     "LoggingContextOrSentinel"
 ] = contextvars.ContextVar("synapse_logging_context", default=SENTINEL_CONTEXT)
 
 
 def current_context() -> LoggingContextOrSentinel:
-    """Get the current logging context."""
-    return getattr(_thread_local, "current_context", SENTINEL_CONTEXT)
+    """Get the current logging context.
+
+    Uses a ContextVar so that each asyncio task has its own isolated context.
+    (The old _thread_local approach was fine for Twisted where only one callback
+    ran at a time, but in asyncio multiple tasks share a thread and would
+    corrupt each other's contexts.)
+    """
+    return _current_context_var.get(SENTINEL_CONTEXT)
 
 
 def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSentinel:
@@ -776,7 +779,6 @@ def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSe
     if current is not context:
         rusage = get_thread_resource_usage()
         current.stop(rusage)
-        _thread_local.current_context = context
         _current_context_var.set(context)
         context.start(rusage)
 
