@@ -825,10 +825,9 @@ class HomeserverTestCase(TestCase):
         """
         # Advance fake time (fires pending sleeps and callFromThread)
         self.reactor.advance(by)
-        # Yield to the event loop multiple times so background tasks
-        # (including DB operations in executor threads) can complete.
+        # Yield to the event loop multiple times to drain pending callbacks.
         for _ in range(20):
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0)
 
     async def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         """Await an awaitable, optionally advancing fake time first."""

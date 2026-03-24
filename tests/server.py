@@ -545,10 +545,10 @@ async def make_request(
     if await_result and req.render_deferred is not None:
         import asyncio
 
-        # Advance fake time in tiny increments (1ms). This is small enough
-        # that ratelimit token buckets don't noticeably refill (0.2/s × 1ms
-        # = 0.0002 tokens per iteration), yet large enough that ratelimit
-        # pauses (0.5s) complete in ~500 iterations.
+        # Advance fake time in a background task so clock.sleep() calls
+        # (ratelimit pauses) and call_later timers resolve. We advance
+        # 1ms per event loop iteration — small enough to not refill
+        # ratelimit buckets, large enough for pauses to complete.
         async def _advance_time() -> None:
             while not req.render_deferred.done():
                 if clock is not None:
