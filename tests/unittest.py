@@ -576,6 +576,21 @@ class HomeserverTestCase(TestCase):
             if inspect.isawaitable(res):
                 await res
 
+    async def asyncTearDown(self) -> None:
+        """Shut down the homeserver to cancel all background tasks.
+
+        This prevents looping calls and delayed calls from firing during
+        cleanup, which would leave non-sentinel logging contexts active
+        and cause the next test's setUp to fail.
+        """
+        if hasattr(self, 'hs') and self.hs is not None:
+            self.hs.get_clock().shutdown()
+            # Give event loop time for cancellation to propagate
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+        # Ensure we're back in the sentinel context
+        set_current_context(SENTINEL_CONTEXT)
+
     def tearDown(self) -> None:
         # Reset to not use frozen dicts.
         events.USE_FROZEN_DICTS = False

@@ -637,6 +637,10 @@ class ThreadedMemoryReactorClock:
         self.triggers[key] = (callable, args)
         return key
 
+    def removeSystemEventTrigger(self, trigger_id: Any) -> None:
+        """Remove a previously registered system event trigger."""
+        self.triggers.pop(trigger_id, None)
+
     def getThreadPool(self) -> Any:
         return self.threadpool
 
