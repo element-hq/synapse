@@ -875,6 +875,11 @@ class SynapseRequest:
         self.finish_time = time.time()
         self.finished = True
 
+        # Notify the channel (FakeChannel in tests) that the request is done,
+        # so it can record resource usage from the logcontext.
+        if self.channel is not None and hasattr(self.channel, 'requestDone'):
+            self.channel.requestDone(self)
+
         if self._opentracing_span:
             self._opentracing_span.log_kv({"event": "response sent"})
         if not self._is_processing:

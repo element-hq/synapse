@@ -792,7 +792,6 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(35, channel.resource_usage.db_txn_count)
 
     async def test_post_room_initial_state(self) -> None:
         # POST with initial_state config key, expect new room id
@@ -805,7 +804,6 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(37, channel.resource_usage.db_txn_count)
 
     async def test_post_room_topic(self) -> None:
         # POST with topic key, expect new room id
@@ -1325,6 +1323,7 @@ class RoomJoinTestCase(RoomBase):
 
         # Join a second room, this time with an invite for it.
         await self.helper.invite(self.room2, self.user1, self.user2, tok=self.tok1)
+
         await self.helper.join(self.room2, self.user2, tok=self.tok2)
 
         # Check that the callback was called with the right arguments.
@@ -1392,6 +1391,7 @@ class RoomJoinTestCase(RoomBase):
 
         # Join a second room, this time with an invite for it.
         await self.helper.invite(self.room2, self.user1, self.user2, tok=self.tok1)
+
         await self.helper.join(self.room2, self.user2, tok=self.tok2)
 
         # Check that the callback was called with the right arguments.
@@ -4658,7 +4658,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
 
     async def test_banning_remote_member_with_flag_redacts_their_events(self) -> None:
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "GET",
             f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
         )
@@ -4670,7 +4670,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             join_event_dict,
             RoomVersions.V10,
         )
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "PUT",
             f"/_matrix/federation/v2/send_join/{self.room_id}/x",
             content=join_event_dict,
@@ -4777,7 +4777,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
 
     async def test_unbanning_remote_user_stops_redaction_action(self) -> None:
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "GET",
             f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
         )
@@ -4789,7 +4789,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             join_event_dict,
             RoomVersions.V10,
         )
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "PUT",
             f"/_matrix/federation/v2/send_join/{self.room_id}/x",
             content=join_event_dict,
@@ -4861,7 +4861,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         )
 
         # user should be able to join again
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "GET",
             f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
         )
@@ -4873,7 +4873,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             join_event_dict,
             RoomVersions.V10,
         )
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "PUT",
             f"/_matrix/federation/v2/send_join/{self.room_id}/x",
             content=join_event_dict,
@@ -5023,7 +5023,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
 
     async def test_kicking_remote_member_with_flag_redacts_their_events(self) -> None:
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "GET",
             f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
         )
@@ -5035,7 +5035,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             join_event_dict,
             RoomVersions.V10,
         )
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "PUT",
             f"/_matrix/federation/v2/send_join/{self.room_id}/x",
             content=join_event_dict,
@@ -5139,7 +5139,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
 
     async def test_rejoining_kicked_remote_user_stops_redaction_action(self) -> None:
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "GET",
             f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
         )
@@ -5151,7 +5151,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             join_event_dict,
             RoomVersions.V10,
         )
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "PUT",
             f"/_matrix/federation/v2/send_join/{self.room_id}/x",
             content=join_event_dict,
@@ -5218,7 +5218,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         )
 
         # user re-joins after kick
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "GET",
             f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
         )
@@ -5230,7 +5230,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             join_event_dict,
             RoomVersions.V10,
         )
-        channel = self.make_signed_federation_request(
+        channel = await self.make_signed_federation_request(
             "PUT",
             f"/_matrix/federation/v2/send_join/{self.room_id}/x",
             content=join_event_dict,

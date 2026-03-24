@@ -106,6 +106,7 @@ class FutureCache(Generic[VT]):
     ) -> None:
         self.name = name
         self._max_entries = max_entries
+        self._tree = tree
 
         # Pending (in-flight) futures
         self._pending: dict[Hashable, FutureCacheEntry[VT]] = {}
@@ -214,7 +215,15 @@ class FutureCache(Generic[VT]):
         return entry.observe()
 
     def invalidate(self, key: Hashable) -> None:
-        """Remove an entry from the cache and fire invalidation callbacks."""
+        """Remove an entry from the cache and fire invalidation callbacks.
+
+        If `tree=True`, the key is treated as a prefix: all entries whose key
+        is a tuple starting with the elements of *key* are invalidated.
+        """
+        if self._tree and isinstance(key, tuple):
+            self._invalidate_prefix(key)
+            return
+
         # Invalidate pending
         entry = self._pending.pop(key, None)
         if entry is not None:
@@ -228,6 +237,34 @@ class FutureCache(Generic[VT]):
                 cb()
             except Exception:
                 logger.exception("Error running cache invalidation callback")
+
+    def _invalidate_prefix(self, prefix: tuple) -> None:
+        """Invalidate all entries whose key starts with *prefix*."""
+        prefix_len = len(prefix)
+
+        # Pending
+        to_remove = [
+            k for k in self._pending
+            if isinstance(k, tuple) and k[:prefix_len] == prefix
+        ]
+        for k in to_remove:
+            entry = self._pending.pop(k, None)
+            if entry is not None:
+                entry.run_invalidation_callbacks()
+
+        # Completed
+        to_remove = [
+            k for k in self._completed
+            if isinstance(k, tuple) and k[:prefix_len] == prefix
+        ]
+        for k in to_remove:
+            self._completed.pop(k, None)
+            callbacks = self._completed_callbacks.pop(k, [])
+            for cb in callbacks:
+                try:
+                    cb()
+                except Exception:
+                    logger.exception("Error running cache invalidation callback")
 
     def invalidate_all(self) -> None:
         """Remove all entries and fire all invalidation callbacks."""

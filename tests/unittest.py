@@ -1067,7 +1067,7 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
         d["/_matrix/federation"] = TransportLayerServer(self.hs)
         return d
 
-    def make_signed_federation_request(
+    async def make_signed_federation_request(
         self,
         method: str,
         path: str,
@@ -1101,7 +1101,7 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
             )
         )
 
-        return make_request(
+        return await make_request(
             self.reactor,
             self.site,
             method=method,
@@ -1111,6 +1111,7 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
             await_result=await_result,
             custom_headers=custom_headers,
             client_ip=client_ip,
+            clock=self.clock,
         )
 
     def add_hashes_and_signatures_from_other_server(
