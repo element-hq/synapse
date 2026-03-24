@@ -471,9 +471,14 @@ def split_device_messages_into_edus(
                 break
             else:
                 if target_count == 1:
-                    # Single recipient's messages are too large, let's reject the client call with `M_TOO_LARGE`,
-                    # we expect this error to reach the client in the case of the /sendToDevice endpoint.
-                    # cf https://github.com/matrix-org/matrix-spec/pull/2340 for the matching spec change proposal.
+                    # Single recipient's messages are too large, let's reject the client
+                    # call with 413/`M_TOO_LARGE`, we expect this error to reach the
+                    # client in the case of the /sendToDevice endpoint.
+                    #
+                    # 413 is currently an unspecced response for `/sendToDevice` but is
+                    # probably the best thing we can do.
+                    # https://github.com/matrix-org/matrix-spec/pull/2340 tracks adding
+                    # this to the spec
                     recipient = message_items[0][0]
                     raise EventSizeError(
                         f"device message to {recipient} too large to fit in a single EDU",
