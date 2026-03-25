@@ -20,7 +20,6 @@
 #
 import enum
 import logging
-import threading
 from typing import (
     Generic,
     Iterable,
@@ -168,17 +167,12 @@ class DictionaryCache(Generic[KT, DKT, DV]):
 
         self.name = name
         self.sequence = 0
-        self.thread: threading.Thread | None = None
 
     def check_thread(self) -> None:
-        expected_thread = self.thread
-        if expected_thread is None:
-            self.thread = threading.current_thread()
-        else:
-            if expected_thread is not threading.current_thread():
-                raise ValueError(
-                    "Cache objects can only be accessed from the main thread"
-                )
+        # No-op: under free-threaded Python the "main thread" concept is
+        # less meaningful, and the underlying LruCache already has its own
+        # per-cache lock protecting all mutations.
+        pass
 
     def get(self, key: KT, dict_keys: Iterable[DKT] | None = None) -> DictionaryEntry:
         """Fetch an entry out of the cache

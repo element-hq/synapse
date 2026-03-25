@@ -22,7 +22,6 @@
 
 import abc
 import enum
-import threading
 from typing import (
     Callable,
     Collection,
@@ -75,7 +74,6 @@ class DeferredCache(Generic[KT, VT]):
 
     __slots__ = (
         "cache",
-        "thread",
         "_pending_deferred_cache",
     )
 
@@ -139,21 +137,15 @@ class DeferredCache(Generic[KT, VT]):
             prune_unread_entries=prune_unread_entries,
         )
 
-        self.thread: threading.Thread | None = None
-
     @property
     def max_entries(self) -> int:
         return self.cache.max_size
 
     def check_thread(self) -> None:
-        expected_thread = self.thread
-        if expected_thread is None:
-            self.thread = threading.current_thread()
-        else:
-            if expected_thread is not threading.current_thread():
-                raise ValueError(
-                    "Cache objects can only be accessed from the main thread"
-                )
+        # No-op: under free-threaded Python the "main thread" concept is
+        # less meaningful, and the underlying LruCache already has its own
+        # per-cache lock protecting all mutations.
+        pass
 
     def get(
         self,

@@ -19,7 +19,12 @@
 #
 #
 
-"""A circular doubly linked list implementation."""
+"""A circular doubly linked list implementation.
+
+Free-threading safe: each list has its own lock (stored on the root node)
+rather than a single global lock shared by all lists. This eliminates
+cross-cache contention under free-threaded Python.
+"""
 
 import threading
 from typing import Generic, TypeVar
@@ -36,31 +41,33 @@ class ListNode(Generic[P]):
     been removed from the list.
     """
 
-    # A lock to protect mutating the list prev/next pointers.
-    _LOCK = threading.Lock()
-
     # We don't use attrs here as in py3.6 you can't have `attr.s(slots=True)`
     # and inherit from `Generic` for some reason
     __slots__ = [
         "cache_entry",
         "prev_node",
         "next_node",
+        "_list_lock",
     ]
 
     def __init__(self, cache_entry: P | None = None) -> None:
         self.cache_entry = cache_entry
         self.prev_node: ListNode[P] | None = None
         self.next_node: ListNode[P] | None = None
+        # Per-list lock. Set on root nodes at creation; propagated to
+        # non-root nodes when they are inserted into the list.
+        self._list_lock: threading.Lock | None = None
 
     @classmethod
     def create_root_node(cls: type["ListNode[P]"]) -> "ListNode[P]":
         """Create a new linked list by creating a "root" node, which is a node
         that has prev_node/next_node pointing to itself and no associated cache
-        entry.
+        entry. The root node owns the per-list lock.
         """
         root = cls()
         root.prev_node = root
         root.next_node = root
+        root._list_lock = threading.Lock()
         return root
 
     @classmethod
@@ -76,13 +83,23 @@ class ListNode(Generic[P]):
             node: The existing node in the list to insert the new entry after.
         """
         new_node = cls(cache_entry)
-        with cls._LOCK:
+        # Propagate the list lock from the target node.
+        lock = node._list_lock
+        new_node._list_lock = lock
+        if lock is not None:
+            with lock:
+                new_node._refs_insert_after(node)
+        else:
             new_node._refs_insert_after(node)
         return new_node
 
     def remove_from_list(self) -> None:
         """Remove this node from the list."""
-        with self._LOCK:
+        lock = self._list_lock
+        if lock is not None:
+            with lock:
+                self._refs_remove_node_from_list()
+        else:
             self._refs_remove_node_from_list()
 
         # We drop the reference to the cache entry to break the reference cycle
@@ -94,20 +111,27 @@ class ListNode(Generic[P]):
         """Move this node from its current location in the list to after the
         given node.
         """
-        with self._LOCK:
-            # We assert that both this node and the target node is still "alive".
-            assert self.prev_node
-            assert self.next_node
-            assert node.prev_node
-            assert node.next_node
+        lock = node._list_lock
+        if lock is not None:
+            with lock:
+                self._move_after_inner(node)
+        else:
+            self._move_after_inner(node)
 
-            assert self is not node
+    def _move_after_inner(self, node: "ListNode[P]") -> None:
+        # We assert that both this node and the target node is still "alive".
+        assert self.prev_node
+        assert self.next_node
+        assert node.prev_node
+        assert node.next_node
 
-            # Remove self from the list
-            self._refs_remove_node_from_list()
+        assert self is not node
 
-            # Insert self back into the list, after target node
-            self._refs_insert_after(node)
+        # Remove self from the list
+        self._refs_remove_node_from_list()
+
+        # Insert self back into the list, after target node
+        self._refs_insert_after(node)
 
     def _refs_remove_node_from_list(self) -> None:
         """Internal method to *just* remove the node from the list, without

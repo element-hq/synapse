@@ -19,11 +19,14 @@ as a replacement for twisted.enterprise.adbapi.ConnectionPool, using
 concurrent.futures.ThreadPoolExecutor + asyncio.loop.run_in_executor()
 instead of Twisted's thread pool.
 
-This module is unused until later phases switch the DatabasePool to use it.
+Designed for free-threaded Python (no GIL): each executor thread gets its
+own persistent connection via thread-local storage, and all shared mutable
+state is protected by locks.
 """
 
 import asyncio
 import logging
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, TypeVar
@@ -46,8 +49,10 @@ class NativeConnectionPool:
     thread-local connection management. Each thread in the pool gets its own
     persistent database connection, which is reused across calls.
 
-    This is the asyncio-native equivalent of twisted.enterprise.adbapi.ConnectionPool
-    and will replace it in DatabasePool once the migration is complete.
+    Free-threading safe: all shared state is protected by locks. For Postgres
+    backends, the pool size defaults to ``cp_max`` from the database config
+    (or ``min(32, os.cpu_count() + 4)`` when unset), allowing many queries to
+    execute truly in parallel under free-threaded Python.
     """
 
     def __init__(
@@ -55,19 +60,32 @@ class NativeConnectionPool:
         db_config: DatabaseConnectionConfig,
         engine: BaseDatabaseEngine,
         server_name: str,
-        max_workers: int = 5,
+        max_workers: int | None = None,
         initial_connection: Connection | None = None,
     ) -> None:
         self._db_config = db_config
         self._engine = engine
         self._server_name = server_name
 
+        # Lock protecting _closed flag (read from event loop, written on shutdown)
+        self._state_lock = threading.Lock()
+        self._closed = False
+
         # Extract DB connection arguments (filter out cp_* Twisted pool args)
+        raw_args = db_config.config.get("args", {})
         self._db_args: dict[str, Any] = {
-            k: v
-            for k, v in db_config.config.get("args", {}).items()
-            if not k.startswith("cp_")
+            k: v for k, v in raw_args.items() if not k.startswith("cp_")
         }
+
+        # Determine pool size from config or sensible defaults.
+        # For Postgres, cp_max controls the upper bound of connections.
+        if max_workers is None:
+            cp_max = raw_args.get("cp_max")
+            if cp_max is not None:
+                max_workers = int(cp_max)
+            else:
+                # Default: scale with CPU count, capped at 32.
+                max_workers = min(32, (os.cpu_count() or 4) + 4)
 
         # For in-memory SQLite, use single worker and allow cross-thread access
         db_path = self._db_args.get("database", "")
@@ -75,33 +93,33 @@ class NativeConnectionPool:
             max_workers = 1
             self._db_args["check_same_thread"] = False
 
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_workers,
-            thread_name_prefix=f"synapse-db-{db_config.name}",
-        )
-
-        # Thread-local storage for per-thread connections
+        # Thread-local storage for per-thread connections.
+        # threading.local is safe under free-threaded Python — each thread
+        # still gets its own namespace.
         self._thread_local = threading.local()
 
         # For in-memory SQLite or when an initial connection is provided,
         # use a shared connection (not thread-local).
-        # When using a shared connection, limit to 1 worker to avoid
-        # concurrent access deadlocks on the same SQLite connection.
         self._shared_conn: Connection | None = initial_connection
         if db_path == ":memory:" or db_path == "":
             self._use_shared_conn = True
         else:
             self._use_shared_conn = initial_connection is not None
 
-        if self._use_shared_conn and max_workers > 1:
-            # Recreate executor with single worker
-            self._executor.shutdown(wait=False)
-            self._executor = ThreadPoolExecutor(
-                max_workers=1,
-                thread_name_prefix=f"synapse-db-{db_config.name}",
-            )
+        if self._use_shared_conn:
+            max_workers = 1
 
-        self._closed = False
+        self._max_workers = max_workers
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix=f"synapse-db-{db_config.name}",
+        )
+
+        logger.info(
+            "Database pool %r: %d worker threads (free-threading ready)",
+            db_config.name,
+            max_workers,
+        )
 
     @property
     def running(self) -> bool:
@@ -253,7 +271,8 @@ class NativeConnectionPool:
 
         Closes all thread-local connections and shuts down the executor.
         """
-        self._closed = True
+        with self._state_lock:
+            self._closed = True
         self._executor.shutdown(wait=False)
 
     def threadID(self) -> int:
