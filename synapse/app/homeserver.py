@@ -482,6 +482,13 @@ def main() -> None:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+    # Create the asyncio event loop early, before setup(), so that any
+    # call_later/looping_call calls during initialization register on
+    # the correct loop (the one that start_reactor will run).
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     # Create a logging context as soon as possible so we can start associating
     # everything with this homeserver.
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):

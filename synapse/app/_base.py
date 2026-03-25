@@ -205,8 +205,10 @@ def start_reactor(
             # registered via register_start() before we get here and will be
             # executed once the loop starts.
             with PreserveLoggingContext():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+                # Use the existing event loop (created early in main() before
+                # setup()) so that call_later/looping_call timers registered
+                # during initialization are on the correct loop.
+                loop = asyncio.get_event_loop()
 
                 # Schedule all pending startup tasks
                 for task_coro in _pending_startup_tasks:
