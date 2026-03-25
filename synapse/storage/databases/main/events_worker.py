@@ -31,6 +31,7 @@ from typing import (
     Literal,
     Mapping,
     MutableMapping,
+    Sequence,
     cast,
     overload,
 )
@@ -2494,8 +2495,8 @@ class EventsWorkerStore(SQLBaseStore):
         )
 
     async def get_events_next_to_gaps(
-        self, events: list[EventBase], direction: Direction
-    ) -> list[EventGapEntry]:
+        self, events: Sequence[EventBase], direction: Direction
+    ) -> Sequence[EventGapEntry]:
         """
         Find all of the events that have gaps next to them.
 

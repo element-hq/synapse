@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Sequence, cast
 
 import attr
 
@@ -80,7 +80,7 @@ class GetMessagesResult:
     Everything needed to serialize a `/messages` response.
     """
 
-    messages_chunk: list[EventBase]
+    messages_chunk: Sequence[EventBase]
     """
     A list of room events.
 
@@ -93,7 +93,7 @@ class GetMessagesResult:
     available. Clients should continue to paginate until no `end_token` property is returned.
     """
 
-    gaps: list[EventGapEntry]
+    gaps: Sequence[EventGapEntry]
     """
     A list of gaps in the `messages_chunk`
     """
@@ -105,7 +105,7 @@ class GetMessagesResult:
     If an event doesn't have any bundled aggregations, it may not appear in the map.
     """
 
-    state: list[EventBase] | None
+    state: Sequence[EventBase] | None
     """
     A list of state events relevant to showing the chunk. For example, if
     lazy_load_members is enabled in the filter then this may contain the membership
