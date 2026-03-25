@@ -570,6 +570,19 @@ def serialize_event(
     return d
 
 
+def _serialize_events_batch(
+    events: list[JsonDict | EventBase],
+    time_now: int,
+    config: SerializeEventConfig,
+) -> list[JsonDict]:
+    """Serialize a batch of events synchronously.
+
+    Designed to be called via ``loop.run_in_executor()`` so the CPU-heavy
+    dict copying and field filtering runs on a background thread.
+    """
+    return [serialize_event(e, time_now, config=config) for e in events]
+
+
 class EventClientSerializer:
     """Serializes events that are to be sent to clients.
 
@@ -740,11 +753,34 @@ class EventClientSerializer:
         Returns:
             The list of serialized events
         """
+        import asyncio
+
         set_tag(
             SynapseTags.FUNC_ARG_PREFIX + "events.length",
             str(len(events)),
         )
 
+        events_list = list(events)
+
+        # Partition into events that need async handling (bundled aggregations,
+        # admin check, extra field callbacks) and those that can be serialized
+        # purely on a CPU thread.
+        has_callbacks = bool(self._add_extra_fields_to_unsigned_client_event_callbacks)
+        needs_admin_check = config.requester is not None
+
+        if not bundle_aggregations and not has_callbacks and not needs_admin_check:
+            # Fast path: all events can be serialized synchronously on an
+            # executor thread, freeing the event loop for other work.
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None,
+                _serialize_events_batch,
+                events_list,
+                time_now,
+                config,
+            )
+
+        # Slow path: some events need async handling.
         return [
             await self.serialize_event(
                 event,
@@ -752,7 +788,7 @@ class EventClientSerializer:
                 config=config,
                 bundle_aggregations=bundle_aggregations,
             )
-            for event in events
+            for event in events_list
         ]
 
     def register_add_extra_fields_to_unsigned_client_event_callback(

@@ -18,6 +18,7 @@
 #
 #
 
+import asyncio
 import heapq
 import itertools
 import logging
@@ -163,69 +164,31 @@ async def resolve_events_with_store(
 
     logger.debug("%d full_conflicted_set entries", len(full_conflicted_set))
 
-    # Get and sort all the power events (kicks/bans/etc)
-    power_events = (
-        eid for eid in full_conflicted_set if _is_power_event(event_map[eid])
+    # Pre-fetch all auth events recursively so the CPU-heavy phases can
+    # run synchronously on an executor thread without needing I/O.
+    await _prefetch_auth_events(
+        room_id, full_conflicted_set, event_map, state_res_store
     )
-
-    sorted_power_events = await _reverse_topological_power_sort(
-        clock, room_id, power_events, event_map, state_res_store, full_conflicted_set
-    )
-
-    logger.debug("sorted %d power events", len(sorted_power_events))
 
     # v2.1 starts iterative auth checks from the empty set and not the unconflicted state.
-    # It relies on IAC behaviour which populates the base state with the events from auth_events
-    # if the state tuple is missing from the base state. This ensures the base state is only
-    # populated from auth_events rather than whatever the unconflicted state is (which could be
-    # completely bogus).
-    base_state = (
+    base_state: MutableStateMap[str] = (
         {}
         if room_version.state_res == StateResolutionVersions.V2_1
-        else unconflicted_state
+        else dict(unconflicted_state)
     )
 
-    # Now sequentially auth each one
-    resolved_state = await _iterative_auth_checks(
-        clock,
+    # Run the CPU-heavy sort + auth-check phases on an executor thread.
+    # All events are pre-fetched into event_map so no I/O is needed.
+    loop = asyncio.get_running_loop()
+    resolved_state = await loop.run_in_executor(
+        None,
+        _resolve_conflicted_state_sync,
         room_id,
         room_version,
-        event_ids=sorted_power_events,
-        base_state=base_state,
-        event_map=event_map,
-        state_res_store=state_res_store,
-    )
-
-    logger.debug("resolved power events")
-
-    # OK, so we've now resolved the power events. Now sort the remaining
-    # events using the mainline of the resolved power level.
-
-    set_power_events = set(sorted_power_events)
-    leftover_events = [
-        ev_id for ev_id in full_conflicted_set if ev_id not in set_power_events
-    ]
-
-    logger.debug("sorting %d remaining events", len(leftover_events))
-
-    pl = resolved_state.get((EventTypes.PowerLevels, ""), None)
-    leftover_events = await _mainline_sort(
-        clock, room_id, leftover_events, pl, event_map, state_res_store
-    )
-
-    logger.debug("resolving remaining events")
-
-    resolved_state = await _iterative_auth_checks(
-        clock,
-        room_id,
-        room_version,
-        leftover_events,
-        resolved_state,
+        full_conflicted_set,
+        base_state,
         event_map,
-        state_res_store,
     )
-
-    logger.debug("resolved")
 
     # We make sure that unconflicted state always still applies.
     resolved_state.update(unconflicted_state)
@@ -572,6 +535,319 @@ def _is_power_event(event: EventBase) -> bool:
             return event.sender != event.state_key
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# Synchronous helpers for executor offloading
+# ---------------------------------------------------------------------------
+# These operate only on the pre-populated event_map (no I/O).  They are called
+# from a background thread via loop.run_in_executor() so that the CPU-heavy
+# graph traversals, topological sorts and auth checks do not block the event
+# loop under free-threaded Python.
+
+
+def _get_event_sync(
+    room_id: str,
+    event_id: str,
+    event_map: dict[str, EventBase],
+    allow_none: bool = False,
+) -> EventBase | None:
+    """Look up an event from the pre-populated event_map (no I/O)."""
+    event = event_map.get(event_id)
+    if event is None:
+        if allow_none:
+            return None
+        raise Exception("Unknown event %s (not pre-fetched)" % (event_id,))
+    if event.room_id != room_id:
+        raise Exception(
+            "In state res for room %s, event %s is in %s"
+            % (room_id, event_id, event.room_id)
+        )
+    return event
+
+
+async def _prefetch_auth_events(
+    room_id: str,
+    event_ids: set[str],
+    event_map: dict[str, EventBase],
+    state_res_store: StateResolutionStore,
+) -> None:
+    """Recursively fetch all auth events needed by the CPU-heavy state
+    resolution phases into event_map, so they can run without I/O.
+    """
+    to_fetch: set[str] = set()
+    seen: set[str] = set(event_map.keys())
+
+    # Seed with auth events of all events we already have
+    for eid in event_ids:
+        ev = event_map.get(eid)
+        if ev:
+            for aid in ev.auth_event_ids():
+                if aid not in seen:
+                    to_fetch.add(aid)
+
+    while to_fetch:
+        events = await state_res_store.get_events(
+            list(to_fetch), allow_rejected=True
+        )
+        event_map.update(events)
+        seen.update(to_fetch)
+
+        next_fetch: set[str] = set()
+        for ev in events.values():
+            for aid in ev.auth_event_ids():
+                if aid not in seen:
+                    next_fetch.add(aid)
+        to_fetch = next_fetch
+
+
+def _resolve_conflicted_state_sync(
+    room_id: str,
+    room_version: RoomVersion,
+    full_conflicted_set: set[str],
+    base_state: MutableStateMap[str],
+    event_map: dict[str, EventBase],
+) -> MutableStateMap[str]:
+    """Run the CPU-heavy state resolution phases synchronously.
+
+    This is designed to be called via ``loop.run_in_executor()`` so the
+    computation happens on a background thread, freeing the event loop.
+
+    All events must already be present in *event_map* (see
+    ``_prefetch_auth_events``).
+    """
+    # Phase 1: sort power events by reverse topological + power level order
+    power_events = [
+        eid for eid in full_conflicted_set if _is_power_event(event_map[eid])
+    ]
+    sorted_power_events = _reverse_topological_power_sort_sync(
+        room_id, power_events, event_map, full_conflicted_set
+    )
+
+    logger.debug("sorted %d power events", len(sorted_power_events))
+
+    # Phase 2: iterative auth checks on power events
+    resolved_state = _iterative_auth_checks_sync(
+        room_id, room_version, sorted_power_events, base_state, event_map
+    )
+
+    logger.debug("resolved power events")
+
+    # Phase 3: mainline sort on remaining events
+    set_power_events = set(sorted_power_events)
+    leftover_events = [
+        ev_id for ev_id in full_conflicted_set if ev_id not in set_power_events
+    ]
+
+    pl = resolved_state.get((EventTypes.PowerLevels, ""), None)
+    leftover_events = _mainline_sort_sync(
+        room_id, leftover_events, pl, event_map
+    )
+
+    logger.debug("sorting %d remaining events", len(leftover_events))
+
+    # Phase 4: iterative auth checks on remaining events
+    resolved_state = _iterative_auth_checks_sync(
+        room_id, room_version, leftover_events, resolved_state, event_map
+    )
+
+    logger.debug("resolved remaining events")
+    return resolved_state
+
+
+def _get_power_level_for_sender_sync(
+    room_id: str,
+    event_id: str,
+    event_map: dict[str, EventBase],
+) -> int:
+    """Synchronous version of _get_power_level_for_sender."""
+    event = _get_event_sync(room_id, event_id, event_map)
+    assert event is not None
+
+    pl = None
+    create = None
+    for aid in event.auth_event_ids():
+        aev = _get_event_sync(room_id, aid, event_map, allow_none=True)
+        if aev and (aev.type, aev.state_key) == (EventTypes.PowerLevels, ""):
+            pl = aev
+        if aev and (aev.type, aev.state_key) == (EventTypes.Create, ""):
+            create = aev
+
+    if event.type != EventTypes.Create:
+        assert create is not None
+
+    if create and create.room_version.msc4289_creator_power_enabled:
+        if is_creator(create, event.sender):
+            return CREATOR_POWER_LEVEL
+
+    if pl is None:
+        for aid in event.auth_event_ids():
+            aev = _get_event_sync(room_id, aid, event_map, allow_none=True)
+            if aev and (aev.type, aev.state_key) == (EventTypes.Create, ""):
+                creator = (
+                    aev.sender
+                    if event.room_version.implicit_room_creator
+                    else aev.content.get("creator")
+                )
+                if creator == event.sender:
+                    return 100
+                break
+        return 0
+
+    level = pl.content.get("users", {}).get(event.sender)
+    if level is None:
+        level = pl.content.get("users_default", 0)
+    return int(level) if level is not None else 0
+
+
+def _reverse_topological_power_sort_sync(
+    room_id: str,
+    event_ids: Iterable[str],
+    event_map: dict[str, EventBase],
+    full_conflicted_set: set[str],
+) -> list[str]:
+    """Synchronous version of _reverse_topological_power_sort."""
+    graph: dict[str, set[str]] = {}
+    for event_id in event_ids:
+        _add_event_and_auth_chain_to_graph_sync(
+            graph, room_id, event_id, event_map, full_conflicted_set
+        )
+
+    event_to_pl = {}
+    for event_id in graph:
+        event_to_pl[event_id] = _get_power_level_for_sender_sync(
+            room_id, event_id, event_map
+        )
+
+    def _get_power_order(event_id: str) -> tuple[int, int, str]:
+        ev = event_map[event_id]
+        pl = event_to_pl[event_id]
+        return -pl, ev.origin_server_ts, event_id
+
+    return list(lexicographical_topological_sort(graph, key=_get_power_order))
+
+
+def _add_event_and_auth_chain_to_graph_sync(
+    graph: dict[str, set[str]],
+    room_id: str,
+    event_id: str,
+    event_map: dict[str, EventBase],
+    full_conflicted_set: set[str],
+) -> None:
+    """Synchronous version of _add_event_and_auth_chain_to_graph."""
+    state = [event_id]
+    while state:
+        eid = state.pop()
+        graph.setdefault(eid, set())
+        event = _get_event_sync(room_id, eid, event_map)
+        assert event is not None
+        for aid in event.auth_event_ids():
+            if aid in full_conflicted_set:
+                if aid not in graph:
+                    state.append(aid)
+                graph.setdefault(eid, set()).add(aid)
+
+
+def _iterative_auth_checks_sync(
+    room_id: str,
+    room_version: RoomVersion,
+    event_ids: list[str],
+    base_state: MutableStateMap[str],
+    event_map: dict[str, EventBase],
+) -> MutableStateMap[str]:
+    """Synchronous version of _iterative_auth_checks."""
+    resolved_state = dict(base_state)
+
+    for event_id in event_ids:
+        event = event_map[event_id]
+
+        auth_events: dict[tuple[str, str], EventBase] = {}
+        for aid in event.auth_event_ids():
+            ev = _get_event_sync(room_id, aid, event_map, allow_none=True)
+            if ev and ev.rejected_reason is None:
+                auth_events[(ev.type, ev.state_key)] = ev
+
+        for key in event_auth.auth_types_for_event(room_version, event):
+            if key in resolved_state:
+                ev_id = resolved_state[key]
+                ev = _get_event_sync(room_id, ev_id, event_map)
+                if ev and ev.rejected_reason is None:
+                    auth_events[key] = ev
+
+        if event.rejected_reason is not None:
+            continue
+
+        try:
+            event_auth.check_state_dependent_auth_rules(
+                event, auth_events.values()
+            )
+            resolved_state[(event.type, event.state_key)] = event_id
+        except AuthError:
+            pass
+
+    return resolved_state
+
+
+def _mainline_sort_sync(
+    room_id: str,
+    event_ids: list[str],
+    resolved_power_event_id: str | None,
+    event_map: dict[str, EventBase],
+) -> list[str]:
+    """Synchronous version of _mainline_sort."""
+    if not event_ids:
+        return []
+
+    mainline = []
+    pl = resolved_power_event_id
+    while pl:
+        mainline.append(pl)
+        pl_ev = _get_event_sync(room_id, pl, event_map)
+        assert pl_ev is not None
+        auth_events = pl_ev.auth_event_ids()
+        pl = None
+        for aid in auth_events:
+            ev = _get_event_sync(room_id, aid, event_map, allow_none=True)
+            if ev and (ev.type, ev.state_key) == (EventTypes.PowerLevels, ""):
+                pl = aid
+                break
+
+    mainline_map = {ev_id: i + 1 for i, ev_id in enumerate(reversed(mainline))}
+
+    order_map = {}
+    for ev_id in event_ids:
+        depth = _get_mainline_depth_for_event_sync(
+            event_map[ev_id], mainline_map, event_map, room_id
+        )
+        order_map[ev_id] = (depth, event_map[ev_id].origin_server_ts, ev_id)
+
+    sorted_ids = list(event_ids)
+    sorted_ids.sort(key=lambda ev_id: order_map[ev_id])
+    return sorted_ids
+
+
+def _get_mainline_depth_for_event_sync(
+    event: EventBase,
+    mainline_map: dict[str, int],
+    event_map: dict[str, EventBase],
+    room_id: str,
+) -> int:
+    """Synchronous version of _get_mainline_depth_for_event."""
+    tmp_event: EventBase | None = event
+    while tmp_event:
+        depth = mainline_map.get(tmp_event.event_id)
+        if depth is not None:
+            return depth
+
+        auth_events = tmp_event.auth_event_ids()
+        tmp_event = None
+        for aid in auth_events:
+            aev = _get_event_sync(room_id, aid, event_map, allow_none=True)
+            if aev and (aev.type, aev.state_key) == (EventTypes.PowerLevels, ""):
+                tmp_event = aev
+                break
+
+    return 0
 
 
 async def _add_event_and_auth_chain_to_graph(
