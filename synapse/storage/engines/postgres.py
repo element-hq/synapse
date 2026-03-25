@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Mapping, NoReturn, cast
 
 import psycopg2.extensions
 
+from synapse.logging import opentracing
 from synapse.storage.engines._base import (
     AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER,
     BaseDatabaseEngine,
@@ -38,6 +39,44 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class _SqlCommenterCursor(psycopg2.extensions.cursor):
+    """A psycopg2 cursor that appends W3C trace context to SQL statements
+    as SQLCommenter comments when OpenTracing is active.
+
+    This propagates the active span's trace context to PostgreSQL, enabling
+    database-side tracing tools to correlate server-side spans with
+    application-level traces.
+
+    See:
+        - https://google.github.io/sqlcommenter/spec/
+        - https://opentelemetry.io/docs/specs/semconv/db/database-spans/#context-propagation
+    """
+
+    def execute(  # type: ignore[override]
+        self,
+        query: str | bytes,
+        vars: Any = None,  # noqa: A002
+    ) -> None:
+        # The traceparent is only added when a trace is actively being
+        # sampled, so untraced queries are not affected.
+        if isinstance(query, str):
+            traceparent = opentracing.get_active_span_traceparent()
+            if traceparent is not None:
+                query = f"{query} /*traceparent='{traceparent}'*/"
+        return super().execute(query, vars)
+
+    def executemany(  # type: ignore[override]
+        self,
+        query: str | bytes,
+        vars_list: Any,  # noqa: A002
+    ) -> None:
+        if isinstance(query, str):
+            traceparent = opentracing.get_active_span_traceparent()
+            if traceparent is not None:
+                query = f"{query} /*traceparent='{traceparent}'*/"
+        return super().executemany(query, vars_list)
 
 
 class PostgresEngine(
@@ -172,6 +211,10 @@ class PostgresEngine(
 
     def on_new_connection(self, db_conn: "LoggingDatabaseConnection") -> None:
         db_conn.set_isolation_level(self.default_isolation_level)
+
+        # Use a cursor factory that appends W3C trace context to queries
+        # as SQLCommenter comments, propagating spans to the database.
+        db_conn.conn.cursor_factory = _SqlCommenterCursor  # type: ignore[attr-defined]
 
         # Set the bytea output to escape, vs the default of hex
         cursor = db_conn.cursor()

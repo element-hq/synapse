@@ -850,6 +850,30 @@ def get_active_span_text_map(destination: str | None = None) -> dict[str, str]:
     return carrier
 
 
+@ensure_active_span("get the active span's traceparent", ret=None)
+def get_active_span_traceparent() -> str | None:
+    """
+    Get the W3C Trace Context traceparent string for the currently active span.
+
+    Returns the traceparent in the format ``00-<trace_id>-<span_id>-<flags>``
+    if there is an active Jaeger span, or None otherwise.
+
+    See https://www.w3.org/TR/trace-context/#traceparent-header-field-values
+    """
+    # Jaeger spans expose trace_id, span_id, and flags as int attributes.
+    # Other OpenTracing implementations may not have these.
+    assert opentracing.tracer.active_span is not None
+    ctx = opentracing.tracer.active_span.context
+    trace_id = getattr(ctx, "trace_id", None)
+    span_id = getattr(ctx, "span_id", None)
+    flags = getattr(ctx, "flags", 0)
+
+    if trace_id is None or span_id is None:
+        return None
+
+    return f"00-{trace_id:032x}-{span_id:016x}-{flags:02x}"
+
+
 @ensure_active_span("get the span context as a string.", ret={})
 def active_span_context_as_string() -> str:
     """
