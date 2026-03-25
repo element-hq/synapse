@@ -2516,9 +2516,9 @@ class RoomMessageListTestCase(RoomBase):
             "foo",
             # "old history",
         ]
-        # Because the `assertEquals` assertion to assert exact order gives horrible diff
-        # output when it fails, let's use `assertIncludes` as a first step to sanity
-        # check everything is there before we assert the exact order.
+        # Because `assertEquals` produces a confusing diff on failure, let's first use
+        # `assertIncludes` as a first step to sanity check everything is there before we
+        # assert the exact order.
         self.assertIncludes(
             set(actual_messages),
             set(expected_messages),
