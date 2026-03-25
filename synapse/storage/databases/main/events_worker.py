@@ -1765,6 +1765,8 @@ class EventsWorkerStore(SQLBaseStore):
             redacted_event = prune_event(original_ev)
             redacted_event.internal_metadata.redacted_by = redaction_id
 
+            # Note: The `redacted_because` field will later be populated by
+            # `EventClientSerializer.serialize_event`.
             return redacted_event
 
         # no valid redaction found for this event
