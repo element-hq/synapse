@@ -549,8 +549,11 @@ class ApplicationServiceApi(SimpleHttpClient):
             time_now,
             config=SerializeEventConfig(
                 as_client_event=True,
-                # If this is an invite or a knock membership event, and we're interested
-                # in this user, then include any stripped state alongside the event.
+                # If this is an invite or a knock membership event, then include
+                # any stripped state alongside the event. We could narrow this
+                # down to only users the appservice is "interested in", however
+                # it's not worth the complexity of doing so, and it's simpler to
+                # just include it for all users.
                 include_stripped_room_state=True,
                 # Appservices are considered 'trusted' by the admin and should have
                 # applicable metadata on their events.
