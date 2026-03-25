@@ -79,10 +79,6 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_tuple_in_list_sql_clause,
 )
-
-# from synapse.storage.databases.main.stream import (
-#     generate_next_token,
-# )
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import (
     AbstractStreamIdGenerator,
