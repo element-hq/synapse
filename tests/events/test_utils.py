@@ -657,6 +657,7 @@ class SerializeEventTestCase(HomeserverTestCase):
         ev: EventBase,
         fields: list[str] | None,
         include_admin_metadata: bool = False,
+        redaction_map: Mapping[str, EventBase] | None = None,
     ) -> JsonDict:
         return self.get_success(
             self._event_serializer.serialize_event(
@@ -666,6 +667,7 @@ class SerializeEventTestCase(HomeserverTestCase):
                     only_event_fields=fields,
                     include_admin_metadata=include_admin_metadata,
                 ),
+                redaction_map=redaction_map,
             )
         )
 
@@ -779,16 +781,10 @@ class SerializeEventTestCase(HomeserverTestCase):
         )
 
     def test_event_fields_fail_if_fields_not_str(self) -> None:
-        self.get_failure(
-            self._event_serializer.serialize_event(
-                MockEvent(room_id="!foo:bar", content={"foo": "bar"}),
-                1479807801915,
-                config=SerializeEventConfig(
-                    only_event_fields=["room_id", 4],  # type: ignore[list-item]
-                ),
-            ),
-            TypeError,
-        )
+        with self.assertRaises(TypeError):
+            SerializeEventConfig(
+                only_event_fields=["room_id", 4],  # type: ignore[list-item]
+            )
 
     def test_default_serialize_config_excludes_admin_metadata(self) -> None:
         # We just really don't want this to be set to True accidentally
@@ -887,6 +883,52 @@ class SerializeEventTestCase(HomeserverTestCase):
             admin_config.include_stripped_room_state,
         )
         self.assertTrue(admin_config.include_admin_metadata)
+
+    def test_redacted_because_is_filtered_out(self) -> None:
+        """If an event has a unsigned has a `redacted_by` field, then the
+        `redacted_because` should be filtered out if not specified in
+        `only_event_fields`."""
+
+        redaction_id = "$redaction_event_id"
+
+        event = MockEvent(
+            type="foo",
+            event_id="test",
+            room_id="!foo:bar",
+            content={"foo": "bar"},
+        )
+        event.internal_metadata.redacted_by = redaction_id
+
+        redaction_event = MockEvent(
+            type="m.room.redaction",
+            event_id=redaction_id,
+            content={"redacts": "test"},
+        )
+
+        self.assertEqual(
+            self.serialize(
+                event,
+                ["content.foo"],
+                redaction_map={redaction_id: redaction_event},
+            ),
+            {
+                "content": {"foo": "bar"},
+            },
+        )
+
+        self.assertEqual(
+            self.serialize(
+                event,
+                ["content.foo", "unsigned.redacted_because"],
+                redaction_map={redaction_id: redaction_event},
+            ),
+            {
+                "content": {"foo": "bar"},
+                "unsigned": {
+                    "redacted_because": self.serialize(redaction_event, fields=None),
+                },
+            },
+        )
 
 
 class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):

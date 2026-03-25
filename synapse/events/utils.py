@@ -588,7 +588,7 @@ class EventClientSerializer:
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
         bundle_aggregations: dict[str, "BundledAggregations"] | None = None,
-        redaction_map: dict[str, "EventBase"] | None = None,
+        redaction_map: Mapping[str, "EventBase"] | None = None,
     ) -> JsonDict:
         """Serializes a single event.
 
@@ -607,11 +607,6 @@ class EventClientSerializer:
         # To handle the case of presence events and the like
         if not isinstance(event, EventBase):
             return event
-
-        if not isinstance(config.only_event_fields, list) or not all(
-            isinstance(f, str) for f in config.only_event_fields
-        ):
-            raise TypeError("only_event_fields must be a list of strings")
 
         # Force-enable server admin metadata because the only time an event with
         # relevant metadata will be when the admin requested it via their admin
