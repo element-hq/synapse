@@ -780,7 +780,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     recheck = bool(internal_metadata.get("recheck_redaction", False))
                 else:
                     recheck = False
-                updates.append((event_id, recheck))
+                if not recheck:
+                    # Column defaults to true, so we only need to update rows
+                    # where recheck should be false.
+                    updates.append((event_id, recheck))
 
             self.db_pool.simple_update_many_txn(
                 txn,
