@@ -436,6 +436,13 @@ class SerializeEventConfig:
     # whether an event was soft failed by the server.
     include_admin_metadata: bool = False
 
+    @only_event_fields.validator
+    def _validate_only_event_fields(
+        self, attribute: attr.Attribute, value: list[str]
+    ) -> None:
+        if not isinstance(value, list) or not all(isinstance(f, str) for f in value):
+            raise TypeError("only_event_fields must be a list of strings")
+
 
 _DEFAULT_SERIALIZE_EVENT_CONFIG = SerializeEventConfig()
 
@@ -554,14 +561,6 @@ def _serialize_event(
         if e.internal_metadata.policy_server_spammy:
             d["unsigned"]["io.element.synapse.policy_server_spammy"] = True
 
-    only_event_fields = config.only_event_fields
-    if only_event_fields:
-        if not isinstance(only_event_fields, list) or not all(
-            isinstance(f, str) for f in only_event_fields
-        ):
-            raise TypeError("only_event_fields must be a list of strings")
-        d = only_fields(d, only_event_fields)
-
     return d
 
 
@@ -605,6 +604,11 @@ class EventClientSerializer:
         # To handle the case of presence events and the like
         if not isinstance(event, EventBase):
             return event
+
+        if not isinstance(config.only_event_fields, list) or not all(
+            isinstance(f, str) for f in config.only_event_fields
+        ):
+            raise TypeError("only_event_fields must be a list of strings")
 
         # Force-enable server admin metadata because the only time an event with
         # relevant metadata will be when the admin requested it via their admin
@@ -665,6 +669,11 @@ class EventClientSerializer:
                     bundle_aggregations,
                     serialized_event,
                 )
+
+        # Only include fields that are the client has requested.
+        only_event_fields = config.only_event_fields
+        if only_event_fields:
+            serialized_event = only_fields(serialized_event, only_event_fields)
 
         return serialized_event
 
