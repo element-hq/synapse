@@ -425,7 +425,7 @@ class SerializeEventConfig:
     # the transaction_id and delay_id in the unsigned section of the event.
     requester: Requester | None = None
     # List of event fields to include. If empty, all fields will be returned.
-    only_event_fields: list[str] | None = attr.field(default=None)
+    only_event_fields: list[str] | None = attr.ib(default=None)
     # Some events can have stripped room state stored in the `unsigned` field.
     # This is required for invite and knock functionality. If this option is
     # False, that state will be removed from the event before it is returned.
