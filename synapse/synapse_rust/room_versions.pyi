@@ -1,6 +1,6 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2026 Element Creations, Ltd
+# Copyright (C) 2026 Element Creations Ltd.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -109,10 +109,10 @@ class RoomVersion:
     msc4291_room_ids_as_hashes: bool
     """MSC4291: Room IDs as hashes of the create event."""
     strict_event_byte_limits_room_versions: bool
-    """Set of room versions where Synapse strictly enforces event key size limits
-    in bytes, rather than in codepoints.
+    """Whether this room version strictly enforces event key size limits in bytes,
+    rather than in codepoints.
 
-    In these room versions, we are stricter with event size validation."""
+    If true, this room version uses stricter event size validation."""
 
 class RoomVersions:
     V1: RoomVersion
