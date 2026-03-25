@@ -2533,7 +2533,7 @@ class RoomMessageListTestCase(RoomBase):
             for gap in channel.json_body["gaps"]
         ]
         expected_gaps = expected_messages
-        # We only need to assert gaps are in the list (the order doesn't matter)
+        # We only need to assert that gaps are in the list (the order doesn't matter)
         self.assertIncludes(
             set(actual_gaps),
             set(expected_gaps),
