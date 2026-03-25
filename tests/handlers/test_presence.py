@@ -19,7 +19,7 @@
 #
 #
 import itertools
-from typing import Optional, cast
+from typing import cast
 from unittest.mock import Mock, call
 
 from parameterized import parameterized
@@ -57,7 +57,7 @@ from synapse.server import HomeServer
 from synapse.storage.database import LoggingDatabaseConnection
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict, UserID, get_domain_from_id
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -1650,7 +1650,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(state.state, PresenceState.ONLINE)
 
     def _set_presencestate_with_status_msg(
-        self, state: str, status_msg: Optional[str]
+        self, state: str, status_msg: str | None
     ) -> None:
         """Set a PresenceState and status_msg and check the result.
 

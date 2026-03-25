@@ -19,7 +19,6 @@
 #
 #
 from http import HTTPStatus
-from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -28,7 +27,7 @@ from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, Recei
 from synapse.rest.client import login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -259,7 +258,7 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_JSON", channel.json_body)
 
-    def _get_read_receipt(self) -> Optional[JsonDict]:
+    def _get_read_receipt(self) -> JsonDict | None:
         """Syncs and returns the read receipt."""
 
         # Checks if event is a read receipt

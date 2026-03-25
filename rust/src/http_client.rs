@@ -12,10 +12,10 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-use std::{collections::HashMap, future::Future};
+use std::{collections::HashMap, future::Future, sync::OnceLock};
 
 use anyhow::Context;
-use futures::TryStreamExt;
+use http_body_util::BodyExt;
 use once_cell::sync::OnceCell;
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 use reqwest::RequestBuilder;
@@ -134,10 +134,10 @@ fn get_runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRunt
 }
 
 /// A reference to the `twisted.internet.defer` module.
-static DEFER: OnceCell<PyObject> = OnceCell::new();
+static DEFER: OnceCell<Py<PyAny>> = OnceCell::new();
 
 /// Access to the `twisted.internet.defer` module.
-fn defer(py: Python<'_>) -> PyResult<&Bound<PyAny>> {
+fn defer(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
     Ok(DEFER
         .get_or_try_init(|| py.import("twisted.internet.defer").map(Into::into))?
         .bind(py))
@@ -165,21 +165,33 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 #[pyclass]
 struct HttpClient {
     client: reqwest::Client,
-    reactor: PyObject,
+    reactor: Py<PyAny>,
 }
 
 #[pymethods]
 impl HttpClient {
     #[new]
-    pub fn py_new(reactor: Bound<PyAny>, user_agent: &str) -> PyResult<HttpClient> {
+    #[pyo3(signature = (reactor, user_agent, http2_only = false))]
+    pub fn py_new(
+        reactor: Bound<PyAny>,
+        user_agent: &str,
+        http2_only: bool,
+    ) -> PyResult<HttpClient> {
         // Make sure the runtime gets installed
         let _ = runtime(&reactor)?;
 
+        let mut builder = reqwest::Client::builder().user_agent(user_agent);
+
+        if http2_only {
+            // Create the client with 'HTTP/2 prior knowledge' enabled, which
+            // means it will always use HTTP/2 for unencrypted connections
+            builder = builder.http2_prior_knowledge();
+        }
+
+        let client = builder.build().context("building reqwest client")?;
+
         Ok(HttpClient {
-            client: reqwest::Client::builder()
-                .user_agent(user_agent)
-                .build()
-                .context("building reqwest client")?,
+            client,
             reactor: reactor.unbind(),
         })
     }
@@ -223,23 +235,30 @@ impl HttpClient {
 
             let status = response.status();
 
-            let mut stream = response.bytes_stream();
-            let mut buffer = Vec::new();
-            while let Some(chunk) = stream.try_next().await.context("reading body")? {
-                if buffer.len() + chunk.len() > response_limit {
-                    Err(anyhow::anyhow!("Response size too large"))?;
-                }
-
-                buffer.extend_from_slice(&chunk);
-            }
+            // A light-weight way to read the response up until the `response_limit`. We
+            // want to avoid allocating a giant response object on the server above our
+            // expected `response_limit` to avoid out-of-memory DOS problems.
+            let body = reqwest::Body::from(response);
+            let limited_body = http_body_util::Limited::new(body, response_limit);
+            let collected = limited_body
+                .collect()
+                .await
+                .map_err(anyhow::Error::from_boxed)
+                .with_context(|| {
+                    format!(
+                        "Response body exceeded response limit ({} bytes)",
+                        response_limit
+                    )
+                })?;
+            let bytes: bytes::Bytes = collected.to_bytes();
 
             if !status.is_success() {
-                return Err(HttpResponseException::new(status, buffer));
+                return Err(HttpResponseException::new(status, bytes));
             }
 
-            let r = Python::with_gil(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
-
-            Ok(r)
+            // Because of the `pyo3` `bytes` feature, we can pass this back to Python
+            // land efficiently
+            Ok(bytes)
         })
     }
 }
@@ -270,7 +289,7 @@ where
     handle.spawn(async move {
         let res = task.await;
 
-        Python::with_gil(move |py| {
+        Python::attach(move |py| {
             // Flatten the panic into standard python error
             let res = match res {
                 Ok(r) => r,
@@ -299,5 +318,25 @@ where
         });
     });
 
-    Ok(deferred)
+    // Make the deferred follow the Synapse logcontext rules
+    make_deferred_yieldable(py, &deferred)
+}
+
+static MAKE_DEFERRED_YIELDABLE: OnceLock<pyo3::Py<pyo3::PyAny>> = OnceLock::new();
+
+/// Given a deferred, make it follow the Synapse logcontext rules
+fn make_deferred_yieldable<'py>(
+    py: Python<'py>,
+    deferred: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let make_deferred_yieldable = MAKE_DEFERRED_YIELDABLE.get_or_init(|| {
+        let sys = PyModule::import(py, "synapse.logging.context").unwrap();
+        let func = sys.getattr("make_deferred_yieldable").unwrap().unbind();
+        func
+    });
+
+    make_deferred_yieldable
+        .call1(py, (deferred,))?
+        .extract(py)
+        .map_err(Into::into)
 }

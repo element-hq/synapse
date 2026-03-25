@@ -35,7 +35,7 @@ handlers:
 loggers:
     synapse:
         level: INFO
-        handlers: [remote]
+        handlers: [file]
     synapse.storage.SQL:
         level: WARNING
 ```

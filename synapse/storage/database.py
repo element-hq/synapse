@@ -31,16 +31,11 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Iterable,
     Iterator,
-    List,
     Literal,
     Mapping,
-    Optional,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
     cast,
     overload,
@@ -61,13 +56,13 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, register_threadpool
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics import SERVER_NAME_LABEL, register_threadpool
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters
 from synapse.types import StrCollection
 from synapse.util.async_helpers import delay_cancellation
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
@@ -146,7 +141,7 @@ def make_pool(
     def _on_new_connection(conn: Connection) -> None:
         # Ensure we have a logging context so we can correctly track queries,
         # etc.
-        with LoggingContext("db.on_new_connection"):
+        with LoggingContext(name="db.on_new_connection", server_name=server_name):
             engine.on_new_connection(
                 LoggingDatabaseConnection(
                     conn=conn,
@@ -218,10 +213,10 @@ class LoggingDatabaseConnection:
     def cursor(
         self,
         *,
-        txn_name: Optional[str] = None,
-        after_callbacks: Optional[List["_CallbackListEntry"]] = None,
-        async_after_callbacks: Optional[List["_AsyncCallbackListEntry"]] = None,
-        exception_callbacks: Optional[List["_CallbackListEntry"]] = None,
+        txn_name: str | None = None,
+        after_callbacks: list["_CallbackListEntry"] | None = None,
+        async_after_callbacks: list["_AsyncCallbackListEntry"] | None = None,
+        exception_callbacks: list["_CallbackListEntry"] | None = None,
     ) -> "LoggingTransaction":
         if not txn_name:
             txn_name = self.default_txn_name
@@ -251,10 +246,10 @@ class LoggingDatabaseConnection:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[types.TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: types.TracebackType | None,
+    ) -> bool | None:
         return self.conn.__exit__(exc_type, exc_value, traceback)
 
     # Proxy through any unknown lookups to the DB conn class.
@@ -263,9 +258,9 @@ class LoggingDatabaseConnection:
 
 
 # The type of entry which goes on our after_callbacks and exception_callbacks lists.
-_CallbackListEntry = Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
-_AsyncCallbackListEntry = Tuple[
-    Callable[..., Awaitable], Tuple[object, ...], Dict[str, object]
+_CallbackListEntry = tuple[Callable[..., object], tuple[object, ...], dict[str, object]]
+_AsyncCallbackListEntry = tuple[
+    Callable[..., Awaitable], tuple[object, ...], dict[str, object]
 ]
 
 P = ParamSpec("P")
@@ -312,9 +307,9 @@ class LoggingTransaction:
         name: str,
         server_name: str,
         database_engine: BaseDatabaseEngine,
-        after_callbacks: Optional[List[_CallbackListEntry]] = None,
-        async_after_callbacks: Optional[List[_AsyncCallbackListEntry]] = None,
-        exception_callbacks: Optional[List[_CallbackListEntry]] = None,
+        after_callbacks: list[_CallbackListEntry] | None = None,
+        async_after_callbacks: list[_AsyncCallbackListEntry] | None = None,
+        exception_callbacks: list[_CallbackListEntry] | None = None,
     ):
         self.txn = txn
         self.name = name
@@ -328,7 +323,7 @@ class LoggingTransaction:
         self, callback: Callable[P, object], *args: P.args, **kwargs: P.kwargs
     ) -> None:
         """Call the given callback on the main twisted thread after the transaction has
-        finished.
+        finished successfully.
 
         Mostly used to invalidate the caches on the correct thread.
 
@@ -349,7 +344,7 @@ class LoggingTransaction:
         self, callback: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
     ) -> None:
         """Call the given asynchronous callback on the main twisted thread after
-        the transaction has finished (but before those added in `call_after`).
+        the transaction has finished successfully (but before those added in `call_after`).
 
         Mostly used to invalidate remote caches after transactions.
 
@@ -384,16 +379,16 @@ class LoggingTransaction:
         assert self.exception_callbacks is not None
         self.exception_callbacks.append((callback, args, kwargs))
 
-    def fetchone(self) -> Optional[Tuple]:
+    def fetchone(self) -> tuple | None:
         return self.txn.fetchone()
 
-    def fetchmany(self, size: Optional[int] = None) -> List[Tuple]:
+    def fetchmany(self, size: int | None = None) -> list[tuple]:
         return self.txn.fetchmany(size=size)
 
-    def fetchall(self) -> List[Tuple]:
+    def fetchall(self) -> list[tuple]:
         return self.txn.fetchall()
 
-    def __iter__(self) -> Iterator[Tuple]:
+    def __iter__(self) -> Iterator[tuple]:
         return self.txn.__iter__()
 
     @property
@@ -403,7 +398,7 @@ class LoggingTransaction:
     @property
     def description(
         self,
-    ) -> Optional[Sequence[Any]]:
+    ) -> Sequence[Any] | None:
         return self.txn.description
 
     def execute_batch(self, sql: str, args: Iterable[Iterable[Any]]) -> None:
@@ -434,9 +429,9 @@ class LoggingTransaction:
         self,
         sql: str,
         values: Iterable[Iterable[Any]],
-        template: Optional[str] = None,
+        template: str | None = None,
         fetch: bool = True,
-    ) -> List[Tuple]:
+    ) -> list[tuple]:
         """Corresponds to psycopg2.extras.execute_values. Only available when
         using postgres.
 
@@ -541,17 +536,17 @@ class LoggingTransaction:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[types.TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: types.TracebackType | None,
     ) -> None:
         self.close()
 
 
 class PerformanceCounters:
     def __init__(self) -> None:
-        self.current_counters: Dict[str, Tuple[int, float]] = {}
-        self.previous_counters: Dict[str, Tuple[int, float]] = {}
+        self.current_counters: dict[str, tuple[int, float]] = {}
+        self.previous_counters: dict[str, tuple[int, float]] = {}
 
     def update(self, key: str, duration_secs: float) -> None:
         count, cum_time = self.current_counters.get(key, (0, 0.0))
@@ -611,19 +606,13 @@ class DatabasePool:
         )
 
         self.updates = BackgroundUpdater(hs, self)
-        LaterGauge(
-            name="synapse_background_update_status",
-            desc="Background update status",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): self.updates.get_status()},
-        )
 
         self._previous_txn_total_time = 0.0
         self._current_txn_total_time = 0.0
         self._previous_loop_ts = 0.0
 
         # Transaction counter: key is the twisted thread id, value is the current count
-        self._txn_counters: Dict[int, int] = defaultdict(int)
+        self._txn_counters: dict[int, int] = defaultdict(int)
 
         # TODO(paul): These can eventually be removed once the metrics code
         #   is running in mainline, and we have some nice monitoring frontends
@@ -643,12 +632,17 @@ class DatabasePool:
         # Check ASAP (and then later, every 1s) to see if we have finished
         # background updates of tables that aren't safe to update.
         self._clock.call_later(
-            0.0,
-            run_as_background_process,
+            Duration(seconds=0),
+            self.hs.run_as_background_process,
             "upsert_safety_check",
-            self.server_name,
             self._check_safe_to_upsert,
         )
+
+    def stop_background_updates(self) -> None:
+        """
+        Stops the database from running any further background updates.
+        """
+        self.updates.shutdown()
 
     def name(self) -> str:
         "Return the name of this database"
@@ -668,7 +662,7 @@ class DatabasePool:
         If the background updates have not completed, wait 15 sec and check again.
         """
         updates = cast(
-            List[Tuple[str]],
+            list[tuple[str]],
             await self.simple_select_list(
                 "background_updates",
                 keyvalues=None,
@@ -686,10 +680,9 @@ class DatabasePool:
         # If there's any updates still running, reschedule to run.
         if background_update_names:
             self._clock.call_later(
-                15.0,
-                run_as_background_process,
+                Duration(seconds=15),
+                self.hs.run_as_background_process,
                 "upsert_safety_check",
-                self.server_name,
                 self._check_safe_to_upsert,
             )
 
@@ -714,15 +707,15 @@ class DatabasePool:
                 "Total database time: %.3f%% {%s}", ratio * 100, top_three_counters
             )
 
-        self._clock.looping_call(loop, 10000)
+        self._clock.looping_call(loop, Duration(seconds=10))
 
     def new_transaction(
         self,
         conn: LoggingDatabaseConnection,
         desc: str,
-        after_callbacks: List[_CallbackListEntry],
-        async_after_callbacks: List[_AsyncCallbackListEntry],
-        exception_callbacks: List[_CallbackListEntry],
+        after_callbacks: list[_CallbackListEntry],
+        async_after_callbacks: list[_AsyncCallbackListEntry],
+        exception_callbacks: list[_CallbackListEntry],
         func: Callable[Concatenate[LoggingTransaction, P], R],
         *args: P.args,
         **kwargs: P.kwargs,
@@ -807,9 +800,8 @@ class DatabasePool:
         transaction_logger.debug("[TXN START] {%s}", name)
 
         try:
-            i = 0
-            N = 5
-            while True:
+            MAX_NUMBER_OF_ATTEMPTS = 5
+            for attempt_number in range(1, MAX_NUMBER_OF_ATTEMPTS + 1):
                 cursor = conn.cursor(
                     txn_name=name,
                     after_callbacks=after_callbacks,
@@ -835,34 +827,37 @@ class DatabasePool:
                         "[TXN OPERROR] {%s} %s %d/%d",
                         name,
                         e,
-                        i,
-                        N,
+                        attempt_number,
+                        MAX_NUMBER_OF_ATTEMPTS,
                     )
-                    if i < N:
-                        i += 1
-                        try:
-                            with opentracing.start_active_span("db.rollback"):
-                                conn.rollback()
-                        except self.engine.module.Error as e1:
-                            transaction_logger.warning("[TXN EROLL] {%s} %s", name, e1)
+                    try:
+                        with opentracing.start_active_span("db.rollback"):
+                            conn.rollback()
+                    except self.engine.module.Error as e1:
+                        transaction_logger.warning("[TXN EROLL] {%s} %s", name, e1)
+                    # Keep retrying if we haven't reached max attempts
+                    if attempt_number < MAX_NUMBER_OF_ATTEMPTS:
                         continue
                     raise
                 except self.engine.module.DatabaseError as e:
                     if self.engine.is_deadlock(e):
                         transaction_logger.warning(
-                            "[TXN DEADLOCK] {%s} %d/%d", name, i, N
+                            "[TXN DEADLOCK] {%s} %d/%d",
+                            name,
+                            attempt_number,
+                            MAX_NUMBER_OF_ATTEMPTS,
                         )
-                        if i < N:
-                            i += 1
-                            try:
-                                with opentracing.start_active_span("db.rollback"):
-                                    conn.rollback()
-                            except self.engine.module.Error as e1:
-                                transaction_logger.warning(
-                                    "[TXN EROLL] {%s} %s",
-                                    name,
-                                    e1,
-                                )
+                        try:
+                            with opentracing.start_active_span("db.rollback"):
+                                conn.rollback()
+                        except self.engine.module.Error as e1:
+                            transaction_logger.warning(
+                                "[TXN EROLL] {%s} %s",
+                                name,
+                                e1,
+                            )
+                        # Keep retrying if we haven't reached max attempts
+                        if attempt_number < MAX_NUMBER_OF_ATTEMPTS:
                             continue
                     raise
                 finally:
@@ -899,6 +894,21 @@ class DatabasePool:
                     # [1]: https://github.com/python/cpython/blob/v3.8.0/Modules/_sqlite/connection.c#L465
                     # [2]: https://github.com/python/cpython/blob/v3.8.0/Modules/_sqlite/cursor.c#L236
                     cursor.close()
+            else:
+                # To appease the linter, we mark this as unreachable. Unreachable
+                # because we expect the code above to always return from the loop or
+                # raise an exception. `mypy` just doesn't understand our logic above.
+                #
+                # The Python docs
+                # (https://typing.python.org/en/latest/guides/unreachable.html#marking-code-as-unreachable)
+                # suggest `assert False` but that also gets linted to suggest raising an
+                # `AssertionError`. I'm not sure this has the same "unreachable"
+                # semantics, but it works anyway to solve the linter complaint because
+                # we're raising an exception.
+                raise AssertionError(
+                    "We expect this to be unreachable because the code above should either return or raise. "
+                    "This is a logic error in Synapse itself."
+                )
         except Exception as e:
             transaction_logger.debug("[TXN FAIL] {%s} %s", name, e)
             raise
@@ -927,7 +937,7 @@ class DatabasePool:
         func: Callable[..., R],
         *args: Any,
         db_autocommit: bool = False,
-        isolation_level: Optional[int] = None,
+        isolation_level: int | None = None,
         **kwargs: Any,
     ) -> R:
         """Starts a transaction on the database and runs a given function
@@ -959,9 +969,9 @@ class DatabasePool:
         """
 
         async def _runInteraction() -> R:
-            after_callbacks: List[_CallbackListEntry] = []
-            async_after_callbacks: List[_AsyncCallbackListEntry] = []
-            exception_callbacks: List[_CallbackListEntry] = []
+            after_callbacks: list[_CallbackListEntry] = []
+            async_after_callbacks: list[_AsyncCallbackListEntry] = []
+            exception_callbacks: list[_CallbackListEntry] = []
 
             if not current_context():
                 logger.warning("Starting db txn '%s' from sentinel context", desc)
@@ -1009,7 +1019,7 @@ class DatabasePool:
         func: Callable[Concatenate[LoggingDatabaseConnection, P], R],
         *args: Any,
         db_autocommit: bool = False,
-        isolation_level: Optional[int] = None,
+        isolation_level: int | None = None,
         **kwargs: Any,
     ) -> R:
         """Wraps the .runWithConnection() method on the underlying db_pool.
@@ -1049,7 +1059,9 @@ class DatabasePool:
             assert not self.engine.in_transaction(conn)
 
             with LoggingContext(
-                str(curr_context), parent_context=parent_context
+                name=str(curr_context),
+                server_name=self.server_name,
+                parent_context=parent_context,
             ) as context:
                 with opentracing.start_active_span(
                     operation_name="db.connection",
@@ -1106,7 +1118,7 @@ class DatabasePool:
             self._db_pool.runWithConnection(inner_func, *args, **kwargs)
         )
 
-    async def execute(self, desc: str, query: str, *args: Any) -> List[Tuple[Any, ...]]:
+    async def execute(self, desc: str, query: str, *args: Any) -> list[tuple[Any, ...]]:
         """Runs a single query for a result set.
 
         Args:
@@ -1117,7 +1129,7 @@ class DatabasePool:
             The result of decoder(results)
         """
 
-        def interaction(txn: LoggingTransaction) -> List[Tuple[Any, ...]]:
+        def interaction(txn: LoggingTransaction) -> list[tuple[Any, ...]]:
             txn.execute(query, args)
             return txn.fetchall()
 
@@ -1129,7 +1141,7 @@ class DatabasePool:
     async def simple_insert(
         self,
         table: str,
-        values: Dict[str, Any],
+        values: dict[str, Any],
         desc: str = "simple_insert",
     ) -> None:
         """Executes an INSERT query on the named table.
@@ -1143,7 +1155,7 @@ class DatabasePool:
 
     @staticmethod
     def simple_insert_txn(
-        txn: LoggingTransaction, table: str, values: Dict[str, Any]
+        txn: LoggingTransaction, table: str, values: dict[str, Any]
     ) -> None:
         keys, vals = zip(*values.items())
 
@@ -1159,43 +1171,24 @@ class DatabasePool:
     def simple_insert_returning_txn(
         txn: LoggingTransaction,
         table: str,
-        values: Dict[str, Any],
+        values: dict[str, Any],
         returning: StrCollection,
-    ) -> Tuple[Any, ...]:
+    ) -> tuple[Any, ...]:
         """Executes a `INSERT INTO... RETURNING...` statement (or equivalent for
         SQLite versions that don't support it).
         """
 
-        if txn.database_engine.supports_returning:
-            sql = "INSERT INTO %s (%s) VALUES(%s) RETURNING %s" % (
-                table,
-                ", ".join(k for k in values.keys()),
-                ", ".join("?" for _ in values.keys()),
-                ", ".join(k for k in returning),
-            )
+        sql = "INSERT INTO %s (%s) VALUES(%s) RETURNING %s" % (
+            table,
+            ", ".join(k for k in values.keys()),
+            ", ".join("?" for _ in values.keys()),
+            ", ".join(k for k in returning),
+        )
 
-            txn.execute(sql, list(values.values()))
-            row = txn.fetchone()
-            assert row is not None
-            return row
-        else:
-            # For old versions of SQLite we do a standard insert and then can
-            # use `last_insert_rowid` to get at the row we just inserted
-            DatabasePool.simple_insert_txn(
-                txn,
-                table=table,
-                values=values,
-            )
-            txn.execute("SELECT last_insert_rowid()")
-            row = txn.fetchone()
-            assert row is not None
-            (rowid,) = row
-
-            row = DatabasePool.simple_select_one_txn(
-                txn, table=table, keyvalues={"rowid": rowid}, retcols=returning
-            )
-            assert row is not None
-            return row
+        txn.execute(sql, list(values.values()))
+        row = txn.fetchone()
+        assert row is not None
+        return row
 
     async def simple_insert_many(
         self,
@@ -1262,10 +1255,10 @@ class DatabasePool:
     async def simple_upsert(
         self,
         table: str,
-        keyvalues: Dict[str, Any],
-        values: Dict[str, Any],
-        insertion_values: Optional[Dict[str, Any]] = None,
-        where_clause: Optional[str] = None,
+        keyvalues: dict[str, Any],
+        values: dict[str, Any],
+        insertion_values: dict[str, Any] | None = None,
+        where_clause: str | None = None,
         desc: str = "simple_upsert",
     ) -> bool:
         """Insert a row with values + insertion_values; on conflict, update with values.
@@ -1358,8 +1351,8 @@ class DatabasePool:
         table: str,
         keyvalues: Mapping[str, Any],
         values: Mapping[str, Any],
-        insertion_values: Optional[Mapping[str, Any]] = None,
-        where_clause: Optional[str] = None,
+        insertion_values: Mapping[str, Any] | None = None,
+        where_clause: str | None = None,
     ) -> bool:
         """
         Pick the UPSERT method which works best on the platform. Either the
@@ -1403,8 +1396,8 @@ class DatabasePool:
         table: str,
         keyvalues: Mapping[str, Any],
         values: Mapping[str, Any],
-        insertion_values: Optional[Mapping[str, Any]] = None,
-        where_clause: Optional[str] = None,
+        insertion_values: Mapping[str, Any] | None = None,
+        where_clause: str | None = None,
         lock: bool = True,
     ) -> bool:
         """
@@ -1464,7 +1457,7 @@ class DatabasePool:
                 return True
 
         # We didn't find any existing rows, so insert a new one
-        allvalues: Dict[str, Any] = {}
+        allvalues: dict[str, Any] = {}
         allvalues.update(keyvalues)
         allvalues.update(values)
         allvalues.update(insertion_values)
@@ -1484,8 +1477,8 @@ class DatabasePool:
         table: str,
         keyvalues: Mapping[str, Any],
         values: Mapping[str, Any],
-        insertion_values: Optional[Mapping[str, Any]] = None,
-        where_clause: Optional[str] = None,
+        insertion_values: Mapping[str, Any] | None = None,
+        where_clause: str | None = None,
     ) -> bool:
         """
         Use the native UPSERT functionality in PostgreSQL.
@@ -1501,7 +1494,7 @@ class DatabasePool:
             Returns True if a row was inserted or updated (i.e. if `values` is
             not empty then this always returns True)
         """
-        allvalues: Dict[str, Any] = {}
+        allvalues: dict[str, Any] = {}
         allvalues.update(keyvalues)
         allvalues.update(insertion_values or {})
 
@@ -1695,7 +1688,7 @@ class DatabasePool:
             value_values: A list of each row's value column values.
                 Ignored if value_names is empty.
         """
-        allnames: List[str] = []
+        allnames: list[str] = []
         allnames.extend(key_names)
         allnames.extend(value_names)
 
@@ -1738,30 +1731,30 @@ class DatabasePool:
     async def simple_select_one(
         self,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcols: Collection[str],
         allow_none: Literal[False] = False,
         desc: str = "simple_select_one",
-    ) -> Tuple[Any, ...]: ...
+    ) -> tuple[Any, ...]: ...
 
     @overload
     async def simple_select_one(
         self,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcols: Collection[str],
         allow_none: Literal[True] = True,
         desc: str = "simple_select_one",
-    ) -> Optional[Tuple[Any, ...]]: ...
+    ) -> tuple[Any, ...] | None: ...
 
     async def simple_select_one(
         self,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcols: Collection[str],
         allow_none: bool = False,
         desc: str = "simple_select_one",
-    ) -> Optional[Tuple[Any, ...]]:
+    ) -> tuple[Any, ...] | None:
         """Executes a SELECT query on the named table, which is expected to
         return a single row, returning multiple columns from it.
 
@@ -1787,7 +1780,7 @@ class DatabasePool:
     async def simple_select_one_onecol(
         self,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcol: str,
         allow_none: Literal[False] = False,
         desc: str = "simple_select_one_onecol",
@@ -1797,20 +1790,20 @@ class DatabasePool:
     async def simple_select_one_onecol(
         self,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcol: str,
         allow_none: Literal[True] = True,
         desc: str = "simple_select_one_onecol",
-    ) -> Optional[Any]: ...
+    ) -> Any | None: ...
 
     async def simple_select_one_onecol(
         self,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcol: str,
         allow_none: bool = False,
         desc: str = "simple_select_one_onecol",
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Executes a SELECT query on the named table, which is expected to
         return a single row, returning a single column from it.
 
@@ -1838,7 +1831,7 @@ class DatabasePool:
         cls,
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcol: str,
         allow_none: Literal[False] = False,
     ) -> Any: ...
@@ -1849,20 +1842,20 @@ class DatabasePool:
         cls,
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcol: str,
         allow_none: Literal[True] = True,
-    ) -> Optional[Any]: ...
+    ) -> Any | None: ...
 
     @classmethod
     def simple_select_one_onecol_txn(
         cls,
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcol: str,
         allow_none: bool = False,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         ret = cls.simple_select_onecol_txn(
             txn, table=table, keyvalues=keyvalues, retcol=retcol
         )
@@ -1879,9 +1872,9 @@ class DatabasePool:
     def simple_select_onecol_txn(
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcol: str,
-    ) -> List[Any]:
+    ) -> list[Any]:
         sql = ("SELECT %(retcol)s FROM %(table)s") % {"retcol": retcol, "table": table}
 
         if keyvalues:
@@ -1895,10 +1888,10 @@ class DatabasePool:
     async def simple_select_onecol(
         self,
         table: str,
-        keyvalues: Optional[Dict[str, Any]],
+        keyvalues: dict[str, Any] | None,
         retcol: str,
         desc: str = "simple_select_onecol",
-    ) -> List[Any]:
+    ) -> list[Any]:
         """Executes a SELECT query on the named table, which returns a list
         comprising of the values of the named column from the selected rows.
 
@@ -1923,10 +1916,10 @@ class DatabasePool:
     async def simple_select_list(
         self,
         table: str,
-        keyvalues: Optional[Dict[str, Any]],
+        keyvalues: dict[str, Any] | None,
         retcols: Collection[str],
         desc: str = "simple_select_list",
-    ) -> List[Tuple[Any, ...]]:
+    ) -> list[tuple[Any, ...]]:
         """Executes a SELECT query on the named table, which may return zero or
         more rows, returning the result as a list of tuples.
 
@@ -1955,9 +1948,9 @@ class DatabasePool:
         cls,
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Optional[Dict[str, Any]],
+        keyvalues: dict[str, Any] | None,
         retcols: Iterable[str],
-    ) -> List[Tuple[Any, ...]]:
+    ) -> list[tuple[Any, ...]]:
         """Executes a SELECT query on the named table, which may return zero or
         more rows, returning the result as a list of tuples.
 
@@ -1991,10 +1984,10 @@ class DatabasePool:
         column: str,
         iterable: Iterable[Any],
         retcols: Collection[str],
-        keyvalues: Optional[Dict[str, Any]] = None,
+        keyvalues: dict[str, Any] | None = None,
         desc: str = "simple_select_many_batch",
         batch_size: int = 100,
-    ) -> List[Tuple[Any, ...]]:
+    ) -> list[tuple[Any, ...]]:
         """Executes a SELECT query on the named table, which may return zero or
         more rows.
 
@@ -2014,7 +2007,7 @@ class DatabasePool:
         """
         keyvalues = keyvalues or {}
 
-        results: List[Tuple[Any, ...]] = []
+        results: list[tuple[Any, ...]] = []
 
         for chunk in batch_iter(iterable, batch_size):
             rows = await self.runInteraction(
@@ -2039,9 +2032,9 @@ class DatabasePool:
         table: str,
         column: str,
         iterable: Collection[Any],
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcols: Iterable[str],
-    ) -> List[Tuple[Any, ...]]:
+    ) -> list[tuple[Any, ...]]:
         """Executes a SELECT query on the named table, which may return zero or
         more rows.
 
@@ -2081,8 +2074,8 @@ class DatabasePool:
     async def simple_update(
         self,
         table: str,
-        keyvalues: Dict[str, Any],
-        updatevalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
+        updatevalues: dict[str, Any],
         desc: str,
     ) -> int:
         """
@@ -2218,8 +2211,8 @@ class DatabasePool:
     async def simple_update_one(
         self,
         table: str,
-        keyvalues: Dict[str, Any],
-        updatevalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
+        updatevalues: dict[str, Any],
         desc: str = "simple_update_one",
     ) -> None:
         """Executes an UPDATE query on the named table, setting new values for
@@ -2245,8 +2238,8 @@ class DatabasePool:
         cls,
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
-        updatevalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
+        updatevalues: dict[str, Any],
     ) -> None:
         rowcount = cls.simple_update_txn(txn, table, keyvalues, updatevalues)
 
@@ -2260,29 +2253,29 @@ class DatabasePool:
     def simple_select_one_txn(
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcols: Collection[str],
         allow_none: Literal[False] = False,
-    ) -> Tuple[Any, ...]: ...
+    ) -> tuple[Any, ...]: ...
 
     @overload
     @staticmethod
     def simple_select_one_txn(
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcols: Collection[str],
         allow_none: Literal[True] = True,
-    ) -> Optional[Tuple[Any, ...]]: ...
+    ) -> tuple[Any, ...] | None: ...
 
     @staticmethod
     def simple_select_one_txn(
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         retcols: Collection[str],
         allow_none: bool = False,
-    ) -> Optional[Tuple[Any, ...]]:
+    ) -> tuple[Any, ...] | None:
         select_sql = "SELECT %s FROM %s" % (", ".join(retcols), table)
 
         if keyvalues:
@@ -2303,7 +2296,7 @@ class DatabasePool:
         return row
 
     async def simple_delete_one(
-        self, table: str, keyvalues: Dict[str, Any], desc: str = "simple_delete_one"
+        self, table: str, keyvalues: dict[str, Any], desc: str = "simple_delete_one"
     ) -> None:
         """Executes a DELETE query on the named table, expecting to delete a
         single row.
@@ -2323,7 +2316,7 @@ class DatabasePool:
 
     @staticmethod
     def simple_delete_one_txn(
-        txn: LoggingTransaction, table: str, keyvalues: Dict[str, Any]
+        txn: LoggingTransaction, table: str, keyvalues: dict[str, Any]
     ) -> None:
         """Executes a DELETE query on the named table, expecting to delete a
         single row.
@@ -2344,7 +2337,7 @@ class DatabasePool:
             raise StoreError(500, "More than one row matched (%s)" % (table,))
 
     async def simple_delete(
-        self, table: str, keyvalues: Dict[str, Any], desc: str
+        self, table: str, keyvalues: dict[str, Any], desc: str
     ) -> int:
         """Executes a DELETE query on the named table.
 
@@ -2364,7 +2357,7 @@ class DatabasePool:
 
     @staticmethod
     def simple_delete_txn(
-        txn: LoggingTransaction, table: str, keyvalues: Dict[str, Any]
+        txn: LoggingTransaction, table: str, keyvalues: dict[str, Any]
     ) -> int:
         """Executes a DELETE query on the named table.
 
@@ -2390,7 +2383,7 @@ class DatabasePool:
         table: str,
         column: str,
         iterable: Collection[Any],
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
         desc: str,
     ) -> int:
         """Executes a DELETE query on the named table.
@@ -2424,7 +2417,7 @@ class DatabasePool:
         table: str,
         column: str,
         values: Collection[Any],
-        keyvalues: Dict[str, Any],
+        keyvalues: dict[str, Any],
     ) -> int:
         """Executes a DELETE query on the named table.
 
@@ -2504,7 +2497,7 @@ class DatabasePool:
         stream_column: str,
         max_value: int,
         limit: int = 100000,
-    ) -> Tuple[Dict[Any, int], int]:
+    ) -> tuple[dict[Any, int], int]:
         """Gets roughly the last N changes in the given stream table as a
         map from entity to the stream ID of the most recent change.
 
@@ -2529,7 +2522,7 @@ class DatabasePool:
 
         # The rows come out in reverse stream ID order, so we want to keep the
         # stream ID of the first row for each entity.
-        cache: Dict[Any, int] = {}
+        cache: dict[Any, int] = {}
         for row in txn:
             cache.setdefault(row[0], int(row[1]))
 
@@ -2553,11 +2546,11 @@ class DatabasePool:
         start: int,
         limit: int,
         retcols: Iterable[str],
-        filters: Optional[Dict[str, Any]] = None,
-        keyvalues: Optional[Dict[str, Any]] = None,
-        exclude_keyvalues: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
+        keyvalues: dict[str, Any] | None = None,
+        exclude_keyvalues: dict[str, Any] | None = None,
         order_direction: str = "ASC",
-    ) -> List[Tuple[Any, ...]]:
+    ) -> list[tuple[Any, ...]]:
         """
         Executes a SELECT query on the named table with start and limit,
         of row numbers, which may return zero or number of rows from start to limit,
@@ -2592,7 +2585,7 @@ class DatabasePool:
             raise ValueError("order_direction must be one of 'ASC' or 'DESC'.")
 
         where_clause = "WHERE " if filters or keyvalues or exclude_keyvalues else ""
-        arg_list: List[Any] = []
+        arg_list: list[Any] = []
         if filters:
             where_clause += " AND ".join("%s LIKE ?" % (k,) for k in filters)
             arg_list += list(filters.values())
@@ -2622,7 +2615,7 @@ def make_in_list_sql_clause(
     iterable: Collection[Any],
     *,
     negative: bool = False,
-) -> Tuple[str, list]:
+) -> tuple[str, list]:
     """Returns an SQL clause that checks the given column is in the iterable.
 
     On SQLite this expands to `column IN (?, ?, ...)`, whereas on Postgres
@@ -2659,20 +2652,27 @@ def make_in_list_sql_clause(
 
 
 # These overloads ensure that `columns` and `iterable` values have the same length.
-# Suppress "Single overload definition, multiple required" complaint.
-@overload  # type: ignore[misc]
+@overload
 def make_tuple_in_list_sql_clause(
     database_engine: BaseDatabaseEngine,
-    columns: Tuple[str, str],
-    iterable: Collection[Tuple[Any, Any]],
-) -> Tuple[str, list]: ...
+    columns: tuple[str, str],
+    iterable: Collection[tuple[Any, Any]],
+) -> tuple[str, list]: ...
+
+
+@overload
+def make_tuple_in_list_sql_clause(
+    database_engine: BaseDatabaseEngine,
+    columns: tuple[str, str, str],
+    iterable: Collection[tuple[Any, Any, Any]],
+) -> tuple[str, list]: ...
 
 
 def make_tuple_in_list_sql_clause(
     database_engine: BaseDatabaseEngine,
-    columns: Tuple[str, ...],
-    iterable: Collection[Tuple[Any, ...]],
-) -> Tuple[str, list]:
+    columns: tuple[str, ...],
+    iterable: Collection[tuple[Any, ...]],
+) -> tuple[str, list]:
     """Returns an SQL clause that checks the given tuple of columns is in the iterable.
 
     Args:
@@ -2720,7 +2720,7 @@ def make_tuple_in_list_sql_clause(
 KV = TypeVar("KV")
 
 
-def make_tuple_comparison_clause(keys: List[Tuple[str, KV]]) -> Tuple[str, List[KV]]:
+def make_tuple_comparison_clause(keys: list[tuple[str, KV]]) -> tuple[str, list[KV]]:
     """Returns a tuple comparison SQL clause
 
     Builds a SQL clause that looks like "(a, b) > (?, ?)"

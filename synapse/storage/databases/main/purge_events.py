@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Any, Set, Tuple, cast
+from typing import Any, cast
 
 from synapse.api.errors import SynapseError
 from synapse.storage.database import LoggingTransaction
@@ -103,7 +103,7 @@ The tables with a `room_id` column regardless of whether they have a useful inde
 class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
     async def purge_history(
         self, room_id: str, token: str, delete_local_events: bool
-    ) -> Set[int]:
+    ) -> set[int]:
         """Deletes room history before a certain point.
 
         Note that only a single purge can occur at once, this is guaranteed via
@@ -137,7 +137,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         room_id: str,
         token: RoomStreamToken,
         delete_local_events: bool,
-    ) -> Set[int]:
+    ) -> set[int]:
         # Tables that should be pruned:
         #     event_auth
         #     event_backward_extremities
@@ -204,7 +204,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         logger.info("[purge] looking for events to delete")
 
         should_delete_expr = "state_events.state_key IS NULL"
-        should_delete_params: Tuple[Any, ...] = ()
+        should_delete_params: tuple[Any, ...] = ()
         if not delete_local_events:
             should_delete_expr += " AND event_id NOT LIKE ?"
 
@@ -239,6 +239,16 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
 
         txn.execute("SELECT event_id, should_delete FROM events_to_purge")
         event_rows = txn.fetchall()
+
+        if len(event_rows) == 0:
+            logger.info("[purge] no events found to purge")
+
+            # For the sake of cleanliness: drop the temp table.
+            # This will commit the txn in sqlite, so make sure to keep this actually last.
+            txn.execute("DROP TABLE events_to_purge")
+            # no referenced state groups
+            return set()
+
         logger.info(
             "[purge] found %i events before cutoff, of which %i can be deleted",
             len(event_rows),
@@ -355,7 +365,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         """,
             (room_id,),
         )
-        (min_depth,) = cast(Tuple[int], txn.fetchone())
+        (min_depth,) = cast(tuple[int], txn.fetchone())
 
         logger.info("[purge] updating room_depth to %d", min_depth)
 

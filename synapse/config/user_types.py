@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-from typing import Any, List, Optional
+from typing import Any
 
 from synapse.api.constants import UserTypes
 from synapse.types import JsonDict
@@ -26,12 +26,10 @@ class UserTypesConfig(Config):
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
         user_types: JsonDict = config.get("user_types", {})
 
-        self.default_user_type: Optional[str] = user_types.get(
-            "default_user_type", None
-        )
-        self.extra_user_types: List[str] = user_types.get("extra_user_types", [])
+        self.default_user_type: str | None = user_types.get("default_user_type", None)
+        self.extra_user_types: list[str] = user_types.get("extra_user_types", [])
 
-        all_user_types: List[str] = []
+        all_user_types: list[str] = []
         all_user_types.extend(UserTypes.ALL_BUILTIN_USER_TYPES)
         all_user_types.extend(self.extra_user_types)
 

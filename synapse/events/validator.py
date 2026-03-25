@@ -19,11 +19,11 @@
 #
 #
 import collections.abc
-from typing import List, Type, Union, cast
+from typing import cast
 
 import jsonschema
+from pydantic import Field, StrictBool, StrictStr
 
-from synapse._pydantic_compat import Field, StrictBool, StrictStr
 from synapse.api.constants import (
     MAX_ALIAS_LENGTH,
     EventContentFields,
@@ -177,7 +177,7 @@ class EventValidator:
                 errcode=Codes.BAD_JSON,
             )
 
-    def validate_builder(self, event: Union[EventBase, EventBuilder]) -> None:
+    def validate_builder(self, event: EventBase | EventBuilder) -> None:
         """Validates that the builder/event has roughly the right format. Only
         checks values that we expect a proto event to have, rather than all the
         fields an event would have
@@ -249,7 +249,7 @@ class EventValidator:
             if not isinstance(d[s], str):
                 raise SynapseError(400, "'%s' not a string type" % (s,))
 
-    def _ensure_state_event(self, event: Union[EventBase, EventBuilder]) -> None:
+    def _ensure_state_event(self, event: EventBase | EventBuilder) -> None:
         if not event.is_state():
             raise SynapseError(400, "'%s' must be state events" % (event.type,))
 
@@ -283,13 +283,13 @@ POWER_LEVELS_SCHEMA = {
 
 
 class Mentions(RequestBodyModel):
-    user_ids: List[StrictStr] = Field(default_factory=list)
+    user_ids: list[StrictStr] = Field(default_factory=list)
     room: StrictBool = False
 
 
 # This could return something newer than Draft 7, but that's the current "latest"
 # validator.
-def _create_validator(schema: JsonDict) -> Type[jsonschema.Draft7Validator]:
+def _create_validator(schema: JsonDict) -> type[jsonschema.Draft7Validator]:
     validator = jsonschema.validators.validator_for(schema)
 
     # by default jsonschema does not consider a immutabledict to be an object so

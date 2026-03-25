@@ -41,7 +41,7 @@ use pyo3::{
     pybacked::PyBackedStr,
     pyclass, pymethods,
     types::{PyAnyMethods, PyDict, PyDictMethods, PyString},
-    Bound, IntoPyObject, PyAny, PyObject, PyResult, Python,
+    Bound, IntoPyObject, Py, PyAny, PyResult, Python,
 };
 
 use crate::UnwrapInfallible;
@@ -57,6 +57,7 @@ enum EventInternalMetadataData {
     PolicyServerSpammy(bool),
     Redacted(bool),
     TxnId(Box<str>),
+    DelayId(Box<str>),
     TokenId(i64),
     DeviceId(Box<str>),
 }
@@ -113,6 +114,10 @@ impl EventInternalMetadataData {
             ),
             EventInternalMetadataData::TxnId(o) => (
                 pyo3::intern!(py, "txn_id"),
+                o.into_pyobject(py).unwrap_infallible().into_any(),
+            ),
+            EventInternalMetadataData::DelayId(o) => (
+                pyo3::intern!(py, "delay_id"),
                 o.into_pyobject(py).unwrap_infallible().into_any(),
             ),
             EventInternalMetadataData::TokenId(o) => (
@@ -174,6 +179,12 @@ impl EventInternalMetadataData {
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
             "txn_id" => EventInternalMetadataData::TxnId(
+                value
+                    .extract()
+                    .map(String::into_boxed_str)
+                    .with_context(|| format!("'{key_str}' has invalid type"))?,
+            ),
+            "delay_id" => EventInternalMetadataData::DelayId(
                 value
                     .extract()
                     .map(String::into_boxed_str)
@@ -289,7 +300,7 @@ impl EventInternalMetadata {
     /// Get a dict holding the data stored in the `internal_metadata` column in the database.
     ///
     /// Note that `outlier` and `stream_ordering` are stored in separate columns so are not returned here.
-    fn get_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn get_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
 
         for entry in &self.data {
@@ -470,6 +481,17 @@ impl EventInternalMetadata {
     #[setter]
     fn set_txn_id(&mut self, obj: String) {
         set_property!(self, TxnId, obj.into_boxed_str());
+    }
+
+    /// The delay ID, set only if the event was a delayed event.
+    #[getter]
+    fn get_delay_id(&self) -> PyResult<&str> {
+        let s = get_property!(self, DelayId)?;
+        Ok(s)
+    }
+    #[setter]
+    fn set_delay_id(&mut self, obj: String) {
+        set_property!(self, DelayId, obj.into_boxed_str());
     }
 
     /// The access token ID of the user who sent this event, if any.

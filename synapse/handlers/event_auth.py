@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, List, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Mapping
 
 from synapse import event_auth
 from synapse.api.constants import (
@@ -61,7 +61,7 @@ class EventAuthHandler:
     async def check_auth_rules_from_context(
         self,
         event: EventBase,
-        batched_auth_events: Optional[Mapping[str, EventBase]] = None,
+        batched_auth_events: Mapping[str, EventBase] | None = None,
     ) -> None:
         """Check an event passes the auth rules at its own auth events
         Args:
@@ -89,10 +89,10 @@ class EventAuthHandler:
 
     def compute_auth_events(
         self,
-        event: Union[EventBase, EventBuilder],
+        event: EventBase | EventBuilder,
         current_state_ids: StateMap[str],
         for_verification: bool = False,
-    ) -> List[str]:
+    ) -> list[str]:
         """Given an event and current state return the list of event IDs used
         to auth an event.
 
@@ -172,7 +172,7 @@ class EventAuthHandler:
             if len(local_creators) > 0:
                 chosen_user = local_creators.pop()  # random creator
                 user_power_level = CREATOR_POWER_LEVEL
-        else:
+        if chosen_user is None:
             chosen_user = max(
                 local_users_in_room,
                 key=lambda user: users.get(user, users_default_level),
@@ -236,7 +236,7 @@ class EventAuthHandler:
         state_ids: StateMap[str],
         room_version: RoomVersion,
         user_id: str,
-        prev_membership: Optional[str],
+        prev_membership: str | None,
     ) -> None:
         """
         Check whether a user can join a room without an invite due to restricted join rules.

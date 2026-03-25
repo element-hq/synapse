@@ -20,4 +20,9 @@ app_service_config_files:
 {%- endfor %}
 {%- endif %}
 
+{# Controlled by SYNAPSE_ENABLE_METRICS #}
+{% if enable_metrics %}
+enable_metrics: true
+{% endif %}
+
 {{ shared_worker_config }}

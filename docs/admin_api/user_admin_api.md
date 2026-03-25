@@ -403,6 +403,7 @@ is set to `true`:
 
 - Remove the user's display name
 - Remove the user's avatar URL
+- Remove the user's custom profile fields
 - Mark the user as erased
 
 The following actions are **NOT** performed. The list may be incomplete.
@@ -505,6 +506,55 @@ with a body of:
 }
 ```
 
+## List room memberships of a user
+
+Gets a list of room memberships for a specific `user_id`. This
+endpoint differs from
+[`GET /_synapse/admin/v1/users/<user_id>/joined_rooms`](#list-joined-rooms-of-a-user)
+in that it returns rooms with memberships other than "join".
+
+The API is:
+
+```
+GET /_synapse/admin/v1/users/<user_id>/memberships
+```
+
+A response body like the following is returned:
+
+```json
+    {
+        "memberships": {
+            "!DuGcnbhHGaSZQoNQR:matrix.org": "join",
+            "!ZtSaPCawyWtxfWiIy:matrix.org": "leave",
+        }
+    }
+```
+
+which is a list of room membership states for the given user. This endpoint can
+be used with both local and remote users, with the caveat that the homeserver will
+only be aware of the memberships for rooms that one of its local users has joined.
+
+Remote user memberships may also be out of date if all local users have since left
+a room. The homeserver will thus no longer receive membership updates about it.
+
+The list includes rooms that the user has since left; other membership states (knock,
+invite, etc.) are also possible.
+
+Note that rooms will only disappear from this list if they are
+[purged](./rooms.md#delete-room-api) from the homeserver.
+
+**Parameters**
+
+The following parameters should be set in the URL:
+
+- `user_id` - fully qualified: for example, `@user:server.com`.
+
+**Response**
+
+The following fields are returned in the JSON response body:
+
+- `memberships` - A map of `room_id` (string) to `membership` state (string).
+
 ## List joined rooms of a user
 
 Gets a list of all `room_id` that a specific `user_id` is joined to and is a member of (participating in).
@@ -550,7 +600,7 @@ Fetches the number of invites sent by the provided user ID across all rooms
 after the given timestamp.
 
 ```
-GET /_synapse/admin/v1/users/$user_id/sent_invite_count
+GET /_synapse/admin/v1/users/<user_id>/sent_invite_count
 ```
 
 **Parameters**
@@ -584,7 +634,7 @@ Fetches the number of rooms that the user joined after the given timestamp, even
 if they have subsequently left/been banned from those rooms.
 
 ```
-GET /_synapse/admin/v1/users/$<user_id/cumulative_joined_room_count
+GET /_synapse/admin/v1/users/<user_id>/cumulative_joined_room_count
 ```
 
 **Parameters**
@@ -1389,7 +1439,7 @@ The request and response format is the same as the
 The API is:
 
 ```
-GET /_synapse/admin/v1/auth_providers/$provider/users/$external_id
+GET /_synapse/admin/v1/auth_providers/<provider>/users/<external_id>
 ```
 
 When a user matched the given ID for the given provider, an HTTP code `200` with a response body like the following is returned:
@@ -1428,7 +1478,7 @@ _Added in Synapse 1.68.0._
 The API is:
 
 ```
-GET /_synapse/admin/v1/threepid/$medium/users/$address
+GET /_synapse/admin/v1/threepid/<medium>/users/<address>
 ```
 
 When a user matched the given address for the given medium, an HTTP code `200` with a response body like the following is returned:
@@ -1472,7 +1522,7 @@ is provided to override the default and allow the admin to issue the redactions 
 
 The API is 
 ```
-POST /_synapse/admin/v1/user/$user_id/redact
+POST /_synapse/admin/v1/user/<user_id>/redact
 
 {
   "rooms": ["!roomid1", "!roomid2"]
@@ -1521,7 +1571,7 @@ or until Synapse is restarted (whichever happens first).
 The API is:
 
 ```
-GET /_synapse/admin/v1/user/redact_status/$redact_id
+GET /_synapse/admin/v1/user/redact_status/<redact_id>
 ```
 
 A response body like the following is returned:

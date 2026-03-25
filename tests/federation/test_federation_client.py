@@ -30,7 +30,7 @@ from synapse.events import EventBase
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.test_utils import FakeResponse, event_injection
 from tests.unittest import FederatingHomeserverTestCase

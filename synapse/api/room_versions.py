@@ -18,7 +18,6 @@
 #
 #
 
-from typing import Callable, Dict, Optional, Tuple
 
 import attr
 
@@ -87,9 +86,9 @@ class RoomVersion:
     # MSC2209: Check 'notifications' key while verifying
     # m.room.power_levels auth rules.
     limit_notifications_power_levels: bool
-    # No longer include the creator in m.room.create events.
+    # MSC3820: No longer include the creator in m.room.create events (room version 11)
     implicit_room_creator: bool
-    # Apply updated redaction rules algorithm from room version 11.
+    # MSC3820: Apply updated redaction rules algorithm from room version 11
     updated_redaction_rules: bool
     # Support the 'restricted' join rule.
     restricted_join_rule: bool
@@ -109,7 +108,7 @@ class RoomVersion:
     # is not enough to mark it "supported": the push rule evaluator also needs to
     # support the flag. Unknown flags are ignored by the evaluator, making conditions
     # fail if used.
-    msc3931_push_features: Tuple[str, ...]  # values from PushRuleRoomFlag
+    msc3931_push_features: tuple[str, ...]  # values from PushRuleRoomFlag
     # MSC3757: Restricting who can overwrite a state event
     msc3757_enabled: bool
     # MSC4289: Creator power enabled
@@ -476,7 +475,7 @@ class RoomVersions:
     )
 
 
-KNOWN_ROOM_VERSIONS: Dict[str, RoomVersion] = {
+KNOWN_ROOM_VERSIONS: dict[str, RoomVersion] = {
     v.identifier: v
     for v in (
         RoomVersions.V1,
@@ -494,42 +493,5 @@ KNOWN_ROOM_VERSIONS: Dict[str, RoomVersion] = {
         RoomVersions.MSC3757v10,
         RoomVersions.MSC3757v11,
         RoomVersions.HydraV11,
-    )
-}
-
-
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class RoomVersionCapability:
-    """An object which describes the unique attributes of a room version."""
-
-    identifier: str  # the identifier for this capability
-    preferred_version: Optional[RoomVersion]
-    support_check_lambda: Callable[[RoomVersion], bool]
-
-
-MSC3244_CAPABILITIES = {
-    cap.identifier: {
-        "preferred": (
-            cap.preferred_version.identifier
-            if cap.preferred_version is not None
-            else None
-        ),
-        "support": [
-            v.identifier
-            for v in KNOWN_ROOM_VERSIONS.values()
-            if cap.support_check_lambda(v)
-        ],
-    }
-    for cap in (
-        RoomVersionCapability(
-            "knock",
-            RoomVersions.V7,
-            lambda room_version: room_version.knock_join_rule,
-        ),
-        RoomVersionCapability(
-            "restricted",
-            RoomVersions.V9,
-            lambda room_version: room_version.restricted_join_rule,
-        ),
     )
 }

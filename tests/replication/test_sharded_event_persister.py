@@ -27,7 +27,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import make_request

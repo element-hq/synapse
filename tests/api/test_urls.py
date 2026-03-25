@@ -17,7 +17,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.urls import LoginSSORedirectURIBuilder
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -52,4 +52,30 @@ class LoginSSORedirectURIBuilderTestCase(HomeserverTestCase):
                 client_redirect_url=TRICKY_TEST_CLIENT_REDIRECT_URL,
             ),
             "https://test/_matrix/client/v3/login/sso/redirect/oidc-github?redirectUrl=https%3A%2F%2Fx%3F%3Cab+c%3E%26q%22%2B%253D%252B%22%3D%22f%C3%B6%2526%3Do%22",
+        )
+
+    def test_idp_id_with_slash_is_escaped(self) -> None:
+        """
+        Test to make sure that we properly URL encode the IdP ID.
+        """
+        self.assertEqual(
+            self.login_sso_redirect_url_builder.build_login_sso_redirect_uri(
+                idp_id="foo/bar",
+                client_redirect_url="http://example.com/redirect",
+            ),
+            "https://test/_matrix/client/v3/login/sso/redirect/foo%2Fbar?redirectUrl=http%3A%2F%2Fexample.com%2Fredirect",
+        )
+
+    def test_url_as_idp_id_is_escaped(self) -> None:
+        """
+        Test to make sure that we properly URL encode the IdP ID.
+
+        The IdP ID shouldn't be a URL.
+        """
+        self.assertEqual(
+            self.login_sso_redirect_url_builder.build_login_sso_redirect_uri(
+                idp_id="http://should-not-be-url.com/",
+                client_redirect_url="http://example.com/redirect",
+            ),
+            "https://test/_matrix/client/v3/login/sso/redirect/http%3A%2F%2Fshould-not-be-url.com%2F?redirectUrl=http%3A%2F%2Fexample.com%2Fredirect",
         )

@@ -22,7 +22,7 @@
 import argparse
 import logging
 import os
-from typing import Any, List
+from typing import Any
 
 from synapse.config._base import Config, ConfigError
 from synapse.types import JsonDict
@@ -83,7 +83,7 @@ class DatabaseConfig(Config):
     def __init__(self, *args: Any):
         super().__init__(*args)
 
-        self.databases: List[DatabaseConnectionConfig] = []
+        self.databases: list[DatabaseConnectionConfig] = []
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
         # We *experimentally* support specifying multiple databases via the

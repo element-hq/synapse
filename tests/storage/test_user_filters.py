@@ -25,7 +25,7 @@ from twisted.internet.testing import MemoryReactor
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import PostgresEngine
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

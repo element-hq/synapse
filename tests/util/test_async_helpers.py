@@ -17,14 +17,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import logging
 import traceback
-from typing import Any, Coroutine, Generator, List, NoReturn, Optional, Tuple, TypeVar
+from typing import Any, Coroutine, NoReturn, TypeVar
 
 from parameterized import parameterized_class
 
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
-from twisted.internet.task import Clock
 from twisted.python.failure import Failure
 
 from synapse.logging.context import (
@@ -45,7 +45,9 @@ from synapse.util.async_helpers import (
 )
 
 from tests.server import get_clock
-from tests.unittest import TestCase
+from tests.unittest import TestCase, logcontext_clean
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -69,7 +71,7 @@ class ObservableDeferredTest(TestCase):
         observer1.addBoth(check_called_first)
 
         # store the results
-        results: List[Optional[int]] = [None, None]
+        results: list[int | None] = [None, None]
 
         def check_val(res: int, idx: int) -> int:
             results[idx] = res
@@ -100,7 +102,7 @@ class ObservableDeferredTest(TestCase):
         observer1.addBoth(check_called_first)
 
         # store the results
-        results: List[Optional[Failure]] = [None, None]
+        results: list[Failure | None] = [None, None]
 
         def check_failure(res: Failure, idx: int) -> None:
             results[idx] = res
@@ -118,7 +120,7 @@ class ObservableDeferredTest(TestCase):
         assert results[1] is not None
         self.assertEqual(str(results[1].value), "gah!", "observer 2 errback result")
 
-    def test_cancellation(self) -> None:
+    def test_cancellation_observer(self) -> None:
         """Test that cancelling an observer does not affect other observers."""
         origin_d: "Deferred[int]" = Deferred()
         observable = ObservableDeferred(origin_d, consumeErrors=True)
@@ -136,6 +138,10 @@ class ObservableDeferredTest(TestCase):
         self.assertFalse(observer1.called)
         self.failureResultOf(observer2, CancelledError)
         self.assertFalse(observer3.called)
+        # check that we remove the cancelled observer from the list of observers
+        # as a clean up.
+        self.assertEqual(len(observable.observers()), 2)
+        self.assertNotIn(observer2, observable.observers())
 
         # other observers resolve as normal
         origin_d.callback(123)
@@ -146,10 +152,26 @@ class ObservableDeferredTest(TestCase):
         observer4 = observable.observe()
         self.assertEqual(observer4.result, 123, "observer 4 callback result")
 
+    def test_cancellation_observee(self) -> None:
+        """Test that cancelling the original deferred cancels all observers."""
+        origin_d: "Deferred[int]" = Deferred()
+        observable = ObservableDeferred(origin_d, consumeErrors=True)
+
+        observer1 = observable.observe()
+        observer2 = observable.observe()
+
+        self.assertFalse(observer1.called)
+        self.assertFalse(observer2.called)
+
+        # cancel the original deferred
+        origin_d.cancel()
+        self.failureResultOf(observer1, CancelledError)
+        self.failureResultOf(observer2, CancelledError)
+
 
 class TimeoutDeferredTest(TestCase):
     def setUp(self) -> None:
-        self.clock = Clock()
+        self.reactor, self.clock = get_clock()
 
     def test_times_out(self) -> None:
         """Basic test case that checks that the original deferred is cancelled and that
@@ -162,12 +184,16 @@ class TimeoutDeferredTest(TestCase):
             cancelled = True
 
         non_completing_d: Deferred = Deferred(canceller)
-        timing_out_d = timeout_deferred(non_completing_d, 1.0, self.clock)
+        timing_out_d = timeout_deferred(
+            deferred=non_completing_d,
+            timeout=1.0,
+            clock=self.clock,
+        )
 
         self.assertNoResult(timing_out_d)
         self.assertFalse(cancelled, "deferred was cancelled prematurely")
 
-        self.clock.pump((1.0,))
+        self.reactor.pump((1.0,))
 
         self.assertTrue(cancelled, "deferred was not cancelled by timeout")
         self.failureResultOf(timing_out_d, defer.TimeoutError)
@@ -180,57 +206,156 @@ class TimeoutDeferredTest(TestCase):
             raise Exception("can't cancel this deferred")
 
         non_completing_d: Deferred = Deferred(canceller)
-        timing_out_d = timeout_deferred(non_completing_d, 1.0, self.clock)
+        timing_out_d = timeout_deferred(
+            deferred=non_completing_d,
+            timeout=1.0,
+            clock=self.clock,
+        )
 
         self.assertNoResult(timing_out_d)
 
-        self.clock.pump((1.0,))
+        self.reactor.pump((1.0,))
 
         self.failureResultOf(timing_out_d, defer.TimeoutError)
 
-    def test_logcontext_is_preserved_on_cancellation(self) -> None:
-        blocking_was_cancelled = False
+    @logcontext_clean
+    async def test_logcontext_is_preserved_on_timeout_cancellation(self) -> None:
+        """
+        Test that the logcontext is preserved when we timeout and the deferred is
+        cancelled.
+        """
+        # Sanity check that we start in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
 
-        @defer.inlineCallbacks
-        def blocking() -> Generator["Deferred[object]", object, None]:
-            nonlocal blocking_was_cancelled
+        incomplete_deferred_was_cancelled = False
 
-            non_completing_d: Deferred = Deferred()
-            with PreserveLoggingContext():
-                try:
-                    yield non_completing_d
-                except CancelledError:
-                    blocking_was_cancelled = True
-                    raise
+        def mark_was_cancelled(res: Failure) -> None:
+            """
+            A passthrough errback which sets `incomplete_deferred_was_cancelled`.
 
-        with LoggingContext("one") as context_one:
-            # the errbacks should be run in the test logcontext
-            def errback(res: Failure, deferred_name: str) -> Failure:
-                self.assertIs(
-                    current_context(),
-                    context_one,
-                    "errback %s run in unexpected logcontext %s"
-                    % (deferred_name, current_context()),
+            This means we re-raise any exception and allows further errbacks (in
+            `timeout_deferred(...)`) to do their thing. Just trying to be a transparent
+            proxy of any exception while doing our internal test book-keeping.
+            """
+            nonlocal incomplete_deferred_was_cancelled
+            if res.check(CancelledError):
+                incomplete_deferred_was_cancelled = True
+            else:
+                logger.error(
+                    "Expected incomplete_d to fail with `CancelledError` because our "
+                    "`timeout_deferred(...)` utility canceled it but saw %s",
+                    res,
                 )
-                return res
 
-            original_deferred = blocking()
-            original_deferred.addErrback(errback, "orig")
-            timing_out_d = timeout_deferred(original_deferred, 1.0, self.clock)
-            self.assertNoResult(timing_out_d)
-            self.assertIs(current_context(), SENTINEL_CONTEXT)
-            timing_out_d.addErrback(errback, "timingout")
+            # Re-raise the exception so that any further errbacks can do their thing as
+            # normal
+            res.raiseException()
 
-            self.clock.pump((1.0,))
+        # Create a deferred which we will never complete
+        incomplete_d: Deferred = Deferred()
+        incomplete_d.addErrback(mark_was_cancelled)
 
-            self.assertTrue(
-                blocking_was_cancelled, "non-completing deferred was not cancelled"
+        with LoggingContext(name="one", server_name="test_server") as context_one:
+            timing_out_d = timeout_deferred(
+                deferred=incomplete_d,
+                timeout=1.0,
+                clock=self.clock,
             )
-            self.failureResultOf(timing_out_d, defer.TimeoutError)
+            self.assertNoResult(timing_out_d)
+            # We should still be in the logcontext we started in
             self.assertIs(current_context(), context_one)
 
+            # Pump the reactor until we trigger the timeout
+            #
+            # We're manually pumping the reactor (and causing any pending callbacks to
+            # be called) so we need to be in the sentinel logcontext to avoid leaking
+            # our current logcontext into the reactor (which would then get picked up
+            # and associated with the next thing the reactor does). `with
+            # PreserveLoggingContext()` will reset the logcontext to the sentinel while
+            # we're pumping the reactor in the block and return us back to our current
+            # logcontext after the block.
+            with PreserveLoggingContext():
+                self.reactor.pump(
+                    # We only need to pump `1.0` (seconds) as we set
+                    # `timeout_deferred(timeout=1.0)` above
+                    (1.0,)
+                )
 
-class _TestException(Exception):
+            # We expect the incomplete deferred to have been cancelled because of the
+            # timeout by this point
+            self.assertTrue(
+                incomplete_deferred_was_cancelled,
+                "incomplete deferred was not cancelled",
+            )
+            # We should see the `TimeoutError` (instead of a `CancelledError`)
+            self.failureResultOf(timing_out_d, defer.TimeoutError)
+            # We're still in the same logcontext
+            self.assertIs(current_context(), context_one)
+
+        # Back to the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+    @logcontext_clean
+    async def test_logcontext_is_not_lost_when_awaiting_on_timeout_cancellation(
+        self,
+    ) -> None:
+        """
+        Test that the logcontext isn't lost when we `await make_deferred_yieldable(...)`
+        the deferred to complete/timeout and it times out.
+        """
+
+        # Sanity check that we start in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # Create a deferred which we will never complete
+        incomplete_d: Deferred = Deferred()
+
+        async def competing_task() -> None:
+            with LoggingContext(
+                name="competing", server_name="test_server"
+            ) as context_competing:
+                timing_out_d = timeout_deferred(
+                    deferred=incomplete_d,
+                    timeout=1.0,
+                    clock=self.clock,
+                )
+                self.assertNoResult(timing_out_d)
+                # We should still be in the logcontext we started in
+                self.assertIs(current_context(), context_competing)
+
+                # Mimic the normal use case to wait for the work to complete or timeout.
+                #
+                # In this specific test, we expect the deferred to timeout and raise an
+                # exception at this point.
+                await make_deferred_yieldable(timing_out_d)
+
+                self.fail(
+                    "We should not make it to this point as the `timing_out_d` should have been cancelled"
+                )
+
+        d = defer.ensureDeferred(competing_task())
+
+        # Still in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # Pump until we trigger the timeout
+        self.reactor.pump(
+            # We only need to pump `1.0` (seconds) as we set
+            # `timeout_deferred(timeout=1.0)` above
+            (1.0,)
+        )
+
+        # Still in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # We expect a failure due to the timeout
+        self.failureResultOf(d, defer.TimeoutError)
+
+        # Back to the sentinel context at the end of the day
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+
+class _TestException(Exception):  #
     pass
 
 
@@ -502,7 +627,7 @@ class DelayCancellationTests(TestCase):
             await make_deferred_yieldable(blocking_d)
 
         async def outer() -> None:
-            with LoggingContext("c") as c:
+            with LoggingContext(name="c", server_name="test_server") as c:
                 try:
                     await delay_cancellation(inner())
                     self.fail("`CancelledError` was not raised")
@@ -526,8 +651,8 @@ class AwakenableSleeperTests(TestCase):
     "Tests AwakenableSleeper"
 
     def test_sleep(self) -> None:
-        reactor, _ = get_clock()
-        sleeper = AwakenableSleeper(reactor)
+        reactor, clock = get_clock()
+        sleeper = AwakenableSleeper(clock)
 
         d = defer.ensureDeferred(sleeper.sleep("name", 1000))
 
@@ -541,8 +666,8 @@ class AwakenableSleeperTests(TestCase):
         self.assertTrue(d.called)
 
     def test_explicit_wake(self) -> None:
-        reactor, _ = get_clock()
-        sleeper = AwakenableSleeper(reactor)
+        reactor, clock = get_clock()
+        sleeper = AwakenableSleeper(clock)
 
         d = defer.ensureDeferred(sleeper.sleep("name", 1000))
 
@@ -558,8 +683,8 @@ class AwakenableSleeperTests(TestCase):
         reactor.advance(0.6)
 
     def test_multiple_sleepers_timeout(self) -> None:
-        reactor, _ = get_clock()
-        sleeper = AwakenableSleeper(reactor)
+        reactor, clock = get_clock()
+        sleeper = AwakenableSleeper(clock)
 
         d1 = defer.ensureDeferred(sleeper.sleep("name", 1000))
 
@@ -578,8 +703,8 @@ class AwakenableSleeperTests(TestCase):
         self.assertTrue(d2.called)
 
     def test_multiple_sleepers_wake(self) -> None:
-        reactor, _ = get_clock()
-        sleeper = AwakenableSleeper(reactor)
+        reactor, clock = get_clock()
+        sleeper = AwakenableSleeper(clock)
 
         d1 = defer.ensureDeferred(sleeper.sleep("name", 1000))
 
@@ -603,7 +728,7 @@ class AwakenableSleeperTests(TestCase):
 class GatherCoroutineTests(TestCase):
     """Tests for `gather_optional_coroutines`"""
 
-    def make_coroutine(self) -> Tuple[Coroutine[Any, Any, T], "defer.Deferred[T]"]:
+    def make_coroutine(self) -> tuple[Coroutine[Any, Any, T], "defer.Deferred[T]"]:
         """Returns a coroutine and a deferred that it is waiting on to resolve"""
 
         d: "defer.Deferred[T]" = defer.Deferred()
@@ -617,7 +742,7 @@ class GatherCoroutineTests(TestCase):
     def test_single(self) -> None:
         "Test passing in a single coroutine works"
 
-        with LoggingContext("test_ctx") as text_ctx:
+        with LoggingContext(name="test_ctx", server_name="test_server") as text_ctx:
             deferred: "defer.Deferred[None]"
             coroutine, deferred = self.make_coroutine()
 
@@ -643,7 +768,7 @@ class GatherCoroutineTests(TestCase):
     def test_multiple_resolve(self) -> None:
         "Test passing in multiple coroutine that all resolve works"
 
-        with LoggingContext("test_ctx") as test_ctx:
+        with LoggingContext(name="test_ctx", server_name="test_server") as test_ctx:
             deferred1: "defer.Deferred[int]"
             coroutine1, deferred1 = self.make_coroutine()
             deferred2: "defer.Deferred[str]"
@@ -676,7 +801,7 @@ class GatherCoroutineTests(TestCase):
     def test_multiple_fail(self) -> None:
         "Test passing in multiple coroutine where one fails does the right thing"
 
-        with LoggingContext("test_ctx") as test_ctx:
+        with LoggingContext(name="test_ctx", server_name="test_server") as test_ctx:
             deferred1: "defer.Deferred[int]"
             coroutine1, deferred1 = self.make_coroutine()
             deferred2: "defer.Deferred[str]"

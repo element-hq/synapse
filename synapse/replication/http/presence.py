@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -58,12 +58,12 @@ class ReplicationBumpPresenceActiveTime(ReplicationEndpoint):
         self._presence_handler = hs.get_presence_handler()
 
     @staticmethod
-    async def _serialize_payload(user_id: str, device_id: Optional[str]) -> JsonDict:  # type: ignore[override]
+    async def _serialize_payload(user_id: str, device_id: str | None) -> JsonDict:  # type: ignore[override]
         return {"device_id": device_id}
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self._presence_handler.bump_presence_active_time(
             UserID.from_string(user_id), content.get("device_id")
         )
@@ -102,7 +102,7 @@ class ReplicationPresenceSetState(ReplicationEndpoint):
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         state: JsonDict,
         force_notify: bool = False,
         is_sync: bool = False,
@@ -116,7 +116,7 @@ class ReplicationPresenceSetState(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self._presence_handler.set_state(
             UserID.from_string(user_id),
             content.get("device_id"),
