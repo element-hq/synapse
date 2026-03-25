@@ -606,10 +606,15 @@ async def native_concurrently_execute(
     func: Callable[[Any], Awaitable[Any]],
     args: Iterable[Any],
     limit: int,
+    delay_cancellation: bool = False,
 ) -> None:
     """asyncio-native equivalent of concurrently_execute.
 
     Executes func on each arg with at most `limit` concurrent executions.
+
+    Args:
+        delay_cancellation: If True, shield the gather from cancellation
+            so that in-flight tasks can complete before the error propagates.
     """
     sem = asyncio.Semaphore(limit)
 
@@ -617,7 +622,11 @@ async def native_concurrently_execute(
         async with sem:
             await func(item)
 
-    await asyncio.gather(*[_run(item) for item in args])
+    coro = asyncio.gather(*[_run(item) for item in args])
+    if delay_cancellation:
+        await asyncio.shield(coro)
+    else:
+        await coro
 
 
 async def native_timeout(

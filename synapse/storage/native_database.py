@@ -176,14 +176,16 @@ class NativeConnectionPool:
         if self._closed:
             raise Exception("Connection pool is closed")
 
-        conn = self._get_connection()
-
         if self._use_shared_conn:
             # For in-memory SQLite with a shared connection, run directly
             # on the event loop thread to avoid thread dispatch overhead.
+            conn = self._get_connection()
             return func(conn, *args, **kwargs)
 
         def _inner() -> R:
+            # Get connection inside the executor thread so that
+            # _thread_local resolves to this thread's connection.
+            conn = self._get_connection()
             return func(conn, *args, **kwargs)
 
         loop = asyncio.get_running_loop()
@@ -211,11 +213,10 @@ class NativeConnectionPool:
         if self._closed:
             raise Exception("Connection pool is closed")
 
-        conn = self._get_connection()
-
         if self._use_shared_conn:
             # For in-memory SQLite with a shared connection, run directly
             # on the event loop thread to avoid thread dispatch overhead.
+            conn = self._get_connection()
             try:
                 result = func(conn, *args, **kwargs)
                 conn.commit()
@@ -225,6 +226,9 @@ class NativeConnectionPool:
                 raise
 
         def _inner() -> R:
+            # Get connection inside the executor thread so that
+            # _thread_local resolves to this thread's connection.
+            conn = self._get_connection()
             try:
                 result = func(conn, *args, **kwargs)
                 conn.commit()

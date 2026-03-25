@@ -398,10 +398,11 @@ class Lock:
 
         self._table = "worker_read_write_locks" if read_write else "worker_locks"
 
-        # We might be called from a non-main thread, so we defer setting up the
-        # looping call.
+        # We might be called from a non-main thread (e.g. a DB executor),
+        # so we defer setting up the looping call to the event loop.
         self._looping_call: Any | None = None
-        reactor.callFromThread(self._setup_looping_call)
+        loop = clock._get_loop()
+        loop.call_soon_threadsafe(self._setup_looping_call)
 
         self._dropped = False
 
@@ -541,9 +542,10 @@ class Lock:
             # renewing the lock.
             if self._looping_call and self._looping_call.running:
                 # We might be called from a non-main thread.
-                self._reactor.callFromThread(self._looping_call.stop)
+                loop = self._clock._get_loop()
+                loop.call_soon_threadsafe(self._looping_call.stop)
 
-            if self._reactor.running:
+            if not self._clock._is_shutdown:
                 logger.error(
                     "Lock for (%s, %s) dropped without being released",
                     self._lock_name,
