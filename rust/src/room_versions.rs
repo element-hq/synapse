@@ -801,6 +801,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<RoomVersion>()?;
     child_module.add_class::<RoomVersions>()?;
     child_module.add_class::<KnownRoomVersionsMapping>()?;
+    child_module.add_class::<RoomDisposition>()?;
 
     // Build KNOWN_EVENT_FORMAT_VERSIONS as a frozenset
     let known_ef: [i32; 4] = [
