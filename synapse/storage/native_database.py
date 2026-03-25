@@ -186,7 +186,15 @@ class NativeConnectionPool:
             # Get connection inside the executor thread so that
             # _thread_local resolves to this thread's connection.
             conn = self._get_connection()
-            return func(conn, *args, **kwargs)
+            try:
+                return func(conn, *args, **kwargs)
+            finally:
+                # psycopg2 auto-starts a transaction on every query, even
+                # SELECTs. Roll back to close the implicit transaction,
+                # matching Twisted's ConnectionPool.runWithConnection
+                # which did the same to keep connections clean.
+                if self._engine.in_transaction(conn):
+                    conn.rollback()
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, _inner)
