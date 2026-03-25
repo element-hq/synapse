@@ -586,6 +586,13 @@ impl KnownRoomVersionsMapping {
     /// supports it.
     fn add_room_version(&self, version: RoomVersion) {
         let mut versions = self.versions.write().unwrap();
+
+        if versions.iter().any(|v| v.identifier == key) {
+            // We already have this room version, so we don't add it again (as
+            // otherwise we'd end up with duplicates).
+            return;
+        }
+
         versions.push(version);
     }
 
