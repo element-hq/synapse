@@ -1373,7 +1373,7 @@ class EventsWorkerStore(SQLBaseStore):
                 if row:
                     fetched_events[event_id] = row
 
-                    # If this event only has uncofirmend redactions we fetch
+                    # If this event only has unconfirmed redactions we fetch
                     # them from the DB so that we check them to see if any are
                     # valid.
                     if not row.confirmed_redactions:
