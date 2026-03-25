@@ -2524,7 +2524,7 @@ class RoomMessageListTestCase(RoomBase):
             set(expected_messages),
             exact=True,
         )
-        # Asser the actual order
+        # Assert the actual order
         self.assertEqual(actual_messages, expected_messages)
 
         # Make sure the gaps are correct
