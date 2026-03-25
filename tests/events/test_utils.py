@@ -885,7 +885,7 @@ class SerializeEventTestCase(HomeserverTestCase):
         self.assertTrue(admin_config.include_admin_metadata)
 
     def test_redacted_because_is_filtered_out(self) -> None:
-        """If an event has a unsigned has a `redacted_by` field, then the
+        """If an event's unsigned dict has a `redacted_by` field, then the
         `redacted_because` should be filtered out if not specified in
         `only_event_fields`."""
 
