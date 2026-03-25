@@ -657,6 +657,13 @@ class EventClientSerializer:
             new_unsigned.update(serialized_event["unsigned"])
             serialized_event["unsigned"] = new_unsigned
 
+        # Only include fields that are the client has requested.
+        #
+        # Note: we always return bundled aggregations, though it is unclear why.
+        only_event_fields = config.only_event_fields
+        if only_event_fields:
+            serialized_event = only_fields(serialized_event, only_event_fields)
+
         # Check if there are any bundled aggregations to include with the event.
         if bundle_aggregations:
             if event.event_id in bundle_aggregations:
@@ -667,11 +674,6 @@ class EventClientSerializer:
                     bundle_aggregations,
                     serialized_event,
                 )
-
-        # Only include fields that are the client has requested.
-        only_event_fields = config.only_event_fields
-        if only_event_fields:
-            serialized_event = only_fields(serialized_event, only_event_fields)
 
         return serialized_event
 
