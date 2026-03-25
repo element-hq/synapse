@@ -588,6 +588,18 @@ class SynapseRequest:
         Walks the resource tree to find the handler, then kicks off
         the async render as an ``asyncio.Task``.
         """
+        from synapse.http.server import set_cors_headers
+
+        # Handle CORS preflight OPTIONS requests directly.
+        # In the Twisted resource tree, OptionsResource intercepted these
+        # via getChildWithDefault(). Here we handle them before resolution.
+        if self.method == b"OPTIONS":
+            set_cors_headers(self)
+            self.setResponseCode(204)
+            self.setHeader(b"Content-Length", b"0")
+            self.finish()
+            return
+
         target = _resolve_resource(root_resource, self.path)
 
         if hasattr(target, '_async_render_wrapper'):
@@ -1116,6 +1128,26 @@ def aiohttp_handler_factory(
     """
 
     async def handler(aiohttp_request: aiohttp_web.Request) -> aiohttp_web.Response:
+        from synapse.http.server import set_cors_headers
+
+        # Handle CORS preflight OPTIONS requests directly.
+        if aiohttp_request.method == "OPTIONS":
+            resp_headers = {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, HEAD, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, Authorization, Date",
+                "Access-Control-Expose-Headers": "Synapse-Trace-Id, Server",
+                "Content-Length": "0",
+            }
+            path = aiohttp_request.path
+            if (
+                path == "/_matrix/client/unstable/org.matrix.msc4108/rendezvous"
+                or path.startswith("/_synapse/client/rendezvous")
+            ):
+                resp_headers["Access-Control-Allow-Headers"] = "Content-Type, If-Match, If-None-Match"
+                resp_headers["Access-Control-Expose-Headers"] = "Synapse-Trace-Id, Server, ETag"
+            return aiohttp_web.Response(status=204, headers=resp_headers)
+
         # 1. Pre-read request body with size limit enforcement.
         body = await _read_body_with_limit(aiohttp_request, site.max_request_body_size)
 
