@@ -700,7 +700,7 @@ class HomeserverTestCase(TestCase):
         XXX: Deprecated: This method is deprecated. Use `self.reactor.advance(...)`
         directly instead.
 
-        Pump the reactor enough that clock scheduled callbacks will fire.
+        Pump the reactor enough that `clock.call_later` scheduled callbacks will fire.
 
         To demystify this function, it simply advances time by the number of seconds
         specified (defaults to `0`, we also multiply by 100, so `pump(1)` is 100 seconds
@@ -711,10 +711,11 @@ class HomeserverTestCase(TestCase):
         `clock.call_later(Duration(seconds=2), callback)`, then calling
         `self.pump(by=0.02)` will advance time by 2 seconds, which is enough for that
         callback to be ready to run now. Same for `clock.sleep(...)` ,
-        `clock.looping_call(...)`, and whatever other clock utilities for scheduling
-        tasks. Trying to use `pump(by=...)` with exact math to meet a specific deadline
-        feels pretty dirty though which is why we recommend using
-        `self.reactor.advance(...)` directly nowadays.
+        `clock.looping_call(...)`, and whatever other clock utilities that use
+        `clock.call_later` under the hood for scheduling tasks. Trying to use
+        `pump(by=...)` with exact math to meet a specific deadline feels pretty dirty
+        though which is why we recommend using `self.reactor.advance(...)` directly
+        nowadays.
 
         We don't have any exact historical context for why `pump()` was introduced into
         the codebase beyond the code itself. We assume that we multiply by 100 so that
