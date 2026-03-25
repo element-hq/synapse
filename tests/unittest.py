@@ -700,7 +700,7 @@ class HomeserverTestCase(TestCase):
         XXX: Deprecated: This method is deprecated. Use `self.reactor.advance(...)`
         directly instead.
 
-        Pump the reactor enough that scheduled Deferreds will fire.
+        Pump the reactor enough that clock scheduled callbacks will fire.
 
         To demystify this function, it simply advances time by the number of seconds
         specified (defaults to `0`, we also multiply by 100, so `pump(1)` is 100 seconds
@@ -718,8 +718,8 @@ class HomeserverTestCase(TestCase):
 
         We don't have any exact historical context for why `pump()` was introduced into
         the codebase beyond the code itself. We assume that we multiply by 100 so that
-        when you create a Deferred that create more Deferreds, it tries to run the whole
-        chain to completion.
+        when you use the clock to schedule something that schedules more things, it
+        tries to run the whole chain to completion.
 
         XXX: If you're having to call this function, please call out in comments, which
         scheduled thing you're aiming to trigger. Please also check whether the
@@ -730,9 +730,9 @@ class HomeserverTestCase(TestCase):
                 in 100 steps, each step by this value.
         """
         # We multiply by 100, so `pump(1)` actually advances time by 100 seconds in 1
-        # second steps/increments. We assume this was done so that when you create a
-        # Deferred that create more Deferreds, it tries to run the whole chain to
-        # completion.
+        # second steps/increments. We assume this was done so that when you use the
+        # clock to schedule something that schedules more things, it tries to run the
+        # whole chain to completion.
         self.reactor.pump([by] * 100)
 
     def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
