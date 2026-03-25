@@ -17,7 +17,7 @@
 use std::sync::{Arc, LazyLock, RwLock};
 
 use pyo3::{
-    exceptions::PyKeyError,
+    exceptions::{PyKeyError, PyRuntimeError},
     prelude::*,
     types::{PyFrozenSet, PyIterator, PyModule, PyModuleMethods},
     Bound, IntoPyObjectExt, PyResult, Python,
@@ -584,16 +584,20 @@ pub struct KnownRoomVersionsMapping {
 impl KnownRoomVersionsMapping {
     /// Add a new room version to the mapping, indicating that this instance
     /// supports it.
-    fn add_room_version(&self, version: RoomVersion) {
-        let mut versions = self.versions.write().unwrap();
+    fn add_room_version(&self, version: RoomVersion) -> PyResult<()> {
+        let mut versions = self
+            .versions
+            .write()
+            .map_err(|_| PyRuntimeError::new_err("KnownRoomVersionsMapping lock poisoned"))?;
 
-        if versions.iter().any(|v| v.identifier == key) {
+        if versions.iter().any(|v| v.identifier == version.identifier) {
             // We already have this room version, so we don't add it again (as
             // otherwise we'd end up with duplicates).
-            return;
+            return Ok(());
         }
 
         versions.push(version);
+        Ok(())
     }
 
     fn __getitem__(&self, key: &str) -> PyResult<RoomVersion> {
@@ -653,7 +657,10 @@ impl KnownRoomVersionsMapping {
     }
 
     fn __len__(&self) -> PyResult<usize> {
-        let versions = self.versions.read().unwrap();
+        let versions = self
+            .versions
+            .read()
+            .map_err(|_| PyRuntimeError::new_err("KnownRoomVersionsMapping lock poisoned"))?;
         Ok(versions.len())
     }
 
