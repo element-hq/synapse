@@ -88,6 +88,7 @@ def prune_event(event: EventBase) -> EventBase:
     )
     pruned_event.internal_metadata.instance_name = event.internal_metadata.instance_name
     pruned_event.internal_metadata.outlier = event.internal_metadata.outlier
+    pruned_event.internal_metadata.redacted_by = event.internal_metadata.redacted_by
 
     # Mark the event as redacted
     pruned_event.internal_metadata.redacted = True
@@ -123,6 +124,7 @@ def clone_event(event: EventBase) -> EventBase:
     )
     new_event.internal_metadata.instance_name = event.internal_metadata.instance_name
     new_event.internal_metadata.outlier = event.internal_metadata.outlier
+    new_event.internal_metadata.redacted_by = event.internal_metadata.redacted_by
 
     return new_event
 
@@ -423,7 +425,7 @@ class SerializeEventConfig:
     # the transaction_id and delay_id in the unsigned section of the event.
     requester: Requester | None = None
     # List of event fields to include. If empty, all fields will be returned.
-    only_event_fields: list[str] | None = None
+    only_event_fields: list[str] | None = attr.ib(default=None)
     # Some events can have stripped room state stored in the `unsigned` field.
     # This is required for invite and knock functionality. If this option is
     # False, that state will be removed from the event before it is returned.
@@ -433,6 +435,16 @@ class SerializeEventConfig:
     # only server admins can see through other configuration. For example,
     # whether an event was soft failed by the server.
     include_admin_metadata: bool = False
+
+    @only_event_fields.validator
+    def _validate_only_event_fields(
+        self, attribute: attr.Attribute, value: Any
+    ) -> None:
+        if value is None:
+            return
+
+        if not isinstance(value, list) or not all(isinstance(f, str) for f in value):
+            raise TypeError("only_event_fields must be a list of strings")
 
 
 _DEFAULT_SERIALIZE_EVENT_CONFIG = SerializeEventConfig()
@@ -444,7 +456,7 @@ def make_config_for_admin(existing: SerializeEventConfig) -> SerializeEventConfi
     return attr.evolve(existing, include_admin_metadata=True)
 
 
-def serialize_event(
+def _serialize_event(
     e: JsonDict | EventBase,
     time_now_ms: int,
     *,
@@ -475,13 +487,6 @@ def serialize_event(
     if "age_ts" in d["unsigned"]:
         d["unsigned"]["age"] = time_now_ms - d["unsigned"]["age_ts"]
         del d["unsigned"]["age_ts"]
-
-    if "redacted_because" in e.unsigned:
-        d["unsigned"]["redacted_because"] = serialize_event(
-            e.unsigned["redacted_because"],
-            time_now_ms,
-            config=config,
-        )
 
     # If we have applicable fields saved in the internal_metadata, include them in the
     # unsigned section of the event if the event was sent by the same session (or when
@@ -559,14 +564,6 @@ def serialize_event(
         if e.internal_metadata.policy_server_spammy:
             d["unsigned"]["io.element.synapse.policy_server_spammy"] = True
 
-    only_event_fields = config.only_event_fields
-    if only_event_fields:
-        if not isinstance(only_event_fields, list) or not all(
-            isinstance(f, str) for f in only_event_fields
-        ):
-            raise TypeError("only_event_fields must be a list of strings")
-        d = only_fields(d, only_event_fields)
-
     return d
 
 
@@ -591,6 +588,7 @@ class EventClientSerializer:
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
         bundle_aggregations: dict[str, "BundledAggregations"] | None = None,
+        redaction_map: Mapping[str, "EventBase"] | None = None,
     ) -> JsonDict:
         """Serializes a single event.
 
@@ -600,6 +598,8 @@ class EventClientSerializer:
             config: Event serialization config
             bundle_aggregations: A map from event_id to the aggregations to be bundled
                into the event.
+            redaction_map: Optional pre-fetched map from redaction event_id to event,
+               used to avoid per-event DB lookups when serializing many events.
 
         Returns:
             The serialized event
@@ -617,7 +617,34 @@ class EventClientSerializer:
         ):
             config = make_config_for_admin(config)
 
-        serialized_event = serialize_event(event, time_now, config=config)
+        serialized_event = _serialize_event(event, time_now, config=config)
+
+        # If the event was redacted, fetch the redaction event from the database
+        # and include it in the serialized event's unsigned section.
+        redacted_by: str | None = event.internal_metadata.redacted_by
+        if redacted_by is not None:
+            serialized_event.setdefault("unsigned", {})["redacted_by"] = redacted_by
+            if redaction_map is not None:
+                redaction_event: EventBase | None = redaction_map.get(redacted_by)
+            else:
+                redaction_event = await self._store.get_event(
+                    redacted_by,
+                    allow_none=True,
+                )
+            if redaction_event is not None:
+                serialized_redaction = _serialize_event(
+                    redaction_event, time_now, config=config
+                )
+                serialized_event.setdefault("unsigned", {})["redacted_because"] = (
+                    serialized_redaction
+                )
+                # format_event_for_client_v1 copies redacted_because to the
+                # top level, but since we add it after that runs, do it here.
+                if (
+                    config.as_client_event
+                    and config.event_format is format_event_for_client_v1
+                ):
+                    serialized_event["redacted_because"] = serialized_redaction
 
         new_unsigned = {}
         for callback in self._add_extra_fields_to_unsigned_client_event_callbacks:
@@ -629,6 +656,13 @@ class EventClientSerializer:
             # existing fields.
             new_unsigned.update(serialized_event["unsigned"])
             serialized_event["unsigned"] = new_unsigned
+
+        # Only include fields that the client has requested.
+        #
+        # Note: we always return bundled aggregations, though it is unclear why.
+        only_event_fields = config.only_event_fields
+        if only_event_fields:
+            serialized_event = only_fields(serialized_event, only_event_fields)
 
         # Check if there are any bundled aggregations to include with the event.
         if bundle_aggregations:
@@ -745,12 +779,23 @@ class EventClientSerializer:
             str(len(events)),
         )
 
+        # Batch-fetch all redaction events in one go rather than one per event.
+        redaction_ids = {
+            e.internal_metadata.redacted_by
+            for e in events
+            if isinstance(e, EventBase) and e.internal_metadata.redacted_by is not None
+        }
+        redaction_map = (
+            await self._store.get_events(redaction_ids) if redaction_ids else {}
+        )
+
         return [
             await self.serialize_event(
                 event,
                 time_now,
                 config=config,
                 bundle_aggregations=bundle_aggregations,
+                redaction_map=redaction_map,
             )
             for event in events
         ]
