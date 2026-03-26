@@ -566,13 +566,6 @@ class PaginationHandler:
                     StreamKeyType.ROOM, leave_token
                 )
 
-        logger.info(
-            "asdf get_messages backfill=%s pagin_config.from_token=%s curr_topo=%s",
-            backfill,
-            pagin_config.from_token,
-            curr_topo,
-        )
-
         to_room_key = None
         if pagin_config.to_token:
             to_room_key = pagin_config.to_token.room_key
