@@ -255,7 +255,8 @@ class FederationHandler:
                 room_id=room_id,
                 # Per the docstring, it's best to pad the `current_depth` by the
                 # number of messages you plan to backfill from these points.
-                current_depth=current_depth + limit,
+                # current_depth=current_depth + limit,
+                current_depth=current_depth,
                 # We only need to end up with 5 extremities combined with the
                 # insertion event extremities to make the `/backfill` request
                 # but fetch an order of magnitude more to make sure there is
@@ -266,6 +267,25 @@ class FederationHandler:
                 limit=50,
             )
         ]
+
+        all_backwards_extremities = [
+            _BackfillPoint(event_id, depth, _BackfillPointType.BACKWARDS_EXTREMITY)
+            for event_id, depth in await self.store.get_backfill_points_in_room(
+                room_id=room_id,
+                current_depth=999999,
+                limit=50,
+            )
+        ]
+        logger.info(
+            "asdf all_backwards_extremities=%s",
+            all_backwards_extremities,
+        )
+
+        logger.info(
+            "asdf current_depth=%s backwards_extremities=%s",
+            current_depth,
+            backwards_extremities,
+        )
 
         # we now have a list of potential places to backpaginate from. We prefer to
         # start with the most recent (ie, max depth), so let's sort the list.
@@ -313,6 +333,7 @@ class FederationHandler:
             logger.debug(
                 "_maybe_backfill_inner: all backfill points are *after* current depth. Trying again with later backfill points."
             )
+            logger.info("asdf: backfill in the background")
             self.hs.run_as_background_process(
                 "_maybe_backfill_inner_anyway_with_max_depth",
                 self.maybe_backfill,
