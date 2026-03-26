@@ -808,6 +808,31 @@ jobs:
         # custom `.ci/complement_package.gotpl` template to render the output.
         run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
 
+  ess:
+    if: "${{ !failure() && !cancelled() && needs.changes.outputs.integration == 'true' }}"
+    needs:
+      - linting-done
+      - changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install ESS test dependencies
+        uses: element-hq/setup-ess-cluster-action@release/v2
+
+      - name: Build Synapse docker image to local registry
+        run: |
+          docker build -t localhost:5000/synapse:ci -f ./docker/Dockerfile .
+          docker push localhost:5000/synapse:ci
+
+      - name: Build Additional values file
+        run: |
+          yq eval -n '.synapse.image.registry = "localhost:5000" | .synapse.image.repository = "synapse" | .synapse.image.tag = "ci"' > ci-values.yml
+
+      - name: Run ESS tests
+        run: pytest-ess --pull-chart --chart-version 26.3.0 --test-suite "synapse" --additional-test-values-file ci-values.yml -- -vv
+
   cargo-test:
     if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
