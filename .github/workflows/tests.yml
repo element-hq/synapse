@@ -852,6 +852,8 @@ jobs:
       - name: Run ESS tests
         run: pytest-ess --pull-chart --chart-version 26.3.0 --test-suite "synapse" --additional-test-values-file ci-values.yml -- -vv
 
+      - uses: element-hq/upload-ess-logs-action@release/v2
+        if: ${{ failure() }}
   cargo-test:
     if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
