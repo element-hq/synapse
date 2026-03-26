@@ -757,10 +757,11 @@ class ProfileHandler:
                     )
 
                     # Sort rooms by activity (descending stream ordering)
+                    # Use room_id as tiebreaker for deterministic ordering
+                    # Higher activity first, then alphabetically by room_id for ties
                     priority_room_ids = sorted(
                         room_activity.keys(),
-                        key=lambda rid: room_activity.get(rid, 0),
-                        reverse=True,
+                        key=lambda rid: (-room_activity.get(rid, 0), rid),
                     )[:NUMBER_OF_PRIORITISED_ROOMS]
 
                     # Store the priority list so we can resume if interrupted
