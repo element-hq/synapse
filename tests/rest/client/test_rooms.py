@@ -2530,7 +2530,7 @@ class RoomMessageListTestCase(RoomBase):
         # Make sure the gaps are correct
         actual_gaps = [
             event_id_to_message_map.get(gap["event_id"], gap["event_id"])
-            for gap in channel.json_body["gaps"]
+            for gap in channel.json_body["org.matrix.msc3871.gaps"]
         ]
         expected_gaps = expected_messages
         # We only need to assert that gaps are in the list (the order doesn't matter)
@@ -2540,7 +2540,7 @@ class RoomMessageListTestCase(RoomBase):
             exact=True,
         )
         # Ensure that the tokens point to the correct positions
-        for gap in channel.json_body["gaps"]:
+        for gap in channel.json_body["org.matrix.msc3871.gaps"]:
             event_room_stream_token = self.get_success(
                 self.store.get_topological_token_for_event(gap["event_id"])
             )

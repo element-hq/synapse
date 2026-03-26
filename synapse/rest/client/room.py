@@ -861,7 +861,7 @@ async def encode_messages_response(
                 bundle_aggregations=get_messages_result.bundled_aggregations,
             )
         ),
-        "gaps": [
+        "org.matrix.msc3871.gaps": [
             {
                 "prev_pagination_token": await get_messages_result.start_token.copy_and_replace(
                     StreamKeyType.ROOM, gap.prev_token
