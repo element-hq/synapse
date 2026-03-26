@@ -103,10 +103,7 @@ dependencies = [
     # for these dependencies than the minimum specified by the direct dependency.
     # We should periodically check to see if these dependencies are still necessary and
     # remove any that are no longer required.
-    "cffi>=1.15", # via cryptography
     "pynacl>=1.3", # via signedjson
-    "pyparsing>=2.4",  # via packaging
-    "pyrsistent>=0.18.0",  # via jsonschema
     "requests>=2.16.0", # 2.16.0+ no longer vendors urllib3, avoiding Python 3.10+ incompatibility
     "urllib3>=1.26.5", # via treq; 1.26.5 fixes Python 3.10+ collections.abc compatibility
     # 5.2 is the current version in Debian oldstable. If we don't care to support that, then 5.4 is
