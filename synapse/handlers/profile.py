@@ -740,7 +740,7 @@ class ProfileHandler:
 
         NUMBER_OF_PRIORITISED_ROOMS = 50
         priority_room_ids: list[str] = []
-        
+
         # Determine which phase we're in and what to do
         if last_room_id is None:
             # We're in priority phase (or starting fresh)
@@ -829,7 +829,7 @@ class ProfileHandler:
         for room_id in sorted_room_ids:
             if room_id in processed_priority_rooms:
                 continue  # Skip rooms already processed in priority phase
-                
+
             try:
                 # Assume the target_user isn't a guest,
                 # because we don't let guests set profile or avatar data.
