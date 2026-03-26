@@ -58,8 +58,6 @@ func TestMessagesOverFederation(t *testing.T) {
 	// In Synapse, we consider "nearby" as anything within range of the `limit` specified
 	// in `/messages?dir=b&from=xxx&limit=xxx`.
 	//
-	// This is specifically a regression test for Synapse (see TODO).
-	//
 	// This test lives in our in-repo Complement tests for Synapse because the Matrix spec
 	// doesn't have any rules for how a homeserver should backfill. Practically speaking,
 	// homeservers that don't do anything for this problem will just hide messages from
