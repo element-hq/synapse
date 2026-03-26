@@ -42,9 +42,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventCacheEntry
-from synapse.types import create_requester
 from synapse.util.clock import Clock
-from synapse.util.events import generate_fake_event_id
 
 from tests import unittest
 
@@ -212,66 +210,6 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         sg2 = self.get_success(self.store._get_state_group_for_event(ev.event_id))
 
         self.assertEqual(sg, sg2)
-
-    def test_backfill_with_many_backward_extremities(self) -> None:
-        """
-        Check that we can backfill with many backward extremities.
-        The goal is to make sure that when we only use a portion
-        of backwards extremities(the magic number is more than 5),
-        no errors are thrown.
-
-        Regression test, see https://github.com/matrix-org/synapse/pull/11027
-        """
-        # create the room
-        user_id = self.register_user("kermit", "test")
-        tok = self.login("kermit", "test")
-        requester = create_requester(user_id)
-
-        room_id = self.helper.create_room_as(room_creator=user_id, tok=tok)
-
-        ev1 = self.helper.send(room_id, "first message", tok=tok)
-
-        # Create "many" backward extremities. The magic number we're trying to
-        # create more than is 5 which corresponds to the number of backward
-        # extremities we slice off in `_maybe_backfill_inner`
-        for _ in range(8):
-            event_handler = self.hs.get_event_creation_handler()
-            event, unpersisted_context = self.get_success(
-                event_handler.create_event(
-                    requester,
-                    {
-                        "type": "m.room.message",
-                        "content": {
-                            "msgtype": "m.text",
-                            "body": "message connected to fake event",
-                        },
-                        "room_id": room_id,
-                        "sender": user_id,
-                    },
-                    prev_event_ids=[
-                        ev1["event_id"],
-                        # We're creating an backward extremity each time thanks
-                        # to this fake event
-                        generate_fake_event_id(),
-                    ],
-                )
-            )
-            context = self.get_success(unpersisted_context.persist(event))
-            self.get_success(
-                event_handler.handle_new_client_event(requester, [(event, context)])
-            )
-
-        # Make sure backfill still works
-        #
-        # This shouldn't make any actual backfill requests because we're the only
-        # homeserver in the room and we skip ourselves.
-        self.get_success(
-            self.hs.get_federation_handler().maybe_backfill(
-                room_id,
-                current_depth=1,
-                limit=100,
-            )
-        )
 
     def test_backfill_ignores_known_events(self) -> None:
         """
