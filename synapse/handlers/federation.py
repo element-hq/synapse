@@ -255,7 +255,7 @@ class FederationHandler:
                 room_id=room_id,
                 # Per the docstring, it's best to pad the `current_depth` by the
                 # number of messages you plan to backfill from these points.
-                current_depth=current_depth + limit,
+                nearby_depth=current_depth + limit,
                 # We only need to end up with 5 extremities combined with the
                 # insertion event extremities to make the `/backfill` request
                 # but fetch an order of magnitude more to make sure there is
@@ -304,7 +304,7 @@ class FederationHandler:
             # Check that we actually have later backfill points, if not just return.
             have_later_backfill_points = await self.store.get_backfill_points_in_room(
                 room_id=room_id,
-                current_depth=MAX_DEPTH,
+                nearby_depth=MAX_DEPTH,
                 limit=1,
             )
             if not have_later_backfill_points:

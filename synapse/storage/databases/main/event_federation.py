@@ -1199,58 +1199,72 @@ class EventFederationWorkerStore(
     async def get_backfill_points_in_room(
         self,
         room_id: str,
-        current_depth: int,
+        nearby_depth: int,
         limit: int,
     ) -> list[tuple[str, int]]:
         """
         Get the backward extremities to backfill from in the room along with the
         approximate depth.
 
-        Only returns events that are at a depth lower than or
-        equal to the `current_depth`. Sorted by depth, highest to lowest (descending)
-        so the closest events to the `current_depth` are first in the list.
+        Only returns events that are at a depth lower than or equal to the `nearby_depth`.
+        Sorted by depth, highest to lowest (descending) so the closest events to the
+        `nearby_depth` are first in the list.
 
-        Note: We can only do approximate depth comparisons. Backwards extremeties are
-        the oldest events we know of in the room but we only know of them because some
-        other event referenced them by prev_event and aren't persisted in our database
-        yet (meaning we don't know their depth specifically). So we need to look for the
-        approximate depth from the events connected to the current backwards
-        extremeties.
+        ### Why `nearby_depth`?
 
-        It's best to pad the `current_depth` by the number of messages you plan to
-        backfill from these points.
+        We find backfill points from the backward extremities in the DAG. Backward
+        extremities are the oldest events we know of in the room but we only know of
+        them because some other event referenced them by prev_event and aren't persisted
+        in our database yet (meaning we don't know their depth specifically). So we can
+        only do approximate depth comparisons (use the depth of the known events they're
+        connected to). And we don't know if those backward extremities point to a long
+        chain/fork of history that could stretch back far enough to be visible.
+
+        This means a naive homeserver implementation that looks for backward extremities <=
+        depth of the `/messages?dir=b&from=xxx` token may overlook a backfill point that could
+        reveal more history in the window the user is currently paginating in.
+
+        We consider "nearby" as anything within range of the number of events you plan
+        to backfill from the given backfill point. This is a good heuristic as since we
+        plan to backfill N events, the chain of events from a backfill point could
+        extend back into the visible window.
 
         Example:
 
-         - Your pagination token represents a scroll position at `depth` of `100`.
+         - Your pagination token represents a scroll position at a depth of `100`.
          - We have a backfill point at an approximate depth of `125`
          - You plan to backfill `50` events from that backfill point.
 
-        When we pad our `current_depth`, `100` + `50` = `150`, we pick up the backfill
-        point at `125` (because <= `150`, our `current_depth`), backfill `50` events to
-        a depth of `75` in the timeline (exposing new events that we can return `100` ->
-        `75`).
+        When we pad the token `depth` with the number of messages we plan to backfill,
+        `100` + `50` = `150`, we find the backfill point at `125` (because <= `150`, our
+        `nearby_depth`), backfill `50` events to a depth of `75` in the timeline
+        (exposing new events that we can return `100` -> `75`).
 
-        When we don't pad our `current_depth`, `100` is lower than any of the backfill
-        points so we don't pick any and miss out on backfilling any events.
+        When we don't pad our token `depth`, `100` is lower than any of the backfill
+        points so we don't pick any and miss out on backfilling any events. Without
+        something like MSC3871 to indicate gaps in the timeline, clients will most
+        likely never know they are missing any events and never try to paginate again.
 
-        We ignore extremities that are newer than the user's current scroll position
-        (ie, those with depth greater than `current_depth`) as:
-            1. we don't really care about getting events that have happened
-               after our current position; and
-            2. by the nature of paginating and scrolling back, we have likely
-               previously tried and failed to backfill from that extremity, so
-               to avoid getting "stuck" requesting the same backfill repeatedly
-               we drop those extremities.
+        Generally though, we ignore extremities that are newer than the user's current
+        scroll position (ie, those with depth greater than `nearby_depth`) as:
+            1. we don't really care about getting events that have happened after our
+               current position; and
+            2. by the nature of paginating and scrolling back, we have likely previously
+               tried and failed to backfill from that extremity, so to avoid getting
+               "stuck" requesting the same backfill repeatedly we drop those
+               extremities. Although we also have `event_failed_pull_attempts` nowadays
+               to backoff as well.
 
         Args:
             room_id: Room where we want to find the oldest events
-            current_depth: The depth at the user's current scrollback position (see notes above).
+            nearby_depth: Typically, this is depth at the user's current scrollback
+                position + the number of events you plan to backfill from these backfill
+                points.
             limit: The max number of backfill points to return
 
         Returns:
             List of (event_id, depth) tuples. Sorted by depth, highest to lowest
-            (descending) so the closest events to the `current_depth` are first
+            (descending) so the closest events to the `nearby_depth` are first
             in the list.
         """
 
@@ -1258,12 +1272,12 @@ class EventFederationWorkerStore(
             txn: LoggingTransaction, room_id: str
         ) -> list[tuple[str, int]]:
             # Assemble a tuple lookup of event_id -> depth for the oldest events
-            # we know of in the room. Backwards extremeties are the oldest
+            # we know of in the room. Backwards extremities are the oldest
             # events we know of in the room but we only know of them because
             # some other event referenced them by prev_event and aren't
             # persisted in our database yet (meaning we don't know their depth
             # specifically). So we need to look for the approximate depth from
-            # the events connected to the current backwards extremeties.
+            # the events connected to the current backwards extremities.
 
             if isinstance(self.database_engine, PostgresEngine):
                 least_function = "LEAST"
@@ -1283,7 +1297,7 @@ class EventFederationWorkerStore(
                 ON edge.event_id = event.event_id
                 /**
                  * We find the "oldest" events in the room by looking for
-                 * events connected to backwards extremeties (oldest events
+                 * events connected to backwards extremities (oldest events
                  * in the room that we know of so far).
                  */
                 INNER JOIN event_backward_extremities AS backward_extrem
@@ -1309,16 +1323,19 @@ class EventFederationWorkerStore(
                     AND edge.is_state is FALSE
                     /**
                      * We only want backwards extremities that are older than or at
-                     * the same position of the given `current_depth` (where older
+                     * the same position of the given `nearby_depth` (where older
                      * means less than the given depth) because we're looking backwards
-                     * from the `current_depth` when backfilling.
+                     * from the `nearby_depth` when backfilling.
                      *
-                     *                         current_depth (ignore events that come after this, ignore 2-4)
+                     * Keep in mind that `event.depth` is an approximate depth of the
+                     * backward extremity itself.
+                     *
+                     *                         nearby_depth (ignore events that come after this, ignore 2-4)
                      *                         |
                      *                         ▼
                      * <oldest-in-time> [0]<--[1]<--[2]<--[3]<--[4] <newest-in-time>
                      */
-                    AND event.depth <= ? /* current_depth */
+                    AND event.depth <= ? /* nearby_depth */
                     /**
                      * Exponential back-off (up to the upper bound) so we don't retry the
                      * same backfill point over and over. ex. 2hr, 4hr, 8hr, 16hr, etc.
@@ -1336,7 +1353,7 @@ class EventFederationWorkerStore(
                         )
                     )
                 /**
-                 * Sort from highest (closest to the `current_depth`) to the lowest depth
+                 * Sort from highest (closest to the `nearby_depth`) to the lowest depth
                  * because the closest are most relevant to backfill from first.
                  * Then tie-break on alphabetical order of the event_ids so we get a
                  * consistent ordering which is nice when asserting things in tests.
@@ -1349,7 +1366,7 @@ class EventFederationWorkerStore(
                 sql,
                 (
                     room_id,
-                    current_depth,
+                    nearby_depth,
                     self.clock.time_msec(),
                     BACKFILL_EVENT_EXPONENTIAL_BACKOFF_MAXIMUM_DOUBLING_STEPS,
                     BACKFILL_EVENT_EXPONENTIAL_BACKOFF_STEP_MILLISECONDS,
