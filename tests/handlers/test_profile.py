@@ -314,6 +314,108 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 membership[state_tuple].content["displayname"], "Frank Jr."
             )
 
+    def test_background_update_prioritises_recently_active_rooms(self) -> None:
+        """Test that profile updates process recently active rooms first.
+
+        This test will fail with the current implementation (alphabetical order)
+        and pass with the new implementation (activity-based priority).
+        """
+
+        # Set an initial displayname
+        self.get_success(
+            self.handler.set_displayname(
+                self.frank, synapse.types.create_requester(self.frank), "Frank"
+            )
+        )
+
+        # Create multiple rooms
+        room_ids = []
+        for _ in range(5):
+            room_id = self.helper.create_room_as(
+                self.frank.to_string(), tok=self.frank_token
+            )
+            room_ids.append(room_id)
+
+        # Sort room IDs alphabetically to understand the expected order
+        room_ids.sort()
+
+        # The last room alphabetically should be processed first if it's most active
+        last_room_alphabetically = room_ids[-1]
+        first_room_alphabetically = room_ids[0]
+
+        # Mock the bulk_get_last_event_pos_in_room_before_stream_ordering to make
+        # the last alphabetical room the most recently active
+        async def mock_bulk_get_last_event(
+            room_ids_param: list, end_stream_order_by_room: dict
+        ) -> dict:
+            # Return fake stream orderings that make the last alphabetical room most active
+            result = {}
+            for idx, room_id in enumerate(room_ids):
+                if room_id == last_room_alphabetically:
+                    # Give the last alphabetical room the highest stream ordering (most recent)
+                    result[room_id] = 1000
+                elif room_id == first_room_alphabetically:
+                    # Give the first alphabetical room a low stream ordering (least recent)
+                    result[room_id] = 100
+                else:
+                    # Give other rooms intermediate stream orderings
+                    result[room_id] = 500 - idx * 10
+            return result
+
+        # Track which rooms get updated and in what order
+        updated_rooms_order = []
+        original_update_membership = self.hs.get_room_member_handler().update_membership
+
+        async def track_update_membership(*args: Any, **kwargs: Any) -> tuple[str, int]:
+            room_id = args[2]  # room_id is the third argument
+            if room_id not in updated_rooms_order:
+                updated_rooms_order.append(room_id)
+            return await original_update_membership(*args, **kwargs)
+
+        with (
+            patch.object(
+                self.store,
+                "bulk_get_last_event_pos_in_room_before_stream_ordering",
+                side_effect=mock_bulk_get_last_event,
+            ),
+            patch.object(
+                self.hs.get_room_member_handler(),
+                "update_membership",
+                side_effect=track_update_membership,
+            ),
+        ):
+            # Trigger the profile update
+            self.get_success(
+                self.handler.set_displayname(
+                    self.frank, synapse.types.create_requester(self.frank), "Frank Jr."
+                )
+            )
+
+            # Let the background task run
+            self.pump(1.0)
+
+            # Wait for task to complete
+            tasks = self.get_success(
+                self.task_scheduler.get_tasks(
+                    actions=["update_join_states"], statuses=[TaskStatus.COMPLETE]
+                )
+            )
+            self.assertGreaterEqual(
+                len(tasks), 1, "Profile update task should complete"
+            )
+
+            # Verify that all rooms were eventually updated
+            self.assertEqual(
+                set(updated_rooms_order), set(room_ids), "All rooms should be updated"
+            )
+
+            self.assertIn(
+                last_room_alphabetically,
+                updated_rooms_order[:1],
+                f"Most active room {last_room_alphabetically} should be processed first, "
+                f"but rooms were processed in order: {updated_rooms_order}",
+            )
+
     def test_set_my_name_if_disabled(self) -> None:
         self.hs.config.registration.enable_set_displayname = False
 

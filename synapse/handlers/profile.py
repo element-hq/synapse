@@ -724,23 +724,96 @@ class ProfileHandler:
         assert task.params
 
         target_user = UserID.from_string(task.resource_id)
-        room_ids = sorted(await self.store.get_rooms_for_user(target_user.to_string()))
+        all_room_ids = await self.store.get_rooms_for_user(target_user.to_string())
+
+        # Get the full alphabetically sorted list for stable ordering
+        sorted_room_ids = sorted(all_room_ids)
 
         last_room_id = task.result.get("last_room_id", None) if task.result else None
+        processed_priority_rooms = set(
+            task.result.get("processed_priority_rooms", []) if task.result else []
+        )
 
-        if last_room_id:
+        NUMBER_OF_PRIORITISED_ROOMS = 50
+        # If we haven't processed priority rooms yet (no last_room_id means fresh start)
+        if not last_room_id:
+            # Get the most recently active rooms for this user
+            try:
+                # Get the last event position for each room
+                room_activity = await self.store.bulk_get_last_event_pos_in_room_before_stream_ordering(
+                    all_room_ids,
+                    self.store.get_room_max_token(),  # Use current positions
+                )
+
+                # Sort rooms by activity (descending stream ordering)
+                priority_room_ids = sorted(
+                    room_activity.keys(),
+                    key=lambda rid: room_activity.get(rid, 0),
+                    reverse=True,
+                )[:NUMBER_OF_PRIORITISED_ROOMS]
+
+            except Exception as e:
+                # If we can't get priority rooms, fall back to alphabetical
+                logger.warning(
+                    "Failed to get priority rooms for %s: %s. Falling back to alphabetical order.",
+                    target_user.to_string(),
+                    str(e),
+                )
+                priority_room_ids = []
+        else:
+            # We're resuming, skip priority processing
+            priority_room_ids = []
             # Filter out room IDs that have already been handled
             # by finding the first room ID greater than the last handled room ID
             # and slicing the list from that point onwards.
-            room_ids = room_ids[bisect_right(room_ids, last_room_id) :]
+            sorted_room_ids = sorted_room_ids[
+                bisect_right(sorted_room_ids, last_room_id) :
+            ]
 
         requester = create_requester(
             user_id=target_user,
             authenticated_entity=task.params.get("requester_authenticated_entity"),
         )
 
-        for room_id in room_ids:
-            handler = self.hs.get_room_member_handler()
+        handler = self.hs.get_room_member_handler()
+
+        # Process priority rooms first (if any)
+        for room_id in priority_room_ids:
+            if room_id in processed_priority_rooms:
+                continue  # Skip if already processed in a previous run
+
+            try:
+                # Assume the target_user isn't a guest,
+                # because we don't let guests set profile or avatar data.
+                await handler.update_membership(
+                    requester,
+                    target_user,
+                    room_id,
+                    "join",  # We treat a profile update like a join.
+                    ratelimit=False,  # Try to hide that these events aren't atomic.
+                )
+            except CancelledError as e:
+                raise e
+            except Exception as e:
+                logger.warning(
+                    "Failed to update join event for priority room %s - %s",
+                    room_id,
+                    str(e),
+                )
+
+            processed_priority_rooms.add(room_id)
+            # Don't update last_room_id for priority rooms, keep it None
+            # so we know we're still in priority phase if interrupted
+            await self._task_scheduler.update_task(
+                task.id,
+                result={
+                    "last_room_id": None,
+                    "processed_priority_rooms": list(processed_priority_rooms),
+                },
+            )
+
+        # Now process all rooms in alphabetical order (including re-processing priority rooms)
+        for room_id in sorted_room_ids:
             try:
                 # Assume the target_user isn't a guest,
                 # because we don't let guests set profile or avatar data.
@@ -758,7 +831,11 @@ class ProfileHandler:
                     "Failed to update join event for room %s - %s", room_id, str(e)
                 )
             await self._task_scheduler.update_task(
-                task.id, result={"last_room_id": room_id}
+                task.id,
+                result={
+                    "last_room_id": room_id,
+                    "processed_priority_rooms": list(processed_priority_rooms),
+                },
             )
 
         return TaskStatus.COMPLETE, None, None
