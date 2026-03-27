@@ -23,8 +23,8 @@ from unittest.mock import AsyncMock, Mock
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import (
-    MAX_EDU_SIZE,
     MAX_EDUS_PER_TRANSACTION,
+    SOFT_MAX_EDU_SIZE,
     EduTypes,
 )
 from synapse.api.errors import Codes
@@ -122,8 +122,8 @@ class SendToDeviceTestCase(HomeserverTestCase):
         _ = self.register_user("u1", "pass")
         user1_tok = self.login("u1", "pass", "d1")
 
-        # Create a message that is over the `MAX_EDU_SIZE`
-        test_msg = {"foo": "a" * MAX_EDU_SIZE}
+        # Create a message that is over the `SOFT_MAX_EDU_SIZE`
+        test_msg = {"foo": "a" * SOFT_MAX_EDU_SIZE}
         channel = self.make_request(
             "PUT",
             "/_matrix/client/r0/sendToDevice/m.test/12345",
@@ -153,12 +153,51 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # 2 messages, each just big enough to fit into their own EDU
         for i in range(2):
             messages[f"@remote_user{i}:" + destination] = {
-                "device": {"foo": "a" * (MAX_EDU_SIZE - 1000)}
+                "device": {"foo": "a" * (SOFT_MAX_EDU_SIZE - 1000)}
             }
 
         channel = self.make_request(
             "PUT",
             "/_matrix/client/r0/sendToDevice/m.test/1234567",
+            content={"messages": messages},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        self.get_success(sender.send_device_messages([destination]))
+
+        number_of_edus_sent = 0
+        for call in mock_send_transaction.call_args_list:
+            number_of_edus_sent += len(call[0][1]()["edus"])
+
+        self.assertEqual(number_of_edus_sent, 2)
+
+    def test_edu_large_messages_splitting_one_user(self) -> None:
+        """
+        Test that a bunch of to-device messages for the same user are split over multiple EDUs if they are
+        collectively too large to fit into a single EDU
+        """
+        mock_send_transaction: AsyncMock = (
+            self.federation_transport_client.send_transaction
+        )
+        mock_send_transaction.return_value = {}
+
+        sender = self.hs.get_federation_sender()
+
+        _ = self.register_user("u1", "pass")
+        user1_tok = self.login("u1", "pass", "d1")
+        destination = "secondserver"
+        messages = {}
+
+        # 2 messages, each just big enough to fit into their own EDU
+        messages["@remote_user:" + destination] = {
+            "device1": {"foo": "a" * (SOFT_MAX_EDU_SIZE - 1000)},
+            "device2": {"foo": "a" * (SOFT_MAX_EDU_SIZE - 1000)},
+        }
+
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/12345678",
             content={"messages": messages},
             access_token=user1_tok,
         )
@@ -226,7 +265,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
         for i in range(number_of_edus_to_send):
             messages[f"@remote_user{i}:" + destination] = {
-                "device": {"foo": "a" * (MAX_EDU_SIZE - 1000)}
+                "device": {"foo": "a" * (SOFT_MAX_EDU_SIZE - 1000)}
             }
 
         channel = self.make_request(

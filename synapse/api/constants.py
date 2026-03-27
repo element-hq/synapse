@@ -39,7 +39,9 @@ MAX_PDU_SIZE = 65536
 # Allowing oversized EDU's results in failed `/federation/v1/send` transactions (because
 # the request overall can overrun the `max_request_body_size`) which are retried over
 # and over and prevent other outbound federation traffic from happening.
-MAX_EDU_SIZE = 65536
+#
+# We may send EDU's that are larger than this, but we aim to avoid doing so.
+SOFT_MAX_EDU_SIZE = 65536
 
 # This is defined in the Matrix spec and enforced by the receiver.
 MAX_EDUS_PER_TRANSACTION = 100

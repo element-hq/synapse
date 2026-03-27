@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import (
-    MAX_EDU_SIZE,
+    SOFT_MAX_EDU_SIZE,
     EduTypes,
     EventContentFields,
     ToDeviceEventTypes,
@@ -41,6 +41,7 @@ from synapse.logging.opentracing import (
     set_tag,
 )
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, get_domain_from_id
+from synapse.util import split_dict_to_fit_to_size
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import random_string_insecure_fast
 
@@ -241,6 +242,18 @@ class DeviceMessageHandler:
 
             # add an opentracing log entry for each message
             for device_id, message_content in by_device.items():
+                # Check the size of each message, as if these are too large we
+                # can't send them over federation.
+                #
+                # We do this for all to-device messages, even those that aren't
+                # over federation, so as to more easily catch clients that are
+                # sending excessively large messages.
+                if len(encode_canonical_json(message_content)) > SOFT_MAX_EDU_SIZE:
+                    raise EventSizeError(
+                        f"To-device message for {user_id}:{device_id} is too large to send",
+                        unpersistable=True,
+                    )
+
                 log_kv(
                     {
                         "event": "send_to_device_message",
@@ -436,57 +449,61 @@ def split_device_messages_into_edus(
     """
     split_edus_content: list[JsonDict] = []
 
-    # Convert messages dict to a list of (recipient, messages_by_device) pairs
-    message_items = list(messages_by_user_then_device.items())
+    # The header size of the full EDU.
+    base_edu_size = _EMPTY_EDU_SIZE + len(sender_user_id) + len(message_type)
 
-    while message_items:
-        edu_messages = {}
-        # Start by trying to fit all remaining messages
-        target_count = len(message_items)
-
-        while target_count > 0:
-            # Take the first target_count messages
-            edu_messages = dict(message_items[:target_count])
-            edu_content = create_new_to_device_edu_content(
-                sender_user_id, message_type, edu_messages
+    # First split up the top-level dict of user_id to device messages.
+    for subset_messages, estimated_size in split_dict_to_fit_to_size(
+        messages_by_user_then_device,
+        soft_max_size=SOFT_MAX_EDU_SIZE,
+        wrapping_object_size=base_edu_size,
+    ):
+        # The returned subset might be larger than the soft max size if it
+        # contains a single entry that is larger than the soft max size.
+        if estimated_size <= SOFT_MAX_EDU_SIZE - base_edu_size:
+            # This message fits in a single EDU, add it as is.
+            content = create_new_to_device_edu_content(
+                sender_user_id, message_type, subset_messages
             )
-            # Let's add the whole EDU structure before testing the size
-            edu = {
-                "content": edu_content,
-                "edu_type": EduTypes.DIRECT_TO_DEVICE,
-            }
+            split_edus_content.append(content)
+            logger.debug(
+                "Created EDU with %d recipients from %s (message_id=%s), (total EDUs so far: %d)",
+                len(subset_messages),
+                sender_user_id,
+                content["message_id"],
+                len(split_edus_content),
+            )
+        else:
+            # This message doesn't fit in a single EDU. We split the message up
+            # further by device.
+            #
+            # Note: `subset` should only have a single entry in it.
+            for recipient, messages_by_device in subset_messages.items():
+                # Account for the additional nesting and JSON encoding of the
+                # recipient.
+                # The +7 is for the quotes around the recipient, the
+                # colon and two pairs of curly braces.
+                base_size = base_edu_size + len(recipient) + 7
 
-            if len(encode_canonical_json(edu)) <= MAX_EDU_SIZE:
-                # It fits! Add this EDU and remove these messages from the list
-                split_edus_content.append(edu_content)
-                message_items = message_items[target_count:]
-
-                logger.debug(
-                    "Created EDU with %d recipients from %s (message_id=%s), (total EDUs so far: %d)",
-                    target_count,
-                    sender_user_id,
-                    edu_content["message_id"],
-                    len(split_edus_content),
-                )
-                break
-            else:
-                if target_count == 1:
-                    # Single recipient's messages are too large, let's reject the client
-                    # call with 413/`M_TOO_LARGE`, we expect this error to reach the
-                    # client in the case of the /sendToDevice endpoint.
-                    #
-                    # 413 is currently an unspecced response for `/sendToDevice` but is
-                    # probably the best thing we can do.
-                    # https://github.com/matrix-org/matrix-spec/pull/2340 tracks adding
-                    # this to the spec
-                    recipient = message_items[0][0]
-                    raise EventSizeError(
-                        f"device message to {recipient} too large to fit in a single EDU",
-                        unpersistable=True,
+                for subset_messages, _estimated_size in split_dict_to_fit_to_size(
+                    messages_by_device,
+                    soft_max_size=SOFT_MAX_EDU_SIZE,
+                    wrapping_object_size=base_size,
+                ):
+                    # Again, the returned subset might be larger than the soft
+                    # max size, but we can't split it any further so we have to
+                    # add it as is.
+                    content = create_new_to_device_edu_content(
+                        sender_user_id, message_type, {recipient: subset_messages}
                     )
-
-                # Halve the number of messages and try again
-                target_count = target_count // 2
+                    split_edus_content.append(content)
+                    logger.debug(
+                        "Created EDU with %d recipients from %s (message_id=%s), (total EDUs so far: %d)",
+                        len(subset_messages),
+                        sender_user_id,
+                        content["message_id"],
+                        len(split_edus_content),
+                    )
 
     return split_edus_content
 
@@ -509,3 +526,16 @@ def create_new_to_device_edu_content(
         "messages": messages_by_user_then_device,
     }
     return content
+
+
+# The size of an empty EDU with no messages, which we use as the base size when
+# packing messages into EDUs. The size of the sender and message type must be
+# added to this when calculating the size of an EDU.
+_EMPTY_EDU_SIZE = len(
+    encode_canonical_json(
+        {
+            "edu_type": EduTypes.DIRECT_TO_DEVICE,
+            "content": create_new_to_device_edu_content("", "", {}),
+        }
+    )
+)
