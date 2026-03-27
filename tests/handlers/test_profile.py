@@ -26,7 +26,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 import synapse.types
-from synapse.api.constants import EventTypes
+from synapse.api.constants import EventTypes, ReceiptTypes
 from synapse.api.errors import AuthError, SynapseError
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -232,6 +232,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         if room_id_1 > room_id_2:
             room_id_1, room_id_2 = room_id_2, room_id_1
 
+        # Without read receipts, both rooms should be processed in alphabetical order
+
         original_update_membership = self.hs.get_room_member_handler().update_membership
 
         room_1_updated = False
@@ -314,6 +316,232 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.assertEqual(
                 membership[state_tuple].content["displayname"], "Frank Jr."
             )
+
+    def test_room_update_ordering_by_read_receipt(self) -> None:
+        """Test that rooms are updated in order of most recent read receipt."""
+        self.get_success(
+            self.handler.set_displayname(
+                self.frank, synapse.types.create_requester(self.frank), "Frank"
+            )
+        )
+
+        # Create three rooms
+        room_id_1 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+        room_id_2 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+        room_id_3 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+
+        # Send an event in each room to create something to mark as read
+        event_1 = self.helper.send(room_id_1, "Hello 1", tok=self.frank_token)
+        event_2 = self.helper.send(room_id_2, "Hello 2", tok=self.frank_token)
+        event_3 = self.helper.send(room_id_3, "Hello 3", tok=self.frank_token)
+
+        # Set read receipts with different timestamps (simulate different read times)
+        # Room 2 should be most recent, then room 3, then room 1
+        self.get_success(
+            self.store.insert_receipt(
+                room_id_1,
+                ReceiptTypes.READ,
+                user_id=self.frank.to_string(),
+                event_ids=[event_1["event_id"]],
+                thread_id=None,
+                data={"ts": 100},
+            )
+        )
+        self.get_success(
+            self.store.insert_receipt(
+                room_id_3,
+                ReceiptTypes.READ,
+                user_id=self.frank.to_string(),
+                event_ids=[event_3["event_id"]],
+                thread_id=None,
+                data={"ts": 200},
+            )
+        )
+        self.get_success(
+            self.store.insert_receipt(
+                room_id_2,
+                ReceiptTypes.READ,
+                user_id=self.frank.to_string(),
+                event_ids=[event_2["event_id"]],
+                thread_id=None,
+                data={"ts": 300},
+            )
+        )
+
+        # Track the order in which rooms are updated
+        room_update_order = []
+        original_update_membership = self.hs.get_room_member_handler().update_membership
+
+        async def track_update_membership(*args: Any, **kwargs: Any) -> tuple[str, int]:
+            room_id = args[2]
+            room_update_order.append(room_id)
+            return await original_update_membership(*args, **kwargs)
+
+        with patch.object(
+            self.hs.get_room_member_handler(),
+            "update_membership",
+            side_effect=track_update_membership,
+        ):
+            self.get_success(
+                self.handler.set_displayname(
+                    self.frank,
+                    synapse.types.create_requester(self.frank),
+                    "Frank Updated",
+                )
+            )
+
+        # Wait for background task to complete
+        self.get_success(self.clock.sleep(Duration(milliseconds=50)), by=1)
+
+        # Get receipts to understand the actual stream ordering
+        user_receipts = self.get_success(
+            self.store.get_receipts_for_user_with_orderings(
+                self.frank.to_string(),
+                [ReceiptTypes.READ, ReceiptTypes.READ_PRIVATE],
+            )
+        )
+
+        # Sort rooms by stream_ordering (descending) to get expected order
+        rooms_by_stream_ordering = sorted(
+            user_receipts.keys(),
+            key=lambda room_id: -user_receipts[room_id]["stream_ordering"],
+        )
+
+        # Verify rooms were updated in order of most recent read receipt (highest stream_ordering first)
+        self.assertEqual(len(room_update_order), 3)
+        self.assertEqual(room_update_order, rooms_by_stream_ordering)
+
+    def test_room_update_ordering_with_no_receipts_fallback(self) -> None:
+        """Test that rooms without read receipts fall back to alphabetical ordering."""
+        self.get_success(
+            self.handler.set_displayname(
+                self.frank, synapse.types.create_requester(self.frank), "Frank"
+            )
+        )
+
+        # Create two rooms - ensure we know their alphabetical order
+        room_id_a = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+        room_id_b = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+
+        # Ensure room_id_a comes before room_id_b alphabetically
+        if room_id_a > room_id_b:
+            room_id_a, room_id_b = room_id_b, room_id_a
+
+        # Don't set any read receipts - should fall back to alphabetical
+
+        # Track the order in which rooms are updated
+        room_update_order = []
+        original_update_membership = self.hs.get_room_member_handler().update_membership
+
+        async def track_update_membership(*args: Any, **kwargs: Any) -> tuple[str, int]:
+            room_id = args[2]
+            room_update_order.append(room_id)
+            return await original_update_membership(*args, **kwargs)
+
+        with patch.object(
+            self.hs.get_room_member_handler(),
+            "update_membership",
+            side_effect=track_update_membership,
+        ):
+            self.get_success(
+                self.handler.set_displayname(
+                    self.frank,
+                    synapse.types.create_requester(self.frank),
+                    "Frank Updated",
+                )
+            )
+
+        # Wait for background task to complete
+        self.get_success(self.clock.sleep(Duration(milliseconds=50)), by=1)
+
+        # Verify rooms were updated in alphabetical order
+        self.assertEqual(len(room_update_order), 2)
+        self.assertEqual(room_update_order[0], room_id_a)  # Alphabetically first
+        self.assertEqual(room_update_order[1], room_id_b)  # Alphabetically second
+
+    def test_room_update_ordering_mixed_receipts_and_no_receipts(self) -> None:
+        """Test ordering when some rooms have receipts and others don't."""
+        self.get_success(
+            self.handler.set_displayname(
+                self.frank, synapse.types.create_requester(self.frank), "Frank"
+            )
+        )
+
+        # Create three rooms
+        room_with_receipt = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+        room_without_receipt_1 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+        room_without_receipt_2 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+
+        # Ensure we know the alphabetical order of rooms without receipts
+        if room_without_receipt_1 > room_without_receipt_2:
+            room_without_receipt_1, room_without_receipt_2 = (
+                room_without_receipt_2,
+                room_without_receipt_1,
+            )
+
+        # Send an event and set a read receipt for one room only
+        event = self.helper.send(room_with_receipt, "Hello", tok=self.frank_token)
+        self.get_success(
+            self.store.insert_receipt(
+                room_with_receipt,
+                ReceiptTypes.READ,
+                user_id=self.frank.to_string(),
+                event_ids=[event["event_id"]],
+                thread_id=None,
+                data={"ts": 100},
+            )
+        )
+
+        # Track the order in which rooms are updated
+        room_update_order = []
+        original_update_membership = self.hs.get_room_member_handler().update_membership
+
+        async def track_update_membership(*args: Any, **kwargs: Any) -> tuple[str, int]:
+            room_id = args[2]
+            room_update_order.append(room_id)
+            return await original_update_membership(*args, **kwargs)
+
+        with patch.object(
+            self.hs.get_room_member_handler(),
+            "update_membership",
+            side_effect=track_update_membership,
+        ):
+            self.get_success(
+                self.handler.set_displayname(
+                    self.frank,
+                    synapse.types.create_requester(self.frank),
+                    "Frank Updated",
+                )
+            )
+
+        # Wait for background task to complete
+        self.get_success(self.clock.sleep(Duration(milliseconds=50)), by=1)
+
+        # Verify ordering: room with receipt first, then others alphabetically
+        self.assertEqual(len(room_update_order), 3)
+        self.assertEqual(room_update_order[0], room_with_receipt)  # Has receipt - first
+        self.assertEqual(
+            room_update_order[1], room_without_receipt_1
+        )  # No receipt - alphabetically first
+        self.assertEqual(
+            room_update_order[2], room_without_receipt_2
+        )  # No receipt - alphabetically second
 
     @override_config({"enable_set_displayname": False})
     def test_set_my_name_if_disabled(self) -> None:
