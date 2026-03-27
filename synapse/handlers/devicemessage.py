@@ -23,15 +23,8 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
-from canonicaljson import encode_canonical_json
-
-from synapse.api.constants import (
-    MAX_EDU_SIZE,
-    EduTypes,
-    EventContentFields,
-    ToDeviceEventTypes,
-)
-from synapse.api.errors import Codes, EventSizeError, SynapseError
+from synapse.api.constants import EduTypes, EventContentFields, ToDeviceEventTypes
+from synapse.api.errors import Codes, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.logging.context import run_in_background
 from synapse.logging.opentracing import (
@@ -42,7 +35,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, get_domain_from_id
 from synapse.util.json import json_encoder
-from synapse.util.stringutils import random_string_insecure_fast
+from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -229,7 +222,6 @@ class DeviceMessageHandler:
         set_tag(SynapseTags.TO_DEVICE_TYPE, message_type)
         set_tag(SynapseTags.TO_DEVICE_SENDER, sender_user_id)
         local_messages = {}
-        # Map from destination (server) -> recipient (user ID) -> device_id -> JSON message content
         remote_messages: dict[str, dict[str, dict[str, JsonDict]]] = {}
         for user_id, by_device in messages.items():
             if not UserID.is_valid(user_id):
@@ -285,33 +277,28 @@ class DeviceMessageHandler:
                 destination = get_domain_from_id(user_id)
                 remote_messages.setdefault(destination, {})[user_id] = by_device
 
-        # Add local messages to the database.
-        # Retrieve the stream id of the last-processed to-device message.
-        last_stream_id = (
-            await self.store.add_local_messages_from_client_to_device_inbox(
-                local_messages
-            )
-        )
+        context = get_active_span_text_map()
+
+        remote_edu_contents = {}
         for destination, messages in remote_messages.items():
-            split_edus = split_device_messages_into_edus(
-                sender_user_id, message_type, messages
-            )
-            for edu in split_edus:
-                edu["org.matrix.opentracing_context"] = json_encoder.encode(
-                    get_active_span_text_map()
-                )
-                # Add remote messages to the database.
-                last_stream_id = (
-                    await self.store.add_remote_messages_from_client_to_device_inbox(
-                        {destination: edu}
-                    )
-                )
-                log_kv(
-                    {
-                        "destination": destination,
-                        "message_id": edu["message_id"],
-                    }
-                )
+            # The EDU contains a "message_id" property which is used for
+            # idempotence. Make up a random one.
+            message_id = random_string(16)
+            log_kv({"destination": destination, "message_id": message_id})
+
+            remote_edu_contents[destination] = {
+                "messages": messages,
+                "sender": sender_user_id,
+                "type": message_type,
+                "message_id": message_id,
+                "org.matrix.opentracing_context": json_encoder.encode(context),
+            }
+
+        # Add messages to the database.
+        # Retrieve the stream id of the last-processed to-device message.
+        last_stream_id = await self.store.add_messages_to_device_inbox(
+            local_messages, remote_edu_contents
+        )
 
         # Notify listeners that there are new to-device messages to process,
         # handing them the latest stream id.
@@ -410,102 +397,3 @@ class DeviceMessageHandler:
             "events": messages,
             "next_batch": f"d{stream_id}",
         }
-
-
-def split_device_messages_into_edus(
-    sender_user_id: str,
-    message_type: str,
-    messages_by_user_then_device: dict[str, dict[str, JsonDict]],
-) -> list[JsonDict]:
-    """
-    This function takes many to-device messages and fits/splits them into several EDUs
-    as necessary. We split the messages up as the overall request can overrun the
-    `max_request_body_size` and prevent outbound federation traffic because of the size
-    of the transaction (cf. `MAX_EDU_SIZE`).
-
-    Args:
-        sender_user_id: The user that is sending the to-device messages.
-        message_type: The type of to-device messages that are being sent.
-        messages_by_user_then_device: Dictionary of recipient user_id to recipient device_id to message.
-
-    Returns:
-        Bin-packed list of EDU JSON content for the given to_device messages
-
-    Raises:
-        EventSizeError: If a single to-device message is too large to fit into an EDU.
-    """
-    split_edus_content: list[JsonDict] = []
-
-    # Convert messages dict to a list of (recipient, messages_by_device) pairs
-    message_items = list(messages_by_user_then_device.items())
-
-    while message_items:
-        edu_messages = {}
-        # Start by trying to fit all remaining messages
-        target_count = len(message_items)
-
-        while target_count > 0:
-            # Take the first target_count messages
-            edu_messages = dict(message_items[:target_count])
-            edu_content = create_new_to_device_edu_content(
-                sender_user_id, message_type, edu_messages
-            )
-            # Let's add the whole EDU structure before testing the size
-            edu = {
-                "content": edu_content,
-                "edu_type": EduTypes.DIRECT_TO_DEVICE,
-            }
-
-            if len(encode_canonical_json(edu)) <= MAX_EDU_SIZE:
-                # It fits! Add this EDU and remove these messages from the list
-                split_edus_content.append(edu_content)
-                message_items = message_items[target_count:]
-
-                logger.debug(
-                    "Created EDU with %d recipients from %s (message_id=%s), (total EDUs so far: %d)",
-                    target_count,
-                    sender_user_id,
-                    edu_content["message_id"],
-                    len(split_edus_content),
-                )
-                break
-            else:
-                if target_count == 1:
-                    # Single recipient's messages are too large, let's reject the client
-                    # call with 413/`M_TOO_LARGE`, we expect this error to reach the
-                    # client in the case of the /sendToDevice endpoint.
-                    #
-                    # 413 is currently an unspecced response for `/sendToDevice` but is
-                    # probably the best thing we can do.
-                    # https://github.com/matrix-org/matrix-spec/pull/2340 tracks adding
-                    # this to the spec
-                    recipient = message_items[0][0]
-                    raise EventSizeError(
-                        f"device message to {recipient} too large to fit in a single EDU",
-                        unpersistable=True,
-                    )
-
-                # Halve the number of messages and try again
-                target_count = target_count // 2
-
-    return split_edus_content
-
-
-def create_new_to_device_edu_content(
-    sender_user_id: str,
-    message_type: str,
-    messages_by_user_then_device: dict[str, dict[str, JsonDict]],
-) -> JsonDict:
-    """
-    Create a new `m.direct_to_device` EDU `content` object with a unique message ID.
-    """
-    # The EDU contains a "message_id" property which is used for
-    # idempotence. Make up a random one.
-    message_id = random_string_insecure_fast(16)
-    content = {
-        "sender": sender_user_id,
-        "type": message_type,
-        "message_id": message_id,
-        "messages": messages_by_user_then_device,
-    }
-    return content
