@@ -846,14 +846,26 @@ jobs:
           docker push localhost:5000/synapse:ci
 
       - name: Build Additional values file
-        run: |
-          yq eval -n '.synapse.image.registry = "localhost:5000" | .synapse.image.repository = "synapse" | .synapse.image.tag = "ci"' > ci-values.yml
+        run: >
+          yq eval -n '.synapse.image.registry = "localhost:5000" |
+          .synapse.image.repository = "synapse" |
+          .synapse.image.tag = "ci"' > ci-values.yml
 
       - name: Run ESS tests
         run: pytest-ess --test-suite "synapse" --additional-test-values-file ci-values.yml -- -vv
 
-      - uses: element-hq/upload-ess-logs-action@release/v2
+      - name: Collect ESS logs
         if: ${{ failure() }}
+        run: collect-ess-logs
+
+      - name: Upload logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: ess-helm-logs
+          path: ess-helm-logs
+          retention-days: 1
+
   cargo-test:
     if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
