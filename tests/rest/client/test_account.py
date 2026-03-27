@@ -31,7 +31,7 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import LoginType, Membership
-from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.appservice import ApplicationService
 from synapse.rest import admin
 from synapse.rest.client import account, login, register, room
@@ -523,8 +523,17 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
                 user_id, create_requester(user_id), "http://test/Kermit.jpg"
             )
         )
+        # Verify it is set
+        self.assertEqual(
+            self.get_success(profile_handler.get_displayname(user_id)),
+            "Kermit the Frog",
+        )
+        self.assertEqual(
+            self.get_success(profile_handler.get_avatar_url(user_id)),
+            "http://test/Kermit.jpg",
+        )
 
-        # Request erasure of the user
+        # Deactivate!
         self.deactivate(mxid, tok, erase=True)
 
         store = self.hs.get_datastores().main
@@ -532,13 +541,17 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
         # Check that the user has been marked as deactivated.
         self.assertTrue(self.get_success(store.get_user_deactivated_status(mxid)))
 
-        # On deactivation with 'erase', a displayname and avatar_url are set to an empty
-        # string through the handler, but are turned into `None` for the database
-        display_name = self.get_success(profile_handler.get_displayname(user_id))
-        assert display_name is None, f"{display_name}"
+        # On deactivation with 'erase', the entire database row is erased. Both of these
+        # should raise a 404(Not Found) SynapseError
+        display_name_failure = self.get_failure(
+            profile_handler.get_displayname(user_id), SynapseError
+        )
+        assert display_name_failure.value.code == HTTPStatus.NOT_FOUND
 
-        avatar_url = self.get_success(profile_handler.get_avatar_url(user_id))
-        assert avatar_url is None, f"{avatar_url}"
+        avatar_url_failure = self.get_failure(
+            profile_handler.get_avatar_url(user_id), SynapseError
+        )
+        assert avatar_url_failure.value.code == HTTPStatus.NOT_FOUND
 
         # Check that this access token has been invalidated.
         channel = self.make_request("GET", "account/whoami", access_token=tok)
@@ -547,8 +560,8 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
     @override_config({"enable_set_displayname": False, "enable_set_avatar_url": False})
     def test_deactivate_erase_account_with_disabled_profile_changes(self) -> None:
         """
-        Test the same erasure process as `test_deactivate_erase_account` above, but have
-        the homeserver configuration disable user ability to update profile data
+        Test that deactivating the user with the 'erase' option will remove existing
+        profile data, even with the Synapse configuration to forbid profile changes
         """
         mxid = self.register_user("kermit", "test")
         user_id = UserID.from_string(mxid)
@@ -560,32 +573,45 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
         # the database directly
         store = self.hs.get_datastores().main
         self.get_success(store.set_profile_displayname(user_id, "Kermit the Frog"))
+        self.get_success(
+            store.set_profile_avatar_url(user_id, "http://test/Kermit.jpg")
+        )
 
+        # Verify it is set
         self.assertEqual(
             (self.get_success(store.get_profile_displayname(user_id))),
             "Kermit the Frog",
         )
-        self.get_success(
-            store.set_profile_avatar_url(user_id, "http://test/Kermit.jpg")
+        self.assertEqual(
+            self.get_success(profile_handler.get_displayname(user_id)),
+            "Kermit the Frog",
         )
         self.assertEqual(
             (self.get_success(store.get_profile_avatar_url(user_id))),
             "http://test/Kermit.jpg",
         )
+        self.assertEqual(
+            self.get_success(profile_handler.get_avatar_url(user_id)),
+            "http://test/Kermit.jpg",
+        )
 
-        # Request erasure of the user
+        # Deactivate!
         self.deactivate(mxid, tok, erase=True)
 
         # Check that the user has been marked as deactivated.
         self.assertTrue(self.get_success(store.get_user_deactivated_status(mxid)))
 
-        # On deactivation with 'erase', a displayname and avatar_url are set to an empty
-        # string through the handler, but are turned into `None` for the database
-        display_name = self.get_success(profile_handler.get_displayname(user_id))
-        assert display_name is None, f"{display_name}"
+        # On deactivation with 'erase', the entire database row is erased. Both of these
+        # should raise a 404(Not Found) SynapseError
+        display_name_failure = self.get_failure(
+            profile_handler.get_displayname(user_id), SynapseError
+        )
+        assert display_name_failure.value.code == HTTPStatus.NOT_FOUND
 
-        avatar_url = self.get_success(profile_handler.get_avatar_url(user_id))
-        assert avatar_url is None, f"{avatar_url}"
+        avatar_url_failure = self.get_failure(
+            profile_handler.get_avatar_url(user_id), SynapseError
+        )
+        assert avatar_url_failure.value.code == HTTPStatus.NOT_FOUND
 
         # Check that this access token has been invalidated.
         channel = self.make_request("GET", "account/whoami", access_token=tok)
