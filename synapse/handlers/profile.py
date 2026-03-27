@@ -341,6 +341,45 @@ class ProfileHandler:
         if propagate:
             await self._update_join_states(requester, target_user)
 
+    async def delete_profile_upon_deactivation(
+        self,
+        target_user: UserID,
+        requester: Requester,
+        by_admin: bool = False,
+    ) -> None:
+        """
+        Clear the user's profile upon user deactivation (specifically, when user erasure is needed).
+
+        This includes the displayname, avatar_url, all custom profile fields.
+
+        The user directory is NOT updated in any way; it is the caller's responsibility to remove
+        the user from the user directory.
+
+        Rooms' join states are NOT updated in any way; it is the caller's responsibility to soon
+        **leave** the room on the user's behalf, so there's no point sending new join events into
+        rooms to propagate the profile deletion.
+        See the `users_pending_deactivation` table and the associated user parter loop.
+        """
+        if not self.hs.is_mine(target_user):
+            raise SynapseError(400, "User is not hosted on this homeserver")
+
+        # Prevent users from deactivating anyone but themselves,
+        # except for admins who can deactivate anyone.
+        if not by_admin and target_user != requester.user:
+            # It's a little strange to have this check here, but given all the sibling
+            # methods have these checks, it'd be even stranger to be inconsistent and not
+            # have it.
+            raise AuthError(400, "Cannot remove another user's profile")
+
+        await self.store.delete_profile(target_user)
+
+        await self._third_party_rules.on_profile_update(
+            target_user.to_string(),
+            ProfileInfo(None, None),
+            by_admin,
+            deactivation=True,
+        )
+
     @cached()
     async def check_avatar_size_and_mime_type(self, mxc: str) -> bool:
         """Check that the size and content type of the avatar at the given MXC URI are
