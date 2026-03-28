@@ -19,7 +19,7 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from canonicaljson import encode_canonical_json
 
@@ -453,9 +453,13 @@ class ProfileWorkerStore(SQLBaseStore):
             if isinstance(self.database_engine, PostgresEngine):
                 from psycopg2.extras import Json
 
-                db_json_wrapper = Json
+                def db_json_wrapper(value: JsonDict) -> Any:
+                    return Json(value)
+
             else:
-                db_json_wrapper = encode_canonical_json
+
+                def db_json_wrapper(value: JsonDict) -> Any:
+                    return encode_canonical_json(value)
 
             values = {
                 "avatar_url": new_profile.get("avatar_url"),
