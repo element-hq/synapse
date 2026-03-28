@@ -452,15 +452,15 @@ class ProfileWorkerStore(SQLBaseStore):
 
             if isinstance(self.database_engine, PostgresEngine):
                 from psycopg2.extras import Json
-            else:
 
-                def Json(x: JsonDict) -> bytes:
-                    return encode_canonical_json(x)
+                db_json_wrapper = Json
+            else:
+                db_json_wrapper = encode_canonical_json
 
             values = {
                 "avatar_url": new_profile.get("avatar_url"),
                 "displayname": new_profile.get("displayname"),
-                "fields": Json(
+                "fields": db_json_wrapper(
                     {
                         k: v
                         for k, v in new_profile.items()
