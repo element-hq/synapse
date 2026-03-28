@@ -778,6 +778,68 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
+    @unittest.override_config({"experimental_features": {"msc4437_enabled": True}})
+    def test_msc4437_batch_set(self) -> None:
+        new_profile_1 = {
+            "custom_field": "meow",
+            "displayname": "owner",
+            "com.example.field_to_be_removed": 1234,
+        }
+        new_profile_2 = {
+            "custom_field": {"data": True},
+            "displayname": "not owner",
+            "com.example.another_field": ["yes"],
+        }
+        # Test with two objects to ensure adding, removing and modifying fields works
+        for new_profile in (new_profile_1, new_profile_2):
+            channel = self.make_request(
+                "PUT",
+                f"/_matrix/client/unstable/com.beeper.msc4437/profile/{self.owner}",
+                content=new_profile,
+                access_token=self.owner_tok,
+            )
+            self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+            channel = self.make_request(
+                "GET",
+                f"/_matrix/client/v3/profile/{self.owner}",
+            )
+            self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+            self.assertEqual(channel.json_body, new_profile)
+
+    @unittest.override_config({"experimental_features": {"msc4437_enabled": True}})
+    def test_msc4437_set_invalid_field_name(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/com.beeper.msc4437/profile/{self.owner}",
+            content={"[invalid field]": True, "com.example.valid_field": True},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
+
+    @unittest.override_config({"experimental_features": {"msc4437_enabled": True}})
+    def test_msc4437_profile_too_long(self) -> None:
+        extra_length = len(r'{"displayname":"meow","a":""}')
+        max_as = MAX_PROFILE_SIZE - extra_length
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/com.beeper.msc4437/profile/{self.owner}",
+            content={"displayname": "meow", "a": "a" * (max_as + 1)},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/com.beeper.msc4437/profile/{self.owner}",
+            content={"displayname": "meow", "a": "a" * max_as},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
     def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 

@@ -436,6 +436,48 @@ class ProfileWorkerStore(SQLBaseStore):
             "set_profile_avatar_url", set_profile_avatar_url
         )
 
+    async def overwrite_profile(self, user_id: UserID, new_profile: JsonDict) -> None:
+        """
+        Overwrite the entire profile of a user.
+
+        Args:
+            user_id: The user's ID.
+            new_profile: The new profile dictionary.
+        """
+        user_localpart = user_id.localpart
+
+        def overwrite_profile(txn: LoggingTransaction) -> None:
+            if len(encode_canonical_json(new_profile)) > MAX_PROFILE_SIZE:
+                raise StoreError(400, "Profile too large", Codes.PROFILE_TOO_LARGE)
+
+            if isinstance(self.database_engine, PostgresEngine):
+                from psycopg2.extras import Json
+            else:
+
+                def Json(x: JsonDict) -> bytes:
+                    return encode_canonical_json(x)
+
+            values = {
+                "avatar_url": new_profile.get("avatar_url"),
+                "displayname": new_profile.get("displayname"),
+                "fields": Json(
+                    {
+                        k: v
+                        for k, v in new_profile.items()
+                        if k not in ("avatar_url", "displayname")
+                    }
+                ),
+                "full_user_id": user_id.to_string(),
+            }
+            self.db_pool.simple_upsert_txn(
+                txn,
+                table="profiles",
+                keyvalues={"user_id": user_localpart},
+                values=values,
+            )
+
+        await self.db_pool.runInteraction("overwrite_profile", overwrite_profile)
+
     async def set_profile_field(
         self, user_id: UserID, field_name: str, new_value: JsonValue
     ) -> None:
