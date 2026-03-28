@@ -108,6 +108,8 @@ dependencies = [
     # zope-interface is still used by some remaining compatibility code
     "zope-interface>=5.2",
     "aiohttp (>=3.13.3,<4.0.0)",
+    "redis (>=7.4.0,<8.0.0)",
+    "psycopg2 (>=2.9.11,<3.0.0)",
 ]
 
 [project.optional-dependencies]
