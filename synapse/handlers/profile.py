@@ -704,7 +704,8 @@ class ProfileHandler:
 
         old_profile = await self.store.get_profileinfo(target_user)
         new_displayname = new_profile.get("displayname", "")
-        if new_displayname != old_profile.display_name:
+        name_changed = new_displayname != old_profile.display_name
+        if name_changed:
             if not isinstance(new_displayname, str):
                 raise SynapseError(
                     400, "'displayname' must be a string", errcode=Codes.INVALID_PARAM
@@ -725,7 +726,8 @@ class ProfileHandler:
                     )
 
         new_avatar_url = new_profile.get("avatar_url", "")
-        if new_avatar_url != old_profile.avatar_url:
+        avatar_changed = new_avatar_url != old_profile.avatar_url
+        if avatar_changed:
             if not self.hs.config.registration.enable_set_avatar_url:
                 raise SynapseError(
                     400,
@@ -769,7 +771,7 @@ class ProfileHandler:
             target_user.to_string(), profile, by_admin, deactivation=False
         )
 
-        if propagate:
+        if propagate and (name_changed or avatar_changed):
             await self._update_join_states(requester, target_user)
 
     async def _update_join_states(
