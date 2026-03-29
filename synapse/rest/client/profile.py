@@ -110,7 +110,6 @@ class ProfileOverwriteRestServlet(RestServlet):
                 HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
             )
 
-        # Guest users are able to set their own displayname.
         requester = await self.auth.get_user_by_req(request, allow_guest=False)
         user = UserID.from_string(user_id)
         is_admin = await self.auth.is_server_admin(requester)

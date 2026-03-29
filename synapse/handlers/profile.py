@@ -218,7 +218,7 @@ class ProfileHandler:
             raise SynapseError(400, "User is not hosted on this homeserver")
 
         if not by_admin and target_user != requester.user:
-            raise AuthError(400, "Cannot set another user's displayname")
+            raise AuthError(400, "Cannot set another user's profile")
 
         if not by_admin and not self.hs.config.registration.enable_set_displayname:
             profile = await self.store.get_profileinfo(target_user)
@@ -717,18 +717,16 @@ class ProfileHandler:
                 )
 
             if not by_admin and not self.hs.config.registration.enable_set_displayname:
-                profile = await self.store.get_profileinfo(target_user)
-                if profile.display_name:
-                    raise SynapseError(
-                        400,
-                        "Changing display name is disabled on this server",
-                        Codes.FORBIDDEN,
-                    )
+                raise SynapseError(
+                    400,
+                    "Changing display name is disabled on this server",
+                    Codes.FORBIDDEN,
+                )
 
         new_avatar_url = new_profile.get("avatar_url", "")
         avatar_changed = new_avatar_url != old_profile.avatar_url
         if avatar_changed:
-            if not self.hs.config.registration.enable_set_avatar_url:
+            if not by_admin and not self.hs.config.registration.enable_set_avatar_url:
                 raise SynapseError(
                     400,
                     "Changing avatar is disabled on this server",
