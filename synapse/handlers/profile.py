@@ -218,7 +218,7 @@ class ProfileHandler:
             raise SynapseError(400, "User is not hosted on this homeserver")
 
         if not by_admin and target_user != requester.user:
-            raise AuthError(400, "Cannot set another user's profile")
+            raise AuthError(400, "Cannot set another user's displayname")
 
         if not by_admin and not self.hs.config.registration.enable_set_displayname:
             profile = await self.store.get_profileinfo(target_user)
@@ -700,7 +700,7 @@ class ProfileHandler:
             raise SynapseError(400, "User is not hosted on this homeserver")
 
         if not by_admin and target_user != requester.user:
-            raise AuthError(400, "Cannot set another user's displayname")
+            raise AuthError(400, "Cannot set another user's profile")
 
         old_profile = await self.store.get_profileinfo(target_user)
         new_displayname = new_profile.get("displayname", "")
