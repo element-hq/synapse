@@ -55,7 +55,6 @@ from synapse.events.utils import (
     EventClientSerializer,
     SerializeEventConfig,
     format_event_for_client_v2,
-    serialize_event,
 )
 from synapse.handlers.pagination import GetMessagesResult
 from synapse.http.server import HttpServer
@@ -214,6 +213,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
+        self._event_serializer = hs.get_event_client_serializer()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
@@ -285,7 +285,7 @@ class RoomStateEventRestServlet(RestServlet):
             raise SynapseError(404, "Event not found.", errcode=Codes.NOT_FOUND)
 
         if format == "event":
-            event = serialize_event(
+            event = await self._event_serializer.serialize_event(
                 data,
                 self.clock.time_msec(),
                 config=SerializeEventConfig(

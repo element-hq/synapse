@@ -38,17 +38,22 @@ set -e
 # Tag local builds with a dummy registry namespace so that later builds may reference
 # them exactly instead of accidentally pulling from a remote registry.
 #
-# This is important as some storage drivers/types prefer remote images over local
-# (`containerd`) which causes problems as we're testing against some remote image that
-# doesn't include all of the changes that we're trying to test (be it locally or in a PR
-# in CI). This is spawning from a real-world problem where the GitHub runners were
+# This is important as some Docker storage drivers/types prefer remote images over local
+# (like `containerd`) which causes problems as we're testing against some remote image
+# that doesn't include all of the changes that we're trying to test (be it locally or in
+# a PR in CI). This is spawning from a real-world problem where the GitHub runners were
 # updated to use Docker Engine 29.0.0+ which uses `containerd` by default for new
 # installations.
+#
+# XXX: If the Docker image name changes, don't forget to update
+# `.github/workflows/push_complement_image.yml` as well
 LOCAL_IMAGE_NAMESPACE=localhost
 
 # The image tags for how these images will be stored in the registry
 SYNAPSE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse"
 SYNAPSE_WORKERS_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-workers"
+# XXX: If the Docker image name changes, don't forget to update
+# `.github/workflows/push_complement_image.yml` as well
 COMPLEMENT_SYNAPSE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/complement-synapse"
 
 SYNAPSE_EDITABLE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-editable"
@@ -155,8 +160,18 @@ main() {
   if [[ -z "$COMPLEMENT_DIR" ]]; then
     COMPLEMENT_REF=${COMPLEMENT_REF:-main}
     echo "COMPLEMENT_DIR not set. Fetching Complement checkout from ${COMPLEMENT_REF}..."
-    wget -Nq https://github.com/matrix-org/complement/archive/${COMPLEMENT_REF}.tar.gz
+    
+    # Download the Complement checkout at the specified ref.
+    wget -q https://github.com/matrix-org/complement/archive/${COMPLEMENT_REF}.tar.gz
+
+    # Delete the existing complement checkout. Otherwise we'll end up with stale
+    # test files after they're deleted server-side, and `tar` will not delete
+    # old files.
+    rm -rf complement-${COMPLEMENT_REF}
+
+    # Extract the checkout.
     tar -xzf ${COMPLEMENT_REF}.tar.gz
+
     COMPLEMENT_DIR=complement-${COMPLEMENT_REF}
     echo "Checkout available at 'complement-${COMPLEMENT_REF}'"
   fi

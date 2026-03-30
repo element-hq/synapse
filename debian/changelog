@@ -1,8 +1,19 @@
-matrix-synapse-py3 (1.149.1+nmu1) UNRELEASED; urgency=medium
+matrix-synapse-py3 (1.150.0) stable; urgency=medium
 
+  * New synapse release 1.150.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 24 Mar 2026 14:17:04 +0000
+
+matrix-synapse-py3 (1.150.0~rc1) stable; urgency=medium
+
+  [ Quentin Gliech ]
   * Change how the systemd journald integration is installed.
+  * Update Poetry used at build time to 2.2.1.
 
- -- Quentin Gliech <packages@matrix.org>  Fri, 20 Feb 2026 19:19:51 +0100
+  [ Synapse Packaging team ]
+  * New synapse release 1.150.0rc1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 17 Mar 2026 14:56:35 +0000
 
 matrix-synapse-py3 (1.149.1) stable; urgency=medium
 

@@ -144,7 +144,7 @@ class VersionsRestServlet(RestServlet):
                     # Implements additional endpoints as described in MSC2432
                     "org.matrix.msc2432": True,
                     # Implements additional endpoints as described in MSC2666
-                    "uk.half-shot.msc2666.query_mutual_rooms": self.config.experimental.msc2666_enabled,
+                    "uk.half-shot.msc2666.query_mutual_rooms.stable": True,
                     # Whether new rooms will be set to encrypted or not (based on presets).
                     "io.element.e2ee_forced.public": self.e2ee_forced_public,
                     "io.element.e2ee_forced.private": self.e2ee_forced_private,
@@ -189,8 +189,6 @@ class VersionsRestServlet(RestServlet):
                             is not None
                         )
                     ),
-                    # MSC4388: Secure out-of-band channel for sign in with QR
-                    "io.element.msc4388": (self.config.experimental.msc4388_enabled),
                     # MSC4140: Delayed events
                     "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
                     # Simplified sliding sync

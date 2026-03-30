@@ -1,0 +1,1 @@
+Ensure old Complement test files are removed when downloading a Complement checkout via `./scripts-dev/complement.sh`.

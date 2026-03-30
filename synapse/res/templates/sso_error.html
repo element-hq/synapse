@@ -20,6 +20,27 @@
         <header>
             <p>You are not allowed to log in here.</p>
         </header>
+{% elif error == "provider_unavailable" %}
+        <header>
+            <h1>This login provider is unavailable right now.</h1>
+            <p>
+                There has been a problem which means that it's not currently possible
+                to log in with that provider.
+            </p>
+            <p>
+                If your account has a password, or is connected to other login providers,
+                try those methods to log in.
+            </p>
+            <p>
+                This issue could be temporary, so please try again later.
+                If the problem persists, please contact the server's administrator.
+            </p>
+            <small>
+                If you are the administrator of this server, please check the server logs for more information.
+                This could be caused by a server misconfiguration or an issue with the provider.
+            </small>
+        </header>
+        {% include "sso_footer.html" without context %}
 {% else %}
         <header>
             <h1>There was an error</h1>

@@ -653,6 +653,8 @@ This setting has the following sub-options:
 
 * `endpoint` (string): The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted. Defaults to `"http://localhost:8080"`.
 
+* `force_http2` (boolean): Force HTTP/2 over plaintext (H2C) when connecting to MAS. MAS supports this natively, but a reverse proxy between Synapse and MAS may not. Defaults to `false`.
+
 * `secret` (string|null): A shared secret that will be used to authenticate requests from and to MAS.
 
 * `secret_path` (string|null): Alternative to `secret`, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
