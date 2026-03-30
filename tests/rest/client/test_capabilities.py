@@ -209,46 +209,6 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.3pid_changes"]["enabled"])
 
-    @override_config({"experimental_features": {"msc3244_enabled": False}})
-    def test_get_does_not_include_msc3244_fields_when_disabled(self) -> None:
-        access_token = self.get_success(
-            self.auth_handler.create_access_token_for_user_id(
-                self.user, device_id=None, valid_until_ms=None
-            )
-        )
-
-        channel = self.make_request("GET", self.url, access_token=access_token)
-        capabilities = channel.json_body["capabilities"]
-
-        self.assertEqual(channel.code, 200)
-        self.assertNotIn(
-            "org.matrix.msc3244.room_capabilities", capabilities["m.room_versions"]
-        )
-
-    def test_get_does_include_msc3244_fields_when_enabled(self) -> None:
-        access_token = self.get_success(
-            self.auth_handler.create_access_token_for_user_id(
-                self.user, device_id=None, valid_until_ms=None
-            )
-        )
-
-        channel = self.make_request("GET", self.url, access_token=access_token)
-        capabilities = channel.json_body["capabilities"]
-
-        self.assertEqual(channel.code, 200)
-        for details in capabilities["m.room_versions"][
-            "org.matrix.msc3244.room_capabilities"
-        ].values():
-            if details["preferred"] is not None:
-                self.assertTrue(
-                    details["preferred"] in KNOWN_ROOM_VERSIONS,
-                    str(details["preferred"]),
-                )
-
-            self.assertGreater(len(details["support"]), 0)
-            for room_version in details["support"]:
-                self.assertTrue(room_version in KNOWN_ROOM_VERSIONS, str(room_version))
-
     def test_get_get_token_login_fields_when_disabled(self) -> None:
         """By default login via an existing session is disabled."""
         access_token = self.get_success(

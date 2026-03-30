@@ -10,7 +10,6 @@ alias block='{ set +x; } 2>/dev/null; func() { echo "::group::$*"; set -x; }; fu
 alias endblock='{ set +x; } 2>/dev/null; func() { echo "::endgroup::"; set -x; }; func'
 
 block Install Complement Dependencies
-  sudo apt-get -qq update && sudo apt-get install -qqy libolm3 libolm-dev
   go install -v github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest
 endblock
 

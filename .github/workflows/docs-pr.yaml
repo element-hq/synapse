@@ -24,7 +24,7 @@ jobs:
           mdbook-version: '0.5.2'
 
       - name: Setup python
-        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.x"
 
@@ -39,7 +39,7 @@ jobs:
           cp book/welcome_and_overview.html book/index.html
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: book
           path: book

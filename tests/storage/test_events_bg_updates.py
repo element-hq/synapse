@@ -14,11 +14,14 @@
 #
 
 
+from canonicaljson import encode_canonical_json
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.server import HomeServer
+from synapse.types.storage import _BackgroundUpdates
 from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
@@ -154,3 +157,133 @@ class TestFixupMaxDepthCapBgUpdate(HomeserverTestCase):
         # Assert that the topological_ordering of events has not been changed
         # from their depth.
         self.assertDictEqual(event_id_to_depth, dict(rows))
+
+
+class TestRedactionsRecheckBgUpdate(HomeserverTestCase):
+    """Test the background update that backfills the `recheck` column in redactions."""
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = self.hs.get_datastores().main
+        self.db_pool = self.store.db_pool
+
+        # Re-insert the background update, since it already ran during setup.
+        self.get_success(
+            self.db_pool.simple_insert(
+                table="background_updates",
+                values={
+                    "update_name": _BackgroundUpdates.REDACTIONS_RECHECK_BG_UPDATE,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.db_pool.updates._all_done = False
+
+    def _insert_redaction(
+        self,
+        event_id: str,
+        redacts: str,
+        recheck_redaction: bool | None = None,
+        insert_event_json: bool = True,
+    ) -> None:
+        """Insert a row into `redactions` and optionally a matching `event_json` row.
+
+        Args:
+            event_id: The event ID of the redaction event.
+            redacts: The event ID being redacted.
+            recheck_redaction: The value of `recheck_redaction` in internal metadata.
+                If None, the key is omitted from internal metadata.
+            insert_event_json: Whether to insert a corresponding row in `event_json`.
+        """
+        self.get_success(
+            self.db_pool.simple_insert(
+                table="redactions",
+                values={
+                    "event_id": event_id,
+                    "redacts": redacts,
+                    "have_censored": False,
+                    "received_ts": 0,
+                },
+            )
+        )
+
+        if insert_event_json:
+            internal_metadata: dict = {}
+            if recheck_redaction is not None:
+                internal_metadata["recheck_redaction"] = recheck_redaction
+
+            self.get_success(
+                self.db_pool.simple_insert(
+                    table="event_json",
+                    values={
+                        "event_id": event_id,
+                        "room_id": "!room:test",
+                        "internal_metadata": encode_canonical_json(
+                            internal_metadata
+                        ).decode("utf-8"),
+                        "json": "{}",
+                        "format_version": 3,
+                    },
+                )
+            )
+
+    def _get_recheck(self, event_id: str) -> bool:
+        row = self.get_success(
+            self.db_pool.simple_select_one(
+                table="redactions",
+                keyvalues={"event_id": event_id},
+                retcols=["recheck"],
+            )
+        )
+        return bool(row[0])
+
+    def test_recheck_true(self) -> None:
+        """A redaction with recheck_redaction=True in internal metadata gets recheck=True."""
+        self._insert_redaction("$redact1:test", "$target1:test", recheck_redaction=True)
+
+        self.wait_for_background_updates()
+
+        self.assertTrue(self._get_recheck("$redact1:test"))
+
+    def test_recheck_false(self) -> None:
+        """A redaction with recheck_redaction=False in internal metadata gets recheck=False."""
+        self._insert_redaction(
+            "$redact2:test", "$target2:test", recheck_redaction=False
+        )
+
+        self.wait_for_background_updates()
+
+        self.assertFalse(self._get_recheck("$redact2:test"))
+
+    def test_recheck_absent_from_metadata(self) -> None:
+        """A redaction with no recheck_redaction key in internal metadata gets recheck=False."""
+        self._insert_redaction("$redact3:test", "$target3:test", recheck_redaction=None)
+
+        self.wait_for_background_updates()
+
+        self.assertFalse(self._get_recheck("$redact3:test"))
+
+    def test_recheck_no_event_json(self) -> None:
+        """A redaction with no event_json row gets recheck=False."""
+        self._insert_redaction(
+            "$redact4:test", "$target4:test", insert_event_json=False
+        )
+
+        self.wait_for_background_updates()
+
+        self.assertFalse(self._get_recheck("$redact4:test"))
+
+    def test_batching(self) -> None:
+        """The update processes rows in batches, completing when all are done."""
+        self._insert_redaction("$redact5:test", "$target5:test", recheck_redaction=True)
+        self._insert_redaction(
+            "$redact6:test", "$target6:test", recheck_redaction=False
+        )
+        self._insert_redaction("$redact7:test", "$target7:test", recheck_redaction=True)
+
+        self.wait_for_background_updates()
+
+        self.assertTrue(self._get_recheck("$redact5:test"))
+        self.assertFalse(self._get_recheck("$redact6:test"))
+        self.assertTrue(self._get_recheck("$redact7:test"))

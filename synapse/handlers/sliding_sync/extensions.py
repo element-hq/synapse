@@ -14,10 +14,10 @@
 
 import itertools
 import logging
+from collections import ChainMap
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
-    ChainMap,
     Mapping,
     MutableMapping,
     Sequence,
