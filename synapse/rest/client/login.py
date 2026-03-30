@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
 import logging
 import re
 from typing import (
@@ -42,7 +41,7 @@ from synapse.api.errors import (
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.api.urls import CLIENT_API_PREFIX
 from synapse.appservice import ApplicationService
-from synapse.handlers.sso import SsoIdentityProvider
+from synapse.handlers.sso import SsoIdentityProvider, SsoSetupError
 from synapse.http import get_request_uri
 from synapse.http.server import HttpServer, finish_request
 from synapse.http.servlet import (
@@ -679,11 +678,26 @@ class SsoRedirectServlet(RestServlet):
 
         args: dict[bytes, list[bytes]] = request.args  # type: ignore
         client_redirect_url = parse_bytes_from_args(args, "redirectUrl", required=True)
-        sso_url = await self._sso_handler.handle_redirect_request(
-            request,
-            client_redirect_url,
-            idp_id,
-        )
+        try:
+            sso_url = await self._sso_handler.handle_redirect_request(
+                request,
+                client_redirect_url,
+                idp_id,
+            )
+        except SsoSetupError:
+            logger.exception(
+                "Login redirect failed because SSO/identity provider %r unavailable",
+                idp_id,
+            )
+            # Show an error page that is slightly more friendly than JSON
+            self._sso_handler.render_error(
+                request,
+                "provider_unavailable",
+                "This login provider is currently unavailable on this homeserver.",
+                code=503,
+            )
+            return
+
         logger.info("Redirecting to %s", sso_url)
         request.redirect(sso_url)
         finish_request(request)

@@ -20,9 +20,8 @@
 #
 
 import unittest as stdlib_unittest
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
-import attr
 from parameterized import parameterized
 
 from synapse.api.constants import EventContentFields
@@ -38,10 +37,14 @@ from synapse.events.utils import (
     make_config_for_admin,
     maybe_upsert_event_field,
     prune_event,
-    serialize_event,
 )
 from synapse.types import JsonDict, create_requester
 from synapse.util.frozenutils import freeze
+
+from tests.unittest import HomeserverTestCase
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 
 def MockEvent(**kwargs: Any) -> EventBase:
@@ -553,11 +556,6 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
             room_version=RoomVersions.V10,
         )
 
-        # Create a new room version.
-        msc3389_room_ver = attr.evolve(
-            RoomVersions.V10, msc3389_relation_redactions=True
-        )
-
         self.run_test(
             {
                 "type": "m.room.message",
@@ -581,7 +579,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "signatures": {},
                 "unsigned": {},
             },
-            room_version=msc3389_room_ver,
+            room_version=RoomVersions.MSC3389v10,
         )
 
         # If the field is not an object, redact it.
@@ -599,7 +597,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "signatures": {},
                 "unsigned": {},
             },
-            room_version=msc3389_room_ver,
+            room_version=RoomVersions.MSC3389v10,
         )
 
         # If the m.relates_to property would be empty, redact it.
@@ -614,7 +612,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "signatures": {},
                 "unsigned": {},
             },
-            room_version=msc3389_room_ver,
+            room_version=RoomVersions.MSC3389v10,
         )
 
 
@@ -644,19 +642,27 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
         self.assertEqual(cloned.internal_metadata.txn_id, "txn")
 
 
-class SerializeEventTestCase(stdlib_unittest.TestCase):
+class SerializeEventTestCase(HomeserverTestCase):
+    def prepare(self, reactor: Any, clock: Any, hs: "HomeServer") -> None:
+        self._event_serializer = hs.get_event_client_serializer()
+
     def serialize(
         self,
         ev: EventBase,
         fields: list[str] | None,
         include_admin_metadata: bool = False,
+        redaction_map: Mapping[str, EventBase] | None = None,
     ) -> JsonDict:
-        return serialize_event(
-            ev,
-            1479807801915,
-            config=SerializeEventConfig(
-                only_event_fields=fields, include_admin_metadata=include_admin_metadata
-            ),
+        return self.get_success(
+            self._event_serializer.serialize_event(
+                ev,
+                1479807801915,
+                config=SerializeEventConfig(
+                    only_event_fields=fields,
+                    include_admin_metadata=include_admin_metadata,
+                ),
+                redaction_map=redaction_map,
+            )
         )
 
     def test_event_fields_works_with_keys(self) -> None:
@@ -770,9 +776,8 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
 
     def test_event_fields_fail_if_fields_not_str(self) -> None:
         with self.assertRaises(TypeError):
-            self.serialize(
-                MockEvent(room_id="!foo:bar", content={"foo": "bar"}),
-                ["room_id", 4],  # type: ignore[list-item]
+            SerializeEventConfig(
+                only_event_fields=["room_id", 4],  # type: ignore[list-item]
             )
 
     def test_default_serialize_config_excludes_admin_metadata(self) -> None:
@@ -872,6 +877,52 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
             admin_config.include_stripped_room_state,
         )
         self.assertTrue(admin_config.include_admin_metadata)
+
+    def test_redacted_because_is_filtered_out(self) -> None:
+        """If an event's unsigned dict has a `redacted_by` field, then the
+        `redacted_because` should be filtered out if not specified in
+        `only_event_fields`."""
+
+        redaction_id = "$redaction_event_id"
+
+        event = MockEvent(
+            type="foo",
+            event_id="test",
+            room_id="!foo:bar",
+            content={"foo": "bar"},
+        )
+        event.internal_metadata.redacted_by = redaction_id
+
+        redaction_event = MockEvent(
+            type="m.room.redaction",
+            event_id=redaction_id,
+            content={"redacts": "test"},
+        )
+
+        self.assertEqual(
+            self.serialize(
+                event,
+                ["content.foo"],
+                redaction_map={redaction_id: redaction_event},
+            ),
+            {
+                "content": {"foo": "bar"},
+            },
+        )
+
+        self.assertEqual(
+            self.serialize(
+                event,
+                ["content.foo", "unsigned.redacted_because"],
+                redaction_map={redaction_id: redaction_event},
+            ),
+            {
+                "content": {"foo": "bar"},
+                "unsigned": {
+                    "redacted_because": self.serialize(redaction_event, fields=None),
+                },
+            },
+        )
 
 
 class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):

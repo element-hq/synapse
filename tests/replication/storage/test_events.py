@@ -101,11 +101,10 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
 
         msg_dict = msg.get_dict()
         msg_dict["content"] = {}
-        msg_dict["unsigned"]["redacted_by"] = redaction.event_id
-        msg_dict["unsigned"]["redacted_because"] = redaction
         redacted = make_event_from_dict(
             msg_dict, internal_metadata_dict=msg.internal_metadata.get_dict()
         )
+        redacted.internal_metadata.redacted_by = redaction.event_id
         self.check(
             "get_event", [msg.event_id], redacted, asserter=self.assertEventsEqual
         )
@@ -125,11 +124,10 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
 
         msg_dict = msg.get_dict()
         msg_dict["content"] = {}
-        msg_dict["unsigned"]["redacted_by"] = redaction.event_id
-        msg_dict["unsigned"]["redacted_because"] = redaction
         redacted = make_event_from_dict(
             msg_dict, internal_metadata_dict=msg.internal_metadata.get_dict()
         )
+        redacted.internal_metadata.redacted_by = redaction.event_id
         self.check(
             "get_event", [msg.event_id], redacted, asserter=self.assertEventsEqual
         )
