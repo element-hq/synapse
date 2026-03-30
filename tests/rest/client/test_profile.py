@@ -655,6 +655,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         # ref: https://github.com/twisted/twisted/issues/12482
         # To remove this, we would need to fix the above issue and
         # update, including in olddeps (so several years' wait).
+        # test_msc4437_profile_too_long has the same hack
         sql_logger = logging.getLogger("synapse.storage.SQL")
         sql_logger_was_disabled = sql_logger.disabled
         sql_logger.disabled = True
@@ -820,25 +821,37 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     @unittest.override_config({"experimental_features": {"msc4437_enabled": True}})
     def test_msc4437_profile_too_long(self) -> None:
-        extra_length = len(r'{"displayname":"meow","a":""}')
-        max_as = MAX_PROFILE_SIZE - extra_length
+        # FIXME: Because we emit huge SQL log lines and trial can't handle these,
+        # sometimes (flakily) failing the test run,
+        # disable SQL logging for this test.
+        # ref: https://github.com/twisted/twisted/issues/12482
+        # To remove this, we would need to fix the above issue and
+        # update, including in olddeps (so several years' wait).
+        # test_set_custom_field_profile_too_long has the same hack
+        sql_logger = logging.getLogger("synapse.storage.SQL")
+        sql_logger_was_disabled = sql_logger.disabled
+        sql_logger.disabled = True
+        try:
+            extra_length = len(r'{"displayname":"meow","a":""}')
+            max_as = MAX_PROFILE_SIZE - extra_length
+            channel = self.make_request(
+                "PUT",
+                f"/_matrix/client/unstable/com.beeper.msc4437/profile/{self.owner}",
+                content={"displayname": "meow", "a": "a" * (max_as + 1)},
+                access_token=self.owner_tok,
+            )
+            self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+            self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
 
-        channel = self.make_request(
-            "PUT",
-            f"/_matrix/client/unstable/com.beeper.msc4437/profile/{self.owner}",
-            content={"displayname": "meow", "a": "a" * (max_as + 1)},
-            access_token=self.owner_tok,
-        )
-        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
-        self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
-
-        channel = self.make_request(
-            "PUT",
-            f"/_matrix/client/unstable/com.beeper.msc4437/profile/{self.owner}",
-            content={"displayname": "meow", "a": "a" * max_as},
-            access_token=self.owner_tok,
-        )
-        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+            channel = self.make_request(
+                "PUT",
+                f"/_matrix/client/unstable/com.beeper.msc4437/profile/{self.owner}",
+                content={"displayname": "meow", "a": "a" * max_as},
+                access_token=self.owner_tok,
+            )
+            self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        finally:
+            sql_logger.disabled = sql_logger_was_disabled
 
     def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
