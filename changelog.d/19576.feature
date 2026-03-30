@@ -1,1 +1,1 @@
-Unprefix room_version & encryption from hierarchy API.
+Stabilize `room_version` and `encryption` fields in the space/room `/hierarchy` API (part of [MSC3266](https://github.com/matrix-org/matrix-spec-proposals/pull/3266)).
