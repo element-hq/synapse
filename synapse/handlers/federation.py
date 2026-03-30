@@ -106,6 +106,9 @@ backfill_processing_before_timer = Histogram(
 
 
 NUMBER_OF_EVENTS_TO_BACKFILL = 100
+"""
+The number of events we try to backfill from other servers in a single request.
+"""
 
 
 # TODO: We can refactor this away now that there is only one backfill point again
