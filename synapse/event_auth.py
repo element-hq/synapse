@@ -60,7 +60,6 @@ from synapse.api.room_versions import (
     KNOWN_ROOM_VERSIONS,
     EventFormatVersions,
     RoomVersion,
-    RoomVersions,
 )
 from synapse.events import is_creator
 from synapse.state import CREATE_KEY
@@ -383,25 +382,6 @@ def check_state_dependent_auth_rules(
     logger.debug("Allowing! %s", event)
 
 
-# Set of room versions where Synapse did not apply event key size limits
-# in bytes, but rather in codepoints.
-# In these room versions, we are more lenient with event size validation.
-LENIENT_EVENT_BYTE_LIMITS_ROOM_VERSIONS = {
-    RoomVersions.V1,
-    RoomVersions.V2,
-    RoomVersions.V3,
-    RoomVersions.V4,
-    RoomVersions.V5,
-    RoomVersions.V6,
-    RoomVersions.V7,
-    RoomVersions.V8,
-    RoomVersions.V9,
-    RoomVersions.V10,
-    RoomVersions.MSC1767v10,
-    RoomVersions.MSC3757v10,
-}
-
-
 def _check_size_limits(event: "EventBase") -> None:
     """
     Checks the size limits in a PDU.
@@ -440,9 +420,7 @@ def _check_size_limits(event: "EventBase") -> None:
     if len(event.event_id) > 255:
         raise EventSizeError("'event_id' too large", unpersistable=True)
 
-    strict_byte_limits = (
-        event.room_version not in LENIENT_EVENT_BYTE_LIMITS_ROOM_VERSIONS
-    )
+    strict_byte_limits = event.room_version.strict_event_byte_limits_room_versions
 
     # Byte size check: if these fail, then be lenient to avoid breaking rooms.
     if len(event.user_id.encode("utf-8")) > 255:

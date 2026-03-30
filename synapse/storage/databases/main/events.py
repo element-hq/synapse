@@ -2944,6 +2944,7 @@ class PersistEventsStore:
             values={
                 "redacts": event.redacts,
                 "received_ts": self._clock.time_msec(),
+                "recheck": event.internal_metadata.need_to_check_redaction(),
             },
         )
 
