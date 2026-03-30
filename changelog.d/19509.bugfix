@@ -1,0 +1,1 @@
+Allow Synapse to start up even when discovery fails for an OpenID Connect provider.

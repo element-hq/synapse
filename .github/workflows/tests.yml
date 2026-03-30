@@ -744,6 +744,12 @@ jobs:
       - name: Formatted sanity check Complement test logs
         # Always run this step if we attempted to run the Complement tests.
         if: always() && steps.run_sanity_check_complement_image_test.outcome != 'skipped'
+        # We do not hide successful tests in `gotestfmt` here as the list of sanity
+        # check tests is so short. Feel free to change this when we get more tests.
+        #
+        # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
+        # it derives several values under `$settings` and passes them to our
+        # custom `.ci/complement_package.gotpl` template to render the output.
         run: cat /tmp/gotest-sanity-check-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
 
       - name: Run Complement Tests
@@ -764,10 +770,15 @@ jobs:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
 
-      - name: Formatted Complement test logs
+      - name: Formatted Complement test logs (only failing are shown)
         # Always run this step if we attempted to run the Complement tests.
         if: always() && steps.run_complement_tests.outcome != 'skipped'
-        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
+        # Hide successful tests in order to reduce the verbosity of the otherwise very large output.
+        #
+        # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
+        # it derives several values under `$settings` and passes them to our
+        # custom `.ci/complement_package.gotpl` template to render the output.
+        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
 
       - name: Run in-repo Complement Tests
         id: run_in_repo_complement_tests
@@ -787,10 +798,15 @@ jobs:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
 
-      - name: Formatted in-repo Complement test logs
+      - name: Formatted in-repo Complement test logs (only failing are shown)
         # Always run this step if we attempted to run the Complement tests.
         if: always() && steps.run_in_repo_complement_tests.outcome != 'skipped'
-        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
+        # Hide successful tests in order to reduce the verbosity of the otherwise very large output.
+        #
+        # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
+        # it derives several values under `$settings` and passes them to our
+        # custom `.ci/complement_package.gotpl` template to render the output.
+        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
 
   cargo-test:
     if: ${{ needs.changes.outputs.rust == 'true' }}

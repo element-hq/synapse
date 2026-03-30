@@ -477,8 +477,7 @@ class ExperimentalConfig(Config):
         self.msc1767_enabled: bool = experimental.get("msc1767_enabled", False)
         if self.msc1767_enabled:
             # Enable room version (and thus applicable push rules from MSC3931/3932)
-            version_id = RoomVersions.MSC1767v10.identifier
-            KNOWN_ROOM_VERSIONS[version_id] = RoomVersions.MSC1767v10
+            KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC1767v10)
 
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
@@ -538,9 +537,9 @@ class ExperimentalConfig(Config):
         # See: https://github.com/element-hq/synapse/issues/19433
         msc4388_mode = experimental.get("msc4388_mode", "off")
 
-        if msc4388_mode not in ["off", "public", "authenticated"]:
+        if msc4388_mode not in ["off", "open", "authenticated"]:
             raise ConfigError(
-                "msc4388_mode must be one of 'off', 'public' or 'authenticated'",
+                "msc4388_mode must be one of 'off', 'open' or 'authenticated'",
                 ("experimental", "msc4388_mode"),
             )
         self.msc4388_enabled: bool = msc4388_mode != "off"
