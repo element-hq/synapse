@@ -23,7 +23,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from synapse.api.constants import ReceiptTypes
-from synapse.api.errors import SynapseError
 from synapse.util.async_helpers import Linearizer
 
 if TYPE_CHECKING:
@@ -55,25 +54,20 @@ class ReadMarkerHandler:
                 user_id, room_id, ReceiptTypes.FULLY_READ
             )
 
-            should_update = True
-            # Get event ordering, this also ensures we know about the event
-            event_ordering = await self.store.get_event_ordering(event_id, room_id)
+            # Ignore subsequent attempts to apply the same read marker.
+            if (
+                existing_read_marker is not None
+                and not isinstance(existing_read_marker.get("event_id"), str)
+                and event_id == existing_read_marker.get("event_id")
+            ):
+                return
 
-            if existing_read_marker:
-                try:
-                    old_event_ordering = await self.store.get_event_ordering(
-                        existing_read_marker["event_id"], room_id
-                    )
-                except SynapseError:
-                    # Old event no longer exists, assume new is ahead. This may
-                    # happen if the old event was removed due to retention.
-                    pass
-                else:
-                    # Only update if the new marker is ahead in the stream
-                    should_update = event_ordering > old_event_ordering
-
-            if should_update:
-                content = {"event_id": event_id}
-                await self.account_data_handler.add_account_data_to_room(
-                    user_id, room_id, ReceiptTypes.FULLY_READ, content
-                )
+            # Update the user's account data with the new read marker.
+            #
+            # Note: it's OK if this update refers to an *older* event than the
+            # previous read marker; a user may have accidentally marked some
+            # messages as read, and want to undo it.
+            content = {"event_id": event_id}
+            await self.account_data_handler.add_account_data_to_room(
+                user_id, room_id, ReceiptTypes.FULLY_READ, content
+            )
