@@ -791,21 +791,21 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
 
     def _quarantine_local_media(self, media_id: str, admin_user_tok: str) -> None:
-            channel = self.make_request(
-                "POST",
-                "/_synapse/admin/v1/media/quarantine/%s/%s"
-                % (
-                    self.server_name,
-                    media_id,
-                ),
-                access_token=admin_user_tok,
-            )
-            self.assertEqual(200, channel.code, msg=channel.json_body)
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/media/quarantine/%s/%s"
+            % (
+                self.server_name,
+                media_id,
+            ),
+            access_token=admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
 
     def _local_upload(self, admin_user_tok: str) -> str:
-            return self.helper.upload_media(
-                SMALL_PNG, tok=admin_user_tok, expect_code=200
-            )["content_uri"][6:].split("/")[1]  # Cut off 'mxc://' and domain
+        return self.helper.upload_media(SMALL_PNG, tok=admin_user_tok, expect_code=200)[
+            "content_uri"
+        ][6:].split("/")[1]  # Cut off 'mxc://' and domain
 
     def test_list_quarantined_media(self) -> None:
         """
@@ -845,7 +845,8 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         self.assertEqual(103, channel.json_body["next_batch"])  # streams start at 2
         for row in channel.json_body["rows"]:
             self.assertIn(
-                row["media_id"], self.media_ids[0:100],
+                row["media_id"],
+                self.media_ids[0:100],
             )
             self.assertEqual(row["origin"], self.server_name)
             self.assertEqual(row["quarantined"], True)
@@ -861,7 +862,8 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         self.assertEqual(106, channel.json_body["next_batch"])
         for row in channel.json_body["rows"]:
             self.assertIn(
-                row["media_id"], self.media_ids[100:],
+                row["media_id"],
+                self.media_ids[100:],
             )
             self.assertEqual(row["origin"], self.server_name)
             self.assertEqual(row["quarantined"], True)

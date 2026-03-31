@@ -176,16 +176,18 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             self._instance_name in hs.config.worker.writers.quarantined_media_changes
         )
 
-        self._quarantined_media_changes_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
-            db_conn=db_conn,
-            db=database,
-            notifier=hs.get_replication_notifier(),
-            stream_name=QuarantinedMediaStream.NAME,
-            server_name=self.server_name,
-            instance_name=self._instance_name,
-            tables=[("quarantined_media_changes", "instance_name", "stream_id")],
-            sequence_name="quarantined_media_id_seq",
-            writers=hs.config.worker.writers.quarantined_media_changes,
+        self._quarantined_media_changes_id_gen: MultiWriterIdGenerator = (
+            MultiWriterIdGenerator(
+                db_conn=db_conn,
+                db=database,
+                notifier=hs.get_replication_notifier(),
+                stream_name=QuarantinedMediaStream.NAME,
+                server_name=self.server_name,
+                instance_name=self._instance_name,
+                tables=[("quarantined_media_changes", "instance_name", "stream_id")],
+                sequence_name="quarantined_media_id_seq",
+                writers=hs.config.worker.writers.quarantined_media_changes,
+            )
         )
 
         # Register a background update to flag already-quarantined media in the quaranine
