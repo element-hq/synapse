@@ -1,0 +1,1 @@
+Reject `device_keys: null` in the request to [`POST /_matrix/client/v3/keys/upload`](https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysupload), as per the spec. This was temporarily allowed as a workaround for misbehaving clients.
