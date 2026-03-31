@@ -842,7 +842,7 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(100, len(channel.json_body["rows"]))
-        self.assertEqual(103, channel.json_body["next_batch"])  # streams start at 2
+        self.assertEqual(101, channel.json_body["next_batch"])
         for row in channel.json_body["rows"]:
             self.assertIn(
                 row["media_id"],
@@ -854,7 +854,7 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         # Page 2 (explicit ?from, using next_batch)
         channel = self.make_request(
             "GET",
-            "/_synapse/admin/v1/media/quarantine_changes?from=103",
+            "/_synapse/admin/v1/media/quarantine_changes?from=101",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
@@ -890,8 +890,8 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
             "/_synapse/admin/v1/media/quarantine_changes?from=-1",
             access_token=self.admin_user_tok,
         )
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(0, len(channel.json_body["rows"]))
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
 
 class QuarantineMediaByIDTestCase(_AdminMediaTests):
