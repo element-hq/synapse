@@ -181,7 +181,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             instance_name=self._instance_name,
             tables=[("quarantined_media_changes", "instance_name", "stream_id")],
             sequence_name="quarantined_media_id_seq",
-            writers=[],  # we don't use `get_current_token` or `get_positions`, per docs
+            writers=hs.config.worker.writers.quarantined_media_changes,
         )
 
         # Register a background update to flag already-quarantined media in the quaranine
@@ -1237,6 +1237,14 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # TODO: Figure out all remote media a user has referenced in a message
 
         return local_media_ids
+
+    async def get_current_quarantined_media_stream_id(self) -> int:
+        """Gets the position of the quarantined media changes stream.
+
+        Returns:
+            int - the current stream ID
+        """
+        return self._quarantined_media_changes_id_gen.get_current_token()
 
     async def get_quarantined_media_changes(
         self, *, from_id: int, to_id: int, limit: int

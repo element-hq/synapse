@@ -245,9 +245,7 @@ class ListQuarantineChanges(RestServlet):
 
         from_id = parse_integer(request, "from", default=0)
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
-        to_id = (
-            from_id + limit
-        )  # somewhat implied, but makes our call to the store easier
+        to_id = await self.store.get_current_quarantined_media_stream_id()
 
         changes = await self.store.get_quarantined_media_changes(
             from_id=from_id,
@@ -264,8 +262,10 @@ class ListQuarantineChanges(RestServlet):
             for c in changes
         ]
 
-        # `from` is exclusive, so don't +1
-        next_batch = max(c.stream_id for c in changes) if changes else from_id
+        # `from` is exclusive, so don't +1 this. We also know the last record will have
+        # the highest stream ID, so use that one. If there aren't any records, just
+        # return the `from` value.
+        next_batch = changes[-1].stream_id if len(changes) > 0 else from_id
 
         return HTTPStatus.OK, {"next_batch": next_batch, "rows": rows}
 

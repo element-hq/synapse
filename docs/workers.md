@@ -576,6 +576,11 @@ configured as stream writer for the `device_lists` stream:
     ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 
+##### The `quarantined_media_changes` stream
+
+[`synapse.app.media_repository`](#synapseappmedia_repository) workers should be 
+configured as stream writers for the `quarantined_media_changes` stream.
+
 #### Restrict outbound federation traffic to a specific set of workers
 
 The
