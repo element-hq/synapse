@@ -15,8 +15,9 @@ _trial_temp*/
 .DS_Store
 __pycache__/
 
-# We do want poetry, cargo and flake lockfiles.
+# We do want poetry, uv, cargo and flake lockfiles.
 !poetry.lock
+!uv.lock
 !Cargo.lock
 !flake.lock
 
