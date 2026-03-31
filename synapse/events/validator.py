@@ -22,7 +22,6 @@ import collections.abc
 from typing import cast
 
 import jsonschema
-from pydantic import Field, StrictBool, StrictStr
 
 from synapse.api.constants import (
     MAX_ALIAS_LENGTH,
@@ -40,10 +39,8 @@ from synapse.events.utils import (
     CANONICALJSON_MIN_INT,
     validate_canonicaljson,
 )
-from synapse.http.servlet import validate_json_object
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
 from synapse.types import EventID, JsonDict, RoomID, StrCollection, UserID
-from synapse.types.rest import RequestBodyModel
 
 
 class EventValidator:
@@ -135,7 +132,18 @@ class EventValidator:
 
         # If the event contains a mentions key, validate it.
         if EventContentFields.MENTIONS in event.content:
-            validate_json_object(event.content[EventContentFields.MENTIONS], Mentions)
+            try:
+                jsonschema.validate(
+                    instance=event.content[EventContentFields.MENTIONS],
+                    schema=MENTIONS_SCHEMA,
+                    cls=MENTIONS_VALIDATOR,
+                )
+            except jsonschema.ValidationError as e:
+                raise SynapseError(
+                    code=400,
+                    msg=e.message,  # noqa: B306
+                    errcode=Codes.BAD_JSON,
+                )
 
     def _validate_retention(self, event: EventBase) -> None:
         """Checks that an event that defines the retention policy for a room respects the
@@ -281,10 +289,16 @@ POWER_LEVELS_SCHEMA = {
     },
 }
 
-
-class Mentions(RequestBodyModel):
-    user_ids: list[StrictStr] = Field(default_factory=list)
-    room: StrictBool = False
+MENTIONS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "user_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "room": {"type": "boolean"},
+    },
+}
 
 
 # This could return something newer than Draft 7, but that's the current "latest"
@@ -292,14 +306,21 @@ class Mentions(RequestBodyModel):
 def _create_validator(schema: JsonDict) -> type[jsonschema.Draft7Validator]:
     validator = jsonschema.validators.validator_for(schema)
 
-    # by default jsonschema does not consider a immutabledict to be an object so
-    # we need to use a custom type checker
+    # by default jsonschema does not consider a immutabledict to be an object, or
+    # a tuple to be an array (frozenutils freezes lists to tuples), so we need a
+    # custom type checker for both.
     # https://python-jsonschema.readthedocs.io/en/stable/validate/?highlight=object#validating-with-additional-types
     type_checker = validator.TYPE_CHECKER.redefine(
         "object", lambda checker, thing: isinstance(thing, collections.abc.Mapping)
+    ).redefine(
+        "array",
+        lambda checker, thing: isinstance(thing, (list, tuple)),
     )
 
     return jsonschema.validators.extend(validator, type_checker=type_checker)
 
 
 POWER_LEVELS_VALIDATOR = _create_validator(POWER_LEVELS_SCHEMA)
+
+MENTIONS_VALIDATOR = _create_validator(MENTIONS_SCHEMA)
+
