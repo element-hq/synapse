@@ -218,6 +218,13 @@ def split_dict_to_fit_to_size(
     if not original_dict:
         return
 
+    # Check if the whole dict fits within the size limit. If it does, we can
+    # skip the splitting logic and just return the original dict.
+    full_size = _len_with_wrapping_object(original_dict, wrapping_object_size)
+    if full_size <= soft_max_size:
+        yield (original_dict, full_size)
+        return
+
     # The current payload being built up. We keep track of the estimated size of
     # the JSON encoding of this payload so that we can decide when to start a
     # new one.
