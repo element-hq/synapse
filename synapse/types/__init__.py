@@ -134,7 +134,22 @@ class AbsentType(Enum):
     def __get_pydantic_core_schema__(
         cls, source_type: object, handler: GetCoreSchemaHandler
     ) -> CoreSchema:
-        return pydantic_core.core_schema.is_instance_schema(cls)
+        def _reject_from_json(v: object) -> "AbsentType":
+            """
+            Reject the JSON value, no matter what it is, since absent values
+            are meant to be ... absent, thus have nothing they can be deserialised
+            from.
+            """
+            raise ValueError("AbsentType cannot be deserialized from JSON")
+
+        # `json_or_python_schema` wrapper needed for Pydantic < 2.10
+        # but can be replaced with just the `is_instance_schema` after that version.
+        return pydantic_core.core_schema.json_or_python_schema(
+            json_schema=pydantic_core.core_schema.no_info_plain_validator_function(
+                _reject_from_json
+            ),
+            python_schema=pydantic_core.core_schema.is_instance_schema(cls),
+        )
 
     def __copy__(self) -> "AbsentType":
         """
