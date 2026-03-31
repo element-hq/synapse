@@ -479,16 +479,21 @@ def split_device_messages_into_edus(
             #
             # Note: `subset` should only have a single entry in it.
             for recipient, messages_by_device in subset_messages.items():
-                # Account for the additional nesting and JSON encoding of the
-                # recipient.
-                # The +7 is for the quotes around the recipient, the
-                # colon and two pairs of curly braces.
-                base_size = base_edu_size + len(recipient) + 7
+                # The header size of the EDU for this recipient, which includes
+                # the size of the recipient user ID and the wrapping structure
+                # for the device messages.
+                subset_base_size = len(
+                    encode_canonical_json(
+                        _create_new_to_device_edu(
+                            sender_user_id, message_type, {recipient: {}}
+                        )
+                    )
+                )
 
                 for subset_messages, _estimated_size in split_dict_to_fit_to_size(
                     messages_by_device,
                     soft_max_size=SOFT_MAX_EDU_SIZE,
-                    wrapping_object_size=base_size,
+                    wrapping_object_size=subset_base_size,
                 ):
                     # Again, the returned subset might be larger than the soft
                     # max size, but we can't split it any further so we have to
@@ -528,14 +533,21 @@ def create_new_to_device_edu_content(
     return content
 
 
+def _create_new_to_device_edu(
+    sender_user_id: str,
+    message_type: str,
+    messages_by_user_then_device: dict[str, dict[str, JsonDict]],
+) -> dict[str, Any]:
+    """Create a new `m.direct_to_device` EDU, returning the full EDU dict."""
+    return {
+        "edu_type": EduTypes.DIRECT_TO_DEVICE,
+        "content": create_new_to_device_edu_content(
+            sender_user_id, message_type, messages_by_user_then_device
+        ),
+    }
+
+
 # The size of an empty EDU with no messages, which we use as the base size when
 # packing messages into EDUs. The size of the sender and message type must be
 # added to this when calculating the size of an EDU.
-_EMPTY_EDU_SIZE = len(
-    encode_canonical_json(
-        {
-            "edu_type": EduTypes.DIRECT_TO_DEVICE,
-            "content": create_new_to_device_edu_content("", "", {}),
-        }
-    )
-)
+_EMPTY_EDU_SIZE = len(encode_canonical_json(_create_new_to_device_edu("", "", {})))

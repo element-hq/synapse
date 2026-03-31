@@ -224,14 +224,17 @@ def split_dict_to_fit_to_size(
     current_payload = _DictSplitterState(subset={}, estimated_size=wrapping_object_size)
 
     for key, payload in original_dict.items():
-        # Estimate size of this entry, accounting for JSON encoding of the key
-        # and value, plus the colon
-        payload_size = len(encode_canonical_json(payload)) + len(key) + 3
+        current_payload.subset[key] = payload
+        current_size = _len_with_wrapping_object(
+            current_payload.subset, wrapping_object_size
+        )
 
-        if current_payload.estimated_size + payload_size > soft_max_size:
-            # This message doesn't fit in the current EDU, start a new one
-            # (unless the current payload is already empty)
-            if current_payload.subset:
+        if current_size > soft_max_size:
+            # We've exceeded the size limit, so we need to start a new payload. We pop
+            # the current entry from the payload and yield the previous payload, then
+            # start a new payload with just the current entry.
+            if len(current_payload.subset) > 1:
+                current_payload.subset.pop(key)
                 yield current_payload.subset, current_payload.estimated_size
 
                 current_payload = _DictSplitterState(
@@ -239,13 +242,27 @@ def split_dict_to_fit_to_size(
                     estimated_size=wrapping_object_size,
                 )
 
-        if current_payload.subset:
-            # account for comma if this isn't the first entry
-            payload_size += 1
+                # Recalculate the current size with just the current entry.
+                current_size = _len_with_wrapping_object(
+                    {key: payload}, wrapping_object_size
+                )
 
         current_payload.subset[key] = payload
-        current_payload.estimated_size += payload_size
+        current_payload.estimated_size = current_size
 
     if current_payload.subset:
         # yield the final payload if it's non-empty
         yield current_payload.subset, current_payload.estimated_size
+
+
+def _len_with_wrapping_object(payload: Any, wrapping_object_size: int) -> int:
+    """Helper function to calculate the size of a payload when encoded as JSON,
+    including any wrapping structure."""
+    return (
+        len(encode_canonical_json(payload))
+        + wrapping_object_size
+        # account for the curly braces of the dict itself, which are
+        # included in the size of the subset but not in the size of the
+        # payload
+        - 2
+    )
