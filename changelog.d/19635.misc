@@ -1,0 +1,1 @@
+Allow clients to set their user's `m.fully_read` marker back to older events.
