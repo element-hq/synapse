@@ -231,7 +231,10 @@ class UnquarantineMediaByID(RestServlet):
 
 
 class ListQuarantineChanges(RestServlet):
-    """Lists the quarantine changes to media."""
+    """Lists the quarantine changes to media.
+
+    Uses the pagination format described by https://spec.matrix.org/v1.18/appendices/#pagination
+    """
 
     PATTERNS = admin_patterns("/media/quarantine_changes$")
 

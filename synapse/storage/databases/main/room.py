@@ -106,7 +106,7 @@ class RoomStats(LargestRoomStats):
 
 @dataclass(frozen=True)
 class QuarantinedMediaUpdate:
-    stream_id: int
+    stream_id: int  # for the quarantined_media_changes stream
     origin: str
     media_id: str
     quarantined: bool
@@ -210,8 +210,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         some point. Media which isn't quarantined has not changed state (as far as
         this function can tell).
 
-        When media was quarantined is not recorded, so this uses the current time as
-        the time when the change happened.
+        When media was quarantined is not recorded, so this inserts as if the media was
+        quarantined at the current time.
 
         Further, due to lack of timestamp or history, media which was quarantined then
         unquarantined will not be picked up by this background task.

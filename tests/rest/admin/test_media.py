@@ -760,6 +760,8 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.server_name = hs.hostname
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
 
     def test_no_auth(self) -> None:
         """
@@ -813,9 +815,6 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         We can't really test that remote media is quarantined, but we can test that local
         media is.
         """
-        self.admin_user = self.register_user("admin", "pass", admin=True)
-        self.admin_user_tok = self.login("admin", "pass")
-
         # Upload 105 media objects to test multiple pages
         self.media_ids = [self._local_upload(self.admin_user_tok) for _ in range(105)]
 
@@ -854,7 +853,7 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         # Page 2 (explicit ?from, using next_batch)
         channel = self.make_request(
             "GET",
-            "/_synapse/admin/v1/media/quarantine_changes?from=101",
+            f"/_synapse/admin/v1/media/quarantine_changes?from={channel.json_body['next_batch']}",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
@@ -872,9 +871,6 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         """
         Ensure out of bounds requests are handled gracefully.
         """
-        self.admin_user = self.register_user("admin", "pass", admin=True)
-        self.admin_user_tok = self.login("admin", "pass")
-
         # Page that's very much out of range, so should have no results
         channel = self.make_request(
             "GET",
@@ -883,6 +879,7 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(0, len(channel.json_body["rows"]))
+        self.assertEqual(900000, channel.json_body["next_batch"])
 
         # The same, but negative
         channel = self.make_request(

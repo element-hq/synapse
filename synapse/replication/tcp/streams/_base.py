@@ -814,6 +814,9 @@ class StickyEventsStream(_StreamFromIdGen):
 class QuarantinedMediaStreamRow:
     """Row for QuarantinedMediaStream"""
 
+    # We store the origin and media_id as media is scoped to the origin and are uniquely
+    # identified by (origin, media_id).
+
     origin: str
     media_id: str
     quarantined: bool

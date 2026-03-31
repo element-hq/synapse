@@ -20,6 +20,7 @@ CREATE TABLE quarantined_media_changes (
     instance_name TEXT NOT NULL,
 
     -- Media origin. NULL if local media.
+    -- We store the origin and media_id as media is scoped to the origin and are uniquely identified by (origin, media_id).
     origin TEXT NULL,
 
     -- Media ID at the origin.
