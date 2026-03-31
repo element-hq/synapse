@@ -323,4 +323,3 @@ def _create_validator(schema: JsonDict) -> type[jsonschema.Draft7Validator]:
 POWER_LEVELS_VALIDATOR = _create_validator(POWER_LEVELS_SCHEMA)
 
 MENTIONS_VALIDATOR = _create_validator(MENTIONS_SCHEMA)
-
