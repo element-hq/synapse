@@ -172,6 +172,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             writers=["master"],
         )
 
+        self._can_write_quarantined_media_changes = (
+            self._instance_name in hs.config.worker.writers.quarantined_media_changes
+        )
+
         self._quarantined_media_changes_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
             db_conn=db_conn,
             db=database,
@@ -1277,6 +1281,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             SELECT stream_id, origin, media_id, quarantined
             FROM quarantined_media_changes
             WHERE ? < stream_id AND stream_id <= ?
+            ORDER BY stream_id ASC
             LIMIT ?
             """,
             (from_id, to_id, limit),
@@ -1305,6 +1310,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 may be None if the media is local.
             quarantined: Whether the media is being quarantined or unquarantined.
         """
+        assert self._can_write_quarantined_media_changes
         medias_with_stream_ids = zip(
             origins_and_media_ids,
             self._quarantined_media_changes_id_gen.get_next_mult_txn(
