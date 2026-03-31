@@ -228,7 +228,7 @@ class RoomPolicyHandler:
             signature = await self._federation_client.ask_policy_server_to_sign_event(
                 policy_server.server_name,
                 event,
-                timeout=3000,
+                timeout=30000,
             )
             # TODO: We can *probably* remove this when we remove unstable MSC4284 support.
             # The server *should* be returning either a signature or an error, but there could
