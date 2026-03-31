@@ -250,7 +250,10 @@ Response:
 ## Listing quarantined media changes
 
 When media is quarantined or unquarantined, a change record is created in the 
-database. This API returns those change records.
+database. This API returns those change records in the order they were created.
+
+Each page has a maximum of 100 records. The first page has the oldest records, 
+paginating forwards with each `next_batch` value.
 
 Request:
 
@@ -258,7 +261,8 @@ Request:
 GET /_synapse/admin/v1/media/quarantine_changes?from=2
 ```
 
-Where `from` is the `next_batch` value from a previous request. It is optional.
+Where `from` is the `next_batch` value from a previous request. It is optional
+and defaults to the first page (the value `0`).
 
 Response:
 

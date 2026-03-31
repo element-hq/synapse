@@ -11,6 +11,7 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+-- Represents a stream of when media is quarantined and unquarantined.
 CREATE TABLE quarantined_media_changes (
     -- Position in the quarantined media stream
     stream_id INTEGER NOT NULL PRIMARY KEY,
@@ -28,5 +29,6 @@ CREATE TABLE quarantined_media_changes (
     quarantined BOOLEAN NOT NULL
 );
 
+-- Start the background update to populate existing quarantined media in the table. See update handler for more details.
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
     (9305, 'flag_existing_quarantined_media', '{}');

@@ -184,6 +184,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             writers=[],  # we don't use `get_current_token` or `get_positions`, per docs
         )
 
+        # Register a background update to flag already-quarantined media in the quaranine
+        # media changes table. This is to populate the API endpoint which consumes the
+        # table with initial data that callers expect (namely, a list of currently
+        # quarantined media).
         self.db_pool.updates.register_background_update_handler(
             "flag_existing_quarantined_media", self._flag_existing_quarantined_media
         )
@@ -191,6 +195,31 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
     async def _flag_existing_quarantined_media(
         self, progress: JsonDict, batch_size: int
     ) -> int:
+        """Background update function to flag existing already-quarantined media in
+        the new `quarantine_media_changes` table.
+
+        This only flags quarantined media as the API which reads the table is only
+        concerned with *changes* to the quarantined state - media does not start as
+        quarantined, so if it's already quarantined then it has changed state at
+        some point. Media which isn't quarantined has not changed state (as far as
+        this function can tell).
+
+        When media was quarantined is not recorded, so this uses the current time as
+        the time when the change happened.
+
+        Further, due to lack of timestamp or history, media which was quarantined then
+        unquarantined will not be picked up by this background task.
+
+        Function signature is as per `register_background_update_handler` requirements.
+
+        Args:
+            progress: The progress dictionary from the background update.
+            batch_size: The number of rows to process in each batch.
+
+        Returns:
+              The number of rows inserted.
+        """
+        # The last row OFFSET we got to in the UNION query below
         last_row_num: int = progress.get("last_row_num", 0)
 
         # The `ORDER BY` here would normally miss records if the admin (un)quarantined a
@@ -199,6 +228,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # newly quarantines some media, adding a row to the stream table, then we run
         # over it again in the background update, adding a second row. Duplicate rows are
         # non-issues for us.
+        #
+        # Note: Already-quarantined media is indicated by the `quarantined_by` field being
+        # non-null. We only want quarantined media, per docstring above.
         def flag_quarantined(txn: LoggingTransaction) -> int:
             txn.execute(
                 """
@@ -1219,7 +1251,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             limit: The maximum number of rows to return
 
         Returns:
-            list of QuarantinedMediaUpdate update rows
+            list of QuarantinedMediaUpdate update rows in stream ordering.
         """
         return await self.db_pool.runInteraction(
             "get_quarantined_media_changes",
@@ -1331,8 +1363,14 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
             media_ids_affected = txn.fetchall()
+            # We use `len(media_ids_affected)` here and below because both queries may
+            # affect fewer or more rows than the `media_ids` input. For example, if the
+            # media_ids point to already-quarantined media, then nothing was updated.
+            # Similarly, the below query might find more media than the `media_ids`
+            # because it's searching for hashes instead.
             total_media_quarantined += len(media_ids_affected)
             if len(media_ids_affected) > 0:
+                # Flag media that was newly (un)quarantined in the changes table.
                 self._insert_quarantine_change_txn(
                     txn,
                     [(None, media_id) for (media_id,) in media_ids_affected],
