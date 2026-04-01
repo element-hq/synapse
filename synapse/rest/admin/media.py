@@ -35,6 +35,7 @@ from synapse.http.servlet import (
     parse_string,
 )
 from synapse.http.site import SynapseRequest
+from synapse.replication.tcp.streams import QuarantinedMediaStream
 from synapse.rest.admin._base import (
     admin_patterns,
     assert_requester_is_admin,
@@ -242,6 +243,7 @@ class ListQuarantineChanges(RestServlet):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.server_name = hs.hostname
+        self.replication = hs.get_replication_data_handler()
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
@@ -249,6 +251,12 @@ class ListQuarantineChanges(RestServlet):
         from_id = parse_integer(request, "from", default=0)
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
         to_id = await self.store.get_current_quarantined_media_stream_id()
+
+        await self.replication.wait_for_stream_position(
+            self.server_name,
+            QuarantinedMediaStream.NAME,
+            to_id,
+        )
 
         changes = await self.store.get_quarantined_media_changes(
             from_id=from_id,
