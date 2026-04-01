@@ -833,7 +833,7 @@ class QuarantinedMediaStream(_StreamFromIdGen):
         super().__init__(
             hs.get_instance_name(),
             self._update_function,
-            self.store.get_quarantined_media_stream_id_generator(),
+            self.store._quarantined_media_changes_id_gen,
         )
 
     async def _update_function(
