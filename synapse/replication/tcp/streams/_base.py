@@ -837,7 +837,7 @@ class QuarantinedMediaStream(_StreamFromIdGen):
         )
 
     async def _update_function(
-        self, instance_name: str, from_token: int, to_token: int, limit: int
+        self, instance_name: str, from_token: Token, to_token: Token, limit: int
     ) -> StreamUpdateResult:
         updates = await self.store.get_quarantined_media_changes(
             from_id=from_token, to_id=to_token, limit=limit
