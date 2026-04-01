@@ -1267,14 +1267,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         Returns:
             list of QuarantinedMediaUpdate update rows in stream ordering.
         """
-
-        # Wait to ensure the current worker can actually read the stream up to to_id
-        await self._replication.wait_for_stream_position(
-            self._instance_name,
-            QuarantinedMediaStream.NAME,
-            to_id,
-        )
-
         return await self.db_pool.runInteraction(
             "get_quarantined_media_changes",
             self._get_quarantined_media_changes_txn,
