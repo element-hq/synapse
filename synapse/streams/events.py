@@ -128,6 +128,7 @@ class EventSources:
             StreamKeyType.UN_PARTIAL_STATED_ROOMS: self.store.get_un_partial_stated_rooms_id_generator(),
             StreamKeyType.THREAD_SUBSCRIPTIONS: self.store.get_thread_subscriptions_stream_id_generator(),
             StreamKeyType.STICKY_EVENTS: self.store.get_sticky_events_stream_id_generator(),
+            StreamKeyType.QUARANTINED_MEDIA: self.store.get_quarantined_media_stream_id_generator(),
         }
 
         for _, key in StreamKeyType.__members__.items():

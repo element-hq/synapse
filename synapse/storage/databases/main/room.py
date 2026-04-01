@@ -157,6 +157,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         self.config: HomeServerConfig = hs.config
 
+        self._replication = hs.get_replication_data_handler()
+
         self._un_partial_stated_rooms_stream_id_gen: MultiWriterIdGenerator
 
         self._un_partial_stated_rooms_stream_id_gen = MultiWriterIdGenerator(
@@ -1252,6 +1254,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """
         return self._quarantined_media_changes_id_gen.get_current_token()
 
+    def get_quarantined_media_stream_id_generator(self) -> MultiWriterIdGenerator:
+        return self._quarantined_media_changes_id_gen
+
     async def get_quarantined_media_changes(
         self, *, from_id: int, to_id: int, limit: int
     ) -> list[QuarantinedMediaUpdate]:
@@ -1267,6 +1272,14 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         Returns:
             list of QuarantinedMediaUpdate update rows in stream ordering.
         """
+
+        # Wait to ensure the current worker can actually read the stream up to to_id
+        await self._replication.wait_for_stream_position(
+            self._instance_name,
+            QuarantinedMediaStream.NAME,
+            to_id,
+        )
+
         return await self.db_pool.runInteraction(
             "get_quarantined_media_changes",
             self._get_quarantined_media_changes_txn,
