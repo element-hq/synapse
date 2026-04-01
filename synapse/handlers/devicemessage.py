@@ -447,9 +447,6 @@ def split_device_messages_into_edus(
 
     Returns:
         Bin-packed list of EDU JSON content for the given to_device messages
-
-    Raises:
-        EventSizeError: If a single to-device message is too large to fit into an EDU.
     """
     split_edus_content: list[JsonDict] = []
 
