@@ -2482,7 +2482,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         # will be older than the cutoff.
         #
         # Some rows will have a NULL inserted_ts, but we can assume that the
-        # timestamp will montonically increase with stream ID, so we can safely
+        # timestamp will monotonically increase with stream ID, so we can safely
         # ignore those rows when calculating the cutoff stream ID. This means
         # that we may end up keeping some rows with a non-NULL inserted_ts that
         # are older than the cutoff, but that's better than accidentally
