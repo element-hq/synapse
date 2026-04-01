@@ -3,8 +3,8 @@ version: 2
 # open-pull-requests-limit to 10 (from the default of 5) to better ensure we
 # don't continuously grow a backlog of updates.
 updates:
-  - # "pip" is the correct setting for poetry, per https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
-    package-ecosystem: "pip"
+  - # "uv" ecosystem for uv-managed Python dependencies, per https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
+    package-ecosystem: "uv"
     directory: "/"
     open-pull-requests-limit: 10
     schedule:
