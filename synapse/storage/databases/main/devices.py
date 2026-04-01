@@ -2532,21 +2532,38 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         #
         # We also delete in batches to avoid massive churn when initially
         # clearing out all the old entries.
+        #
+        # We set a minimum stream ID so that when we delete in batches the
+        # database doesn't have to scan through all the rows that were just
+        # deleted to find the next batch to delete.
         delete_sql = """
             DELETE FROM device_lists_changes_in_room
             WHERE stream_id IN (
                 SELECT stream_id FROM device_lists_changes_in_room
-                WHERE stream_id <= ?
+                WHERE ? < stream_id AND stream_id <= ?
                 ORDER BY stream_id ASC
                 LIMIT ?
             )
+            RETURNING stream_id
         """
 
+        # The minimum stream ID to delete in the next batch, c.f. comment above.
+        # We default to 0 here as that is less than all possible stream IDs.
+        min_stream_id = 0
+
         def prune_device_lists_changes_in_room_txn(txn: LoggingTransaction) -> int:
+            nonlocal min_stream_id
+
             txn.execute(
-                delete_sql, (prune_before_stream_id, PRUNE_DEVICE_LISTS_BATCH_SIZE)
+                delete_sql,
+                (min_stream_id, prune_before_stream_id, PRUNE_DEVICE_LISTS_BATCH_SIZE),
             )
             num_deleted = txn.rowcount
+
+            # If we deleted any rows then we need to update the min_stream_id to
+            # be the max of all those deleted.
+            if num_deleted:
+                min_stream_id = max(row[0] for row in txn)
 
             # Make sure to invalidate the cache of the minimum stream ID after
             # deleting.
@@ -2563,7 +2580,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 prune_device_lists_changes_in_room_txn,
             )
             num_rows_deleted += batch_deleted
-            if batch_deleted == 0:
+            if batch_deleted < PRUNE_DEVICE_LISTS_BATCH_SIZE:
                 break
 
             # Sleep for a short time to avoid hammering the database too much if

@@ -420,6 +420,10 @@ class DeviceStoreTestCase(HomeserverTestCase):
             (PRUNE_DEVICE_LISTS_CHANGES_IN_ROOM_AGE - Duration(minutes=30)).as_secs()
         )
 
+        # Advance repeatedly a bit so that the pruning process can run to completion.
+        for _ in range(10):
+            self.reactor.advance(Duration(milliseconds=110).as_secs())
+
         # Check that the old entries have been pruned, and the new entries are still there.
         count, min_device_id = get_devices_in_room_status()
         self.assertEqual(count, 10 * len(room_ids))
@@ -429,6 +433,10 @@ class DeviceStoreTestCase(HomeserverTestCase):
         self.reactor.advance(
             (PRUNE_DEVICE_LISTS_CHANGES_IN_ROOM_AGE + Duration(minutes=30)).as_secs()
         )
+
+        # Advance repeatedly a bit so that the pruning process can run to completion.
+        for _ in range(10):
+            self.reactor.advance(Duration(milliseconds=110).as_secs())
 
         count, min_device_id = get_devices_in_room_status()
         self.assertEqual(count, len(room_ids))
