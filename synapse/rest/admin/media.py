@@ -43,7 +43,7 @@ from synapse.rest.admin._base import (
 from synapse.storage.databases.main.media_repository import (
     MediaSortOrder,
 )
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, UserID, MultiWriterStreamToken
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -248,11 +248,11 @@ class ListQuarantineChanges(RestServlet):
 
         from_id = parse_integer(request, "from", default=0)
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
-        to_id = await self.store.get_current_quarantined_media_stream_id()
+        to_token = await self.store.get_current_quarantined_media_stream_id()
 
-        changes = await self.store.get_quarantined_media_changes(
-            from_id=from_id,
-            to_id=to_id,
+        changes = await self.store.get_quarantined_media_changes_between_tokens(
+            from_token=MultiWriterStreamToken(stream=from_id),
+            to_token=to_token,
             limit=limit,
         )
 

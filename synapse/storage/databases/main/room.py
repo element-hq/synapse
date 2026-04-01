@@ -60,7 +60,8 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
-from synapse.types import JsonDict, RetentionPolicy, StrCollection, ThirdPartyInstanceID
+from synapse.types import JsonDict, RetentionPolicy, StrCollection, \
+    ThirdPartyInstanceID, MultiWriterStreamToken
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import MXC_REGEX
@@ -1246,16 +1247,38 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return local_media_ids
 
-    async def get_current_quarantined_media_stream_id(self) -> int:
+    async def get_current_quarantined_media_stream_id(self) -> MultiWriterStreamToken:
         """Gets the position of the quarantined media changes stream.
 
         Returns:
             int - the current stream ID
         """
-        return self._quarantined_media_changes_id_gen.get_current_token()
+        return MultiWriterStreamToken.from_generator(self._quarantined_media_changes_id_gen)
 
     def get_quarantined_media_stream_id_generator(self) -> MultiWriterIdGenerator:
         return self._quarantined_media_changes_id_gen
+
+    async def get_quarantined_media_changes_between_tokens(
+        self, *, from_token: MultiWriterStreamToken, to_token: MultiWriterStreamToken, limit: int
+    ) -> list[QuarantinedMediaUpdate]:
+        """Get updates to quarantined media between two stream tokens.
+
+        Bounds: from_token < ... <= to_token
+
+        Args:
+            from_token: The starting stream token (exclusive)
+            to_token: The ending stream token (inclusive)
+            limit: The maximum number of rows to return
+
+        Returns:
+            list of QuarantinedMediaUpdate update rows in stream ordering.
+        """
+        assert from_token.is_before_or_eq(to_token)
+        return await self.get_quarantined_media_changes(
+            from_id=from_token.stream,
+            to_id=to_token.stream,
+            limit=limit,
+        )
 
     async def get_quarantined_media_changes(
         self, *, from_id: int, to_id: int, limit: int
