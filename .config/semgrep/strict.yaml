@@ -5,10 +5,7 @@ rules:
           def $FUNC(...):
             ...
       - pattern: |
-          "=~/.*evil1.*$/"
-      # TODO somehow allow matching a separate node
-      - pattern: |
-          "=~/.*evil2.*$/"
-    message: "Function '$FUNC' contains evil1 and evil2"
+          "...evil..."
+    message: "Function '$FUNC' contains evil"
     languages: [python]
     severity: ERROR

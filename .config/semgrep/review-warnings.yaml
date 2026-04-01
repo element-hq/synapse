@@ -6,8 +6,8 @@ rules:
             ...
       - pattern: |
           "...profiles..."
-      - pattern: |
-          "...user_id..."
+      # - pattern: |
+      #     "...user_id..."
     message: "Function '$FUNC' references both 'profiles' and 'user_id'"
     languages: [python]
     severity: WARNING
