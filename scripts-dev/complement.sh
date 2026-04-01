@@ -28,8 +28,8 @@
 #
 # ./complement.sh -run "TestOutboundFederation(Profile|Send)"
 #
-# Specifying TEST_ONLY_SKIP_DEP_HASH_VERIFICATION=1 will cause `poetry export`
-# to not emit any hashes when building the Docker image. This then means that
+# Specifying TEST_ONLY_SKIP_DEP_HASH_VERIFICATION=1 will cause `uv sync`
+# to not verify hashes when building the Docker image. This then means that
 # you can use 'unverifiable' sources such as git repositories as dependencies.
 
 # Exit if a line returns a non-zero exit code
@@ -192,13 +192,13 @@ main() {
     elif $CONTAINER_RUNTIME inspect "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" &>/dev/null; then
       # complement-synapse-editable already exists: see if we can still use it:
       # - The Rust module must still be importable; it will fail to import if the Rust source has changed.
-      # - The Poetry lock file must be the same (otherwise we assume dependencies have changed)
+      # - The uv lock file must be the same (otherwise we assume dependencies have changed)
 
       # First set up the module in the right place for an editable installation.
       $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
 
       if ($CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'python' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -c 'import synapse.synapse_rust' \
-        && $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'diff' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" --brief /editable-src/poetry.lock /poetry.lock.bak); then
+        && $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'diff' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" --brief /editable-src/uv.lock /uv.lock.bak); then
         skip_docker_build=1
       else
         echo "Editable Synapse image is stale. Will rebuild."
@@ -234,7 +234,7 @@ main() {
       # up with our current reality.
       rm -rf matrix_synapse.egg-info/
       # Figure out the Synapse version string in our current checkout
-      synapse_version_string="$(poetry run python -c 'from synapse.util import SYNAPSE_VERSION; print(SYNAPSE_VERSION)')"
+      synapse_version_string="$(python -c 'from synapse.util import SYNAPSE_VERSION; print(SYNAPSE_VERSION)')"
 
       # Build the base Synapse image from the local checkout
       echo_if_github "::group::Build Docker image: matrixdotorg/synapse"
@@ -242,7 +242,7 @@ main() {
         -t "$SYNAPSE_IMAGE_PATH" \
         --build-arg SYNAPSE_VERSION_STRING="$synapse_version_string" \
         --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
-        --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
+        --build-arg TEST_ONLY_IGNORE_LOCKFILE \
         -f "docker/Dockerfile" .
       echo_if_github "::endgroup::"
 

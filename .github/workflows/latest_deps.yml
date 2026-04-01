@@ -160,8 +160,8 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Ensure sytest runs `pip install`
-        # Delete the lockfile so sytest will `pip install` rather than `poetry install`
-        run: rm /src/poetry.lock
+        # Delete the lockfile so sytest will `pip install` rather than `uv sync`
+        run: rm /src/uv.lock
         working-directory: /src
       - name: Prepare test blacklist
         run: cat sytest-blacklist .ci/worker-blacklist > synapse-blacklist-with-workers
@@ -229,7 +229,7 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-          TEST_ONLY_IGNORE_POETRY_LOCKFILE: 1
+          TEST_ONLY_IGNORE_LOCKFILE: 1
 
       - name: Formatted Complement test logs
         # Always run this step if we attempted to run the Complement tests.
@@ -253,7 +253,7 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-          TEST_ONLY_IGNORE_POETRY_LOCKFILE: 1
+          TEST_ONLY_IGNORE_LOCKFILE: 1
 
       - name: Formatted in-repo Complement test logs
         # Always run this step if we attempted to run the Complement tests.

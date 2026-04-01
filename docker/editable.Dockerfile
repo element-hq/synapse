@@ -6,11 +6,15 @@
 ARG PYTHON_VERSION=3.10
 
 ###
-### Stage 0: generate requirements.txt
+### Stage 0: build editable install
 ###
 # We hardcode the use of Debian trixie here because this could change upstream
 # and other Dockerfiles used for testing are expecting trixie.
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-trixie
+FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-trixie
+
+# This silences a warning as uv isn't able to do hardlinks between its cache
+# (mounted as --mount=type=cache) and the target directory.
+ENV UV_LINK_MODE=copy
 
 # Install Rust and other dependencies (stolen from normal Dockerfile)
 # install the OS build deps
@@ -49,18 +53,19 @@ RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-tool
 # at runtime.
 COPY synapse /editable-src/synapse/
 COPY rust /editable-src/rust/
-# ... and what we need to `pip install`.
-COPY pyproject.toml poetry.lock README.rst build_rust.py Cargo.toml Cargo.lock /editable-src/
+# ... and what we need to install.
+COPY pyproject.toml uv.lock README.rst build_rust.py Cargo.toml Cargo.lock /editable-src/
 
-RUN pip install poetry
-RUN poetry config virtualenvs.create false
-RUN cd /editable-src && poetry install --extras all
+# Install into the system Python (no virtualenv) using the lockfile
+ENV UV_PROJECT_ENVIRONMENT=/usr/local
+RUN --mount=type=cache,target=/root/.cache/uv \
+  cd /editable-src && uv sync --extra all --frozen
 
 # Make copies of useful things for inspection:
 # - the Rust module (must be copied to the editable source tree before startup)
-# - poetry.lock is useful for checking if dependencies have changed.
+# - uv.lock is useful for checking if dependencies have changed.
 RUN cp /editable-src/synapse/synapse_rust.abi3.so /synapse_rust.abi3.so.bak
-RUN cp /editable-src/poetry.lock /poetry.lock.bak
+RUN cp /editable-src/uv.lock /uv.lock.bak
 
 
 ### Extra setup from original Dockerfile

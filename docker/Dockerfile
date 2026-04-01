@@ -15,55 +15,11 @@
 #    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile --build-arg PYTHON_VERSION=3.10 .
 #
 
-# Irritatingly, there is no blessed guide on how to distribute an application with its
-# poetry-managed environment in a docker image. We have opted for
-# `poetry export | pip install -r /dev/stdin`, but beware: we have experienced bugs in
-# in `poetry export` in the past.
-
 ARG DEBIAN_VERSION=trixie
 ARG PYTHON_VERSION=3.13
-ARG POETRY_VERSION=2.2.1
 
 ###
-### Stage 0: generate requirements.txt
-###
-### This stage is platform-agnostic, so we can use the build platform in case of cross-compilation.
-###
-FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS requirements
-
-WORKDIR /synapse
-
-# Copy just what we need to run `poetry export`...
-COPY pyproject.toml poetry.lock /synapse/
-
-
-# If specified, we won't verify the hashes of dependencies.
-# This is only needed if the hashes of dependencies cannot be checked for some
-# reason, such as when a git repository is used directly as a dependency.
-ARG TEST_ONLY_SKIP_DEP_HASH_VERIFICATION
-
-# If specified, we won't use the Poetry lockfile.
-# Instead, we'll just install what a regular `pip install` would from PyPI.
-ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
-
-# This silences a warning as uv isn't able to do hardlinks between its cache
-# (mounted as --mount=type=cache) and the target directory.
-ENV UV_LINK_MODE=copy
-
-# Export the dependencies, but only if we're actually going to use the Poetry lockfile.
-# Otherwise, just create an empty requirements file so that the Dockerfile can
-# proceed.
-ARG POETRY_VERSION
-RUN --mount=type=cache,target=/root/.cache/uv \
-  if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-    uvx --with poetry-plugin-export==1.9.0 \
-        poetry@${POETRY_VERSION} export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
-  else \
-    touch /synapse/requirements.txt; \
-  fi
-
-###
-### Stage 1: builder
+### Stage 0: builder
 ###
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS builder
 
@@ -84,39 +40,51 @@ RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-tool
 ARG CARGO_NET_GIT_FETCH_WITH_CLI=false
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=$CARGO_NET_GIT_FETCH_WITH_CLI
 
+WORKDIR /synapse
+
+# If specified, we won't verify the hashes of dependencies.
+# This is only needed if the hashes of dependencies cannot be checked for some
+# reason, such as when a git repository is used directly as a dependency.
+ARG TEST_ONLY_SKIP_DEP_HASH_VERIFICATION
+
+# If specified, we won't use the uv lockfile.
+# Instead, we'll just install what a regular `pip install` would from PyPI.
+ARG TEST_ONLY_IGNORE_LOCKFILE
+
 # To speed up rebuilds, install all of the dependencies before we copy over
 # the whole synapse project, so that this layer in the Docker cache can be
-# used while you develop on the source
+# used while you develop on the source.
 #
-# This is aiming at installing the `[tool.poetry.depdendencies]` from pyproject.toml.
-COPY --from=requirements /synapse/requirements.txt /synapse/
+# We use `uv sync --no-install-project` to install only the dependencies
+# from the lockfile, without installing the project itself.
+COPY pyproject.toml uv.lock /synapse/
 RUN --mount=type=cache,target=/root/.cache/uv \
-  uv pip install --prefix="/install" --no-deps -r /synapse/requirements.txt
+  if [ -z "$TEST_ONLY_IGNORE_LOCKFILE" ]; then \
+    uv sync --extra all --frozen --no-install-project --no-dev ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--no-verify-hashes}; \
+  fi
 
 # Copy over the rest of the synapse source code.
 COPY synapse /synapse/synapse/
 COPY rust /synapse/rust/
-# ... and what we need to `pip install`.
-COPY pyproject.toml README.rst build_rust.py Cargo.toml Cargo.lock /synapse/
-
-# Repeat of earlier build argument declaration, as this is a new build stage.
-ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
+# ... and what we need to build and install the project.
+COPY README.rst build_rust.py Cargo.toml Cargo.lock /synapse/
 
 # Install the synapse package itself.
-# If we have populated requirements.txt, we don't install any dependencies
-# as we should already have those from the previous `pip install` step.
+# If we are using the lockfile, we use `uv sync` which will reuse the
+# already-installed dependencies from the previous step.
+# Otherwise, we fall back to `uv pip install` which resolves freely from PyPI.
 RUN \
   --mount=type=cache,target=/root/.cache/uv \
   --mount=type=cache,target=/synapse/target,sharing=locked \
   --mount=type=cache,target=${CARGO_HOME}/registry,sharing=locked \
-  if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-    uv pip install --prefix="/install" --no-deps /synapse[all]; \
+  if [ -z "$TEST_ONLY_IGNORE_LOCKFILE" ]; then \
+    uv sync --extra all --frozen --no-dev --no-editable; \
   else \
-    uv pip install --prefix="/install" /synapse[all]; \
+    uv pip install --python=.venv /synapse[all]; \
   fi
 
 ###
-### Stage 2: runtime dependencies download for ARM64 and AMD64
+### Stage 1: runtime dependencies download for ARM64 and AMD64
 ###
 FROM --platform=$BUILDPLATFORM docker.io/library/debian:${DEBIAN_VERSION} AS runtime-deps
 
@@ -164,7 +132,7 @@ RUN \
 
 
 ###
-### Stage 3: runtime
+### Stage 2: runtime
 ###
 
 FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
@@ -188,11 +156,12 @@ COPY --from=runtime-deps /install-${TARGETARCH}/etc /etc
 COPY --from=runtime-deps /install-${TARGETARCH}/usr /usr
 COPY --from=runtime-deps /install-${TARGETARCH}/var /var
 
-# Copy the installed python packages from the builder stage.
-#
-# uv will generate a `.lock` file when installing packages, which we don't want
-# to copy to the final image.
-COPY --from=builder  --exclude=.lock /install /usr/local
+# Copy the virtual environment from the builder stage.
+COPY --from=builder /synapse/.venv /synapse/.venv
+
+# Put the virtualenv on PATH
+ENV PATH="/synapse/.venv/bin:$PATH"
+
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 
