@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import (
+    MAX_TO_DEVICE_CONTENT_SIZE,
     SOFT_MAX_EDU_SIZE,
     EduTypes,
     EventContentFields,
@@ -248,7 +249,10 @@ class DeviceMessageHandler:
                 # We do this for all to-device messages, even those that aren't
                 # over federation, so as to more easily catch clients that are
                 # sending excessively large messages.
-                if len(encode_canonical_json(message_content)) > SOFT_MAX_EDU_SIZE:
+                if (
+                    len(encode_canonical_json(message_content))
+                    > MAX_TO_DEVICE_CONTENT_SIZE
+                ):
                     # 413 is currently an unspecced response for `/sendToDevice` but is
                     # probably the best thing we can do.
                     # https://github.com/matrix-org/matrix-spec/pull/2340 tracks adding
