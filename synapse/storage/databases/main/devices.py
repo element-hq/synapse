@@ -2559,12 +2559,13 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 delete_sql,
                 (min_stream_id, prune_before_stream_id, PRUNE_DEVICE_LISTS_BATCH_SIZE),
             )
-            num_deleted = txn.rowcount
 
-            # If we deleted any rows then we need to update the min_stream_id to
-            # be the max of all those deleted.
-            if num_deleted:
-                min_stream_id = max(row[0] for row in txn)
+            # We can't use rowcount as that is incorrect on SQLite when using
+            # RETURNING.
+            num_deleted = 0
+            for row in txn:
+                num_deleted += 1
+                min_stream_id = max(min_stream_id, row[0])
 
             # Make sure to invalidate the cache of the minimum stream ID after
             # deleting.
