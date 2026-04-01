@@ -15,4 +15,4 @@ ALTER TABLE device_lists_changes_in_room ADD COLUMN inserted_ts BIGINT;
 
 -- Add a background update to add index
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (9005, 'device_lists_changes_in_room_inserted_ts_idx', '{}');
+  (9305, 'device_lists_changes_in_room_inserted_ts_idx', '{}');
