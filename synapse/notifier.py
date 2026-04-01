@@ -41,6 +41,7 @@ from twisted.internet.defer import Deferred
 from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import AuthError
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
@@ -210,7 +211,7 @@ class _NotifierUserStream:
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventStreamResult:
-    events: list[JsonDict | EventBase]
+    events: list[JsonDict | FilteredEvent]
     start_token: StreamToken
     end_token: StreamToken
 
@@ -765,7 +766,7 @@ class Notifier:
             # The events fetched from each source are a JsonDict, EventBase, or
             # UserPresenceState, but see below for UserPresenceState being
             # converted to JsonDict.
-            events: list[JsonDict | EventBase] = []
+            events: list[JsonDict | FilteredEvent] = []
             end_token = from_token
 
             for keyname, source in self.event_sources.sources.get_sources():
