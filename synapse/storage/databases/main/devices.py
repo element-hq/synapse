@@ -2482,12 +2482,13 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         # delete all rows with a stream ID less than or equal to this, as they
         # will be older than the cutoff.
         #
-        # Some rows will have a NULL inserted_ts, but we can assume that the
-        # timestamp will monotonically increase with stream ID, so we can safely
-        # ignore those rows when calculating the cutoff stream ID. This means
-        # that we may end up keeping some rows with a non-NULL inserted_ts that
-        # are older than the cutoff, but that's better than accidentally
-        # deleting rows that are newer than the cutoff.
+        # Some rows will have a NULL inserted_ts (due to being inserted before
+        # the column was added), but we can assume that the timestamp will
+        # monotonically increase with stream ID, so we can safely ignore those
+        # rows when calculating the cutoff stream ID. This means that we may end
+        # up keeping some rows with a non-NULL inserted_ts that are older than
+        # the cutoff, but that's better than accidentally deleting rows that are
+        # newer than the cutoff.
         cutoff_sql = """
             SELECT stream_id FROM device_lists_changes_in_room
             WHERE inserted_ts <= ? AND inserted_ts IS NOT NULL
