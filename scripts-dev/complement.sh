@@ -11,11 +11,6 @@
 # filepath of a local Complement checkout or by setting the COMPLEMENT_REF
 # environment variable to pull a different branch or commit.
 #
-# To use the 'podman' command instead 'docker', set the PODMAN environment
-# variable. Example:
-#
-# PODMAN=1 ./complement.sh
-#
 # By default Synapse is run in monolith mode. This can be overridden by
 # setting the WORKERS environment variable.
 #
@@ -27,10 +22,6 @@
 # argument:
 #
 # ./complement.sh -run "TestOutboundFederation(Profile|Send)"
-#
-# Specifying TEST_ONLY_SKIP_DEP_HASH_VERIFICATION=1 will cause `uv sync`
-# to not verify hashes when building the Docker image. This then means that
-# you can use 'unverifiable' sources such as git repositories as dependencies.
 
 # Exit if a line returns a non-zero exit code
 set -e
@@ -49,16 +40,9 @@ set -e
 # `.github/workflows/push_complement_image.yml` as well
 LOCAL_IMAGE_NAMESPACE=localhost
 
-# The image tags for how these images will be stored in the registry
-SYNAPSE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse"
-SYNAPSE_WORKERS_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-workers"
 # XXX: If the Docker image name changes, don't forget to update
 # `.github/workflows/push_complement_image.yml` as well
 COMPLEMENT_SYNAPSE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/complement-synapse"
-
-SYNAPSE_EDITABLE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-editable"
-SYNAPSE_WORKERS_EDITABLE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/synapse-workers-editable"
-COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH="$LOCAL_IMAGE_NAMESPACE/complement-synapse-editable"
 
 # Helper to emit annotations that collapse portions of the log in GitHub Actions
 echo_if_github() {
@@ -73,7 +57,7 @@ usage() {
 Usage: $0 [-f] <go test arguments>...
 Run the complement test suite on Synapse.
   --in-repo
-        Whether to run the in-repo suite of Complement tests (see `./complement` in this project)
+        Whether to run the in-repo suite of Complement tests (see \`./complement\` in this project)
         vs the Complement tests from the Complement repo.
 
   -f, --fast
@@ -84,17 +68,6 @@ Run the complement test suite on Synapse.
   --build-only
         Only build the Docker images. Don't actually run Complement.
         Conflicts with -f/--fast.
-
-  -e, --editable
-        Use an editable build of Synapse, rebuilding the image if necessary.
-        This is suitable for use in development where a fast turn-around time
-        is important.
-        Not suitable for use in CI in case the editable environment is impure.
-
-  --rebuild-editable
-        Force a rebuild of the editable build of Synapse.
-        This is occasionally useful if the built-in rebuild detection with
-        --editable fails, e.g. when changing configure_workers_and_start.py.
 
 For help on arguments to 'go test', run 'go help testflag'.
 EOF
@@ -127,31 +100,12 @@ main() {
       "--build-only")
         skip_complement_run=1
         ;;
-      "-e"|"--editable")
-        use_editable_synapse=1
-        ;;
-      "--rebuild-editable")
-        rebuild_editable_synapse=1
-        ;;
       *)
         # unknown arg: presumably an argument to gotest. break the loop.
         break
     esac
     shift
   done
-
-  # enable buildkit for the docker builds
-  export DOCKER_BUILDKIT=1
-
-  # Determine whether to use the docker or podman container runtime.
-  if [ -n "$PODMAN" ]; then
-    export CONTAINER_RUNTIME=podman
-    export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
-    export BUILDAH_FORMAT=docker
-    export COMPLEMENT_HOSTNAME_RUNNING_COMPLEMENT=host.containers.internal
-  else
-    export CONTAINER_RUNTIME=docker
-  fi
 
   # Change to the repository root
   cd "$(dirname $0)/.."
@@ -160,7 +114,7 @@ main() {
   if [[ -z "$COMPLEMENT_DIR" ]]; then
     COMPLEMENT_REF=${COMPLEMENT_REF:-main}
     echo "COMPLEMENT_DIR not set. Fetching Complement checkout from ${COMPLEMENT_REF}..."
-    
+
     # Download the Complement checkout at the specified ref.
     wget -q https://github.com/matrix-org/complement/archive/${COMPLEMENT_REF}.tar.gz
 
@@ -176,94 +130,16 @@ main() {
     echo "Checkout available at 'complement-${COMPLEMENT_REF}'"
   fi
 
-  if [ -n "$use_editable_synapse" ]; then
-    if [[ -e synapse/synapse_rust.abi3.so ]]; then
-      # In an editable install, back up the host's compiled Rust module to prevent
-      # inconvenience; the container will overwrite the module with its own copy.
-      mv -n synapse/synapse_rust.abi3.so synapse/synapse_rust.abi3.so~host
-      # And restore it on exit:
-      synapse_pkg=`realpath synapse`
-      trap "mv -f '$synapse_pkg/synapse_rust.abi3.so~host' '$synapse_pkg/synapse_rust.abi3.so'" EXIT
-    fi
-
-    editable_mount="$(realpath .):/editable-src:z"
-    if [ -n "$rebuild_editable_synapse" ]; then
-      unset skip_docker_build
-    elif $CONTAINER_RUNTIME inspect "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" &>/dev/null; then
-      # complement-synapse-editable already exists: see if we can still use it:
-      # - The Rust module must still be importable; it will fail to import if the Rust source has changed.
-      # - The uv lock file must be the same (otherwise we assume dependencies have changed)
-
-      # First set up the module in the right place for an editable installation.
-      $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
-
-      if ($CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'python' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -c 'import synapse.synapse_rust' \
-        && $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'diff' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" --brief /editable-src/uv.lock /uv.lock.bak); then
-        skip_docker_build=1
-      else
-        echo "Editable Synapse image is stale. Will rebuild."
-        unset skip_docker_build
-      fi
-    fi
-  fi
-
   if [ -z "$skip_docker_build" ]; then
-    if [ -n "$use_editable_synapse" ]; then
+    # Figure out the Synapse version string from pyproject.toml
+    synapse_version_string="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
 
-      # Build a special image designed for use in development with editable
-      # installs.
-      $CONTAINER_RUNTIME build \
-        -t "$SYNAPSE_EDITABLE_IMAGE_PATH" \
-        -f "docker/editable.Dockerfile" .
+    # Build all complement images via docker bake
+    echo_if_github "::group::Build Docker images via docker bake"
+    SYNAPSE_VERSION_STRING="$synapse_version_string" \
+      docker buildx bake complement
+    echo_if_github "::endgroup::"
 
-      $CONTAINER_RUNTIME build \
-        -t "$SYNAPSE_WORKERS_EDITABLE_IMAGE_PATH" \
-        --build-arg FROM="$SYNAPSE_EDITABLE_IMAGE_PATH" \
-        -f "docker/Dockerfile-workers" .
-
-      $CONTAINER_RUNTIME build \
-        -t "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" \
-        --build-arg FROM="$SYNAPSE_WORKERS_EDITABLE_IMAGE_PATH" \
-        -f "docker/complement/Dockerfile" "docker/complement"
-
-      # Prepare the Rust module
-      $CONTAINER_RUNTIME run --rm -v $editable_mount --entrypoint 'cp' "$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH" -- /synapse_rust.abi3.so.bak /editable-src/synapse/synapse_rust.abi3.so
-
-    else
-      # We remove the `egg-info` as it can contain outdated information which won't line
-      # up with our current reality.
-      rm -rf matrix_synapse.egg-info/
-      # Figure out the Synapse version string in our current checkout
-      synapse_version_string="$(python -c 'from synapse.util import SYNAPSE_VERSION; print(SYNAPSE_VERSION)')"
-
-      # Build the base Synapse image from the local checkout
-      echo_if_github "::group::Build Docker image: matrixdotorg/synapse"
-      $CONTAINER_RUNTIME build \
-        -t "$SYNAPSE_IMAGE_PATH" \
-        --build-arg SYNAPSE_VERSION_STRING="$synapse_version_string" \
-        --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
-        --build-arg TEST_ONLY_IGNORE_LOCKFILE \
-        -f "docker/Dockerfile" .
-      echo_if_github "::endgroup::"
-
-      # Build the workers docker image (from the base Synapse image we just built).
-      echo_if_github "::group::Build Docker image: matrixdotorg/synapse-workers"
-      $CONTAINER_RUNTIME build \
-        -t "$SYNAPSE_WORKERS_IMAGE_PATH" \
-        --build-arg FROM="$SYNAPSE_IMAGE_PATH" \
-        -f "docker/Dockerfile-workers" .
-      echo_if_github "::endgroup::"
-
-      # Build the unified Complement image (from the worker Synapse image we just built).
-      echo_if_github "::group::Build Docker image: complement/Dockerfile"
-      $CONTAINER_RUNTIME build \
-        -t "$COMPLEMENT_SYNAPSE_IMAGE_PATH" \
-        --build-arg FROM="$SYNAPSE_WORKERS_IMAGE_PATH" \
-        -f "docker/complement/Dockerfile" "docker/complement"
-      echo_if_github "::endgroup::"
-
-    fi
-  
     echo "Docker images built."
   else
     echo "Skipping Docker image build as requested."
@@ -301,10 +177,6 @@ main() {
   )
 
   export COMPLEMENT_BASE_IMAGE="$COMPLEMENT_SYNAPSE_IMAGE_PATH"
-  if [ -n "$use_editable_synapse" ]; then
-    export COMPLEMENT_BASE_IMAGE="$COMPLEMENT_SYNAPSE_EDITABLE_IMAGE_PATH"
-    export COMPLEMENT_HOST_MOUNTS="$editable_mount"
-  fi
 
   # Enable dirty runs, so tests will reuse the same container where possible.
   # This significantly speeds up tests, but increases the possibility of test pollution.
@@ -385,7 +257,7 @@ main() {
   # Print out the executed commands so it's more obvious what's happening at the end here.
   # Things are slightly ambiguous with the in-repo vs Complement tests.
   set -x
-  
+
   if [ -n "$use_in_repo_tests" ]; then
     # Run the suite of Complement tests in the `./complement` directory in this repo
     cd "./complement"

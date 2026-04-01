@@ -51,36 +51,34 @@ ARG TEST_ONLY_SKIP_DEP_HASH_VERIFICATION
 # Instead, we'll just install what a regular `pip install` would from PyPI.
 ARG TEST_ONLY_IGNORE_LOCKFILE
 
-# To speed up rebuilds, install all of the dependencies before we copy over
-# the whole synapse project, so that this layer in the Docker cache can be
-# used while you develop on the source.
-#
-# We use `uv sync --no-install-project` to install only the dependencies
-# from the lockfile, without installing the project itself.
+# First, install only the dependencies (without the project itself).
+# This layer is cached as long as pyproject.toml and uv.lock don't change,
+# so dependency bytecode compilation (~4000 files) only happens once.
 COPY pyproject.toml uv.lock /synapse/
 RUN --mount=type=cache,target=/root/.cache/uv \
   if [ -z "$TEST_ONLY_IGNORE_LOCKFILE" ]; then \
-    uv sync --extra all --frozen --no-install-project --no-dev ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--no-verify-hashes}; \
+    uv sync --extra all --frozen --no-install-project --no-dev \
+      ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--no-verify-hashes} \
+      --compile-bytecode; \
   fi
 
-# Copy over the rest of the synapse source code.
+# Now copy the source and install the project itself.
+# On a Python-only change, only the synapse package is reinstalled and
+# only its bytecode needs recompiling.
 COPY synapse /synapse/synapse/
 COPY rust /synapse/rust/
-# ... and what we need to build and install the project.
 COPY README.rst build_rust.py Cargo.toml Cargo.lock /synapse/
 
-# Install the synapse package itself.
-# If we are using the lockfile, we use `uv sync` which will reuse the
-# already-installed dependencies from the previous step.
-# Otherwise, we fall back to `uv pip install` which resolves freely from PyPI.
 RUN \
   --mount=type=cache,target=/root/.cache/uv \
   --mount=type=cache,target=/synapse/target,sharing=locked \
   --mount=type=cache,target=${CARGO_HOME}/registry,sharing=locked \
   if [ -z "$TEST_ONLY_IGNORE_LOCKFILE" ]; then \
-    uv sync --extra all --frozen --no-dev --no-editable; \
+    uv sync --extra all --frozen --no-dev --no-editable \
+      ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--no-verify-hashes} \
+      --compile-bytecode; \
   else \
-    uv pip install --python=.venv /synapse[all]; \
+    uv pip install --python=.venv /synapse[all] --compile-bytecode; \
   fi
 
 ###
@@ -135,7 +133,7 @@ RUN \
 ### Stage 2: runtime
 ###
 
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
+FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION} AS runtime
 
 ARG TARGETARCH
 
@@ -176,3 +174,44 @@ ENTRYPOINT ["/start.py"]
 
 HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \
   CMD curl -fSs http://localhost:8008/health || exit 1
+
+
+###
+### Stage 3: simplified runtime for complement/local testing (single-arch)
+###
+### This stage skips the multi-arch runtime-deps dance and just installs
+### runtime dependencies via apt for the host architecture only.
+###
+
+FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION} AS complement-runtime
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update -qq && \
+    apt-get install -yqq --no-install-recommends \
+        curl gosu libjpeg62-turbo libpq5 libwebp7 xmlsec1 libjemalloc2
+
+# Copy the virtual environment from the builder stage.
+COPY --from=builder /synapse/.venv /synapse/.venv
+
+# Put the virtualenv on PATH
+ENV PATH="/synapse/.venv/bin:$PATH"
+
+ARG SYNAPSE_VERSION_STRING
+ENV SYNAPSE_VERSION_STRING=${SYNAPSE_VERSION_STRING}
+
+LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
+LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'
+LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
+LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later OR LicenseRef-Element-Commercial'
+
+COPY ./docker/start.py /start.py
+COPY ./docker/conf /conf
+
+EXPOSE 8008/tcp 8448/tcp
+EXPOSE 19090/tcp
+
+ENTRYPOINT ["/start.py"]
+
+HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \
+    CMD curl -fSs http://localhost:8008/health || exit 1

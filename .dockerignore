@@ -7,7 +7,7 @@
 !rust
 !README.rst
 !pyproject.toml
-!poetry.lock
+!uv.lock
 !Cargo.lock
 !Cargo.toml
 !build_rust.py
