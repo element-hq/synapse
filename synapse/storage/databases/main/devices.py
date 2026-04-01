@@ -1860,7 +1860,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         Returns:
             Collection of user ID/device ID tuples of all devices that have
-            changed
+            changed, or None if the given stream ID is too old and so a complete
+            list cannot be calculated.
         """
 
         lowest_known_stream_id = await self._get_min_device_lists_changes_in_room()
