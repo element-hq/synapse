@@ -2566,6 +2566,10 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             if batch_deleted == 0:
                 break
 
+            # Sleep for a short time to avoid hammering the database too much if
+            # there are a lot of rows to delete.
+            await self.clock.sleep(Duration(milliseconds=100))
+
         if num_rows_deleted:
             logger.info(
                 "Pruned %d rows from device_lists_changes_in_room", num_rows_deleted
