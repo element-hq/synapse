@@ -1057,7 +1057,6 @@ class StreamKeyType(Enum):
     UN_PARTIAL_STATED_ROOMS = "un_partial_stated_rooms_key"
     THREAD_SUBSCRIPTIONS = "thread_subscriptions_key"
     STICKY_EVENTS = "sticky_events_key"
-    QUARANTINED_MEDIA = "quarantined_media_key"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
