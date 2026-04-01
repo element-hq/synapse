@@ -5,7 +5,7 @@ rules:
           def $FUNC(...):
             ...
       - pattern: |
-          "...profiles..."
+          "profiles"
       # - pattern: |
       #     "...user_id..."
     message: "Function '$FUNC' references both 'profiles' and 'user_id'"

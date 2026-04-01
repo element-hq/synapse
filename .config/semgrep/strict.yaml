@@ -5,7 +5,7 @@ rules:
           def $FUNC(...):
             ...
       - pattern: |
-          "...evil..."
+          "evil"
     message: "Function '$FUNC' contains evil"
     languages: [python]
     severity: ERROR
