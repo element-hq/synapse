@@ -1298,7 +1298,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             for stream_id, origin, media_id, quarantined in txn
         ]
 
-    async def record_media_quarantine_change(self, origin: str | None, media_id: str, quarantined: bool) -> None:
+    async def record_media_quarantine_change(
+        self, origin: str | None, media_id: str, quarantined: bool
+    ) -> None:
         """Records a change to the quarantine state of a piece of media.
 
         Args:
