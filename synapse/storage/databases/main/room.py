@@ -1298,6 +1298,21 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             for stream_id, origin, media_id, quarantined in txn
         ]
 
+    async def record_media_quarantine_change(self, origin: str | None, media_id: str, quarantined: bool) -> None:
+        """Records a change to the quarantine state of a piece of media.
+
+        Args:
+            origin: The media origin, or None if the media is local.
+            media_id: The media ID at the origin.
+            quarantined: Whether the media is being quarantined or unquarantined.
+        """
+        return await self.db_pool.runInteraction(
+            "record_media_quarantine_change",
+            self._insert_quarantine_change_txn,
+            [[origin, media_id]],
+            quarantined,
+        )
+
     def _insert_quarantine_change_txn(
         self,
         txn: LoggingTransaction,
