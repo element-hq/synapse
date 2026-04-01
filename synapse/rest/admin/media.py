@@ -43,7 +43,7 @@ from synapse.rest.admin._base import (
 from synapse.storage.databases.main.media_repository import (
     MediaSortOrder,
 )
-from synapse.types import JsonDict, MultiWriterStreamToken, UserID
+from synapse.types import JsonDict, UserID, MultiWriterStreamToken
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
