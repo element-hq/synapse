@@ -159,6 +159,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             "redactions_received_ts", self._redactions_received_ts
         )
 
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.REDACTIONS_RECHECK_BG_UPDATE,
+            self._redactions_recheck_bg_update,
+        )
+
         # This index gets deleted in `event_fix_redactions_bytes` update
         self.db_pool.updates.register_background_index_update(
             "event_fix_redactions_bytes_create_index",
@@ -744,6 +749,66 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         if not count:
             await self.db_pool.updates._end_background_update("redactions_received_ts")
+
+        return count
+
+    async def _redactions_recheck_bg_update(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """Fills in the `recheck` column of the `redactions` table based on
+        the `recheck_redaction` field in each event's internal metadata."""
+        last_event_id = progress.get("last_event_id", "")
+
+        def _txn(txn: LoggingTransaction) -> int:
+            sql = """
+                SELECT r.event_id, ej.internal_metadata
+                FROM redactions AS r
+                LEFT JOIN event_json AS ej USING (event_id)
+                WHERE r.event_id > ?
+                ORDER BY r.event_id ASC
+                LIMIT ?
+            """
+            txn.execute(sql, (last_event_id, batch_size))
+            rows = txn.fetchall()
+            if not rows:
+                return 0
+
+            updates = []
+            for event_id, internal_metadata_json in rows:
+                if internal_metadata_json is not None:
+                    internal_metadata = db_to_json(internal_metadata_json)
+                    recheck = bool(internal_metadata.get("recheck_redaction", False))
+                else:
+                    recheck = False
+                if not recheck:
+                    # Column defaults to true, so we only need to update rows
+                    # where recheck should be false.
+                    updates.append((event_id, recheck))
+
+            self.db_pool.simple_update_many_txn(
+                txn,
+                table="redactions",
+                key_names=("event_id",),
+                key_values=[(event_id,) for event_id, _ in updates],
+                value_names=("recheck",),
+                value_values=[(recheck,) for _, recheck in updates],
+            )
+
+            upper_event_id = rows[-1][0]
+            self.db_pool.updates._background_update_progress_txn(
+                txn,
+                _BackgroundUpdates.REDACTIONS_RECHECK_BG_UPDATE,
+                {"last_event_id": upper_event_id},
+            )
+
+            return len(rows)
+
+        count = await self.db_pool.runInteraction("_redactions_recheck_bg_update", _txn)
+
+        if not count:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.REDACTIONS_RECHECK_BG_UPDATE
+            )
 
         return count
 

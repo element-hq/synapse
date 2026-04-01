@@ -47,15 +47,19 @@ jobs:
         if: github.event_name == 'push'
         with:
           ref: master
+      # We use `poetry` in `complement.sh`
+      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        with:
+          poetry-version: "2.2.1"
       - name: Login to registry
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Work out labels for complement image
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: ghcr.io/${{ github.repository }}/complement-synapse
           tags: |
@@ -69,6 +73,7 @@ jobs:
         run: |
           for TAG in ${{ join(fromJson(steps.meta.outputs.json).tags, ' ') }}; do 
             echo "tag and push $TAG"
-            docker tag complement-synapse $TAG
+            # `localhost/complement-synapse` should match the image created by `scripts-dev/complement.sh`
+            docker tag localhost/complement-synapse $TAG
             docker push $TAG
           done

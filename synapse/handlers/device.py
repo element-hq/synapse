@@ -130,7 +130,6 @@ class DeviceHandler:
         self._auth_handler = hs.get_auth_handler()
         self._account_data_handler = hs.get_account_data_handler()
         self._event_sources = hs.get_event_sources()
-        self._msc3852_enabled = hs.config.experimental.msc3852_enabled
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
         )
@@ -291,6 +290,8 @@ class DeviceHandler:
             user_id: The user to delete devices from.
             device_ids: The list of device IDs to delete
         """
+        logger.info("Deleting devices %r for %r", list(device_ids), user_id)
+
         to_device_stream_id = self._event_sources.get_current_token().to_device_key
 
         try:
