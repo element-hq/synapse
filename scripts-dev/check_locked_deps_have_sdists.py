@@ -22,25 +22,32 @@
 import sys
 from pathlib import Path
 
-import tomli
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 
 def main() -> None:
-    lockfile_path = Path(__file__).parent.parent.joinpath("poetry.lock")
+    lockfile_path = Path(__file__).parent.parent.joinpath("uv.lock")
     with open(lockfile_path, "rb") as lockfile:
-        lockfile_content = tomli.load(lockfile)
+        lockfile_content = tomllib.load(lockfile)
 
-    # Poetry 1.3+ lockfile format:
-    # There's a `files` inline table in each [[package]]
-    packages_to_assets: dict[str, list[dict[str, str]]] = {
-        package["name"]: package["files"] for package in lockfile_content["package"]
-    }
+    packages: list[dict] = lockfile_content["package"]
 
     success = True
+    checked = 0
 
-    for package_name, assets in packages_to_assets.items():
-        has_sdist = any(asset["file"].endswith(".tar.gz") for asset in assets)
-        if not has_sdist:
+    for package in packages:
+        package_name = package["name"]
+
+        # Skip the project itself
+        if package_name == "matrix-synapse":
+            continue
+
+        checked += 1
+
+        if "sdist" not in package:
             success = False
             print(
                 f"Locked package {package_name!r} does not have a source distribution!",
@@ -49,13 +56,13 @@ def main() -> None:
 
     if not success:
         print(
-            "\nThere were some problems with the Poetry lockfile (poetry.lock).",
+            "\nThere were some problems with the uv lockfile (uv.lock).",
             file=sys.stderr,
         )
         sys.exit(1)
 
     print(
-        f"Poetry lockfile OK. {len(packages_to_assets)} locked packages checked.",
+        f"uv lockfile OK. {checked} locked packages checked.",
         file=sys.stderr,
     )
 

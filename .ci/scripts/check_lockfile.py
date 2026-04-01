@@ -6,17 +6,17 @@ if sys.version_info < (3, 11):
 
 import tomllib
 
-with open("poetry.lock", "rb") as f:
+with open("uv.lock", "rb") as f:
     lockfile = tomllib.load(f)
 
 try:
-    lock_version = lockfile["metadata"]["lock-version"]
-    assert lock_version == "2.1"
+    lock_version = lockfile["version"]
+    assert lock_version == 1
 except Exception:
     print(
         """\
-    Lockfile is not version 2.1. You probably need to upgrade poetry on your local box
-    and re-run `poetry lock`. See the Poetry cheat sheet at
+    Lockfile is not version 1. You probably need to upgrade uv on your local box
+    and re-run `uv lock`. See the dependency management documentation at
     https://element-hq.github.io/synapse/develop/development/dependencies.html
     """
     )

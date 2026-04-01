@@ -2,10 +2,10 @@ on:
   push:
     branches: ["develop", "release-*"]
     paths:
-      - poetry.lock
+      - uv.lock
   pull_request:
     paths:
-      - poetry.lock
+      - uv.lock
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,5 +20,4 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.x'
-      - run: pip install tomli
       - run: ./scripts-dev/check_locked_deps_have_sdists.py
