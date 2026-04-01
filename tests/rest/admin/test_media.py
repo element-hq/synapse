@@ -812,8 +812,6 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
     def test_list_quarantined_media(self) -> None:
         """
         Ensure we actually get results for each page and that pagination is seamless.
-        We can't really test that remote media is quarantined, but we can test that local
-        media is.
         """
         # Upload 105 media objects to test multiple pages
         self.media_ids = [self._local_upload(self.admin_user_tok) for _ in range(105)]
@@ -867,9 +865,9 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
             self.assertEqual(row["origin"], self.server_name)
             self.assertEqual(row["quarantined"], True)
 
-    def test_list_quarantined_media_bounds(self) -> None:
+    def test_list_quarantined_media_bounds_high(self) -> None:
         """
-        Ensure out of bounds requests are handled gracefully.
+        Ensure out of bounds requests with high `from` values are handled gracefully.
         """
         # Page that's very much out of range, so should have no results
         channel = self.make_request(
@@ -881,7 +879,11 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         self.assertEqual(0, len(channel.json_body["rows"]))
         self.assertEqual(900000, channel.json_body["next_batch"])
 
-        # The same, but negative
+    def test_list_quarantined_media_bounds_low(self) -> None:
+        """
+        Ensure out of bounds requests with low `from` values are handled gracefully.
+        """
+        # The same as above, but negative
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/media/quarantine_changes?from=-1",
