@@ -190,7 +190,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             )
         )
 
-        # Register a background update to flag already-quarantined media in the quaranine
+        # Register a background update to flag already-quarantined media in the quarantine
         # media changes table. This is to populate the API endpoint which consumes the
         # table with initial data that callers expect (namely, a list of currently
         # quarantined media).
