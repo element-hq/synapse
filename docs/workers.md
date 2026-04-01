@@ -578,8 +578,11 @@ configured as stream writer for the `device_lists` stream:
 
 ##### The `quarantined_media_changes` stream
 
-[`synapse.app.media_repository`](#synapseappmedia_repository) workers should be 
-configured as stream writers for the `quarantined_media_changes` stream.
+The `quarantined_media_changes` stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly to one of the workers
+configured as stream writer for the `quarantined_media_changes` stream:
+
+    ^/_synapse/admin/v1/quarantine_media/.*$
 
 #### Restrict outbound federation traffic to a specific set of workers
 
