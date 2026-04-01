@@ -2461,7 +2461,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     @wrap_as_background_process("prune_device_lists_changes_in_room")
     async def _prune_device_lists_changes_in_room(self) -> None:
         """Delete old entries out of the `device_lists_changes_in_room`, so that
-        we don't
+        we the table doesn't grow indefinitely.
         """
 
         # Let's only do this pruning if the index on inserted_ts has been
