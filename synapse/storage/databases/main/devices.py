@@ -1183,7 +1183,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             user_ids: If provided, only check if these users have changed their device lists.
                 Otherwise changes from all users are returned.
             to_key: The maximum device lists stream token to query device list changes for,
-                inclusive.
+                inclusive. If None then no upper limit is applied.
 
         Returns:
             The set of user/device ID tuples whose devices have changed since `from_key`
