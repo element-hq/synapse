@@ -249,6 +249,10 @@ class DeviceMessageHandler:
                 # over federation, so as to more easily catch clients that are
                 # sending excessively large messages.
                 if len(encode_canonical_json(message_content)) > SOFT_MAX_EDU_SIZE:
+                    # 413 is currently an unspecced response for `/sendToDevice` but is
+                    # probably the best thing we can do.
+                    # https://github.com/matrix-org/matrix-spec/pull/2340 tracks adding
+                    # this to the spec
                     raise EventSizeError(
                         f"To-device message for {user_id}:{device_id} is too large to send",
                         unpersistable=True,
