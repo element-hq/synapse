@@ -689,20 +689,6 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
         if max_stream <= self.get_max_stream_pos():
             return self
 
-        # Log *something* as we consider this a programming error
-        #
-        # We don't assert as the whole point of bounding is so that we can recover
-        # gracefully.
-        #
-        # Old versions of Synapse could advance streams without persisting anything in
-        # the DB (fixed in https://github.com/element-hq/synapse/pull/17229) and on
-        # restart, those updates would be lost.
-        logger.error(
-            "Bounding token from the future: token: %s, bound: %s",
-            self,
-            max_stream,
-        )
-
         min_pos = min(self.stream, max_stream)
         return type(self)(
             stream=min_pos,
