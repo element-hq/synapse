@@ -6,6 +6,7 @@
 //! source has been updated but the library hasn't been rebuilt.
 
 use std::path::PathBuf;
+use std::process::Command;
 
 use blake2::{Blake2b512, Digest};
 
@@ -47,6 +48,16 @@ fn main() -> Result<(), std::io::Error> {
 
     let hex_digest = hex::encode(hasher.finalize());
     println!("cargo:rustc-env=SYNAPSE_RUST_DIGEST={hex_digest}");
+
+    let rustc_version = Command::new("rustc")
+        .arg("--version")
+        .output()
+        .map(|o| String::from_utf8(o.stdout).unwrap_or_default())
+        .unwrap_or_else(|_| "unknown".to_string());
+    println!(
+        "cargo:rustc-env=SYNAPSE_RUSTC_VERSION={}",
+        rustc_version.trim()
+    );
 
     // The default rules don't pick up trivial changes to the workspace config
     // files, but we need to rebuild if those change to pick up the changed

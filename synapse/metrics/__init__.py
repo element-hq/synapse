@@ -60,6 +60,7 @@ from twisted.web.server import Request
 
 # This module is imported for its side effects; flake8 needn't warn that it's unused.
 import synapse.metrics._reactor_metrics  # noqa: F401
+import synapse.synapse_rust as synapse_rust
 from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
 from synapse.metrics._types import Collector
 from synapse.types import StrSequence
@@ -679,6 +680,17 @@ build_info.labels(
     SYNAPSE_VERSION,
     " ".join([platform.system(), platform.release()]),
 ).set(1)
+
+# Rust version used for compilation
+get_rustc_version = getattr(synapse_rust, "get_rustc_version", None)
+rustc_version = get_rustc_version() if get_rustc_version is not None else "unknown"
+
+rust_build_info = Gauge(  # type: ignore[missing-server-name-label]
+    "synapse_build_rust_compiler_version",
+    "Rust compiler version used at build time",
+    ["rustc_version"],
+)
+rust_build_info.labels(rustc_version).set(1)
 
 
 synapse_server_name_info = Gauge(
