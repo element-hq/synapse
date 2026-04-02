@@ -283,7 +283,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             if len(remote_media_result) > 0:
                 self._insert_quarantine_change_txn(txn, remote_media_result, True)
 
-            self.db_pool._background_update_progress_txn(
+            self.db_pool.updates._background_update_progress_txn(
                 txn,
                 "flag_existing_quarantined_media",
                 {
