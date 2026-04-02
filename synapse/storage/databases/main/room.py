@@ -60,8 +60,12 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
-from synapse.types import JsonDict, RetentionPolicy, StrCollection, \
-    ThirdPartyInstanceID, AbstractMultiWriterStreamToken
+from synapse.types import (
+    JsonDict,
+    RetentionPolicy,
+    StrCollection,
+    ThirdPartyInstanceID,
+)
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
@@ -247,7 +251,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # non-null. We only want quarantined media, per docstring above.
         def flag_quarantined(txn: LoggingTransaction) -> int:
             # It doesn't matter which order we do these in, as long as we do both of them.
-            txn.execute("""
+            txn.execute(
+                """
                 SELECT NULL AS media_origin, media_id
                 FROM local_media_repository
                 WHERE quarantined_by IS NOT NULL
@@ -255,7 +260,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 ORDER BY media_id
                 LIMIT ?
             """,
-                (last_local_media_id, batch_size)
+                (last_local_media_id, batch_size),
             )
             local_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
             if len(local_media_result) > 0:
@@ -263,7 +268,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
             # We use a >= ? on the media origin to avoid missing records when media IDs
             # collide between origins.
-            txn.execute("""
+            txn.execute(
+                """
                 SELECT media_origin, media_id
                 FROM remote_media_cache
                 WHERE quarantined_by IS NOT NULL
@@ -271,7 +277,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 ORDER BY media_origin, media_id
                 LIMIT ?
             """,
-                (last_remote_origin, last_remote_media_id, batch_size)
+                (last_remote_origin, last_remote_media_id, batch_size),
             )
             remote_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
             if len(remote_media_result) > 0:
@@ -281,15 +287,26 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 txn,
                 "flag_existing_quarantined_media",
                 {
-                    "last_local_media_id": local_media_result[-1][1] if len(local_media_result) > 0 else last_local_media_id,
-                    "last_remote_media_id": remote_media_result[-1][1] if len(remote_media_result) > 0 else last_remote_media_id,
-                    "last_remote_origin": remote_media_result[-1][0] if len(remote_media_result) > 0 else last_remote_origin,
-                }
+                    "last_local_media_id": local_media_result[-1][1]
+                    if len(local_media_result) > 0
+                    else last_local_media_id,
+                    "last_remote_media_id": remote_media_result[-1][1]
+                    if len(remote_media_result) > 0
+                    else last_remote_media_id,
+                    "last_remote_origin": remote_media_result[-1][0]
+                    if len(remote_media_result) > 0
+                    else last_remote_origin,
+                },
             )
 
             return len(local_media_result) + len(remote_media_result)
 
-        logger.info("Flagging existing quarantined media with local offset %s and remote offset %s/%s", last_local_media_id, last_remote_origin, last_remote_media_id)
+        logger.info(
+            "Flagging existing quarantined media with local offset %s and remote offset %s/%s",
+            last_local_media_id,
+            last_remote_origin,
+            last_remote_media_id,
+        )
         num_flagged = await self.db_pool.runInteraction(
             "_flag_existing_quarantined_media",
             flag_quarantined,
@@ -1310,7 +1327,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         # "This should never happen". Tokens we hand out via the API should exist. If they
         # don't, then we're in a bad state and need to explode.
-        max_persisted_position = await self._quarantined_media_changes_id_gen.get_max_allocated_token()
+        max_persisted_position = (
+            await self._quarantined_media_changes_id_gen.get_max_allocated_token()
+        )
         assert max_persisted_position >= target_id, (
             f"Unable to wait for invalid future token (token={target_id} has positions "
             f"ahead of our max persisted position={max_persisted_position})"

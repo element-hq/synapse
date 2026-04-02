@@ -35,7 +35,6 @@ from synapse.http.servlet import (
     parse_string,
 )
 from synapse.http.site import SynapseRequest
-from synapse.replication.tcp.streams import QuarantinedMediaStream
 from synapse.rest.admin._base import (
     admin_patterns,
     assert_requester_is_admin,
