@@ -1,0 +1,1 @@
+resolves #19403 Report the rust compiler version used in the prometheus metrics. Contributed by Noah Markert.
