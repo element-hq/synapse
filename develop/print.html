@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-b358e032.js";
+            window.path_to_searchindex_js = "searchindex-e2da9a48.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -18073,6 +18073,16 @@ server is set to authenticate you over the UNIX socket (i.e. if the <code>psql</
 works without further arguments).</p>
 <p>Your Postgres account needs to be able to create databases; see the postgres
 docs for <a href="https://www.postgresql.org/docs/current/sql-alterrole.html"><code>ALTER ROLE</code></a>.</p>
+<h3 id="running-the-tests-on-macos"><a class="header" href="#running-the-tests-on-macos">Running the tests on MacOS</a></h3>
+<p>To run the unit tests with SQLite on MacOS you will need to swap out the default MacOS
+python interpreter with the homebrew version. This is due to the default using a
+locked down version of Python and sqlite3. After installing python from homebrew:</p>
+<pre><code>  poetry env remove --all
+  poetry env use /opt/homebrew/bin/python3.13
+  poetry install
+  poetry run trial tests
+</code></pre>
+<p>This example uses python 3.13, but choose whichever version you want.</p>
 <h2 id="run-the-integration-tests-sytest"><a class="header" href="#run-the-integration-tests-sytest">Run the integration tests (<a href="https://github.com/matrix-org/sytest">Sytest</a>).</a></h2>
 <p>The integration tests are a more comprehensive suite of tests. They
 run a full version of Synapse, including your changes, to check if
