@@ -252,11 +252,15 @@ class ListQuarantineChanges(RestServlet):
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
         to_id = await self.store.get_current_quarantined_media_stream_id()
 
-        await self.replication.wait_for_stream_position(
-            self.server_name,
-            QuarantinedMediaStream.NAME,
-            to_id,
-        )
+        if to_id < from_id or from_id < 0:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Query parameter from must be a positive integer and behind the current stream position.",
+                errcode=Codes.INVALID_PARAM,
+            )
+
+        # We need to wait to ensure that our current worker is actually caught up with
+        # the stream position, otherwise we might not return what we think we're returning.
 
         changes = await self.store.get_quarantined_media_changes(
             from_id=from_id,
@@ -264,7 +268,7 @@ class ListQuarantineChanges(RestServlet):
             limit=limit,
         )
 
-        rows = [
+        serialized_changes = [
             {
                 "origin": c.origin if c.origin is not None else self.server_name,
                 "media_id": c.media_id,
@@ -275,10 +279,10 @@ class ListQuarantineChanges(RestServlet):
 
         # `from` is exclusive, so don't +1 this. We also know the last record will have
         # the highest stream ID, so use that one. If there aren't any records, just
-        # return the `from` value.
-        next_batch = changes[-1].stream_id if len(changes) > 0 else from_id
+        # return the `to_id` value because it'll be the furthest stream position possible.
+        next_batch = changes[-1].stream_id if len(changes) > 0 else to_id
 
-        return HTTPStatus.OK, {"next_batch": next_batch, "rows": rows}
+        return HTTPStatus.OK, {"next_batch": next_batch, "changes": serialized_changes}
 
 
 class ProtectMediaByID(RestServlet):

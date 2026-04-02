@@ -816,16 +816,16 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         # Upload 105 media objects to test multiple pages
         self.media_ids = [self._local_upload(self.admin_user_tok) for _ in range(105)]
 
-        # No rows before quarantine
+        # No changes before quarantine
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/media/quarantine_changes",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(0, len(channel.json_body["rows"]))
+        self.assertEqual(0, len(channel.json_body["changes"]))
 
-        # We expect to continue from `from` because we have no rows
+        # We expect to continue from the current stream position because we have no changes
         self.assertEqual(0, channel.json_body["next_batch"])
 
         # Quarantine by hash should kick in to get the other 104 media objects
@@ -838,9 +838,9 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(100, len(channel.json_body["rows"]))
+        self.assertEqual(100, len(channel.json_body["changes"]))
         self.assertEqual(101, channel.json_body["next_batch"])
-        for row in channel.json_body["rows"]:
+        for row in channel.json_body["changes"]:
             self.assertIn(
                 row["media_id"],
                 self.media_ids[0:100],
@@ -855,9 +855,9 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(5, len(channel.json_body["rows"]))
+        self.assertEqual(5, len(channel.json_body["changes"]))
         self.assertEqual(106, channel.json_body["next_batch"])
-        for row in channel.json_body["rows"]:
+        for row in channel.json_body["changes"]:
             self.assertIn(
                 row["media_id"],
                 self.media_ids[100:],
@@ -875,9 +875,8 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
             "/_synapse/admin/v1/media/quarantine_changes?from=900000",
             access_token=self.admin_user_tok,
         )
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(0, len(channel.json_body["rows"]))
-        self.assertEqual(900000, channel.json_body["next_batch"])
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
     def test_list_quarantined_media_bounds_low(self) -> None:
         """
