@@ -149,7 +149,9 @@ class EventSources:
                     ].get_max_allocated_token()
 
                     if max_token < token_value.get_max_stream_pos():
-                        # Log *something* as we consider this a Synapse programming error
+                        # Log *something* as we consider this as a Synapse programming error
+                        # (assuming no malicious user manipulation of the token) (we shouldn't be
+                        # handing out future tokens).
                         #
                         # We don't assert as the whole point of bounding is so that we can recover
                         # gracefully.
