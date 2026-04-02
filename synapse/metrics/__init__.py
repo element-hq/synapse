@@ -678,7 +678,7 @@ event_processing_lag_by_event = Histogram(
 build_info = Gauge(  # type: ignore[missing-server-name-label]
     "synapse_build_info",
     "Build information",
-    ["pythonversion", "version", "osversion", "rustc_version"],
+    ["pythonversion", "version", "osversion", "rustcversion"],
 )
 build_info.labels(
     " ".join([platform.python_implementation(), platform.python_version()]),
