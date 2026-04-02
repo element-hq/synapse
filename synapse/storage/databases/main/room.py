@@ -58,12 +58,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
-from synapse.types import (
-    JsonDict,
-    RetentionPolicy,
-    StrCollection,
-    ThirdPartyInstanceID,
-)
+from synapse.types import JsonDict, RetentionPolicy, StrCollection, ThirdPartyInstanceID
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import MXC_REGEX
