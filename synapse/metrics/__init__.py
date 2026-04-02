@@ -60,9 +60,9 @@ from twisted.web.server import Request
 
 # This module is imported for its side effects; flake8 needn't warn that it's unused.
 import synapse.metrics._reactor_metrics  # noqa: F401
-import synapse.synapse_rust as synapse_rust
 from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
 from synapse.metrics._types import Collector
+from synapse.synapse_rust import get_rustc_version
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION
 
@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 METRICS_PREFIX = "/_synapse/metrics"
 
 # Rust version used for compilation
-RUSTC_VERSION = synapse_rust.get_rustc_version()
+RUSTC_VERSION = get_rustc_version()
 
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
