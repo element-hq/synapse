@@ -70,6 +70,9 @@ logger = logging.getLogger(__name__)
 
 METRICS_PREFIX = "/_synapse/metrics"
 
+# Rust version used for compilation
+RUSTC_VERSION = synapse_rust.get_rustc_version()
+
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
 SERVER_NAME_LABEL = "server_name"
@@ -673,25 +676,16 @@ event_processing_lag_by_event = Histogram(
 # consider this process-level because all Synapse homeservers running in the process
 # will use the same Synapse version.
 build_info = Gauge(  # type: ignore[missing-server-name-label]
-    "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
+    "synapse_build_info",
+    "Build information",
+    ["pythonversion", "version", "osversion", "rustc_version"],
 )
 build_info.labels(
     " ".join([platform.python_implementation(), platform.python_version()]),
     SYNAPSE_VERSION,
     " ".join([platform.system(), platform.release()]),
+    RUSTC_VERSION,
 ).set(1)
-
-# Rust version used for compilation
-get_rustc_version = getattr(synapse_rust, "get_rustc_version", None)
-rustc_version = get_rustc_version() if get_rustc_version is not None else "unknown"
-
-rust_build_info = Gauge(  # type: ignore[missing-server-name-label]
-    "synapse_build_rust_compiler_version",
-    "Rust compiler version used at build time",
-    ["rustc_version"],
-)
-rust_build_info.labels(rustc_version).set(1)
-
 
 synapse_server_name_info = Gauge(
     "synapse_server_name_info",
