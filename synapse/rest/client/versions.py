@@ -191,6 +191,8 @@ class VersionsRestServlet(RestServlet):
                     ),
                     # MSC4140: Delayed events
                     "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
+                    # MSC4143: Matrix RTC transports (LiveKit backend)
+                    "org.matrix.msc4143": self.config.experimental.msc4143_enabled,
                     # Simplified sliding sync
                     "org.matrix.simplified_msc3575": msc3575_enabled,
                     # Arbitrary key-value profile fields.

@@ -34,13 +34,12 @@ class MatrixRTCRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self._hs = hs
-        self._auth = hs.get_auth()
         self._transports = hs.config.matrix_rtc.transports
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        # Require authentication for this endpoint.
-        await self._auth.get_user_by_req(request)
-
+        # No authentication required: this is a public discovery endpoint.
+        # Clients such as Element X call it without a token to determine
+        # whether the server supports MatrixRTC before establishing a session.
         if self._transports:
             return 200, {"rtc_transports": self._transports}
 
