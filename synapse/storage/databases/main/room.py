@@ -227,8 +227,14 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         Returns:
               The number of rows inserted.
         """
-        # The last row OFFSET we got to in the UNION query below
-        last_row_num: int = progress.get("last_row_num", 0)
+        # We track the progress for the local and remote tables separately just in case
+        # there are media ID collisions that would make a mess of `ORDER BY media_id
+        # LIMIT ?`. If there are collisions towards the end of the returned set, the LIMIT
+        # might cut off some rows and make a future call with `WHERE media_id > ?` miss
+        # them too. By tracking each table separately, we avoid this kind of issue.
+        last_local_media_id = progress.get("last_local_media_id", "")
+        last_remote_media_id = progress.get("last_remote_media_id", "")
+        last_remote_origin = progress.get("last_remote_origin", "")
 
         # The `ORDER BY` here would normally miss records if the admin (un)quarantined a
         # record, but that doesn't affect the background update because we also insert
@@ -240,34 +246,50 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # Note: Already-quarantined media is indicated by the `quarantined_by` field being
         # non-null. We only want quarantined media, per docstring above.
         def flag_quarantined(txn: LoggingTransaction) -> int:
-            txn.execute(
-                """
+            # It doesn't matter which order we do these in, as long as we do both of them.
+            txn.execute("""
                 SELECT NULL AS media_origin, media_id
                 FROM local_media_repository
                 WHERE quarantined_by IS NOT NULL
+                    AND media_id > ?
+                ORDER BY media_id
+                LIMIT ?
+            """,
+                (last_local_media_id, batch_size)
+            )
+            local_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
+            if len(local_media_result) > 0:
+                self._insert_quarantine_change_txn(txn, local_media_result, True)
 
-                UNION
-
+            # We use a >= ? on the media origin to avoid missing records when media IDs
+            # collide between origins.
+            txn.execute("""
                 SELECT media_origin, media_id
                 FROM remote_media_cache
                 WHERE quarantined_by IS NOT NULL
-
+                    AND media_origin >= ? AND media_id > ?
                 ORDER BY media_origin, media_id
-                LIMIT ? OFFSET ?
-                """,
-                (batch_size, last_row_num),
+                LIMIT ?
+            """,
+                (last_remote_origin, last_remote_media_id, batch_size)
             )
-            res = cast(list[tuple[str | None, str]], txn.fetchall())
-            if len(res) > 0:
-                self._insert_quarantine_change_txn(txn, res, True)
-                self.db_pool.updates._background_update_progress_txn(
-                    txn,
-                    "flag_existing_quarantined_media",
-                    {"last_row_num": last_row_num + len(res)},
-                )
-            return len(res)
+            remote_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
+            if len(remote_media_result) > 0:
+                self._insert_quarantine_change_txn(txn, remote_media_result, True)
 
-        logger.info("Flagging existing quarantined media with offset %s", last_row_num)
+            self.db_pool._background_update_progress_txn(
+                txn,
+                "flag_existing_quarantined_media",
+                {
+                    "last_local_media_id": local_media_result[-1][1] if len(local_media_result) > 0 else last_local_media_id,
+                    "last_remote_media_id": remote_media_result[-1][1] if len(remote_media_result) > 0 else last_remote_media_id,
+                    "last_remote_origin": remote_media_result[-1][0] if len(remote_media_result) > 0 else last_remote_origin,
+                }
+            )
+
+            return len(local_media_result) + len(remote_media_result)
+
+        logger.info("Flagging existing quarantined media with local offset %s and remote offset %s/%s", last_local_media_id, last_remote_origin, last_remote_media_id)
         num_flagged = await self.db_pool.runInteraction(
             "_flag_existing_quarantined_media",
             flag_quarantined,
