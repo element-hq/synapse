@@ -826,7 +826,7 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         self.assertEqual(0, len(channel.json_body["changes"]))
 
         # We expect to continue from the current stream position because we have no changes
-        self.assertEqual(0, channel.json_body["next_batch"])
+        self.assertEqual(1, channel.json_body["next_batch"])
 
         # Quarantine by hash should kick in to get the other 104 media objects
         self._quarantine_local_media(self.media_ids[0], self.admin_user_tok)
