@@ -64,3 +64,4 @@ default = ["extension-module"]
 [build-dependencies]
 blake2 = "0.10.4"
 hex = "0.4.3"
+rustc_version = "0.4.1"
