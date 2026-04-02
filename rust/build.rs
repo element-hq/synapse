@@ -5,9 +5,10 @@
 //! does not match the source in-tree, helping to detect the case where the
 //! source has been updated but the library hasn't been rebuilt.
 
+use std::path::PathBuf;
+
 use blake2::{Blake2b512, Digest};
 use rustc_version::version_meta;
-use std::path::PathBuf;
 
 fn main() -> Result<(), std::io::Error> {
     let mut dirs = vec![PathBuf::from("src")];
