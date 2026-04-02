@@ -46,6 +46,9 @@ from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import log_kv, start_active_span
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.storage.util.id_generators import (
+    MultiWriterIdGenerator,
+)
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
     ISynapseReactor,
@@ -831,8 +834,15 @@ class Notifier:
         return result
 
     async def wait_for_stream_token(self, stream_token: StreamToken) -> bool:
-        """Wait for this worker to catch up with the given stream token."""
+        """
+        Wait for this worker to catch up with the given stream token.
+
+        Returns:
+            True when this worker has caught up
+            False when we timed out waiting
+        """
         current_token = self.event_sources.get_current_token()
+        # Return early if we are already caught up
         if stream_token.is_before_or_eq(current_token):
             return True
 
@@ -840,6 +850,7 @@ class Notifier:
         # the future", i.e. that are ahead of the tokens persisted in the DB.
         stream_token = await self.event_sources.bound_future_token(stream_token)
 
+        # Start waiting until we've caught up to the `stream_token`
         start = self.clock.time_msec()
         logged = False
         while True:
@@ -849,6 +860,7 @@ class Notifier:
 
             now = self.clock.time_msec()
 
+            # Timed out
             if now - start > 10_000:
                 return False
 
@@ -856,6 +868,44 @@ class Notifier:
                 logger.info(
                     "Waiting for current token to reach %s; currently at %s",
                     stream_token,
+                    current_token,
+                )
+                logged = True
+
+            # TODO: be better
+            await self.clock.sleep(Duration(milliseconds=500))
+
+    async def wait_for_multi_writer_stream_token(
+        self, token: MultiWriterStreamToken, id_gen: MultiWriterIdGenerator
+    ) -> bool:
+        """Wait for this worker to catch up with the given stream token."""
+        current_token = id_gen.get_current_token()
+        # Return early if we are already caught up
+        if token.is_before_or_eq(current_token):
+            return True
+
+        # Work around a bug where older Synapse versions gave out tokens "from
+        # the future", i.e. that are ahead of the tokens persisted in the DB.
+        token = token.bound_future_token(TODO)
+
+        # Start waiting until we've caught up to the `stream_token`
+        start = self.clock.time_msec()
+        logged = False
+        while True:
+            current_token = self.event_sources.get_current_token()
+            if token.is_before_or_eq(current_token):
+                return True
+
+            now = self.clock.time_msec()
+
+            # Timed out
+            if now - start > 10_000:
+                return False
+
+            if not logged:
+                logger.info(
+                    "Waiting for current token to reach %s; currently at %s",
+                    token,
                     current_token,
                 )
                 logged = True
