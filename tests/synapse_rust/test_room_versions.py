@@ -26,9 +26,9 @@ class KnownRoomVersionsMappingTestCase(unittest.TestCase):
 
     def test_contains_non_string(self) -> None:
         """Test that non-string keys return False from __contains__."""
-        self.assertFalse(42 in KNOWN_ROOM_VERSIONS)
-        self.assertFalse(3.14 in KNOWN_ROOM_VERSIONS)
-        self.assertFalse([] in KNOWN_ROOM_VERSIONS)
+        self.assertFalse(42 in KNOWN_ROOM_VERSIONS)  # type: ignore[comparison-overlap]
+        self.assertFalse(3.14 in KNOWN_ROOM_VERSIONS)  # type: ignore[comparison-overlap]
+        self.assertFalse([] in KNOWN_ROOM_VERSIONS)  # type: ignore[comparison-overlap]
 
     def test_contains_known_version(self) -> None:
         self.assertTrue("1" in KNOWN_ROOM_VERSIONS)
