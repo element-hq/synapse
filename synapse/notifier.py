@@ -51,7 +51,6 @@ from synapse.storage.util.id_generators import (
 )
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
-    AbstractMultiWriterStreamToken,
     ISynapseReactor,
     JsonDict,
     MultiWriterStreamToken,
@@ -896,7 +895,7 @@ class Notifier:
 
     async def wait_for_multi_writer_stream_token(
         self,
-        token: AbstractMultiWriterStreamToken,
+        token: MultiWriterStreamToken,
         id_gen: MultiWriterIdGenerator,
     ) -> bool:
         """
@@ -912,7 +911,7 @@ class Notifier:
             True when this worker has caught up
             False when we timed out waiting
         """
-        current_token = AbstractMultiWriterStreamToken.from_generator(id_gen)
+        current_token = MultiWriterStreamToken.from_generator(id_gen)
         # Return early if we are already caught up
         if token.is_before_or_eq(current_token):
             return True
@@ -936,7 +935,7 @@ class Notifier:
         start = self.clock.time_msec()
         logged = False
         while True:
-            current_token = AbstractMultiWriterStreamToken.from_generator(id_gen)
+            current_token = MultiWriterStreamToken.from_generator(id_gen)
             if token.is_before_or_eq(current_token):
                 return True
 
