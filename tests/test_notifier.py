@@ -137,9 +137,10 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
     def test_wait_for_multi_writer_stream_token_with_invalid_future_sync_token(
         self,
     ) -> None:
-        """Like the previous test, except we give a token that has a stream
-        position ahead of what is in the DB, i.e. its invalid and we shouldn't
-        wait for the stream to advance (as it may never do so).
+        """
+        Like `test_wait_for_multi_writer_stream_token_with_future_sync_token`, except we
+        give a token that has a stream position ahead of what is in the DB, i.e. its
+        invalid and we shouldn't wait for the stream to advance (as it may never do so).
 
         This can happen due to older versions of Synapse giving out stream
         positions without persisting them in the DB, and so on restart the
