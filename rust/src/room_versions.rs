@@ -609,9 +609,12 @@ impl KnownRoomVersionsMapping {
             .ok_or_else(|| PyKeyError::new_err(key.to_string()))
     }
 
-    fn __contains__(&self, key: &str) -> PyResult<bool> {
+    fn __contains__(&self, key: &Bound<'_, PyAny>) -> bool {
+        let Ok(key) = key.extract::<&str>() else {
+            return false;
+        };
         let versions = self.versions.read().unwrap();
-        Ok(versions.iter().any(|v| v.identifier == key))
+        versions.iter().any(|v| v.identifier == key)
     }
 
     fn keys(&self) -> PyResult<Vec<&'static str>> {
