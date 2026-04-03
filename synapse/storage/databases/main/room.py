@@ -1679,6 +1679,57 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             get_un_partial_stated_rooms_from_stream_txn,
         )
 
+    async def get_room_report(self, report_id: int) -> dict[str, Any] | None:
+        """Retrieve a room report
+
+        Args:
+            report_id: ID of reported room in database
+        Returns:
+            JSON dict of information from an event report or None if the
+            report does not exist.
+        """
+
+        def _get_room_report_txn(
+            txn: LoggingTransaction, report_id: int
+        ) -> dict[str, Any] | None:
+            sql = """
+                  SELECT rr.id, \
+                         rr.received_ts, \
+                         rr.room_id, \
+                         rr.user_id, \
+                         rr.reason, \
+                         room_stats_state.canonical_alias, \
+                         room_stats_state.name, \
+                         room_stats_state.topic \
+                  FROM room_reports AS rr
+                  JOIN room_stats_state
+                    ON room_stats_state.room_id = rr.room_id
+                  WHERE rr.id = ? \
+                  """
+
+            txn.execute(sql, [report_id])
+            row = txn.fetchone()
+
+            if not row:
+                return None
+
+            room_report = {
+                "id": row[0],
+                "received_ts": row[1],
+                "room_id": row[2],
+                "user_id": row[3],
+                "reason": row[4],
+                "canonical_alias": row[5],
+                "name": row[6],
+                "topic": row[7],
+            }
+
+            return room_report
+
+        return await self.db_pool.runInteraction(
+            "get_room_report", _get_room_report_txn, report_id
+        )
+
     async def get_event_report(self, report_id: int) -> dict[str, Any] | None:
         """Retrieve an event report
 
@@ -1738,6 +1789,105 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction(
             "get_event_report", _get_event_report_txn, report_id
+        )
+
+    async def get_room_reports_paginate(
+        self,
+        start: int,
+        limit: int,
+        direction: Direction = Direction.BACKWARDS,
+        user_id: str | None = None,
+        room_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Retrieve a paginated list of room reports
+
+        Args:
+            start: event offset to begin the query from
+            limit: number of rows to retrieve
+            direction: Whether to fetch the most recent first (backwards) or the
+                oldest first (forwards)
+            user_id: search for user_id. Ignored if user_id is None
+            room_id: filter reports against a specific room_id. Ignored if room_id is None
+        Returns:
+            Tuple of:
+                json list of room reports
+                total number of room reports matching the filter criteria
+        """
+
+        def _get_room_reports_paginate_txn(
+            txn: LoggingTransaction,
+        ) -> tuple[list[dict[str, Any]], int]:
+            filters = []
+            args: list[object] = []
+
+            if user_id:
+                filters.append("rr.user_id LIKE ?")
+                args.extend(["%" + user_id + "%"])
+            if room_id:
+                filters.append("rr.room_id LIKE ?")
+                args.extend(["%" + room_id + "%"])
+
+            if direction == Direction.BACKWARDS:
+                order = "DESC"
+            else:
+                order = "ASC"
+
+            where_clause = "WHERE " + " AND ".join(filters) if len(filters) > 0 else ""
+
+            # Don't count reports against rooms which have been deleted/purged
+            sql = """
+                SELECT COUNT(*) as total_room_reports
+                FROM room_reports AS rr
+                JOIN room_stats_state ON room_stats_state.room_id = rr.room_id
+                {}
+                """.format(where_clause)
+            txn.execute(sql, args)
+            count = cast(tuple[int], txn.fetchone())[0]
+
+            sql = """
+                SELECT
+                    rr.id,
+                    rr.received_ts,
+                    rr.room_id,
+                    rr.user_id,
+                    rr.reason,
+                    room_stats_state.canonical_alias,
+                    room_stats_state.name,
+                    room_stats_state.topic
+                FROM room_reports AS rr
+                JOIN room_stats_state
+                    ON room_stats_state.room_id = rr.room_id
+                {where_clause}
+                ORDER BY rr.received_ts {order}
+                LIMIT ?
+                OFFSET ?
+            """.format(
+                where_clause=where_clause,
+                order=order,
+            )
+
+            args += [limit, start]
+            txn.execute(sql, args)
+
+            room_reports = []
+            for row in txn:
+                room_reports.append(
+                    {
+                        "id": row[0],
+                        "received_ts": row[1],
+                        "room_id": row[2],
+                        "user_id": row[3],
+                        "reason": row[4],
+                        "canonical_alias": row[5],
+                        "name": row[6],
+                        "topic": row[7],
+                    }
+                )
+
+            return room_reports, count
+
+        return await self.db_pool.runInteraction(
+            "get_room_reports_paginate", _get_room_reports_paginate_txn
         )
 
     async def get_event_reports_paginate(
@@ -1860,6 +2010,27 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction(
             "get_event_reports_paginate", _get_event_reports_paginate_txn
         )
+
+    async def delete_room_report(self, report_id: int) -> bool:
+        """Remove a room report from database.
+
+        Args:
+            report_id: Report to delete
+
+        Returns:
+            Whether the report was successfully deleted or not.
+        """
+        try:
+            await self.db_pool.simple_delete_one(
+                table="room_reports",
+                keyvalues={"id": report_id},
+                desc="delete_room_report",
+            )
+        except StoreError:
+            # Deletion failed because report does not exist
+            return False
+
+        return True
 
     async def delete_event_report(self, report_id: int) -> bool:
         """Remove an event report from database.
