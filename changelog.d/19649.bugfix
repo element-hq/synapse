@@ -1,0 +1,1 @@
+Fix `KNOWN_ROOM_VERSIONS.__contains__` raising `TypeError` for non-string keys, which could cause `/sync` to fail for rooms with a NULL room version in the database.
