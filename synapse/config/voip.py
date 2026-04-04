@@ -36,6 +36,12 @@ You have configured both `turn_cloudflare_api_token` and
 These are mutually incompatible.
 """
 
+CONFLICTING_TURN_BROKER_API_TOKEN_OPTS_ERROR = """\
+You have configured both `turn_broker_api_token` and
+`turn_broker_api_token_path`.
+These are mutually incompatible.
+"""
+
 
 class VoipConfig(Config):
     section = "voip"
@@ -87,6 +93,27 @@ class VoipConfig(Config):
             "turn_cloudflare_api_base_url", "https://rtc.live.cloudflare.com/v1"
         ).rstrip("/")
 
+        self.turn_federation_deployment = config.get(
+            "turn_federation_deployment", False
+        )
+        self.turn_broker_url = config.get("turn_broker_url")
+        self.turn_broker_api_token = config.get("turn_broker_api_token")
+        if self.turn_broker_api_token and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("turn_broker_api_token",),
+            )
+
+        turn_broker_api_token_path = config.get("turn_broker_api_token_path")
+        if turn_broker_api_token_path:
+            if self.turn_broker_api_token:
+                raise ConfigError(CONFLICTING_TURN_BROKER_API_TOKEN_OPTS_ERROR)
+
+            self.turn_broker_api_token = read_file(
+                turn_broker_api_token_path,
+                ("turn_broker_api_token_path",),
+            ).strip()
+
         if self.turn_cloudflare_enabled and not self.turn_cloudflare_key_id:
             raise ConfigError(
                 "`turn_cloudflare_key_id` is required when "
@@ -100,4 +127,18 @@ class VoipConfig(Config):
                 "`turn_cloudflare_api_token_path` is required when "
                 "`turn_cloudflare_enabled` is true",
                 ("turn_cloudflare_api_token",),
+            )
+
+        if self.turn_federation_deployment and not self.turn_broker_url:
+            raise ConfigError(
+                "`turn_broker_url` is required when "
+                "`turn_federation_deployment` is true",
+                ("turn_broker_url",),
+            )
+
+        if self.turn_federation_deployment and not self.turn_broker_api_token:
+            raise ConfigError(
+                "One of `turn_broker_api_token` or `turn_broker_api_token_path` "
+                "is required when `turn_federation_deployment` is true",
+                ("turn_broker_api_token",),
             )

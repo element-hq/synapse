@@ -40,6 +40,38 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _validate_turn_credentials_response(
+    response: JsonDict, requested_ttl: int | None = None
+) -> JsonDict:
+    """Validate a Matrix TURN credentials response shape."""
+
+    username = response.get("username")
+    password = response.get("password")
+    ttl = response.get("ttl")
+    uris = response.get("uris")
+
+    if not isinstance(username, str) or not isinstance(password, str):
+        raise ValueError("TURN credentials response did not include credentials")
+
+    if not isinstance(ttl, int) or ttl <= 0:
+        raise ValueError("TURN credentials response did not include a valid ttl")
+
+    if requested_ttl is not None and ttl > requested_ttl:
+        raise ValueError("TURN credentials response ttl exceeded the requested ttl")
+
+    if not isinstance(uris, list) or not uris or not all(
+        isinstance(uri, str) and uri.startswith(("turn:", "turns:")) for uri in uris
+    ):
+        raise ValueError("TURN credentials response did not include TURN URIs")
+
+    return {
+        "username": username,
+        "password": password,
+        "ttl": ttl,
+        "uris": uris,
+    }
+
+
 def _parse_cloudflare_turn_response(response: JsonDict, ttl: int) -> JsonDict:
     """Convert Cloudflare TURN API credentials into the Matrix VoIP response shape."""
 
@@ -108,6 +140,30 @@ class VoipRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.http_client: SimpleHttpClient = hs.get_proxied_http_client()
 
+    async def _get_turn_broker_credentials(self, ttl: int) -> JsonDict | None:
+        if not self.hs.config.voip.turn_federation_deployment:
+            return None
+
+        broker_url = self.hs.config.voip.turn_broker_url
+        if not broker_url:
+            return None
+
+        api_token = self.hs.config.voip.turn_broker_api_token
+        headers = None
+        if api_token:
+            headers = {b"Authorization": [f"Bearer {api_token}".encode("ascii")]}
+
+        response = await self.http_client.post_json_get_json(
+            broker_url,
+            {"ttl": ttl},
+            headers=headers,
+        )
+
+        if not isinstance(response, dict):
+            raise ValueError("TURN broker returned a non-object response")
+
+        return _validate_turn_credentials_response(response, ttl)
+
     async def _get_cloudflare_turn_credentials(self, ttl: int) -> JsonDict | None:
         if not self.hs.config.voip.turn_cloudflare_enabled:
             return None
@@ -143,7 +199,21 @@ class VoipRestServlet(RestServlet):
         turnPassword = self.hs.config.voip.turn_password
         userLifetime = self.hs.config.voip.turn_user_lifetime
 
-        if self.hs.config.voip.turn_cloudflare_enabled:
+        if self.hs.config.voip.turn_federation_deployment:
+            try:
+                broker_response = await self._get_turn_broker_credentials(
+                    userLifetime // 1000
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to fetch TURN credentials from the configured broker; "
+                    "falling back to the configured TURN server",
+                    exc_info=True,
+                )
+            else:
+                if broker_response is not None:
+                    return 200, broker_response
+        elif self.hs.config.voip.turn_cloudflare_enabled:
             try:
                 cloudflare_response = await self._get_cloudflare_turn_credentials(
                     userLifetime // 1000

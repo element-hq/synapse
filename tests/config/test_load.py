@@ -144,6 +144,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         [
             "turn_shared_secret_path: /does/not/exist",
             "turn_cloudflare_api_token_path: /does/not/exist",
+            "turn_broker_api_token_path: /does/not/exist",
             "registration_shared_secret_path: /does/not/exist",
             "macaroon_secret_key_path: /does/not/exist",
             "recaptcha_private_key_path: /does/not/exist",
@@ -172,6 +173,10 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             (
                 "turn_cloudflare_api_token_path: {}",
                 lambda c: c.voip.turn_cloudflare_api_token.encode("utf-8"),
+            ),
+            (
+                "turn_broker_api_token_path: {}",
+                lambda c: c.voip.turn_broker_api_token.encode("utf-8"),
             ),
             (
                 "registration_shared_secret_path: {}",
@@ -232,6 +237,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         [
             "turn_shared_secret: 53C237",
             "turn_cloudflare_api_token: 53C237",
+            "turn_broker_api_token: 53C237",
             "registration_shared_secret: 53C237",
             "macaroon_secret_key: 53C237",
             "recaptcha_private_key: 53C237",
@@ -305,6 +311,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
                     "",
                     f"turn_shared_secret_path: {secret_file.name}",
                     f"turn_cloudflare_api_token_path: {secret_file.name}",
+                    f"turn_broker_api_token_path: {secret_file.name}",
                     f"registration_shared_secret_path: {secret_file.name}",
                     f"macaroon_secret_key_path: {secret_file.name}",
                     f"recaptcha_private_key_path: {secret_file.name}",
@@ -349,3 +356,36 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
 
         with self.assertRaises(ConfigError):
             HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    def test_turn_broker_requires_federation_deployment_configuration(self) -> None:
+        self.generate_config()
+        self.add_lines_to_config(["", "turn_federation_deployment: true"])
+
+        with self.assertRaises(ConfigError):
+            HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    def test_turn_broker_requires_api_token_configuration(self) -> None:
+        self.generate_config()
+        self.add_lines_to_config(
+            [
+                "",
+                "turn_federation_deployment: true",
+                "turn_broker_url: https://turn-broker.example.com/credentials",
+            ]
+        )
+
+        with self.assertRaises(ConfigError):
+            HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    def test_turn_broker_url_is_accepted_without_federation_deployment(self) -> None:
+        self.generate_config()
+        self.add_lines_to_config(
+            ["", "turn_broker_url: https://turn-broker.example.com/credentials"]
+        )
+
+        config = HomeServerConfig.load_config("", ["-c", self.config_file])
+        self.assertFalse(config.voip.turn_federation_deployment)
+        self.assertEqual(
+            config.voip.turn_broker_url,
+            "https://turn-broker.example.com/credentials",
+        )

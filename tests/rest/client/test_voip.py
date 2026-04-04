@@ -26,6 +26,27 @@ from tests.unittest import override_config
 
 
 class ParseCloudflareTurnResponseTestCase(unittest.TestCase):
+    def test_validates_turn_broker_credentials(self) -> None:
+        response = voip._validate_turn_credentials_response(
+            {
+                "username": "user",
+                "password": "pass",
+                "ttl": 3600,
+                "uris": ["turn:turn.example.com:3478?transport=udp"],
+            },
+            requested_ttl=3600,
+        )
+
+        self.assertEqual(
+            response,
+            {
+                "username": "user",
+                "password": "pass",
+                "ttl": 3600,
+                "uris": ["turn:turn.example.com:3478?transport=udp"],
+            },
+        )
+
     def test_parses_cloudflare_turn_credentials(self) -> None:
         response = voip._parse_cloudflare_turn_response(
             {
@@ -156,6 +177,115 @@ class VoipTestCase(unittest.HomeserverTestCase):
             },
         )
         self.assertEqual(mock_fetch.await_count, 1)
+
+    @override_config(
+        {
+            "turn_federation_deployment": True,
+            "turn_broker_url": "https://turn-broker.example.com/credentials",
+            "turn_broker_api_token": "broker-token",
+            "turn_cloudflare_enabled": True,
+            "turn_cloudflare_key_id": "cf-key-id",
+            "turn_cloudflare_api_token": "cf-api-token",
+            "turn_user_lifetime": "1h",
+        }
+    )
+    def test_federation_deployment_prefers_turn_broker(self) -> None:
+        with patch.object(
+            voip.VoipRestServlet,
+            "_get_turn_broker_credentials",
+            new=AsyncMock(
+                return_value={
+                    "username": "broker-user",
+                    "password": "broker-pass",
+                    "ttl": 3600,
+                    "uris": ["turn:broker.example.com:3478?transport=udp"],
+                }
+            ),
+        ) as mock_broker:
+            with patch.object(
+                voip.VoipRestServlet,
+                "_get_cloudflare_turn_credentials",
+                new=AsyncMock(
+                    return_value={
+                        "username": "cf-user",
+                        "password": "cf-pass",
+                        "ttl": 3600,
+                        "uris": [
+                            "turn:turn.cloudflare.com:3478?transport=udp"
+                        ],
+                    }
+                ),
+            ) as mock_cloudflare:
+                channel = self.make_request(
+                    "GET", "/voip/turnServer", access_token=self.access_token
+                )
+
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.json_body,
+            {
+                "username": "broker-user",
+                "password": "broker-pass",
+                "ttl": 3600,
+                "uris": ["turn:broker.example.com:3478?transport=udp"],
+            },
+        )
+        self.assertEqual(mock_broker.await_count, 1)
+        self.assertEqual(mock_cloudflare.await_count, 0)
+
+    @override_config(
+        {
+            "turn_broker_url": "https://turn-broker.example.com/credentials",
+            "turn_broker_api_token": "broker-token",
+            "turn_cloudflare_enabled": True,
+            "turn_cloudflare_key_id": "cf-key-id",
+            "turn_cloudflare_api_token": "cf-api-token",
+            "turn_user_lifetime": "1h",
+        }
+    )
+    def test_turn_broker_url_is_ignored_without_federation_deployment(self) -> None:
+        with patch.object(
+            voip.VoipRestServlet,
+            "_get_turn_broker_credentials",
+            new=AsyncMock(
+                return_value={
+                    "username": "broker-user",
+                    "password": "broker-pass",
+                    "ttl": 3600,
+                    "uris": ["turn:broker.example.com:3478?transport=udp"],
+                }
+            ),
+        ) as mock_broker:
+            with patch.object(
+                voip.VoipRestServlet,
+                "_get_cloudflare_turn_credentials",
+                new=AsyncMock(
+                    return_value={
+                        "username": "cf-user",
+                        "password": "cf-pass",
+                        "ttl": 3600,
+                        "uris": [
+                            "turn:turn.cloudflare.com:3478?transport=udp"
+                        ],
+                    }
+                ),
+            ) as mock_cloudflare:
+                channel = self.make_request(
+                    "GET", "/voip/turnServer", access_token=self.access_token
+                )
+
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.json_body,
+            {
+                "username": "cf-user",
+                "password": "cf-pass",
+                "ttl": 3600,
+                "uris": ["turn:turn.cloudflare.com:3478?transport=udp"],
+            },
+        )
+        self.assertEqual(mock_broker.await_count, 0)
+        self.assertEqual(mock_cloudflare.await_count, 1)
 
     @override_config(
         {
