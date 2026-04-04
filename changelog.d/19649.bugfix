@@ -1,1 +1,1 @@
-Fix `KNOWN_ROOM_VERSIONS.__contains__` raising `TypeError` for non-string keys, which could cause `/sync` to fail for rooms with a NULL room version in the database.
+Fix `KNOWN_ROOM_VERSIONS.__contains__` raising `TypeError` for non-string keys, which could cause `/sync` to fail for rooms with a NULL room version in the database. Bug introduced in [#19589](https://github.com/element-hq/synapse/pull/19589).
