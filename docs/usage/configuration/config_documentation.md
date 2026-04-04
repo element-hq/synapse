@@ -2604,6 +2604,55 @@ Example configuration:
 turn_allow_guests: false
 ```
 ---
+### `turn_cloudflare_enabled`
+
+*(boolean)* Whether to fetch dynamic TURN credentials from Cloudflare's TURN API before falling back to the locally configured TURN server. Defaults to `false`.
+
+Example configuration:
+```yaml
+turn_cloudflare_enabled: true
+```
+---
+### `turn_cloudflare_key_id`
+
+*(string|null)* The Cloudflare TURN key ID used to generate short-lived ICE server credentials. Defaults to `null`.
+
+Example configuration:
+```yaml
+turn_cloudflare_key_id: YOUR_CLOUDFLARE_TURN_KEY_ID
+```
+---
+### `turn_cloudflare_api_token`
+
+*(string|null)* The Cloudflare API token used to request short-lived TURN credentials. Defaults to `null`.
+
+Example configuration:
+```yaml
+turn_cloudflare_api_token: YOUR_CLOUDFLARE_API_TOKEN
+```
+---
+### `turn_cloudflare_api_token_path`
+
+*(string|null)* An alternative to [`turn_cloudflare_api_token`](#turn_cloudflare_api_token): allows the Cloudflare API token to be specified in an external file.
+
+The file should be a plain text file, containing only the API token. Synapse reads the token from the given file once at startup.
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+turn_cloudflare_api_token_path: /path/to/secrets/file
+```
+---
+### `turn_cloudflare_api_base_url`
+
+*(string)* The base URL for Cloudflare's TURN credential API. Defaults to `https://rtc.live.cloudflare.com/v1`.
+
+Example configuration:
+```yaml
+turn_cloudflare_api_base_url: https://rtc.live.cloudflare.com/v1
+```
+---
 ### `matrix_rtc`
 
 *(object)* Options related to MatrixRTC. Defaults to `{}`.

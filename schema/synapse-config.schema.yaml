@@ -2917,6 +2917,47 @@ properties:
     default: true
     examples:
       - false
+  turn_cloudflare_enabled:
+    type: boolean
+    description: >-
+      Whether to fetch dynamic TURN credentials from Cloudflare's TURN API
+      before falling back to the locally configured TURN server.
+    default: false
+    examples:
+      - true
+  turn_cloudflare_key_id:
+    type: ["string", "null"]
+    description: >-
+      The Cloudflare TURN key ID used to generate short-lived ICE server
+      credentials.
+    default: null
+    examples:
+      - YOUR_CLOUDFLARE_TURN_KEY_ID
+  turn_cloudflare_api_token:
+    type: ["string", "null"]
+    description: >-
+      The Cloudflare API token used to request short-lived TURN credentials.
+    default: null
+    examples:
+      - YOUR_CLOUDFLARE_API_TOKEN
+  turn_cloudflare_api_token_path:
+    type: ["string", "null"]
+    description: >-
+      An alternative to [`turn_cloudflare_api_token`](#turn_cloudflare_api_token):
+      allows the Cloudflare API token to be specified in an external file.
+
+
+      The file should be a plain text file, containing only the API token.
+      Synapse reads the token from the given file once at startup.
+    default: null
+    examples:
+      - /path/to/secrets/file
+  turn_cloudflare_api_base_url:
+    type: string
+    description: The base URL for Cloudflare's TURN credential API.
+    default: https://rtc.live.cloudflare.com/v1
+    examples:
+      - https://rtc.live.cloudflare.com/v1
   matrix_rtc:
     type: object 
     description: >-
