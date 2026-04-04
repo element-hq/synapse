@@ -60,6 +60,22 @@ TURN server, you can keep the existing `turn_uris` / shared-secret settings in
 place. Synapse will try Cloudflare first and fall back to the existing TURN
 configuration if Cloudflare credential generation fails.
 
+If you operate multiple federated homeservers and want them to fetch the same
+shared TURN credentials for a short time window, configure those homeservers to
+use a TURN broker instead of calling Cloudflare directly:
+
+    turn_federation_deployment: true
+    turn_broker_url: https://turn-broker.example.com/credentials
+    turn_broker_api_token_path: /path/to/turn-broker-api-token
+    turn_user_lifetime: 1h
+
+When `turn_federation_deployment` is enabled, Synapse fetches TURN credentials
+from `turn_broker_url` and authenticates using
+`turn_broker_api_token` / `turn_broker_api_token_path`. In this mode Synapse
+skips the direct Cloudflare request path for that homeserver. If
+`turn_broker_url` is set without enabling `turn_federation_deployment`, it is
+ignored.
+
 Cloudflare may return alternate port 53 TURN URLs in addition to the primary
 ports. Synapse filters those `:53` TURN URLs before returning credentials to
 clients, since browsers often time out on that port.
