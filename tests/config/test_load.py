@@ -143,6 +143,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
     @parameterized.expand(
         [
             "turn_shared_secret_path: /does/not/exist",
+            "turn_cloudflare_api_token_path: /does/not/exist",
             "registration_shared_secret_path: /does/not/exist",
             "macaroon_secret_key_path: /does/not/exist",
             "recaptcha_private_key_path: /does/not/exist",
@@ -167,6 +168,10 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             (
                 "turn_shared_secret_path: {}",
                 lambda c: c.voip.turn_shared_secret.encode("utf-8"),
+            ),
+            (
+                "turn_cloudflare_api_token_path: {}",
+                lambda c: c.voip.turn_cloudflare_api_token.encode("utf-8"),
             ),
             (
                 "registration_shared_secret_path: {}",
@@ -226,6 +231,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
     @parameterized.expand(
         [
             "turn_shared_secret: 53C237",
+            "turn_cloudflare_api_token: 53C237",
             "registration_shared_secret: 53C237",
             "macaroon_secret_key: 53C237",
             "recaptcha_private_key: 53C237",
@@ -298,6 +304,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
                 [
                     "",
                     f"turn_shared_secret_path: {secret_file.name}",
+                    f"turn_cloudflare_api_token_path: {secret_file.name}",
                     f"registration_shared_secret_path: {secret_file.name}",
                     f"macaroon_secret_key_path: {secret_file.name}",
                     f"recaptcha_private_key_path: {secret_file.name}",
@@ -320,3 +327,25 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             HomeServerConfig.load_config(
                 "", ["-c", self.config_file, "--no-secrets-in-config"]
             )
+
+    @parameterized.expand(
+        [
+            ("turn_cloudflare_enabled: true",),
+            (
+                "turn_cloudflare_enabled: true\n"
+                "turn_cloudflare_api_token_path: /tmp/example-token",
+            ),
+            (
+                "turn_cloudflare_enabled: true\n"
+                "turn_cloudflare_key_id: example-key-id",
+            ),
+        ]
+    )
+    def test_cloudflare_turn_requires_complete_configuration(
+        self, config_str: str
+    ) -> None:
+        self.generate_config()
+        self.add_lines_to_config(["", config_str])
+
+        with self.assertRaises(ConfigError):
+            HomeServerConfig.load_config("", ["-c", self.config_file])

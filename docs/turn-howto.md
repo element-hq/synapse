@@ -14,6 +14,12 @@ This documentation provides two TURN server configuration examples:
 * [coturn](setup/turn/coturn.md)
 * [eturnal](setup/turn/eturnal.md)
 
+Synapse can also fetch short-lived credentials from Cloudflare Realtime TURN.
+In that setup, Synapse requests temporary TURN credentials from Cloudflare on
+behalf of Matrix clients and returns them through the existing
+`/_matrix/client/*/voip/turnServer` endpoint, so clients do not need any
+Cloudflare-specific changes.
+
 ## Requirements
 
 For TURN relaying to work, the TURN service must be hosted on a server/endpoint with a public IP.
@@ -39,6 +45,24 @@ As an example, here is the relevant section of the config file for `matrix.org`.
     turn_shared_secret: "n0t4ctuAllymatr1Xd0TorgSshar3d5ecret4obvIousreAsons"
     turn_user_lifetime: 86400000
     turn_allow_guests: true
+
+If you are using Cloudflare Realtime TURN instead of a self-hosted TURN server,
+configure Synapse with:
+
+    turn_cloudflare_enabled: true
+    turn_cloudflare_key_id: YOUR_CLOUDFLARE_TURN_KEY_ID
+    turn_cloudflare_api_token_path: /path/to/turn-cloudflare-api-token
+    turn_user_lifetime: 1h
+
+Using `turn_cloudflare_api_token_path` is recommended over putting the API token
+inline in the homeserver configuration. If you already operate a self-hosted
+TURN server, you can keep the existing `turn_uris` / shared-secret settings in
+place. Synapse will try Cloudflare first and fall back to the existing TURN
+configuration if Cloudflare credential generation fails.
+
+Cloudflare may return alternate port 53 TURN URLs in addition to the primary
+ports. Synapse filters those `:53` TURN URLs before returning credentials to
+clients, since browsers often time out on that port.
 
 After updating the homeserver configuration, you must restart synapse:
 
