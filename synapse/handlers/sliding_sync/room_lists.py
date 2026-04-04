@@ -1197,18 +1197,17 @@ class SlidingSyncRoomLists:
             else:
                 rooms_for_user[room_id] = change_room_for_user
 
-        # Ensure we have entries for rooms that the user has been "state reset"
-        # out of. These are rooms appear in the `newly_left_rooms` map but
-        # aren't in the `rooms_for_user` map.
+        # Ensure we have entries for newly-left rooms that are missing from the current
+        # membership snapshot. This covers both true state resets and cases where the
+        # current membership snapshot disappeared after a real leave event.
         for room_id, newly_left_room_for_user in newly_left_room_map.items():
-            # If we already know about the room, it's not a state reset
+            # If we already know about the room, it's already represented in the current
+            # membership snapshot.
             if room_id in rooms_for_user:
                 continue
 
-            # This should be true if it's a state reset
+            # This should always be true for rooms in the newly-left map.
             assert newly_left_room_for_user.membership is Membership.LEAVE
-            assert newly_left_room_for_user.event_id is None
-            assert newly_left_room_for_user.sender is None
 
             rooms_for_user[room_id] = newly_left_room_for_user
 
