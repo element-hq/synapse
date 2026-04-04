@@ -5,7 +5,6 @@ from synapse.api.errors import NotFoundError
 from synapse.events.utils import (
     SerializeEventConfig,
     format_event_raw,
-    serialize_event,
 )
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
@@ -40,6 +39,7 @@ class EventRestServlet(RestServlet):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
+        self._event_serializer = hs.get_event_client_serializer()
 
     async def on_GET(
         self, request: SynapseRequest, event_id: str
@@ -64,6 +64,10 @@ class EventRestServlet(RestServlet):
             include_stripped_room_state=True,
             include_admin_metadata=True,
         )
-        res = {"event": serialize_event(event, self._clock.time_msec(), config=config)}
+        res = {
+            "event": await self._event_serializer.serialize_event(
+                event, self._clock.time_msec(), config=config
+            )
+        }
 
         return HTTPStatus.OK, res

@@ -62,7 +62,7 @@ impl NotFoundError {
 import_exception!(synapse.api.errors, HttpResponseException);
 
 impl HttpResponseException {
-    pub fn new(status: StatusCode, bytes: Vec<u8>) -> pyo3::PyErr {
+    pub fn new(status: StatusCode, bytes: bytes::Bytes) -> pyo3::PyErr {
         HttpResponseException::new_err((
             status.as_u16(),
             status.canonical_reason().unwrap_or_default(),

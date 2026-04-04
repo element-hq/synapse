@@ -22,7 +22,7 @@
 
 ARG DEBIAN_VERSION=trixie
 ARG PYTHON_VERSION=3.13
-ARG POETRY_VERSION=2.1.1
+ARG POETRY_VERSION=2.2.1
 
 ###
 ### Stage 0: generate requirements.txt
@@ -170,6 +170,14 @@ RUN \
 FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
 
 ARG TARGETARCH
+
+# If specified, Synapse will use this as the version string in the app.
+#
+# This can be useful to capture the git info of the build as `.git/` won't be
+# available in the Docker image for Synapse to generate from.
+ARG SYNAPSE_VERSION_STRING
+# Pass it through to Synapse as an environment variable.
+ENV SYNAPSE_VERSION_STRING=${SYNAPSE_VERSION_STRING}
 
 LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
 LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'

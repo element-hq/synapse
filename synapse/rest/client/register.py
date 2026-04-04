@@ -86,6 +86,7 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
         self.server_name = hs.hostname
         self.identity_handler = hs.get_identity_handler()
         self.config = hs.config
+        self._registration_enabled = hs.config.registration.enable_registration
 
         if self.hs.config.email.can_verify_email:
             self.registration_mailer = Mailer(
@@ -109,6 +110,14 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
             raise SynapseError(
                 400, "Email-based registration has been disabled on this server"
             )
+
+        if not self._registration_enabled:
+            raise SynapseError(
+                403,
+                "Registration is disabled on this homeserver",
+                Codes.FORBIDDEN,
+            )
+
         body = parse_json_object_from_request(request)
 
         assert_params_in_dict(body, ["client_secret", "email", "send_attempt"])

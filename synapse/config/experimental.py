@@ -3,6 +3,7 @@
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -421,9 +422,6 @@ class ExperimentalConfig(Config):
         # previously calculated push actions.
         self.msc2654_enabled: bool = experimental.get("msc2654_enabled", False)
 
-        # MSC2666: Query mutual rooms between two users.
-        self.msc2666_enabled: bool = experimental.get("msc2666_enabled", False)
-
         # MSC2815 (allow room moderators to view redacted event content)
         self.msc2815_enabled: bool = experimental.get("msc2815_enabled", False)
 
@@ -443,9 +441,6 @@ class ExperimentalConfig(Config):
 
         # MSC3848: Introduce errcodes for specific event sending failures
         self.msc3848_enabled: bool = experimental.get("msc3848_enabled", False)
-
-        # MSC3852: Expose last seen user agent field on /_matrix/client/v3/devices.
-        self.msc3852_enabled: bool = experimental.get("msc3852_enabled", False)
 
         # MSC3866: M_USER_AWAITING_APPROVAL error code
         raw_msc3866_config = experimental.get("msc3866", {})
@@ -482,8 +477,7 @@ class ExperimentalConfig(Config):
         self.msc1767_enabled: bool = experimental.get("msc1767_enabled", False)
         if self.msc1767_enabled:
             # Enable room version (and thus applicable push rules from MSC3931/3932)
-            version_id = RoomVersions.MSC1767v10.identifier
-            KNOWN_ROOM_VERSIONS[version_id] = RoomVersions.MSC1767v10
+            KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC1767v10)
 
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
@@ -509,12 +503,17 @@ class ExperimentalConfig(Config):
             "msc4069_profile_inhibit_propagation", False
         )
 
-        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version:
+        # See: https://github.com/element-hq/synapse/issues/19434
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
 
         self.msc4108_delegation_endpoint: str | None = experimental.get(
             "msc4108_delegation_endpoint", None
         )
+
+        # MSC4370: Get extremities federation endpoint
+        # See https://github.com/element-hq/synapse/issues/19524
+        self.msc4370_enabled = experimental.get("msc4370_enabled", False)
 
         auth_delegated = self.msc3861.enabled or (
             config.get("matrix_authentication_service") or {}
@@ -532,6 +531,26 @@ class ExperimentalConfig(Config):
             raise ConfigError(
                 "You cannot have MSC4108 both enabled and delegated at the same time",
                 ("experimental", "msc4108_delegation_endpoint"),
+            )
+
+        # MSC4388: Secure out-of-band channel for sign in with QR:
+        # See: https://github.com/element-hq/synapse/issues/19433
+        msc4388_mode = experimental.get("msc4388_mode", "off")
+
+        if msc4388_mode not in ["off", "open", "authenticated"]:
+            raise ConfigError(
+                "msc4388_mode must be one of 'off', 'open' or 'authenticated'",
+                ("experimental", "msc4388_mode"),
+            )
+        self.msc4388_enabled: bool = msc4388_mode != "off"
+        self.msc4388_requires_authentication: bool = msc4388_mode == "authenticated"
+
+        if self.msc4388_enabled and not (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False):
+            raise ConfigError(
+                "MSC4388 requires matrix_authentication_service to be enabled",
+                ("experimental", "msc4388_enabled"),
             )
 
         # MSC4133: Custom profile fields
@@ -585,6 +604,3 @@ class ExperimentalConfig(Config):
         # Note that sticky events persisted before this feature is enabled will not be
         # considered sticky by the local homeserver.
         self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
-
-        # MSC4380: Invite blocking
-        self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
