@@ -96,6 +96,7 @@ class VoipConfig(Config):
         self.turn_federation_deployment = config.get(
             "turn_federation_deployment", False
         )
+        self.turn_mode = config.get("turn_mode", "coturn")
         self.turn_broker_url = config.get("turn_broker_url")
         self.turn_broker_api_token = config.get("turn_broker_api_token")
         if self.turn_broker_api_token and not allow_secrets_in_config:
