@@ -143,6 +143,7 @@ class VoipTestCase(unittest.HomeserverTestCase):
 
     @override_config(
         {
+            "turn_mode": "cf",
             "turn_cloudflare_enabled": True,
             "turn_cloudflare_key_id": "cf-key-id",
             "turn_cloudflare_api_token": "cf-api-token",
@@ -180,6 +181,7 @@ class VoipTestCase(unittest.HomeserverTestCase):
 
     @override_config(
         {
+            "turn_mode": "broker",
             "turn_federation_deployment": True,
             "turn_broker_url": "https://turn-broker.example.com/credentials",
             "turn_broker_api_token": "broker-token",
@@ -235,6 +237,7 @@ class VoipTestCase(unittest.HomeserverTestCase):
 
     @override_config(
         {
+            "turn_mode": "cf",
             "turn_broker_url": "https://turn-broker.example.com/credentials",
             "turn_broker_api_token": "broker-token",
             "turn_cloudflare_enabled": True,
@@ -289,6 +292,8 @@ class VoipTestCase(unittest.HomeserverTestCase):
 
     @override_config(
         {
+            "turn_cloudflare_enabled": True,
+            "turn_mode": "cf",
             "turn_cloudflare_enabled": True,
             "turn_cloudflare_key_id": "cf-key-id",
             "turn_cloudflare_api_token": "cf-api-token",
