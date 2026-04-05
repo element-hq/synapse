@@ -46,9 +46,22 @@ As an example, here is the relevant section of the config file for `matrix.org`.
     turn_user_lifetime: 86400000
     turn_allow_guests: true
 
+### TURN mode selection
+
+Synapse supports three TURN credential modes via the `turn_mode` config option:
+
+- **`coturn`** (default): Use local CoTURN directly. Fully backward compatible.
+- **`cf`**: Fetch credentials from Cloudflare Realtime TURN. Falls back to local
+  CoTURN if Cloudflare credential generation fails.
+- **`broker`**: Fetch credentials from a federated TURN broker. Falls back to
+  local CoTURN if the broker is unreachable.
+
+### Cloudflare TURN mode
+
 If you are using Cloudflare Realtime TURN instead of a self-hosted TURN server,
 configure Synapse with:
 
+    turn_mode: cf
     turn_cloudflare_enabled: true
     turn_cloudflare_key_id: YOUR_CLOUDFLARE_TURN_KEY_ID
     turn_cloudflare_api_token_path: /path/to/turn-cloudflare-api-token
@@ -60,21 +73,24 @@ TURN server, you can keep the existing `turn_uris` / shared-secret settings in
 place. Synapse will try Cloudflare first and fall back to the existing TURN
 configuration if Cloudflare credential generation fails.
 
+### Federation broker mode
+
 If you operate multiple federated homeservers and want them to fetch the same
 shared TURN credentials for a short time window, configure those homeservers to
 use a TURN broker instead of calling Cloudflare directly:
 
+    turn_mode: broker
     turn_federation_deployment: true
     turn_broker_url: https://turn-broker.example.com/credentials
     turn_broker_api_token_path: /path/to/turn-broker-api-token
     turn_user_lifetime: 1h
 
-When `turn_federation_deployment` is enabled, Synapse fetches TURN credentials
+When `turn_mode: broker` is enabled, Synapse fetches TURN credentials
 from `turn_broker_url` and authenticates using
-`turn_broker_api_token` / `turn_broker_api_token_path`. In this mode Synapse
-skips the direct Cloudflare request path for that homeserver. If
-`turn_broker_url` is set without enabling `turn_federation_deployment`, it is
-ignored.
+`turn_broker_api_token` / `turn_broker_api_token_path`. If the broker request
+fails, Synapse falls back to the existing local TURN configuration.
+
+If `turn_broker_url` is set without `turn_mode: broker`, it is ignored.
 
 Cloudflare may return alternate port 53 TURN URLs in addition to the primary
 ports. Synapse filters those `:53` TURN URLs before returning credentials to

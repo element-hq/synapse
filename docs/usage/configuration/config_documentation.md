@@ -2604,9 +2604,21 @@ Example configuration:
 turn_allow_guests: false
 ```
 ---
+### `turn_mode`
+
+*(string)* Selects the TURN credential source. Valid values:
+- `coturn` (default): use local CoTURN directly. Backward compatible.
+- `cf`: fetch credentials from Cloudflare Realtime TURN, falling back to local CoTURN on failure.
+- `broker`: fetch credentials from a federated TURN broker, falling back to local CoTURN on failure.
+
+Example configuration:
+```yaml
+turn_mode: cf
+```
+---
 ### `turn_cloudflare_enabled`
 
-*(boolean)* Whether to fetch dynamic TURN credentials from Cloudflare's TURN API before falling back to the locally configured TURN server. Defaults to `false`.
+*(boolean)* Whether to fetch dynamic TURN credentials from Cloudflare's TURN API. This must be set to `true` when `turn_mode` is `cf`. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -2655,7 +2667,7 @@ turn_cloudflare_api_base_url: https://rtc.live.cloudflare.com/v1
 ---
 ### `turn_federation_deployment`
 
-*(boolean)* Whether this homeserver is part of a federated deployment that should fetch TURN credentials from a shared TURN broker instead of calling Cloudflare directly. If false, `turn_broker_url` is ignored. Defaults to `false`.
+*(boolean)* Whether this homeserver is part of a federated deployment that should fetch TURN credentials from a shared TURN broker. This must be set to `true` when `turn_mode` is `broker`. If false, `turn_broker_url` is ignored. Defaults to `false`.
 
 Example configuration:
 ```yaml
