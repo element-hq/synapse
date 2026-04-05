@@ -199,7 +199,9 @@ class VoipRestServlet(RestServlet):
         turnPassword = self.hs.config.voip.turn_password
         userLifetime = self.hs.config.voip.turn_user_lifetime
 
-        if self.hs.config.voip.turn_federation_deployment:
+        turn_mode = self.hs.config.voip.turn_mode
+
+        if turn_mode == "broker":
             try:
                 broker_response = await self._get_turn_broker_credentials(
                     userLifetime // 1000
@@ -207,26 +209,26 @@ class VoipRestServlet(RestServlet):
             except Exception:
                 logger.warning(
                     "Failed to fetch TURN credentials from the configured broker; "
-                    "falling back to the configured TURN server",
+                    "falling back to local CoTURN",
                     exc_info=True,
                 )
             else:
                 if broker_response is not None:
                     return 200, broker_response
-        elif self.hs.config.voip.turn_cloudflare_enabled:
+        elif turn_mode == "cf":
             try:
-                cloudflare_response = await self._get_cloudflare_turn_credentials(
+                cf_response = await self._get_cloudflare_turn_credentials(
                     userLifetime // 1000
                 )
             except Exception:
                 logger.warning(
-                    "Failed to fetch Cloudflare TURN credentials; falling back to "
-                    "the configured TURN server",
+                    "Failed to fetch Cloudflare TURN credentials; "
+                    "falling back to local CoTURN",
                     exc_info=True,
                 )
             else:
-                if cloudflare_response is not None:
-                    return 200, cloudflare_response
+                if cf_response is not None:
+                    return 200, cf_response
 
         if turnUris and turnSecret and userLifetime:
             expiry = (self.hs.get_clock().time_msec() + userLifetime) / 1000
