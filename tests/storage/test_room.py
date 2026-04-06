@@ -74,6 +74,8 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(HomeserverTestCase):
     """
     Test the `flag_existing_quarantined_media` background update.
     """
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
 
     def test_populates_quarantined_only(self) -> None:
         admin_user_tok = self.register_user("admin", "pass", admin=True)
