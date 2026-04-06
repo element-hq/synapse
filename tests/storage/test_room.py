@@ -82,7 +82,8 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(HomeserverTestCase):
 
         # Upload two distinct media items so we can quarantine one. If they shared content,
         # then the quarantine-by-hash code would hit both.
-        unaffected_media_id = self.helper.upload_media(
+        # noinspection PyStatementEffect
+        self.helper.upload_media(
             b"first content", tok=admin_user_tok, expect_code=200
         )["content_uri"][6:].split("/")[1]  # Cut off 'mxc://' and domain
         quarantined_media_id = self.helper.upload_media(
