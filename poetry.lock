@@ -3115,20 +3115,20 @@ files = [
 
 [[package]]
 name = "sqlglot"
-version = "29.0.1"
+version = "30.2.1"
 description = "An easily customizable SQL parser and transpiler"
 optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "sqlglot-29.0.1-py3-none-any.whl", hash = "sha256:06a473ea6c2b3632ac67bd38e687a6860265bf4156e66b54adeda15d07f00c65"},
-    {file = "sqlglot-29.0.1.tar.gz", hash = "sha256:0010b4f77fb996c8d25dd4b16f3654e6da163ff1866ceabc70b24e791c203048"},
+    {file = "sqlglot-30.2.1-py3-none-any.whl", hash = "sha256:f23d9ee9427ef9d20df15f9b0ffa57d9eb45e52b012219a349d1e6b50ed926d1"},
+    {file = "sqlglot-30.2.1.tar.gz", hash = "sha256:ef4a67cc6f66a8043085eb8ea95fa9541c1625dffa9145ad4e9815a7ba60a199"},
 ]
 
 [package.extras]
-c = ["sqlglotc"]
-dev = ["duckdb (>=0.6)", "mypy", "pandas", "pandas-stubs", "pdoc", "pre-commit", "pyperf", "python-dateutil", "pytz", "ruff (==0.7.2)", "types-python-dateutil", "types-pytz", "typing_extensions"]
-rs = ["sqlglotrs (==0.13.0)"]
+c = ["sqlglotc (==30.2.1)"]
+dev = ["duckdb (>=0.6)", "pandas", "pandas-stubs", "pdoc", "pre-commit", "pyperf", "python-dateutil", "pytz", "ruff (==0.15.6)", "setuptools_scm", "sqlglot-mypy (>=1.19.1.post1)", "types-python-dateutil", "types-pytz", "typing_extensions"]
+rs = ["sqlglotc (==30.2.1)", "sqlglotrs (==0.13.0)"]
 
 [[package]]
 name = "threadloop"
