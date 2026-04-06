@@ -223,12 +223,17 @@ class RoomPolicyHandler:
             return
 
         # Ask the policy server to sign this event.
-        # We set a smallish timeout here as we don't want to block event sending too long.
         try:
             signature = await self._federation_client.ask_policy_server_to_sign_event(
                 policy_server.server_name,
                 event,
-                timeout=3000,
+                # We set a smallish timeout here as we don't want to block event sending
+                # too long.
+                #
+                # We were previously seeing regular timeouts with media
+                # scanning/checking when the timeout was set to 3s. 30s was chosen based
+                # on vibes and light real world testing.
+                timeout=30000,
             )
             # TODO: We can *probably* remove this when we remove unstable MSC4284 support.
             # The server *should* be returning either a signature or an error, but there could
