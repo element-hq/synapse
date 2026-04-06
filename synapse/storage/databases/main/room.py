@@ -267,7 +267,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 self._insert_quarantine_change_txn(txn, local_media_result, True)
 
             # We use a >= ? on the media origin to avoid missing records when media IDs
-            # collide between origins.
+            # collide between origins (the table's unique constraint is on `(media_origin, media_id)`).
+            # Filtering by `(media_origin, media_id)` also makes sure we're using an index.
             txn.execute(
                 """
                 SELECT media_origin, media_id
@@ -308,7 +309,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             last_remote_media_id,
         )
         num_flagged = await self.db_pool.runInteraction(
-            "_flag_existing_quarantined_media",
+            "_flag_existing_quarantined_media.flag_quarantined",
             flag_quarantined,
         )
         if num_flagged <= 0:  # probably never negative, but why trust computers?
@@ -1364,12 +1365,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
     async def get_quarantined_media_changes(
         self, *, from_id: int, to_id: int, limit: int
     ) -> list[QuarantinedMediaUpdate]:
-        """Get updates to quarantined media between two stream IDs.
+        """
+        Get updates to quarantined media in stream ordering since `from_id`.
 
-        QuarantinedMediaUpdates are returned in ascending stream order provided
-        the from_id is before the to_id. The returned list will exclude the from_id
-        but not the to_id, if an update shares a stream position with either of those
-        stream IDs.
+        Paginating forwards: from_id < x <= to_id, (ascending order)
 
         Args:
             from_id: The starting stream ID (exclusive)
@@ -1377,7 +1376,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             limit: The maximum number of rows to return
 
         Returns:
-            list of QuarantinedMediaUpdate update rows in stream ordering.
+            List of `QuarantinedMediaUpdate` update rows in stream ordering (ascending order).
         """
         return await self.db_pool.runInteraction(
             "get_quarantined_media_changes",
@@ -1427,7 +1426,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             quarantined,
         )
 
-    def _insert_quarantine_change_txn(
+    def _insert_quarantine_changes_txn(
         self,
         txn: LoggingTransaction,
         origins_and_media_ids: list[tuple[str | None, str]],
