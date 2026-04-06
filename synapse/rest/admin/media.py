@@ -276,9 +276,9 @@ class ListQuarantineChanges(RestServlet):
             for c in changes
         ]
 
-        # We know the last record will have
-        # the highest stream ID, so use that one. If there aren't any records, just
-        # return the `to_id` value because it'll be the furthest stream position possible.
+        # We know the last record will have the highest stream ID, so use that one. If
+        # there aren't any records, just return the `to_id` value because it'll be the
+        # furthest stream position possible.
         next_batch = changes[-1].stream_id if len(changes) > 0 else to_id
 
         return HTTPStatus.OK, {"next_batch": next_batch, "changes": serialized_changes}

@@ -264,7 +264,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             )
             local_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
             if len(local_media_result) > 0:
-                self._insert_quarantine_change_txn(txn, local_media_result, True)
+                self._insert_quarantine_changes_txn(txn, local_media_result, True)
 
             # We use a >= ? on the media origin to avoid missing records when media IDs
             # collide between origins (the table's unique constraint is on `(media_origin, media_id)`).
@@ -282,7 +282,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             )
             remote_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
             if len(remote_media_result) > 0:
-                self._insert_quarantine_change_txn(txn, remote_media_result, True)
+                self._insert_quarantine_changes_txn(txn, remote_media_result, True)
 
             self.db_pool.updates._background_update_progress_txn(
                 txn,
@@ -1498,7 +1498,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             total_media_quarantined += len(media_ids_affected)
             if len(media_ids_affected) > 0:
                 # Flag media that was newly (un)quarantined in the changes table.
-                self._insert_quarantine_change_txn(
+                self._insert_quarantine_changes_txn(
                     txn,
                     [(None, media_id) for (media_id,) in media_ids_affected],
                     quarantined_by is not None,
@@ -1523,7 +1523,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             media_ids_affected = txn.fetchall()
             total_media_quarantined += len(media_ids_affected)
             if len(media_ids_affected) > 0:
-                self._insert_quarantine_change_txn(
+                self._insert_quarantine_changes_txn(
                     txn,
                     [(None, media_id) for (media_id,) in media_ids_affected],
                     quarantined_by is not None,
@@ -1567,7 +1567,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             media_ids_affected = cast(list[tuple[str | None, str]], txn.fetchall())
             total_media_quarantined += len(media_ids_affected)
             if len(media_ids_affected) > 0:
-                self._insert_quarantine_change_txn(
+                self._insert_quarantine_changes_txn(
                     txn,
                     media_ids_affected,
                     quarantined_by is not None,
@@ -1586,7 +1586,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             media_ids_affected = cast(list[tuple[str | None, str]], txn.fetchall())
             total_media_quarantined += len(media_ids_affected)
             if len(media_ids_affected) > 0:
-                self._insert_quarantine_change_txn(
+                self._insert_quarantine_changes_txn(
                     txn,
                     media_ids_affected,
                     quarantined_by is not None,
