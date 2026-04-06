@@ -23,6 +23,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.room_versions import RoomVersions
 from synapse.server import HomeServer
+from synapse.storage.databases.main.room import _BackgroundUpdates, RoomWorkerStore
 from synapse.types import RoomAlias, RoomID, UserID
 from synapse.util.clock import Clock
 
@@ -67,3 +68,64 @@ class RoomStoreTestCase(HomeserverTestCase):
         self.assertIsNone(
             self.get_success(self.store.get_room_with_stats("!uknown:test"))
         )
+
+
+class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(HomeserverTestCase):
+    """
+    Test the `flag_existing_quarantined_media` background update.
+    """
+
+    def test_populates_quarantined_only(self) -> None:
+        admin_user_tok = self.register_user("admin", "pass", admin=True)
+
+        # Upload two distinct media items so we can quarantine one. If they shared content,
+        # then the quarantine-by-hash code would hit both.
+        unaffected_media_id = self.helper.upload_media(b"first content", tok=admin_user_tok, expect_code=200)[
+            "content_uri"
+        ][6:].split("/")[1]  # Cut off 'mxc://' and domain
+        quarantined_media_id = self.helper.upload_media(b"second content", tok=admin_user_tok, expect_code=200)[
+            "content_uri"
+        ][6:].split("/")[1]  # Cut off 'mxc://' and domain
+
+        # Update the quarantined media ID to actually be quarantined manually. We do this
+        # direct to the database to avoid hitting any code which might flag the media in
+        # the changes table for us. This simulates having existing media already quarantined.
+        self.get_success(
+            self.store.db_pool.simple_update_one(
+                table="local_media_repository",
+                keyvalues={"media_id": quarantined_media_id},
+                updatevalues={"quarantined_by": "system"},
+                desc="local_media_repository.test_populates_quarantined_only",
+            )
+        )
+
+        # Insert and run the background update
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="background_updates",
+                values={
+                    "update_name": _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        # Check that the changes table is now populated, and has exactly 1 quarantined
+        # media object in it (the one we quarantined).
+        changes: list[tuple[str | None, str, bool]] = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "quarantined_media_changes",
+                None,
+                retcols=(
+                    "origin",
+                    "media_id",
+                    "quarantined"
+                )
+            )
+        )
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0][0], None)  # origin (local media)
+        self.assertEqual(changes[0][1], quarantined_media_id)  # media_id
+        self.assertEqual(changes[0][2], True)  # quarantined flag
