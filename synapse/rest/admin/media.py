@@ -251,7 +251,7 @@ class ListQuarantineChanges(RestServlet):
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
         to_id = await self.store.get_current_quarantined_media_stream_id()
 
-        if to_id < from_id or from_id < 0:
+        if to_id < from_id:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "Query parameter from must be a positive integer and behind the current stream position.",
@@ -276,7 +276,7 @@ class ListQuarantineChanges(RestServlet):
             for c in changes
         ]
 
-        # `from` is exclusive, so don't +1 this. We also know the last record will have
+        # We know the last record will have
         # the highest stream ID, so use that one. If there aren't any records, just
         # return the `to_id` value because it'll be the furthest stream position possible.
         next_batch = changes[-1].stream_id if len(changes) > 0 else to_id
