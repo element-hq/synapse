@@ -80,7 +80,8 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(_AdminMediaTests):
         self.store = hs.get_datastores().main
 
     def test_populates_quarantined_only(self) -> None:
-        admin_user_tok = self.register_user("admin", "pass", admin=True)
+        self.register_user("admin", "pass", admin=True)
+        admin_user_tok = self.login("admin", "pass")
 
         # Upload two distinct media items so we can quarantine one. If they shared content,
         # then the quarantine-by-hash code would hit both.
