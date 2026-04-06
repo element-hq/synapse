@@ -23,6 +23,7 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
+from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -41,7 +42,7 @@ from synapse.api.constants import (
     JoinRules,
     PublicRoomsFilterFields,
 )
-from synapse.api.errors import StoreError
+from synapse.api.errors import StoreError, SynapseError, Codes
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase
@@ -201,7 +202,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # table with initial data that callers expect (namely, a list of currently
         # quarantined media).
         self.db_pool.updates.register_background_update_handler(
-            "flag_existing_quarantined_media", self._flag_existing_quarantined_media
+            _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA, self._flag_existing_quarantined_media
         )
 
     async def _flag_existing_quarantined_media(
@@ -286,7 +287,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
             self.db_pool.updates._background_update_progress_txn(
                 txn,
-                "flag_existing_quarantined_media",
+                _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA,
                 {
                     "last_local_media_id": local_media_result[-1][1]
                     if len(local_media_result) > 0
@@ -314,7 +315,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         )
         if num_flagged <= 0:  # probably never negative, but why trust computers?
             await self.db_pool.updates._end_background_update(
-                "flag_existing_quarantined_media"
+                _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA
             )
         return num_flagged
 
@@ -1377,7 +1378,26 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         Returns:
             List of `QuarantinedMediaUpdate` update rows in stream ordering (ascending order).
+
+        Raises:
+            SynapseError: If `from_id` is ahead of `to_id`, or if waiting for `to_id`
+                took too long.
         """
+        if to_id < from_id:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Query parameter from must be a positive integer and behind the current stream position.",
+                errcode=Codes.INVALID_PARAM,
+            )
+
+        # Wait for the to_id stream position (or time out)
+        if not await self.wait_for_quarantined_media_stream_id(to_id):
+            raise SynapseError(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "Timed out while waiting for stream position",
+                errcode=Codes.UNKNOWN,
+            )
+
         return await self.db_pool.runInteraction(
             "get_quarantined_media_changes",
             self._get_quarantined_media_changes_txn,
@@ -2365,6 +2385,7 @@ class _BackgroundUpdates:
     REPLACE_ROOM_DEPTH_MIN_DEPTH = "replace_room_depth_min_depth"
     POPULATE_ROOMS_CREATOR_COLUMN = "populate_rooms_creator_column"
     ADD_ROOM_TYPE_COLUMN = "add_room_type_column"
+    FLAG_EXISTING_QUARANTINED_MEDIA = "flag_existing_quarantined_media"
 
 
 _REPLACE_ROOM_DEPTH_SQL_COMMANDS = (

@@ -867,7 +867,8 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
 
     def test_list_quarantined_media_bounds_high(self) -> None:
         """
-        Ensure out of bounds requests with high `from` values are handled gracefully.
+        Ensure out of bounds requests with high `from` values are met with an appropriate
+        error.
         """
         # Page that's very much out of range, so should have no results
         channel = self.make_request(
@@ -880,7 +881,8 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
 
     def test_list_quarantined_media_bounds_low(self) -> None:
         """
-        Ensure out of bounds requests with low `from` values are handled gracefully.
+        Ensure out of bounds requests with low `from` values are met with an appropriate
+        error.
         """
         # The same as above, but negative
         channel = self.make_request(

@@ -11,7 +11,9 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Represents a stream of when media is quarantined and unquarantined.
+-- Represents a stream of when media is quarantined and unquarantined. Note that it's possible for duplicate transitions
+-- to exist in the stream. This typically happens if the background update happens to catch media that was quarantined
+-- elsewhere, leading to a `quarantined=true` record being inserted twice for the same origin and media_id.
 CREATE TABLE quarantined_media_changes (
     -- Position in the quarantined media stream
     stream_id INTEGER NOT NULL PRIMARY KEY,
