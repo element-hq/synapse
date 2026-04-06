@@ -1,3 +1,42 @@
+# Synapse 1.151.0rc1 (2026-03-31)
+
+## Features
+
+- Add stable support for [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284) Policy Servers. ([\#19503](https://github.com/element-hq/synapse/issues/19503))
+- Update and stabilize support for [MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666): Get rooms in common with another user. Contributed by @tulir @ Beeper. ([\#19511](https://github.com/element-hq/synapse/issues/19511))
+- Updated experimental support for [MSC4388: Secure out-of-band channel for sign in with QR](https://github.com/matrix-org/matrix-spec-proposals/pull/4388). ([\#19573](https://github.com/element-hq/synapse/issues/19573))
+- Stabilize `room_version` and `encryption` fields in the space/room `/hierarchy` API (part of [MSC3266](https://github.com/matrix-org/matrix-spec-proposals/pull/3266)). ([\#19576](https://github.com/element-hq/synapse/issues/19576))
+- Introduce a [configuration option](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#matrix_authentication_service) to allow using HTTP/2 over plaintext when Synapse connects to Matrix Authentication Service. ([\#19586](https://github.com/element-hq/synapse/issues/19586))
+
+## Bugfixes
+
+- Fix [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284) Policy Servers implementation to skip signing `org.matrix.msc4284.policy` and `m.room.policy` state events. ([\#19503](https://github.com/element-hq/synapse/issues/19503))
+- Correctly apply [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284) Policy Server signatures to events when the sender and policy server have the same server name. ([\#19503](https://github.com/element-hq/synapse/issues/19503))
+- Allow Synapse to start up even when discovery fails for an OpenID Connect provider. ([\#19509](https://github.com/element-hq/synapse/issues/19509))
+- Fix quarantine media admin APIs sometimes returning inaccurate counts for remote media. ([\#19559](https://github.com/element-hq/synapse/issues/19559))
+- Fix `Build and push complement image` CI job not having `poetry` available for the Complement runner script. ([\#19578](https://github.com/element-hq/synapse/issues/19578))
+- Increase timeout for policy server requests to avoid repeated requests for checking media. ([\#19629](https://github.com/element-hq/synapse/issues/19629))
+
+## Deprecations and Removals
+
+- Remove support for [MSC3852: Expose user agent information on Device](https://github.com/matrix-org/matrix-spec-proposals/pull/3852) as the MSC was closed. ([\#19430](https://github.com/element-hq/synapse/issues/19430))
+
+## Internal Changes
+
+- Fix small comment typo in config output from the `demo/start.sh` script. ([\#19538](https://github.com/element-hq/synapse/issues/19538))
+- Add MSC3820 comment context to `RoomVersion` attributes. ([\#19577](https://github.com/element-hq/synapse/issues/19577))
+- Remove `redacted_because` from internal unsigned. ([\#19581](https://github.com/element-hq/synapse/issues/19581))
+- Prevent sending registration emails if registration is disabled. ([\#19585](https://github.com/element-hq/synapse/issues/19585))
+- Port `RoomVersion` to Rust. ([\#19589](https://github.com/element-hq/synapse/issues/19589))
+- Only show failing Complement tests in the formatted output in CI. ([\#19590](https://github.com/element-hq/synapse/issues/19590))
+- Ensure old Complement test files are removed when downloading a Complement checkout via `./scripts-dev/complement.sh`. ([\#19592](https://github.com/element-hq/synapse/issues/19592))
+- Update `HomeserverTestCase.pump()` docstring to demystify behavior (Twisted reactor/clock). ([\#19602](https://github.com/element-hq/synapse/issues/19602))
+- Deprecate `HomeserverTestCase.pump()` in favor of more direct `HomeserverTestCase.reactor.advance(...)` usage. ([\#19602](https://github.com/element-hq/synapse/issues/19602))
+- Lower the Postgres database `statement_timeout` to 10m (previously 1h). ([\#19604](https://github.com/element-hq/synapse/issues/19604))
+
+
+
+
 # Synapse 1.150.0 (2026-03-24)
 
 No significant changes since 1.150.0rc1.

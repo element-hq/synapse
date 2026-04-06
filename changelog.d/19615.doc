@@ -1,0 +1,1 @@
+Include a workaround for running the unit tests with SQLite under recent versions of MacOS.

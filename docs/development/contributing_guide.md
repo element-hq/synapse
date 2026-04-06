@@ -309,6 +309,21 @@ works without further arguments).
 Your Postgres account needs to be able to create databases; see the postgres
 docs for [`ALTER ROLE`](https://www.postgresql.org/docs/current/sql-alterrole.html).
 
+### Running the tests on MacOS
+
+To run the unit tests with SQLite on MacOS you will need to swap out the default MacOS
+python interpreter with the homebrew version. This is due to the default using a
+locked down version of Python and sqlite3. After installing python from homebrew:
+
+```
+  poetry env remove --all
+  poetry env use /opt/homebrew/bin/python3.13
+  poetry install
+  poetry run trial tests
+```
+
+This example uses python 3.13, but choose whichever version you want.
+
 ## Run the integration tests ([Sytest](https://github.com/matrix-org/sytest)).
 
 The integration tests are a more comprehensive suite of tests. They
