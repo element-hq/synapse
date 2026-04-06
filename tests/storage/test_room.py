@@ -76,6 +76,7 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(HomeserverTestCase):
     """
     Test the `flag_existing_quarantined_media` background update.
     """
+
     servlets = [
         synapse.rest.admin.register_servlets,
         synapse.rest.admin.register_servlets_for_media_repo,
