@@ -1882,6 +1882,160 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return True
 
+    async def get_user_report(self, report_id: int) -> dict[str, Any] | None:
+        """Retrieve a user report
+
+        Args:
+            report_id: ID of user report in database
+        Returns:
+            JSON dict of information from a user report or None if the
+            report does not exist.
+        """
+
+        def _get_user_report_txn(
+            txn: LoggingTransaction, report_id: int
+        ) -> dict[str, Any] | None:
+            sql = """
+                SELECT
+                    id,
+                    received_ts,
+                    target_user_id,
+                    user_id,
+                    reason
+                FROM user_reports
+                WHERE id = ?
+            """
+
+            txn.execute(sql, [report_id])
+            row = txn.fetchone()
+
+            if not row:
+                return None
+
+            user_report = {
+                "id": row[0],
+                "received_ts": row[1],
+                "target_user_id": row[2],
+                "user_id": row[3],
+                "reason": row[4],
+            }
+
+            return user_report
+
+        return await self.db_pool.runInteraction(
+            "get_user_report", _get_user_report_txn, report_id
+        )
+
+    async def get_user_reports_paginate(
+        self,
+        start: int,
+        limit: int,
+        direction: Direction = Direction.BACKWARDS,
+        user_id: str | None = None,
+        target_user_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Retrieve a paginated list of user reports
+
+        Args:
+            start: event offset to begin the query from
+            limit: number of rows to retrieve
+            direction: Whether to fetch the most recent first (backwards) or the
+                oldest first (forwards)
+            user_id: search for user_id of the reporter. Ignored if user_id is None
+            target_user_id: search for user_id of the target. Ignored if target_user_id is None
+        Returns:
+            Tuple of:
+                json list of user reports
+                total number of user reports matching the filter criteria
+        """
+
+        def _get_user_reports_paginate_txn(
+            txn: LoggingTransaction,
+        ) -> tuple[list[dict[str, Any]], int]:
+            filters = []
+            args: list[object] = []
+
+            if user_id:
+                filters.append("user_id LIKE ?")
+                args.extend(["%" + user_id + "%"])
+            if target_user_id:
+                filters.append("target_user_id LIKE ?")
+                args.extend(["%" + target_user_id + "%"])
+
+            if direction == Direction.BACKWARDS:
+                order = "DESC"
+            else:
+                order = "ASC"
+
+            where_clause = "WHERE " + " AND ".join(filters) if len(filters) > 0 else ""
+
+            sql = """
+                SELECT COUNT(*) as total_user_reports
+                FROM user_reports
+                {}
+                """.format(where_clause)
+            txn.execute(sql, args)
+            count = cast(tuple[int], txn.fetchone())[0]
+
+            sql = """
+                SELECT
+                    id,
+                    received_ts,
+                    target_user_id,
+                    user_id,
+                    reason
+                FROM user_reports
+                {where_clause}
+                ORDER BY received_ts {order}
+                LIMIT ?
+                OFFSET ?
+            """.format(
+                where_clause=where_clause,
+                order=order,
+            )
+
+            args += [limit, start]
+            txn.execute(sql, args)
+
+            user_reports = []
+            for row in txn:
+                user_reports.append(
+                    {
+                        "id": row[0],
+                        "received_ts": row[1],
+                        "target_user_id": row[2],
+                        "user_id": row[3],
+                        "reason": row[4],
+                    }
+                )
+
+            return user_reports, count
+
+        return await self.db_pool.runInteraction(
+            "get_user_reports_paginate", _get_user_reports_paginate_txn
+        )
+
+    async def delete_user_report(self, report_id: int) -> bool:
+        """Remove a user report from database.
+
+        Args:
+            report_id: Report to delete
+
+        Returns:
+            Whether the report was successfully deleted or not.
+        """
+        try:
+            await self.db_pool.simple_delete_one(
+                table="user_reports",
+                keyvalues={"id": report_id},
+                desc="delete_user_report",
+            )
+        except StoreError:
+            # Deletion failed because report does not exist
+            return False
+
+        return True
+
     async def set_room_is_public(self, room_id: str, is_public: bool) -> None:
         await self.db_pool.simple_update_one(
             table="rooms",
