@@ -21,7 +21,9 @@
 
 from twisted.internet.testing import MemoryReactor
 
+import synapse.rest.admin
 from synapse.api.room_versions import RoomVersions
+from synapse.rest.client import login, media
 from synapse.server import HomeServer
 from synapse.storage.databases.main.room import _BackgroundUpdates
 from synapse.types import RoomAlias, RoomID, UserID
@@ -74,6 +76,12 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(HomeserverTestCase):
     """
     Test the `flag_existing_quarantined_media` background update.
     """
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        synapse.rest.admin.register_servlets_for_media_repo,
+        login.register_servlets,
+        media.register_servlets,
+    ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main

@@ -1391,7 +1391,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 errcode=Codes.INVALID_PARAM,
             )
 
-        # Wait for the to_id stream position (or time out)
+        # We need to wait to ensure that our current worker is actually caught up with
+        # the stream position, otherwise we might not return what we think we're returning.
         if not await self.wait_for_quarantined_media_stream_id(to_id):
             raise SynapseError(
                 HTTPStatus.INTERNAL_SERVER_ERROR,

@@ -251,9 +251,6 @@ class ListQuarantineChanges(RestServlet):
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
         to_id = await self.store.get_current_quarantined_media_stream_id()
 
-        # We need to wait to ensure that our current worker is actually caught up with
-        # the stream position, otherwise we might not return what we think we're returning.
-
         changes = await self.store.get_quarantined_media_changes(
             from_id=from_id,
             to_id=to_id,
