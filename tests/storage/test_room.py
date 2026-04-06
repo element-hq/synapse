@@ -23,7 +23,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.room_versions import RoomVersions
 from synapse.server import HomeServer
-from synapse.storage.databases.main.room import _BackgroundUpdates, RoomWorkerStore
+from synapse.storage.databases.main.room import _BackgroundUpdates
 from synapse.types import RoomAlias, RoomID, UserID
 from synapse.util.clock import Clock
 
@@ -80,12 +80,12 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(HomeserverTestCase):
 
         # Upload two distinct media items so we can quarantine one. If they shared content,
         # then the quarantine-by-hash code would hit both.
-        unaffected_media_id = self.helper.upload_media(b"first content", tok=admin_user_tok, expect_code=200)[
-            "content_uri"
-        ][6:].split("/")[1]  # Cut off 'mxc://' and domain
-        quarantined_media_id = self.helper.upload_media(b"second content", tok=admin_user_tok, expect_code=200)[
-            "content_uri"
-        ][6:].split("/")[1]  # Cut off 'mxc://' and domain
+        unaffected_media_id = self.helper.upload_media(
+            b"first content", tok=admin_user_tok, expect_code=200
+        )["content_uri"][6:].split("/")[1]  # Cut off 'mxc://' and domain
+        quarantined_media_id = self.helper.upload_media(
+            b"second content", tok=admin_user_tok, expect_code=200
+        )["content_uri"][6:].split("/")[1]  # Cut off 'mxc://' and domain
 
         # Update the quarantined media ID to actually be quarantined manually. We do this
         # direct to the database to avoid hitting any code which might flag the media in
@@ -118,11 +118,7 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(HomeserverTestCase):
             self.store.db_pool.simple_select_list(
                 "quarantined_media_changes",
                 None,
-                retcols=(
-                    "origin",
-                    "media_id",
-                    "quarantined"
-                )
+                retcols=("origin", "media_id", "quarantined"),
             )
         )
         self.assertEqual(len(changes), 1)

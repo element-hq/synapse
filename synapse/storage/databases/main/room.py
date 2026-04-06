@@ -42,7 +42,7 @@ from synapse.api.constants import (
     JoinRules,
     PublicRoomsFilterFields,
 )
-from synapse.api.errors import StoreError, SynapseError, Codes
+from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase
@@ -202,7 +202,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # table with initial data that callers expect (namely, a list of currently
         # quarantined media).
         self.db_pool.updates.register_background_update_handler(
-            _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA, self._flag_existing_quarantined_media
+            _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA,
+            self._flag_existing_quarantined_media,
         )
 
     async def _flag_existing_quarantined_media(
