@@ -621,7 +621,6 @@ class UrlPreviewer:
                 logger.warning(
                     "Media has been automatically quarantined as it matched existing quarantined media"
                 )
-                await self.store.record_media_quarantine_change(None, file_id, True)
 
             time_now_ms = self.clock.time_msec()
 

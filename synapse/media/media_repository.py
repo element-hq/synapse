@@ -422,9 +422,6 @@ class MediaRepository:
                 quarantined_by="system" if should_quarantine else None,
             )
 
-        if should_quarantine:
-            await self.store.record_media_quarantine_change(None, media_id, True)
-
         try:
             await self._generate_thumbnails(None, media_id, media_id, media_type)
         except Exception as e:
