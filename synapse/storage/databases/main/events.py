@@ -264,6 +264,7 @@ class PersistEventsStore:
         self.database_engine = db.engine
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -1183,6 +1184,11 @@ class PersistEventsStore:
                 state_delta_for_room,
                 min_stream_order,
                 sliding_sync_table_changes,
+            )
+
+        if self._msc4354_enabled:
+            self.store.insert_sticky_events_txn(
+                txn, [ev for ev, _ in events_and_contexts]
             )
 
         # We only update the sliding sync tables for non-backfilled events.
@@ -2646,6 +2652,11 @@ class PersistEventsStore:
                 # event isn't an outlier any more.
                 self._update_backward_extremeties(txn, [event])
 
+                if self._msc4354_enabled and event.sticky_duration():
+                    # The de-outliered event is sticky. Update the sticky events table to ensure
+                    # we deliver this down /sync.
+                    self.store.insert_sticky_events_txn(txn, [event])
+
         return [ec for ec in events_and_contexts if ec[0] not in to_remove]
 
     def _store_event_txn(
@@ -2933,6 +2944,7 @@ class PersistEventsStore:
             values={
                 "redacts": event.redacts,
                 "received_ts": self._clock.time_msec(),
+                "recheck": event.internal_metadata.need_to_check_redaction(),
             },
         )
 

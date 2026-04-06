@@ -1,1 +1,0 @@
-MSC4140: Store the JSON content of scheduled delayed events as text instead of a byte array. This fixes the inability to schedule a delayed event with non-ASCII characters in its content.

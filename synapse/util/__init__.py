@@ -21,6 +21,7 @@
 
 import collections.abc
 import logging
+import os
 import typing
 from typing import (
     Iterator,
@@ -74,9 +75,15 @@ def log_failure(
     return None
 
 
-# Version string with git info. Computed here once so that we don't invoke git multiple
-# times.
-SYNAPSE_VERSION = get_distribution_version_string("matrix-synapse", __file__)
+SYNAPSE_VERSION = os.getenv(
+    "SYNAPSE_VERSION_STRING"
+) or get_distribution_version_string("matrix-synapse", __file__)
+"""
+Version string with git info.
+
+This can be overridden via the `SYNAPSE_VERSION_STRING` environment variable or is
+computed here once so that we don't invoke git multiple times.
+"""
 
 
 class ExceptionBundle(Exception):

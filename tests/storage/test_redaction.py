@@ -158,7 +158,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
             event,
         )
 
-        self.assertFalse("redacted_because" in event.unsigned)
+        self.assertIsNone(event.internal_metadata.redacted_by)
 
         # Redact event
         reason = "Because I said so"
@@ -168,7 +168,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(msg_event.event_id, event.event_id)
 
-        self.assertTrue("redacted_because" in event.unsigned)
+        self.assertIsNotNone(event.internal_metadata.redacted_by)
 
         self.assertObjectHasAttributes(
             {
@@ -177,15 +177,6 @@ class RedactionTestCase(unittest.HomeserverTestCase):
                 "content": {},
             },
             event,
-        )
-
-        self.assertObjectHasAttributes(
-            {
-                "type": EventTypes.Redaction,
-                "user_id": self.u_alice.to_string(),
-                "content": {"reason": reason},
-            },
-            event.unsigned["redacted_because"],
         )
 
     def test_redact_join(self) -> None:
@@ -206,7 +197,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
             event,
         )
 
-        self.assertFalse(hasattr(event, "redacted_because"))
+        self.assertIsNone(event.internal_metadata.redacted_by)
 
         # Redact event
         reason = "Because I said so"
@@ -216,7 +207,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
         event = self.get_success(self.store.get_event(msg_event.event_id))
 
-        self.assertTrue("redacted_because" in event.unsigned)
+        self.assertIsNotNone(event.internal_metadata.redacted_by)
 
         self.assertObjectHasAttributes(
             {
@@ -225,15 +216,6 @@ class RedactionTestCase(unittest.HomeserverTestCase):
                 "content": {"membership": Membership.JOIN},
             },
             event,
-        )
-
-        self.assertObjectHasAttributes(
-            {
-                "type": EventTypes.Redaction,
-                "user_id": self.u_alice.to_string(),
-                "content": {"reason": reason},
-            },
-            event.unsigned["redacted_because"],
         )
 
     def test_circular_redaction(self) -> None:
@@ -331,10 +313,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         fetched = self.get_success(self.store.get_event(redaction_event_id1))
 
         # it should have been redacted
-        self.assertEqual(fetched.unsigned["redacted_by"], redaction_event_id2)
-        self.assertEqual(
-            fetched.unsigned["redacted_because"].event_id, redaction_event_id2
-        )
+        self.assertEqual(fetched.internal_metadata.redacted_by, redaction_event_id2)
 
     def test_redact_censor(self) -> None:
         """Test that a redacted event gets censored in the DB after a month"""
@@ -355,7 +334,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
             event,
         )
 
-        self.assertFalse("redacted_because" in event.unsigned)
+        self.assertIsNone(event.internal_metadata.redacted_by)
 
         # Redact event
         reason = "Because I said so"
@@ -363,7 +342,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
         event = self.get_success(self.store.get_event(msg_event.event_id))
 
-        self.assertTrue("redacted_because" in event.unsigned)
+        self.assertIsNotNone(event.internal_metadata.redacted_by)
 
         self.assertObjectHasAttributes(
             {

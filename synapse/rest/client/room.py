@@ -34,7 +34,13 @@ from prometheus_client.core import Histogram
 from twisted.web.server import Request
 
 from synapse import event_auth
-from synapse.api.constants import Direction, EventTypes, Membership
+from synapse.api.constants import (
+    Direction,
+    EventTypes,
+    Membership,
+    StickyEvent,
+    StickyEventField,
+)
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -49,7 +55,6 @@ from synapse.events.utils import (
     EventClientSerializer,
     SerializeEventConfig,
     format_event_for_client_v2,
-    serialize_event,
 )
 from synapse.handlers.pagination import GetMessagesResult
 from synapse.http.server import HttpServer
@@ -208,8 +213,10 @@ class RoomStateEventRestServlet(RestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
+        self._event_serializer = hs.get_event_client_serializer()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -278,7 +285,7 @@ class RoomStateEventRestServlet(RestServlet):
             raise SynapseError(404, "Event not found.", errcode=Codes.NOT_FOUND)
 
         if format == "event":
-            event = serialize_event(
+            event = await self._event_serializer.serialize_event(
                 data,
                 self.clock.time_msec(),
                 config=SerializeEventConfig(
@@ -331,6 +338,10 @@ class RoomStateEventRestServlet(RestServlet):
         if requester.app_service:
             origin_server_ts = parse_integer(request, "ts")
 
+        sticky_duration_ms: int | None = None
+        if self._msc4354_enabled:
+            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
+
         delay = _parse_request_delay(request, self._max_event_delay_ms)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
@@ -341,6 +352,7 @@ class RoomStateEventRestServlet(RestServlet):
                 origin_server_ts=origin_server_ts,
                 content=content,
                 delay=delay,
+                sticky_duration_ms=sticky_duration_ms,
             )
 
             set_tag("delay_id", delay_id)
@@ -368,6 +380,10 @@ class RoomStateEventRestServlet(RestServlet):
                     "room_id": room_id,
                     "sender": requester.user.to_string(),
                 }
+                if sticky_duration_ms is not None:
+                    event_dict[StickyEvent.EVENT_FIELD_NAME] = StickyEventField(
+                        duration_ms=sticky_duration_ms
+                    )
 
                 if state_key is not None:
                     event_dict["state_key"] = state_key
@@ -400,6 +416,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/send/$event_type[/$txn_id]
@@ -420,6 +437,10 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         if requester.app_service:
             origin_server_ts = parse_integer(request, "ts")
 
+        sticky_duration_ms: int | None = None
+        if self._msc4354_enabled:
+            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
+
         delay = _parse_request_delay(request, self._max_event_delay_ms)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
@@ -430,6 +451,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
                 origin_server_ts=origin_server_ts,
                 content=content,
                 delay=delay,
+                sticky_duration_ms=sticky_duration_ms,
             )
 
             set_tag("delay_id", delay_id)
@@ -445,6 +467,11 @@ class RoomSendEventRestServlet(TransactionRestServlet):
 
         if origin_server_ts is not None:
             event_dict["origin_server_ts"] = origin_server_ts
+
+        if sticky_duration_ms is not None:
+            event_dict[StickyEvent.EVENT_FIELD_NAME] = StickyEventField(
+                duration_ms=sticky_duration_ms
+            )
 
         try:
             (
