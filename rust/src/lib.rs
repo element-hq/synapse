@@ -30,6 +30,14 @@ fn get_rust_file_digest() -> &'static str {
     env!("SYNAPSE_RUST_DIGEST")
 }
 
+/// Returns the `rustc` version used when this native module was built.
+///
+/// This value is embedded at build time, so it can be exported as a prometheus metrics.
+#[pyfunction]
+pub fn get_rustc_version() -> &'static str {
+    env!("SYNAPSE_RUSTC_VERSION")
+}
+
 /// Formats the sum of two numbers as string.
 #[pyfunction]
 #[pyo3(text_signature = "(a, b, /)")]
@@ -50,6 +58,7 @@ fn reset_logging_config() {
 fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     m.add_function(wrap_pyfunction!(get_rust_file_digest, m)?)?;
+    m.add_function(wrap_pyfunction!(get_rustc_version, m)?)?;
     m.add_function(wrap_pyfunction!(reset_logging_config, m)?)?;
 
     acl::register_module(py, m)?;
