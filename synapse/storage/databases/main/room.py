@@ -218,8 +218,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         some point. Media which isn't quarantined has not changed state (as far as
         this function can tell).
 
-        When media was quarantined is not recorded, so this inserts as if the media was
-        quarantined at the current time.
+        We don't know when the media was originally quarantined, so this inserts as if
+        the media was quarantined now and are processed in an arbitrary order.
 
         Further, due to lack of timestamp or history, media which was quarantined then
         unquarantined will not be picked up by this background task.
