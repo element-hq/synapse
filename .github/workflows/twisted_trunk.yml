@@ -12,9 +12,8 @@ on:
       twisted_ref:
         description: Commit, branch or tag to checkout from upstream Twisted.
         required: false
-        default: 'trunk'
+        default: "trunk"
         type: string
-
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,13 +48,13 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: "3.x"
           extras: "all"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
       - run: |
           poetry remove twisted
           poetry add --extras tls git+https://github.com/twisted/twisted.git#${{ inputs.twisted_ref || 'trunk' }}
@@ -77,19 +76,18 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: "3.x"
           extras: "all test"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
       - run: |
           poetry remove twisted
           poetry add --extras tls git+https://github.com/twisted/twisted.git#trunk
           poetry install --no-interaction --extras "all test"
       - run: poetry run trial --jobs 2 tests
-
       - name: Dump logs
         # Logs are most useful when the command fails, always include them.
         if: ${{ always() }}
@@ -123,7 +121,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Patch dependencies
         # Note: The poetry commands want to create a virtualenv in /src/.venv/,
@@ -147,7 +145,7 @@ jobs:
         if: ${{ always() }}
         run: /sytest/scripts/tap_to_gha.pl /logs/results.tap
       - name: Upload SyTest logs
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: ${{ always() }}
         with:
           name: Sytest Logs - ${{ job.status }} - (${{ join(matrix.*, ', ') }})
@@ -182,7 +180,7 @@ jobs:
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
 
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           cache-dependency-path: complement/go.sum
           go-version-file: complement/go.mod
@@ -199,11 +197,53 @@ jobs:
           poetry lock
         working-directory: synapse
 
-      - run: |
+      - name: Run Complement Tests
+        id: run_complement_tests
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
           set -o pipefail
-          TEST_ONLY_SKIP_DEP_HASH_VERIFICATION=1 POSTGRES=${{ (matrix.database == 'Postgres') && 1 || '' }} WORKERS=${{ (matrix.arrangement == 'workers') && 1 || '' }} COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -json 2>&1 | synapse/.ci/scripts/gotestfmt
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log
         shell: bash
-        name: Run Complement Tests
+        env:
+          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: 1
+
+      - name: Formatted Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_complement_tests.outcome != 'skipped'
+        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
+
+      - name: Run in-repo Complement Tests
+        id: run_in_repo_complement_tests
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest-in-repo-complement.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
+          set -o pipefail
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 | tee /tmp/gotest-in-repo-complement.log
+        shell: bash
+        env:
+          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: 1
+
+      - name: Formatted in-repo Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_in_repo_complement_tests.outcome != 'skipped'
+        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
 
   # open an issue if the build fails, so we know about it.
   open-issue:

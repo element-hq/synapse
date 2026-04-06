@@ -45,6 +45,7 @@ from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import JsonDict, Requester, UserID, create_requester
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+from synapse.util.duration import Duration
 from synapse.util.json import json_decoder
 
 from . import introspection_response_timer
@@ -110,6 +111,7 @@ class MasDelegatedAuth(BaseAuth):
         self._rust_http_client = HttpClient(
             reactor=hs.get_reactor(),
             user_agent=self._http_client.user_agent.decode("utf8"),
+            http2_only=self._config.force_http2,
         )
         self._server_metadata = RetryOnExceptionCachedCall[ServerMetadata](
             self._load_metadata
@@ -139,7 +141,7 @@ class MasDelegatedAuth(BaseAuth):
             clock=self._clock,
             name="mas_token_introspection",
             server_name=self.server_name,
-            timeout_ms=120_000,
+            timeout=Duration(minutes=2),
             # don't log because the keys are access tokens
             enable_logging=False,
         )

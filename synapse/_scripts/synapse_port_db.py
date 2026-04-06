@@ -122,7 +122,7 @@ BOOLEAN_COLUMNS = {
     "presence_stream": ["currently_active"],
     "public_room_list_stream": ["visibility"],
     "pushers": ["enabled"],
-    "redactions": ["have_censored"],
+    "redactions": ["have_censored", "recheck"],
     "remote_media_cache": ["authenticated"],
     "room_memberships": ["participant"],
     "room_stats_state": ["is_federatable"],
