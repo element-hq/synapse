@@ -134,6 +134,14 @@ class SlidingSyncInterestedRooms:
     """
 
     all_rooms: set[str]
+    """
+    The set of room IDs of all rooms that could appear in any list.
+    This set includes rooms that are outside the list ranges.
+    In other words, this is the set of all rooms that the client is
+    _interested_ in (in a pure sense),
+    even if these rooms are omitted from the current window (which
+    is, in a sense, just a computational optimisation).
+    """
 
     room_membership_for_user_map: Mapping[str, RoomsForUserType]
 
