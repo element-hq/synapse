@@ -148,7 +148,7 @@ class StorageProviderWrapper(StorageProvider):
         if file_info.url_cache:
             return None
 
-        await maybe_awaitable(self.backend.delete(path, file_info))
+        return await maybe_awaitable(self.backend.delete(path, file_info))
 
 
 class FileStorageProviderBackend(StorageProvider):
