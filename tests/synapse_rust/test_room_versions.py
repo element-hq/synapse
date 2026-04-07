@@ -35,3 +35,11 @@ class KnownRoomVersionsMappingTestCase(unittest.TestCase):
 
     def test_contains_unknown_version(self) -> None:
         self.assertFalse("unknown" in KNOWN_ROOM_VERSIONS)
+
+    def test_getitem_non_string_raises_key_error(self) -> None:
+        """Test that KNOWN_ROOM_VERSIONS[non_string] raises KeyError,
+        not TypeError, matching Python dict semantics."""
+        with self.assertRaises(KeyError):
+            KNOWN_ROOM_VERSIONS[42]  # type: ignore[index]
+        with self.assertRaises(KeyError):
+            KNOWN_ROOM_VERSIONS[None]  # type: ignore[index]
