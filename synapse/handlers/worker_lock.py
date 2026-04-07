@@ -54,6 +54,9 @@ logger = logging.getLogger(__name__)
 # will not disappear under our feet as long as we don't delete the room.
 NEW_EVENT_DURING_PURGE_LOCK_NAME = "new_event_during_purge_lock"
 
+WORKER_LOCK_MAX_RETRY_INTERVAL = Duration(minutes=15).as_secs()
+WORKER_LOCK_WARN_RETRY_INTERVAL = Duration(minutes=10).as_secs()
+
 
 class WorkerLocksHandler:
     """A class for waiting on taking out locks, rather than using the storage
@@ -240,7 +243,7 @@ class WaitingLock:
                     break
 
                 try:
-                    # Wait until the notification the lock might have been
+                    # Wait until the notification that the lock might have been
                     # released (by the deferred being resolved). We also
                     # periodically wake up in case the lock was released, but we
                     # weren't notified.
@@ -252,10 +255,11 @@ class WaitingLock:
                         )
                 except defer.TimeoutError:
                     # Only increment the timeout interval if this was an actual timeout
-                    self._timeout_interval = self._increment_timeout_interval()
+                    self._increment_timeout_interval()
                 except Exception as e:
                     logger.warning(
-                        "Caught an exception while waiting on WaitingLock: %r", e
+                        "Caught an exception while waiting on WaitingLock(lock_name=%s, lock_key=%s): %r",
+                        self.lock_name, self.lock_key, e
                     )
 
         return await self._inner_lock.__aenter__()
@@ -278,14 +282,17 @@ class WaitingLock:
         return r
 
     def _increment_timeout_interval(self) -> float:
-        next = self._timeout_interval
-        next = min(Duration(minutes=15).as_secs(), next * 2)
-        if next > Duration(minutes=10).as_secs():  # >12 iterations
+        _next = self._timeout_interval
+        _next = min(WORKER_LOCK_MAX_RETRY_INTERVAL, _next * 2)
+        if _next > WORKER_LOCK_WARN_RETRY_INTERVAL:  # >12 iterations
             logger.warning(
                 "Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 next,
             )
-        return next * random.uniform(0.9, 1.1)
+        # The jitter value is maintained for the timeout, to help avoid a "thundering
+        # herd" situation when all locks may time out at the same time.
+        self._timeout_interval = _next * random.uniform(0.9, 1.1)
+        return self._timeout_interval
 
 
 @attr.s(auto_attribs=True, eq=False)
@@ -328,7 +335,7 @@ class WaitingMultiLock:
                     break
 
                 try:
-                    # Wait until the notification the lock might have been
+                    # Wait until the notification that the lock might have been
                     # released (by the deferred being resolved). We also
                     # periodically wake up in case the lock was released, but we
                     # weren't notified.
@@ -340,10 +347,11 @@ class WaitingMultiLock:
                         )
                 except defer.TimeoutError:
                     # Only increment the timeout interval if this was an actual timeout
-                    self._timeout_interval = self._increment_timeout_interval()
+                    self._increment_timeout_interval()
                 except Exception as e:
                     logger.warning(
-                        "Caught an exception while waiting on WaitingMultiLock: %r", e
+                        "Caught an exception while waiting on WaitingMultiLock(lock_names=%r): %r",
+                        self.lock_names, e
                     )
 
         assert self._inner_lock_cm
@@ -369,11 +377,14 @@ class WaitingMultiLock:
         return r
 
     def _increment_timeout_interval(self) -> float:
-        next = self._timeout_interval
-        next = min(Duration(minutes=15).as_secs(), next * 2)
-        if next > Duration(minutes=10).as_secs():  # >12 iterations
+        _next = self._timeout_interval
+        _next = min(WORKER_LOCK_MAX_RETRY_INTERVAL, _next * 2)
+        if _next > WORKER_LOCK_WARN_RETRY_INTERVAL:  # >12 iterations
             logger.warning(
                 "Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 next,
             )
-        return next * random.uniform(0.9, 1.1)
+        # The jitter value is maintained for the timeout, to help avoid a "thundering
+        # herd" situation when all locks may time out at the same time.
+        self._timeout_interval = _next * random.uniform(0.9, 1.1)
+        return self._timeout_interval

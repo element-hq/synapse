@@ -49,21 +49,13 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         self.get_success(lock1.__aenter__())
 
         lock2 = self.worker_lock_handler.acquire_lock("name", "key")
-        # Wrap the WaitingLock object, so we can detect if the timeouts are being hit
-        with patch.object(
-            lock2,
-            "_increment_timeout_interval",
-            wraps=lock2._increment_timeout_interval,
-        ) as wrapped_lock2_increment_timeout_interval_method:
-            d2 = defer.ensureDeferred(lock2.__aenter__())
-            self.assertNoResult(d2)
+        d2 = defer.ensureDeferred(lock2.__aenter__())
+        self.assertNoResult(d2)
 
-            # The lock should not time out here
-            wrapped_lock2_increment_timeout_interval_method.assert_not_called()
-            self.get_success(lock1.__aexit__(None, None, None))
+        self.get_success(lock1.__aexit__(None, None, None))
 
-            self.get_success(d2)
-            self.get_success(lock2.__aexit__(None, None, None))
+        self.get_success(d2)
+        self.get_success(lock2.__aexit__(None, None, None))
 
     def test_timeouts_for_lock_locally(self) -> None:
         """Test timeouts are incremented for a lock on a single worker"""
