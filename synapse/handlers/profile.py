@@ -671,6 +671,107 @@ class ProfileHandler:
 
         return response
 
+    async def overwrite_profile(
+        self,
+        target_user: UserID,
+        requester: Requester,
+        new_profile: JsonDict,
+        *,
+        by_admin: bool = False,
+        propagate: bool = True,
+    ) -> None:
+        """Overwrite the entire profile of a user
+
+        Preconditions:
+        - This must NOT be called as part of deactivating the user, because we will
+          notify modules about the change whilst claiming it is not related
+          to user deactivation and we will also (if `propagate=True`) send
+          updates into rooms, which could cause rooms to be accidentally joined
+          after the deactivated user has left them.
+
+        Args:
+            target_user: the user whose displayname is to be changed.
+            requester: The user attempting to make this change.
+            new_profile: The new profile dictionary.
+            by_admin: Whether this change was made by an administrator.
+            propagate: Whether this change also applies to the user's membership events.
+        """
+        if not self.hs.is_mine(target_user):
+            raise SynapseError(400, "User is not hosted on this homeserver")
+
+        if not by_admin and target_user != requester.user:
+            raise AuthError(400, "Cannot set another user's profile")
+
+        old_profile = await self.store.get_profileinfo(target_user)
+        new_displayname = new_profile.get("displayname", "")
+        name_changed = new_displayname != old_profile.display_name
+        if name_changed:
+            if not isinstance(new_displayname, str):
+                raise SynapseError(
+                    400, "'displayname' must be a string", errcode=Codes.INVALID_PARAM
+                )
+
+            if len(new_displayname) > MAX_DISPLAYNAME_LEN:
+                raise SynapseError(
+                    400, "Displayname is too long (max %i)" % (MAX_DISPLAYNAME_LEN,)
+                )
+
+            if not by_admin and not self.hs.config.registration.enable_set_displayname:
+                raise SynapseError(
+                    400,
+                    "Changing display name is disabled on this server",
+                    Codes.FORBIDDEN,
+                )
+
+        new_avatar_url = new_profile.get("avatar_url", "")
+        avatar_changed = new_avatar_url != old_profile.avatar_url
+        if avatar_changed:
+            if not by_admin and not self.hs.config.registration.enable_set_avatar_url:
+                raise SynapseError(
+                    400,
+                    "Changing avatar is disabled on this server",
+                    Codes.FORBIDDEN,
+                )
+
+            if not isinstance(new_avatar_url, str):
+                raise SynapseError(
+                    400, "'avatar_url' must be a string", errcode=Codes.INVALID_PARAM
+                )
+
+            if len(new_avatar_url) > MAX_AVATAR_URL_LEN:
+                raise SynapseError(
+                    400, "Avatar URL is too long (max %i)" % (MAX_AVATAR_URL_LEN,)
+                )
+
+            if not by_admin and not await self.check_avatar_size_and_mime_type(
+                new_avatar_url
+            ):
+                raise SynapseError(403, "This avatar is not allowed", Codes.FORBIDDEN)
+
+        # If the admin changes the display name of a user, the requesting user cannot send
+        # the join event to update the display name in the rooms.
+        # This must be done by the target user themselves.
+        if by_admin:
+            requester = create_requester(
+                target_user,
+                authenticated_entity=requester.authenticated_entity,
+            )
+
+        await self.store.overwrite_profile(target_user, new_profile)
+
+        profile = await self.store.get_profileinfo(target_user)
+
+        await self.user_directory_handler.handle_local_profile_change(
+            target_user.to_string(), profile
+        )
+
+        await self._third_party_rules.on_profile_update(
+            target_user.to_string(), profile, by_admin, deactivation=False
+        )
+
+        if propagate and (name_changed or avatar_changed):
+            await self._update_join_states(requester, target_user)
+
     async def _update_join_states(
         self, requester: Requester, target_user: UserID
     ) -> None:

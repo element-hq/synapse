@@ -206,6 +206,8 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4354": self.config.experimental.msc4354_enabled,
                     # MSC4380: Invite blocking
                     "org.matrix.msc4380.stable": True,
+                    # MSC4437: Endpoint to replace entire profile
+                    "com.beeper.msc4437": self.config.experimental.msc4437_enabled,
                 },
             },
         )

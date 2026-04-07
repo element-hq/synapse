@@ -89,6 +89,57 @@ class ProfileRestServlet(RestServlet):
         return 200, ret
 
 
+class ProfileOverwriteRestServlet(RestServlet):
+    # Note for stabilization: just remove this separate servlet and move on_PUT into the main ProfileRestServlet.
+    PATTERNS = client_patterns(
+        "/com.beeper.msc4437/profile/(?P<user_id>[^/]*)", unstable=True, releases=()
+    )
+    CATEGORY = "Event sending requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.profile_handler = hs.get_profile_handler()
+        self.auth = hs.get_auth()
+
+    async def on_PUT(
+        self, request: SynapseRequest, user_id: str
+    ) -> tuple[int, JsonDict]:
+        if not UserID.is_valid(user_id):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
+            )
+
+        requester = await self.auth.get_user_by_req(request, allow_guest=False)
+        user = UserID.from_string(user_id)
+        is_admin = await self.auth.is_server_admin(requester)
+
+        content = parse_json_object_from_request(request)
+        for key in content.keys():
+            if not key:
+                raise SynapseError(
+                    400, "Empty field name in request", errcode=Codes.INVALID_PARAM
+                )
+
+            if len(key.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
+                raise SynapseError(
+                    400, f"Too long field name {key!r}", errcode=Codes.KEY_TOO_LARGE
+                )
+
+            if not is_namedspaced_grammar(key):
+                raise SynapseError(
+                    400,
+                    f"Field name {key!r} does not follow Common Namespaced Identifier Grammar",
+                    errcode=Codes.INVALID_PARAM,
+                )
+
+        await self.profile_handler.overwrite_profile(
+            user, requester, content, by_admin=is_admin
+        )
+
+        return 200, {}
+
+
 class ProfileFieldRestServlet(RestServlet):
     PATTERNS = [
         *client_patterns(
@@ -289,3 +340,5 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ProfileRestServlet(hs).register(http_server)
     if hs.config.experimental.msc4133_enabled:
         UnstableProfileFieldRestServlet(hs).register(http_server)
+    if hs.config.experimental.msc4437_enabled:
+        ProfileOverwriteRestServlet(hs).register(http_server)
