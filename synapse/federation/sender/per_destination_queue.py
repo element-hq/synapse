@@ -48,6 +48,7 @@ from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import SynapseTags, set_tag
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
+from synapse.storage import DataStore
 from synapse.types import JsonDict, ReadReceipt
 from synapse.util.retryutils import NotRetryingDestination, get_retry_limiter
 from synapse.visibility import filter_events_for_server
@@ -106,6 +107,9 @@ class PerDestinationQueue:
         self._instance_name = hs.get_instance_name()
         self._federation_shard_config = hs.config.worker.federation_shard_config
         self._state = hs.get_state_handler()
+        self._sticky_event_backlog_tracker = StickyEventBacklogTracker(
+            destination, self._store, self._hs.config.experimental.msc4354_enabled
+        )
 
         self._should_send_on_this_instance = True
         if not self._federation_shard_config.should_handle(
@@ -769,9 +773,9 @@ class _TransactionCompletionInformation:
     When the transaction completes, this should be stored as our position in the events stream.
     """
 
-    pdus: list[EventBase]
+    pdu_count_from_main_queue: int
     """
-    These PDUs were sent in the transaction.
+    The number of PDUs that were sent from the main queue.
     """
 
 
@@ -910,7 +914,7 @@ class _TransactionQueueManager:
                 device_list_id=device_list_id_upon_completion,
                 device_stream_id=device_stream_id_upon_completion,
                 last_stream_ordering=last_stream_ordering,
-                pdus=pdus,
+                pdu_count_from_main_queue=len(pdus),
             ),
         )
 
@@ -935,8 +939,8 @@ class _TransactionQueueManager:
         Handle the fact that a transaction has been successfully completed.
         """
         # Successfully sent transactions, so we remove pending PDUs from the queue
-        if info.pdus:
-            queue._pending_pdus = queue._pending_pdus[len(info.pdus) :]
+        if info.pdu_count_from_main_queue:
+            queue._pending_pdus = queue._pending_pdus[info.pdu_count_from_main_queue :]
 
         # Succeeded to send the transaction so we record where we have sent up
         # to in the various streams
@@ -963,3 +967,64 @@ class _TransactionQueueManager:
             await queue._store.set_destination_last_successful_stream_ordering(
                 queue._destination, info.last_stream_ordering
             )
+
+
+class StickyEventBacklogTracker:
+    """
+    Tracks our state with sticky events.
+    """
+
+    def __init__(
+        self, destination: str, store: DataStore, msc4354_enabled: bool
+    ) -> None:
+        # Assume backlogged by default
+        self._backlogged = True
+        """
+        Do we *potentially* have a backlog of sticky events to send out?
+        """
+
+        self._destination = destination
+        """
+        The server name of the destination we are responsible for.
+        """
+
+        self._store = store
+
+        self._msc4354_enabled = msc4354_enabled
+
+    async def prepare_transaction(
+        self,
+    ) -> tuple[list[EventBase], _TransactionCompletionInformation] | None:
+        """
+        Try to prepare a transaction based on the sticky event backlog.
+        """
+
+        if not self._msc4354_enabled:
+            # MSC4354 Sticky Events disabled, so nothing to do.
+            return None
+
+        if not self._backlogged:
+            return None
+
+        # TODO select a room and get up to 50 sticky events
+
+        # Return the transaction
+
+        return sticky_events, _TransactionCompletionInformation(
+            device_list_id=None,
+            device_stream_id=None,
+            last_stream_ordering=None,
+            # These events are not from the main queue, so don't advance the main queue
+            pdu_count_from_main_queue=0,
+            # TODO advance in the sticky backlog stream...
+        )
+
+    async def complete_transaction(self, transaction: int) -> None:
+        pass
+
+    async def notify_joined_room(self) -> None:
+        """
+        Call when we have been notified that the server this queue is responsible for
+        has just newly joined a room.
+        """
+        self._backlogged = True

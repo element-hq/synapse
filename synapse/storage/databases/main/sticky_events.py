@@ -2,6 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright (C) 2025 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -18,17 +19,22 @@ from typing import TYPE_CHECKING, Collection, cast
 from twisted.internet.defer import Deferred
 
 from synapse.events import EventBase
-from synapse.replication.tcp.streams._base import StickyEventsStream
+from synapse.replication.tcp.streams._base import (
+    StickyEventsStream,
+    StickyEventStreamPosition,
+)
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
     make_in_list_sql_clause,
+    user_is_local_like_pattern,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.types import RoomID
 from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
@@ -419,4 +425,187 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         return self.hs.run_as_background_process(
             "delete_expired_sticky_events",
             self._delete_expired_sticky_events,
+        )
+
+    async def get_backlogged_sticky_events_for_destination(
+        self, destination: str, *, limit: int = 50
+    ) -> tuple[RoomID, StickyEventStreamPosition, list[str]] | None:
+        """
+        From the `destination_room_sticky_events_backlog` table, if there are backlogged
+        sticky events to send to the given destination, returns up to 50 IDs of sticky
+        events from one room.
+
+        The sticky events are constrained to originating from this server:
+
+        > Attempt to **push** their own[^origin] sticky events to all joined servers
+        > — https://github.com/matrix-org/matrix-spec-proposals/blame/74fc75e1dc1301230cc3fcb7435205bf4f567ef8/proposals/4354-sticky-events.md#L88
+        >
+        > [^origin]: That is, the domain of the sender of the sticky event is the sending server.
+        > — https://github.com/matrix-org/matrix-spec-proposals/blame/74fc75e1dc1301230cc3fcb7435205bf4f567ef8/proposals/4354-sticky-events.md#L491
+
+        The sticky events are ordered by oldest `sticky_events.stream_id` first,
+        which corresponds to `stream_ordering` first for locally-originating events.
+
+        Returns
+            - `None` if no backlog exists
+            - if a backlog exists, a tuple of
+                1. room ID
+                2. The sticky event stream position that should be advanced to upon
+                   successful sending of this batch.
+                   (currently: the highest sticky event stream position of the returned sticky events)
+                3. event IDs of backlogged sticky events (between 1 and `limit` of them)
+        """
+
+        def _get_backlogged_sticky_events_for_destination_txn(
+            txn: LoggingTransaction,
+        ) -> tuple[RoomID, StickyEventStreamPosition, list[str]] | None:
+            first_try = _try_get_backlogged_sticky_events_for_destination_txn(txn)
+            if first_try is None:
+                return None
+
+            room_id, advance_sticky_event_stream_pos, sticky_event_ids = first_try
+            if sticky_event_ids:
+                assert advance_sticky_event_stream_pos is not None
+                return room_id, advance_sticky_event_stream_pos, sticky_event_ids
+
+            # A room is considered backlogged but doesn't have any
+            # sticky events to send
+            # This can happen when the sticky events expire, for instance.
+            # Trigger a cleanup of the table for this destination and try round again.
+            _clean_backlog_txn(txn)
+
+            # After having cleaned the backlog, try again
+            second_try = _try_get_backlogged_sticky_events_for_destination_txn(txn)
+            if not second_try:
+                return None
+            room_id, max_sticky_events_stream_position, event_ids = second_try
+
+            assert len(event_ids) > 0
+            assert max_sticky_events_stream_position is not None
+
+            return room_id, max_sticky_events_stream_position, event_ids
+
+        def _try_get_backlogged_sticky_events_for_destination_txn(
+            txn: LoggingTransaction,
+        ) -> tuple[RoomID, StickyEventStreamPosition | None, list[str]] | None:
+            """
+            Attempt to pull out backlogged sticky events for the destination
+            from any room.
+
+            Returns
+                - `None` if no backlog exists
+                - if a backlog exists, a tuple of
+                    1. room ID
+                    2. The sticky event stream position that should be advanced to upon
+                       successful sending of this batch, or `None` if no events.
+                       (currently: the highest sticky event stream position of the returned sticky events)
+                    3. event IDs of backlogged sticky events (between 0 and `limit` of them)
+
+                  It is possible for a room ID to be returned with zero sticky events,
+                  for example if all the backlogged sticky events for that room expired.
+
+                  In that case, clean-up should be triggered on the table and then
+                  try again.
+            """
+
+            txn.execute(
+                """
+                SELECT room_id, sticky_events_stream_position
+                FROM destination_room_sticky_events_backlog
+                WHERE destination = ?
+                LIMIT 1
+                """
+            )
+            row = txn.fetchone()
+            if not row:
+                return None
+
+            room_id, last_sent_sticky_event_stream_position = cast(tuple[str, int], row)
+
+            txn.execute(
+                """
+                SELECT event_id, stream_id
+                FROM sticky_events
+                WHERE room_id = ?
+                    -- TODO < vs <=
+                    AND ? < sticky_events_stream_position
+                    -- filter to locally-originating sticky events
+                    AND se.sender LIKE ?
+                ORDER BY stream_id ASC
+                LIMIT ?
+                """,
+                (
+                    room_id,
+                    last_sent_sticky_event_stream_position,
+                    user_is_local_like_pattern(self.hs),
+                    limit,
+                ),
+            )
+
+            # -1 and below aren't used as stream positions
+            max_stream_position = -1
+            event_ids = []
+            for event_id, stream_position in txn:
+                event_ids.append(event_id)
+                max_stream_position = max(max_stream_position, stream_position)
+
+            max_stream_position_return = (
+                None
+                if max_stream_position == -1
+                else StickyEventStreamPosition(max_stream_position)
+            )
+
+            return RoomID.from_string(room_id), max_stream_position_return, event_ids
+
+        def _clean_backlog_txn(txn: LoggingTransaction) -> None:
+            """
+            Clean up `destination_room_sticky_events_backlog` rows that no longer apply,
+            because there are no longer active sticky events in that range in that room.
+
+            Invoked when we try to process a room and find that it has no sticky events
+            to send to this destination.
+            """
+            txn.execute(
+                """
+                WITH to_clean_up AS (
+                    SELECT room_id FROM destination_room_sticky_events_backlog AS backlog
+                    -- This is an anti-join: we want to find backlog rows where no sticky events match
+                    LEFT JOIN sticky_events AS se
+                        ON se.room_id = backlog.room_id
+                        -- filter to locally-originating sticky events
+                        AND se.sender LIKE ?
+                        -- TODO >= vs > here! Need to figure out what we're doing and what looks cleanest
+                        AND se.stream_id >= backlog.sticky_events_stream_position
+                    WHERE se.event_id IS NULL
+                )
+                DELETE FROM destination_room_sticky_events_backlog
+                WHERE destination = ? AND room_id IN (SELECT room_id FROM to_clean_up)
+                """,
+                (user_is_local_like_pattern(self.hs), destination),
+            )
+
+        return await self.db_pool.runInteraction(
+            "get_backlogged_sticky_events_for_destination",
+            _get_backlogged_sticky_events_for_destination_txn,
+        )
+
+    async def mark_backlogged_sticky_events_sent(
+        self,
+        destination: str,
+        room_id: RoomID,
+        max_sent_sticky_events_stream_position: StickyEventStreamPosition,
+    ) -> None:
+        """
+        Marks some backlogged sticky events as sent.
+
+        The specific sticky events so marked are those in the given room,
+        with sticky event stream positions <= `max_sent_sticky_events_stream_position`.
+        """
+
+        def _txn(txn: LoggingTransaction) -> None:
+            # TODO
+            pass
+
+        return await self.db_pool.runInteraction(
+            "mark_backlogged_sticky_events_sent", _txn
         )
