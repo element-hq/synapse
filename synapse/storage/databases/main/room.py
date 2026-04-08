@@ -228,7 +228,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         Args:
             progress: The progress dictionary from the background update.
-            batch_size: The number of rows to process in each batch.
+            batch_size: The number of rows in each of the local_media_repository and
+             remote_media_cache tables to process in each batch.
 
         Returns:
               The number of rows inserted.
@@ -251,6 +252,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         #
         # Note: Already-quarantined media is indicated by the `quarantined_by` field being
         # non-null. We only want quarantined media, per docstring above.
+        #
+        # This background update is considered *best effort* for the reasons above. Data
+        # might be missing or duplicated, and that's just going to have to be okay. This
+        # is further reinforced by not all changes being captured by the table anyway.
+        # See https://github.com/element-hq/synapse/issues/19672 for more details.
         def flag_quarantined(txn: LoggingTransaction) -> int:
             # It doesn't matter which order we do these in, as long as we do both of them.
             txn.execute(
@@ -1381,15 +1387,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             List of `QuarantinedMediaUpdate` update rows in stream ordering (ascending order).
 
         Raises:
-            SynapseError: If `from_id` is ahead of `to_id`, or if waiting for `to_id`
-                took too long.
+            SynapseError: If waiting for `to_id` took too long.
         """
         if to_id < from_id:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter from must be a positive integer and behind the current stream position.",
-                errcode=Codes.INVALID_PARAM,
-            )
+            # the to_id is behind the from_id, which means no results
+            return []
 
         # We need to wait to ensure that our current worker is actually caught up with
         # the stream position, otherwise we might not return what we think we're returning.

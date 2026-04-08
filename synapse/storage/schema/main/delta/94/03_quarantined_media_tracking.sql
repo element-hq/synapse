@@ -11,9 +11,18 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Represents a stream of when media is quarantined and unquarantined. Note that it's possible for duplicate transitions
--- to exist in the stream. This typically happens if the background update happens to catch media that was quarantined
--- elsewhere, leading to a `quarantined=true` record being inserted twice for the same origin and media_id.
+-- Represents a stream of when media is quarantined and unquarantined. Note that it's possible for duplicate rows to
+-- exist in this table. When the background update which backfills this table is running, it orders quarantined media
+-- by `media_id`. This table is also populated when an admin newly quarantines a piece of media. If the admin happens
+-- to newly quarantine media that hasn't yet been processed by the background update, both the admin's API call and the
+-- background update will add a row to this table. If the background update has already progressed past the media's ID,
+-- then only the admin's API call will add a row to this table.
+--
+-- Note also that this table might not be inserted with all possible cases of media being quarantined. For example, if
+-- media is quarantined by hash upon upload or URL preview, it might not show up here. See https://github.com/element-hq/synapse/issues/19672
+-- for more details.
+--
+-- Overall, this table is very much intended to be *best effort* for media that was quarantined before the table existed.
 CREATE TABLE quarantined_media_changes (
     -- Position in the quarantined media stream
     stream_id INTEGER NOT NULL PRIMARY KEY,

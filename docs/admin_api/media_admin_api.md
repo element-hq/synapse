@@ -252,6 +252,20 @@ Response:
 When media is quarantined or unquarantined, a change record is created in the 
 database. This API returns those change records in the order they were created.
 
+**Note**: Some media is quarantined immediately upon upload due to it sharing a
+hash with an existing quarantined media item. Some of these automatic quarantine
+changes are not returned by this API. Callers are generally expected to be using
+the hashes of media returned by this API rather than the specific media IDs which
+can still capture media records that may have been missed. However, not including
+all records is considered a bug, tracked by issue [#19672](https://github.com/element-hq/synapse/issues/19672).
+
+**Note**: Servers which had media quarantined before Synapse 1.152.0 may see 
+duplicate records returned by this API. This is due to how the background update
+works to populate the underlying database table. 
+
+**Note**: Due to the above, this API should be considered *best effort* and expected
+to have missing or duplicate records.
+
 Each page has a maximum of 100 records. The first page has the oldest records, 
 paginating forwards with each `next_batch` value.
 

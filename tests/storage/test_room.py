@@ -24,6 +24,7 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.room_versions import RoomVersions
 from synapse.server import HomeServer
 from synapse.storage.databases.main.room import _BackgroundUpdates
+from synapse.storage.types import Cursor
 from synapse.types import RoomAlias, RoomID, UserID
 from synapse.util.clock import Clock
 
@@ -85,23 +86,38 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(_AdminMediaTests):
 
         # Upload two distinct media items so we can quarantine one. If they shared content,
         # then the quarantine-by-hash code would hit both.
-        # noinspection PyStatementEffect
-        self.helper.upload_media(b"first content", tok=admin_user_tok, expect_code=200)[
-            "content_uri"
-        ][6:].split("/")[1]  # Cut off 'mxc://' and domain
-        quarantined_media_id = self.helper.upload_media(
+        _unaffected_media_response = self.helper.upload_media(b"first content", tok=admin_user_tok, expect_code=200)
+        quarantined_media_uri = self.helper.upload_media(
             b"second content", tok=admin_user_tok, expect_code=200
-        )["content_uri"][6:].split("/")[1]  # Cut off 'mxc://' and domain
+        )["content_uri"]
+        quarantined_media_origin_and_media_id = quarantined_media_uri[6:]  # cut off 'mxc://'
+        quarantined_media_origin, quarantined_media_id = quarantined_media_origin_and_media_id.split("/")
 
-        # Update the quarantined media ID to actually be quarantined manually. We do this
-        # direct to the database to avoid hitting any code which might flag the media in
-        # the changes table for us. This simulates having existing media already quarantined.
+        # Ideally we'd also upload remote media to ensure that gets picked up, but that's
+        # a little tricky to set up in the test here. We hope that local and remote media
+        # are treated similarly during the background update.
+
+        # Quarantine the media like an admin would. Because the quarantine API also inserts
+        # a record into the database for us, we'll clear out the `quarantined_media_changes`
+        # table before running the background update. This will simulate already-quarantined
+        # media being in the database prior to the background update.
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/media/quarantine/%s/%s"
+            % (
+                quarantined_media_origin,
+                quarantined_media_id,
+            ),
+            access_token=admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        # Do that table clear we mentioned above
+        def _wipe_table(txn: Cursor) -> None:
+            txn.execute("DELETE FROM quarantined_media_changes")
         self.get_success(
-            self.store.db_pool.simple_update_one(
-                table="local_media_repository",
-                keyvalues={"media_id": quarantined_media_id},
-                updatevalues={"quarantined_by": "system"},
-                desc="local_media_repository.test_populates_quarantined_only",
+            self.store.db_pool.runInteraction(
+                "test_populates_quarantined_only._wipe_table", _wipe_table
             )
         )
 

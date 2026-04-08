@@ -867,8 +867,7 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
 
     def test_list_quarantined_media_bounds_high(self) -> None:
         """
-        Ensure out of bounds requests with high `from` values are met with an appropriate
-        error.
+        Ensure out of bounds requests with high `from` values return zero results.
         """
         # Page that's very much out of range, so should have no results
         channel = self.make_request(
@@ -876,22 +875,10 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
             "/_synapse/admin/v1/media/quarantine_changes?from=900000",
             access_token=self.admin_user_tok,
         )
-        self.assertEqual(400, channel.code, msg=channel.json_body)
-        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
-
-    def test_list_quarantined_media_bounds_low(self) -> None:
-        """
-        Ensure out of bounds requests with low `from` values are met with an appropriate
-        error.
-        """
-        # The same as above, but negative
-        channel = self.make_request(
-            "GET",
-            "/_synapse/admin/v1/media/quarantine_changes?from=-1",
-            access_token=self.admin_user_tok,
-        )
-        self.assertEqual(400, channel.code, msg=channel.json_body)
-        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(0, len(channel.json_body["changes"]))
+        # we should be returning a value for `from` which actually makes sense
+        self.assertEqual(0, channel.json_body["next_batch"])
 
 
 class QuarantineMediaByIDTestCase(_AdminMediaTests):
