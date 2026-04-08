@@ -38,5 +38,4 @@ CREATE TABLE IF NOT EXISTS msc4242_state_dag_edges(
     -- multiple times for each prev_state_event_id.
     -- depth BIGINT NOT NULL
 );
-CREATE INDEX msc4242_state_dag_edges_by_room ON msc4242_state_dag_edges(room_id);
 CREATE UNIQUE INDEX msc4242_state_dag_edges_key ON msc4242_state_dag_edges(room_id, event_id, prev_state_event_id);

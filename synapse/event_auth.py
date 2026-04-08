@@ -211,8 +211,8 @@ async def check_state_independent_auth_rules(
         )
         prev_state_events.update(fetched_prev_state_events)
         if len(prev_state_events) != len(prev_state_events_ids):
-            # we should have all the prev state events by now, so if we do not, that suggests
-            # a synapse programming error
+            # we should have all the `prev_state_events` by now, so if we do not, that suggests
+            # a Synapse programming error
             known_prev_state_event_ids = set(prev_state_events)
             raise AssertionError(
                 f"Event {event.event_id} has unknown prev_state_events "

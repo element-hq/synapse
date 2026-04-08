@@ -648,7 +648,7 @@ class EventsPersistenceStorageController:
             new_state_dag_extrems = None
 
             if not backfilled:
-                if room_version and room_version.msc4242_state_dags:
+                if room_version.msc4242_state_dags:
                     with Measure(
                         self._clock,
                         name="_process_state_dag_forward_extremities_and_state_delta",
@@ -1121,10 +1121,10 @@ class EventsPersistenceStorageController:
             old_latest_event_ids:
                 the old forward extremities for the room.
 
-            new_latest_event_ids :
+            new_latest_event_ids:
                 the new forward extremities for the room.
 
-            should_prune :
+            should_prune:
                 if true, attempt to prune the forward extremities.
                 Pruning means we will not communicate some new events to other servers,
                 which can compromise eventual delivery, so graphs which are fully synchronised

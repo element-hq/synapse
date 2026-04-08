@@ -432,7 +432,7 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.json_body["error"], "Server is banned from room")
         self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
 
-    # Exclude MSC4242 room versions whilst it lacks federation support
+    # FIXME: Exclude MSC4242 room versions whilst it lacks federation support
     @parameterized.expand(
         [
             (k,)
@@ -447,7 +447,7 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
         """Test GET /extremities with USE_FROZEN_DICTS=True"""
         self._test_get_extremities_common(room_version)
 
-    # Exclude MSC4242 room versions whilst it lacks federation support
+    # FIXME: Exclude MSC4242 room versions whilst it lacks federation support
     @parameterized.expand(
         [
             (k,)
