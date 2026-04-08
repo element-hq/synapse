@@ -2729,7 +2729,19 @@ class EventsBackgroundUpdatesStore(
 
     async def _resign_events(self, progress: dict, batch_size: int) -> int:
         """Retroactively re-sign events signed with a different key than the
-        current signing key."""
+        current signing key.
+
+        Optional progress parameters:
+            old_key_id: If set, only re-sign events currently signed with this
+                key ID (e.g. "ed25519:abc").
+            before_ts: If set, only re-sign events with a received_ts less
+                than this value (milliseconds since epoch).
+        """
+
+        # Read optional filter parameters from progress. These are set once
+        # when the job is created and preserved across batches.
+        old_key_id: str | None = progress.get("old_key_id")
+        before_ts: int | None = progress.get("before_ts")
 
         # Load the next set of candidate events to re-sign.
         # Returns the event IDs and the highest stream position for those events.
@@ -2740,18 +2752,24 @@ class EventsBackgroundUpdatesStore(
             # Start from the minimum 32-bit integer to ensure we cover events
             # with negative stream orderings (e.g. from backfill).
             last_stream_pos: int = progress.get("last_stream_pos", -(1 << 31))
-            txn.execute(
-                """
+
+            sql = """
                 SELECT event_id, stream_ordering FROM events
                 WHERE stream_ordering > ? AND sender LIKE ?
-                ORDER BY stream_ordering ASC LIMIT ?
-                """,
-                (
-                    last_stream_pos,
-                    f"%:{self.hs.hostname}",
-                    batch_size,
-                ),
-            )
+            """
+            args: list[object] = [
+                last_stream_pos,
+                f"%:{self.hs.hostname}",
+            ]
+
+            if before_ts is not None:
+                sql += " AND received_ts < ?"
+                args.append(before_ts)
+
+            sql += " ORDER BY stream_ordering ASC LIMIT ?"
+            args.append(batch_size)
+
+            txn.execute(sql, args)
             event_rows: list[tuple[str, int]] = txn.fetchall()
             if not event_rows:
                 return [], last_stream_pos
@@ -2786,6 +2804,11 @@ class EventsBackgroundUpdatesStore(
             if not event_needs_resigning(event, self.hs.hostname, verify_key):
                 continue
 
+            # If old_key_id is set, only re-sign events signed with that key.
+            if old_key_id is not None:
+                if old_key_id not in event.signatures.get(self.hs.hostname, {}):
+                    continue
+
             event_dict = resign_event(event, self.hs.hostname, self.hs.signing_key)
             resigned_events.append((event.event_id, event_dict))
 
@@ -2813,7 +2836,11 @@ class EventsBackgroundUpdatesStore(
             self.db_pool.updates._background_update_progress_txn(
                 txn,
                 _BackgroundUpdates.EVENT_RESIGN,
-                progress={"last_stream_pos": max_stream_pos},
+                progress={
+                    "last_stream_pos": max_stream_pos,
+                    "old_key_id": old_key_id,
+                    "before_ts": before_ts,
+                },
             )
 
             # Invalidate the event cache for re-signed events so that other

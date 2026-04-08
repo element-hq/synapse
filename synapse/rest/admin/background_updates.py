@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import json
 import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING
@@ -151,7 +152,23 @@ class BackgroundUpdateStartJobRestServlet(RestServlet):
                 ),
             ]
         elif job_name == "event_resign":
-            jobs = [("event_resign", "{}", "")]
+            old_key_id = body.get("old_key_id")
+            if old_key_id is not None and not isinstance(old_key_id, str):
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "'old_key_id' must be a string",
+                )
+            before_ts = body.get("before_ts")
+            if before_ts is not None and not isinstance(before_ts, int):
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "'before_ts' must be an integer",
+                )
+            progress = {
+                "old_key_id": old_key_id,
+                "before_ts": before_ts,
+            }
+            jobs = [("event_resign", json.dumps(progress), "")]
         else:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Invalid job_name")
 

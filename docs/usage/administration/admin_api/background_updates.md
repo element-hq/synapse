@@ -107,4 +107,6 @@ The following JSON body parameters are available:
 - `job_name` - A string which job to run. Valid values are:
   - `populate_stats_process_rooms` - Recalculate the stats for all rooms.
   - `regenerate_directory` - Recalculate the [user directory](../../../user_directory.md) if it is stale or out of sync.
-  - `event_resign` - Re-sign all locally-sent events with the current signing key. This is useful after rotating the server's signing key to ensure all historical events are signed with the new key.
+  - `event_resign` - Re-sign all locally-sent events with the current signing key. This is useful after rotating the server's signing key to ensure all historical events are signed with the new key. Optional additional parameters:
+    - `old_key_id` - Only re-sign events that were signed with this specific key ID (e.g. `"ed25519:my_old_key"`).
+    - `before_ts` - Only re-sign events with a `received_ts` less than this value (milliseconds since the epoch).

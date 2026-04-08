@@ -374,3 +374,66 @@ class TestResignEventsBgUpdate(HomeserverTestCase):
         self.assertIn(
             new_key_id, new_event.signatures[self.hs.config.server.server_name]
         )
+
+    @override_config({"caches": {"global_factor": 1}, "event_cache_size": "999"})
+    def test_old_key_id_filter(self) -> None:
+        """Test that old_key_id parameter causes only events signed with that
+        specific key to be re-signed."""
+
+        self.wait_for_background_updates()
+
+        self.register_user("user2", "pass")
+        token = self.login("user2", "pass")
+
+        room_id = self.helper.create_room_as(
+            "user2", room_version=RoomVersions.V12.identifier, tok=token
+        )
+        body = self.helper.send(room_id, body="Test old_key_id", tok=token)
+
+        old_event = self.get_success(self.store.get_event(body["event_id"]))
+        old_key_id = f"{self.hs.signing_key.alg}:{self.hs.signing_key.version}"
+
+        # Generate a new signing key
+        self.hs.signing_key = signedjson.key.generate_signing_key("new-test-key-2")
+
+        # Insert BG update with old_key_id filter pointing to a WRONG key
+        self.get_success(
+            self.db_pool.simple_insert(
+                table="background_updates",
+                values={
+                    "update_name": "event_resign",
+                    "progress_json": '{"old_key_id": "ed25519:nonexistent"}',
+                },
+            )
+        )
+        self.updates.start_doing_background_updates()
+        self.wait_for_background_updates()
+
+        # Event should NOT have been re-signed (wrong old_key_id filter)
+        event_after = self.get_success(self.store.get_event(body["event_id"]))
+        self.assertIn(
+            old_key_id, event_after.signatures[self.hs.config.server.server_name]
+        )
+
+        # Now insert BG update with the CORRECT old_key_id
+        self.get_success(
+            self.db_pool.simple_insert(
+                table="background_updates",
+                values={
+                    "update_name": "event_resign",
+                    "progress_json": f'{{"old_key_id": "{old_key_id}"}}',
+                },
+            )
+        )
+        self.updates.start_doing_background_updates()
+        self.wait_for_background_updates()
+
+        # Event should now be re-signed
+        new_event = self.get_success(self.store.get_event(body["event_id"]))
+        new_key_id = f"{self.hs.signing_key.alg}:{self.hs.signing_key.version}"
+        self.assertNotIn(
+            old_key_id, new_event.signatures[self.hs.config.server.server_name]
+        )
+        self.assertIn(
+            new_key_id, new_event.signatures[self.hs.config.server.server_name]
+        )
