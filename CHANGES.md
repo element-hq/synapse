@@ -1,3 +1,12 @@
+# Synapse 1.151.0 (2026-04-07)
+
+## Bugfixes
+
+- Fix `KNOWN_ROOM_VERSIONS.__contains__` raising `TypeError` for non-string keys, which could cause `/sync` to fail for rooms with a `NULL` room version in the database. Bug introduced in [#19589](https://github.com/element-hq/synapse/pull/19589) as part of v1.151.0rc1. ([\#19649](https://github.com/element-hq/synapse/issues/19649))
+
+
+
+
 # Synapse 1.151.0rc1 (2026-03-31)
 
 ## Features

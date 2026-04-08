@@ -60,10 +60,10 @@ virtualenv, these can be installed with:
 pip install "matrix-synapse[redis]"
 ```
 
-Note that these dependencies are included when synapse is installed with `pip
-install matrix-synapse[all]`. They are also included in the debian packages from
-`packages.matrix.org` and in the docker images at
-https://hub.docker.com/r/ectorim/synapse/.
+Note that these dependencies are included when Synapse is installed with `pip install
+matrix-synapse[all]`. They are also included in the [Debian
+packages](setup/installation.md#debianubuntu) and in the [Docker
+images](setup/installation.md#docker-images-and-ansible-playbooks).
 
 To make effective use of the workers, you will need to configure an HTTP
 reverse-proxy such as nginx or haproxy, which will direct incoming requests to
