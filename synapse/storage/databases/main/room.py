@@ -23,7 +23,6 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -42,7 +41,7 @@ from synapse.api.constants import (
     JoinRules,
     PublicRoomsFilterFields,
 )
-from synapse.api.errors import Codes, StoreError, SynapseError
+from synapse.api.errors import StoreError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase

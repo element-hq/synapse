@@ -805,7 +805,9 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         self.assertEqual(200, channel.code, msg=channel.json_body)
 
     def _local_upload(self, admin_user_tok: str) -> str:
-        response = self.helper.upload_media(SMALL_PNG, tok=admin_user_tok, expect_code=200)
+        response = self.helper.upload_media(
+            SMALL_PNG, tok=admin_user_tok, expect_code=200
+        )
         origin_and_media_id = response["content_uri"][6:]  # Cut off 'mxc://'
         _origin, media_id = origin_and_media_id.split("/")
         return media_id
