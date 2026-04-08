@@ -23,7 +23,8 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 import attr
-from signedjson.key import get_verify_key
+from signedjson.key import decode_verify_key_base64, get_verify_key
+from signedjson.sign import SignatureVerifyException, verify_signed_json
 
 from synapse.api.constants import (
     MAX_DEPTH,
@@ -37,6 +38,7 @@ from synapse.crypto.event_signing import (
     resign_event,
 )
 from synapse.events import EventBase, make_event_from_dict
+from synapse.events.utils import prune_event_dict
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
@@ -2732,16 +2734,30 @@ class EventsBackgroundUpdatesStore(
         current signing key.
 
         Optional progress parameters:
-            old_key_id: If set, only re-sign events currently signed with this
-                key ID (e.g. "ed25519:abc").
+            old_key: If set, only re-sign events whose signature can be
+                verified with this key. Format: "algorithm:key_id base64key"
+                (e.g. "ed25519:my_old_key XGX0JRS2Af3be3k...").
             before_ts: If set, only re-sign events with a received_ts less
                 than this value (milliseconds since epoch).
         """
 
         # Read optional filter parameters from progress. These are set once
         # when the job is created and preserved across batches.
-        old_key_id: str | None = progress.get("old_key_id")
+        old_key_str: str | None = progress.get("old_key")
         before_ts: int | None = progress.get("before_ts")
+
+        # Parse the old verify key if provided.
+        old_verify_key = None
+        if old_key_str is not None:
+            parts = old_key_str.split(" ", 1)
+            if len(parts) == 2:
+                key_id, key_base64 = parts
+                alg, _, version = key_id.partition(":")
+                old_verify_key = decode_verify_key_base64(alg, version, key_base64)
+            else:
+                raise ValueError(
+                    f"Invalid old_key format: expected 'algorithm:version base64key', got {old_key_str!r}"
+                )
 
         # Load the next set of candidate events to re-sign.
         # Returns the event IDs and the highest stream position for those events.
@@ -2804,9 +2820,29 @@ class EventsBackgroundUpdatesStore(
             if not event_needs_resigning(event, self.hs.hostname, verify_key):
                 continue
 
-            # If old_key_id is set, only re-sign events signed with that key.
-            if old_key_id is not None:
-                if old_key_id not in event.signatures.get(self.hs.hostname, {}):
+            # If old_key is set, only re-sign events whose signature verifies
+            # with the provided old key.
+            if old_verify_key is not None:
+                old_key_id = f"{old_verify_key.alg}:{old_verify_key.version}"
+                server_sigs = event.signatures.get(self.hs.hostname, {})
+                if old_key_id not in server_sigs:
+                    # Event wasn't signed with this key ID at all, skip.
+                    continue
+
+                # Verify the signature is genuinely from this key. We prune
+                # first since signatures are computed over the redacted form.
+                pruned = prune_event_dict(event.room_version, event.get_pdu_json())
+                try:
+                    verify_signed_json(pruned, self.hs.hostname, old_verify_key)
+                except SignatureVerifyException:
+                    # In this case, the key ID was right but the signature doesn't match
+                    # the public key we had. We definitely need to log about this.
+                    logger.warning(
+                        "Event %s has a signature for key %s that does not "
+                        "verify — skipping",
+                        event.event_id,
+                        old_key_id,
+                    )
                     continue
 
             event_dict = resign_event(event, self.hs.hostname, self.hs.signing_key)
@@ -2838,7 +2874,7 @@ class EventsBackgroundUpdatesStore(
                 _BackgroundUpdates.EVENT_RESIGN,
                 progress={
                     "last_stream_pos": max_stream_pos,
-                    "old_key_id": old_key_id,
+                    "old_key": old_key_str,
                     "before_ts": before_ts,
                 },
             )

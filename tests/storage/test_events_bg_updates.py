@@ -14,6 +14,8 @@
 #
 
 
+import json
+
 import signedjson.key
 from canonicaljson import encode_canonical_json
 
@@ -376,9 +378,9 @@ class TestResignEventsBgUpdate(HomeserverTestCase):
         )
 
     @override_config({"caches": {"global_factor": 1}, "event_cache_size": "999"})
-    def test_old_key_id_filter(self) -> None:
-        """Test that old_key_id parameter causes only events signed with that
-        specific key to be re-signed."""
+    def test_old_key_filter(self) -> None:
+        """Test that old_key parameter causes only events whose signature
+        verifies against the provided key to be re-signed."""
 
         self.wait_for_background_updates()
 
@@ -388,39 +390,54 @@ class TestResignEventsBgUpdate(HomeserverTestCase):
         room_id = self.helper.create_room_as(
             "user2", room_version=RoomVersions.V12.identifier, tok=token
         )
-        body = self.helper.send(room_id, body="Test old_key_id", tok=token)
+        body = self.helper.send(room_id, body="Test old_key", tok=token)
 
-        old_key_id = f"{self.hs.signing_key.alg}:{self.hs.signing_key.version}"
+        old_signing_key = self.hs.signing_key
+        old_key_id = f"{old_signing_key.alg}:{old_signing_key.version}"
+        old_verify_key = signedjson.key.get_verify_key(old_signing_key)
+        old_key_param = (
+            f"{old_verify_key.alg}:{old_verify_key.version} "
+            f"{signedjson.key.encode_verify_key_base64(old_verify_key)}"
+        )
 
         # Generate a new signing key
         self.hs.signing_key = signedjson.key.generate_signing_key("new-test-key-2")
 
-        # Insert BG update with old_key_id filter pointing to a WRONG key
+        # Generate a different key but reuse the same key ID/version, to
+        # ensure we're filtering on the actual public key, not just the ID.
+        wrong_key = signedjson.key.generate_signing_key(old_signing_key.version)
+        wrong_verify_key = signedjson.key.get_verify_key(wrong_key)
+        wrong_key_param = (
+            f"{old_verify_key.alg}:{old_verify_key.version} "
+            f"{signedjson.key.encode_verify_key_base64(wrong_verify_key)}"
+        )
+
+        # Insert BG update with old_key filter pointing to a WRONG key
         self.get_success(
             self.db_pool.simple_insert(
                 table="background_updates",
                 values={
                     "update_name": "event_resign",
-                    "progress_json": '{"old_key_id": "ed25519:nonexistent"}',
+                    "progress_json": json.dumps({"old_key": wrong_key_param}),
                 },
             )
         )
         self.updates.start_doing_background_updates()
         self.wait_for_background_updates()
 
-        # Event should NOT have been re-signed (wrong old_key_id filter)
+        # Event should NOT have been re-signed (wrong key)
         event_after = self.get_success(self.store.get_event(body["event_id"]))
         self.assertIn(
             old_key_id, event_after.signatures[self.hs.config.server.server_name]
         )
 
-        # Now insert BG update with the CORRECT old_key_id
+        # Now insert BG update with the CORRECT old key
         self.get_success(
             self.db_pool.simple_insert(
                 table="background_updates",
                 values={
                     "update_name": "event_resign",
-                    "progress_json": f'{{"old_key_id": "{old_key_id}"}}',
+                    "progress_json": json.dumps({"old_key": old_key_param}),
                 },
             )
         )

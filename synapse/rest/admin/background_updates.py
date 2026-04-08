@@ -152,11 +152,11 @@ class BackgroundUpdateStartJobRestServlet(RestServlet):
                 ),
             ]
         elif job_name == "event_resign":
-            old_key_id = body.get("old_key_id")
-            if old_key_id is not None and not isinstance(old_key_id, str):
+            old_key = body.get("old_key")
+            if old_key is not None and not isinstance(old_key, str):
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,
-                    "'old_key_id' must be a string",
+                    "'old_key' must be a string",
                 )
             before_ts = body.get("before_ts")
             if before_ts is not None and not isinstance(before_ts, int):
@@ -165,7 +165,7 @@ class BackgroundUpdateStartJobRestServlet(RestServlet):
                     "'before_ts' must be an integer",
                 )
             progress = {
-                "old_key_id": old_key_id,
+                "old_key": old_key,
                 "before_ts": before_ts,
             }
             jobs = [("event_resign", json.dumps(progress), "")]
