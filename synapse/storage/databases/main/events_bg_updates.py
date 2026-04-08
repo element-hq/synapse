@@ -2894,6 +2894,8 @@ class EventsBackgroundUpdatesStore(
             max_stream_pos,
         )
 
+        logger.info("Re-signed %d events", len(resigned_events))
+
         # Even if we don't re-sign them, we need to let the background updater
         # know we're still churning through the events.
         return len(next_event_ids)
