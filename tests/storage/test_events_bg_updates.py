@@ -390,7 +390,6 @@ class TestResignEventsBgUpdate(HomeserverTestCase):
         )
         body = self.helper.send(room_id, body="Test old_key_id", tok=token)
 
-        old_event = self.get_success(self.store.get_event(body["event_id"]))
         old_key_id = f"{self.hs.signing_key.alg}:{self.hs.signing_key.version}"
 
         # Generate a new signing key
