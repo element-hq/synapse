@@ -216,7 +216,7 @@ async def check_state_independent_auth_rules(
             known_prev_state_event_ids = set(prev_state_events)
             raise AssertionError(
                 f"Event {event.event_id} has unknown prev_state_events "
-                + f"{len(prev_state_events)} != {len(prev_state_events_ids)} "
+                + f"({len(prev_state_events)}/{len(prev_state_events_ids)} known)"
                 + f"{prev_state_events_ids - known_prev_state_event_ids} missing "
                 + f"out of {prev_state_events_ids}"
             )

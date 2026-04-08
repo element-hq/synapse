@@ -32,7 +32,7 @@ import attr
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
-from synapse.events import EventBase
+from synapse.events import EventBase, FrozenEventVMSC4242
 from synapse.types import (
     JsonMapping,
     Requester,
@@ -487,10 +487,8 @@ class AdminHandler:
                 try:
                     prev_state_events = None
                     if room_version.msc4242_state_dags:
-                        # TODO(kegan): better way to typecast and get at this field?
-                        prev_state_events = event.get_dict().get(
-                            "prev_state_events", None
-                        )
+                        assert isinstance(event, FrozenEventVMSC4242)
+                        prev_state_events = event.prev_state_events
                         assert prev_state_events is not None, (
                             "Parent event of redaction has no `prev_state_events` which should be impossible as `prev_state_events` is a required field in MSC4242 rooms"
                         )

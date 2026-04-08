@@ -239,32 +239,6 @@ class StateHandler:
         )
         return await ret.get_state(self._state_storage_controller, state_filter)
 
-    # TODO: Remove as this is unused
-    async def get_current_user_ids_in_room(
-        self, room_id: str, latest_event_ids: StrCollection
-    ) -> set[str]:
-        """
-        Get the users IDs who are currently in a room.
-
-        Note: This is much slower than using the equivalent method
-        `DataStore.get_users_in_room` or `DataStore.get_users_in_room_with_profiles`,
-        so this should only be used when wanting the users at a particular point
-        in the room.
-
-        Args:
-            room_id: The ID of the room.
-            latest_event_ids: Precomputed list of latest event IDs. Will be computed if None.
-        Returns:
-            Set of user IDs in the room.
-        """
-
-        assert latest_event_ids is not None
-
-        logger.debug("calling resolve_state_groups from get_current_user_ids_in_room")
-        entry = await self.resolve_state_groups_for_events(room_id, latest_event_ids)
-        state = await entry.get_state(self._state_storage_controller, StateFilter.all())
-        return await self.store.get_joined_user_ids_from_state(room_id, state)
-
     async def get_hosts_in_room_at_events(
         self, room_id: str, event_ids: StrCollection
     ) -> frozenset[str]:

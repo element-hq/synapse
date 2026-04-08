@@ -943,6 +943,13 @@ class EventsPersistenceStorageController:
             SynapseError: if the new events include unknown prev_state_events
             AssertionError: if there are no state DAG forward extremities remaining in the room
         """
+        # Events are always processed in causal order without any gaps in the DAG
+        # (prev_state_events are always known), guaranteeing that processed events have a path to the
+        # create event. This is an emergent property of state DAGs as asserting that there is a path
+        # to the create event every time we insert an event would be prohibitively expensive.
+        # This is similar to how doubly-linked lists can potentially not refer to previous items correctly
+        # without verifying the list's integrity, but doing it on every insert is too expensive.
+
         # filter out events which don't belong in the state dag.
         new_state_events_contexts = [
             (e, ctx) for e, ctx in event_contexts if event_exists_in_state_dag(e)
