@@ -913,6 +913,10 @@ class Porter:
             await self._setup_autoincrement_sequence(
                 "state_groups_pending_deletion", "sequence_number"
             )
+            await self._setup_sequence(
+                "quarantined_media_id_seq",
+                [("quarantined_media_changes", "stream_id")],
+            )
 
             # Step 3. Get tables.
             self.progress.set_state("Fetching tables")
