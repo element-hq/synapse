@@ -2737,10 +2737,9 @@ class EventsBackgroundUpdatesStore(
         def _fetch_next_events_txn(
             txn: LoggingTransaction,
         ) -> tuple[list[str], int]:
-            # Events with negative stream ordering exist, but those are always
-            # from backfilling over federation. None of the locally sent events
-            # should have a negative stream ordering.
-            last_stream_pos: int = progress.get("last_stream_pos", 0)
+            # Start from the minimum 32-bit integer to ensure we cover events
+            # with negative stream orderings (e.g. from backfill).
+            last_stream_pos: int = progress.get("last_stream_pos", -(1 << 31))
             txn.execute(
                 """
                 SELECT event_id, stream_ordering FROM events
