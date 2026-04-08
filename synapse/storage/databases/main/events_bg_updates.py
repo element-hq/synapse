@@ -23,6 +23,7 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 import attr
+from signedjson.key import get_verify_key
 
 from synapse.api.constants import (
     MAX_DEPTH,
@@ -31,6 +32,10 @@ from synapse.api.constants import (
     RelationTypes,
 )
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+from synapse.crypto.event_signing import (
+    event_needs_resigning,
+    resign_event,
+)
 from synapse.events import EventBase, make_event_from_dict
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -39,6 +44,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_tuple_comparison_clause,
 )
+from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events import (
     SLIDING_SYNC_RELEVANT_STATE_SET,
     PersistEventsStore,
@@ -48,6 +54,7 @@ from synapse.storage.databases.main.events import (
 )
 from synapse.storage.databases.main.events_worker import (
     DatabaseCorruptionError,
+    EventRedactBehaviour,
     InvalidEventError,
 )
 from synapse.storage.databases.main.state_deltas import StateDeltasStore
@@ -112,7 +119,9 @@ class _JoinedRoomStreamOrderingUpdate:
     most_recent_bump_stamp: int | None
 
 
-class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseStore):
+class EventsBackgroundUpdatesStore(
+    StreamWorkerStore, StateDeltasStore, CacheInvalidationWorkerStore, SQLBaseStore
+):
     def __init__(
         self,
         database: DatabasePool,
@@ -344,6 +353,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         self.db_pool.updates.register_background_update_handler(
             _BackgroundUpdates.FIXUP_MAX_DEPTH_CAP, self.fixup_max_depth_cap_bg_update
+        )
+
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.EVENT_RESIGN,
+            self._resign_events,
         )
 
         # We want this to run on the main database at startup before we start processing
@@ -1370,7 +1384,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
 
                 # Iterate the parent IDs and invalidate caches.
-                self._invalidate_cache_and_stream_bulk(  # type: ignore[attr-defined]
+                self._invalidate_cache_and_stream_bulk(
                     txn,
                     self.get_relations_for_event,  # type: ignore[attr-defined]
                     {
@@ -1381,7 +1395,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         for r in relations_to_insert
                     },
                 )
-                self._invalidate_cache_and_stream_bulk(  # type: ignore[attr-defined]
+                self._invalidate_cache_and_stream_bulk(
                     txn,
                     self.get_thread_summary,  # type: ignore[attr-defined]
                     {(r[1],) for r in relations_to_insert},
@@ -2712,6 +2726,115 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
         return num_rooms
+
+    async def _resign_events(self, progress: dict, batch_size: int) -> int:
+        """Retroactively re-sign events signed with a different key than the
+        current signing key."""
+
+        # Load the next set of candidate events to re-sign.
+        # Returns the event IDs and the highest stream position for those events.
+        # If no event IDs are returned, this signals the background update is complete.
+        def _fetch_next_events_txn(
+            txn: LoggingTransaction,
+        ) -> tuple[list[str], int]:
+            # Events with negative stream ordering exist, but those are always
+            # from backfilling over federation. None of the locally sent events
+            # should have a negative stream ordering.
+            last_stream_pos: int = progress.get("last_stream_pos", 0)
+            txn.execute(
+                """
+                SELECT event_id, stream_ordering FROM events
+                WHERE stream_ordering > ? AND sender LIKE ?
+                ORDER BY stream_ordering ASC LIMIT ?
+                """,
+                (
+                    last_stream_pos,
+                    f"%:{self.hs.hostname}",
+                    batch_size,
+                ),
+            )
+            event_rows: list[tuple[str, int]] = txn.fetchall()
+            if not event_rows:
+                return [], last_stream_pos
+
+            last_stream_pos = event_rows[-1][1]
+            return [row[0] for row in event_rows], last_stream_pos
+
+        next_event_ids, max_stream_pos = await self.db_pool.runInteraction(
+            "_resign_events._fetch_next_events",
+            _fetch_next_events_txn,
+        )
+        logger.debug(
+            "Resign[num_checking=%d,sp=%d]", len(next_event_ids), max_stream_pos
+        )
+
+        if not next_event_ids:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.EVENT_RESIGN
+            )
+            return 0
+
+        next_events = await self.get_events_as_list(
+            next_event_ids,
+            redact_behaviour=EventRedactBehaviour.as_is,
+        )
+        verify_key = get_verify_key(self.hs.signing_key)
+
+        # Re-sign any events that need it.
+        # A list of event IDs and their newly signed event dicts.
+        resigned_events: list[tuple[str, JsonDict]] = []
+        for event in next_events:
+            if not event_needs_resigning(event, self.hs.hostname, verify_key):
+                continue
+
+            event_dict = resign_event(event, self.hs.hostname, self.hs.signing_key)
+            resigned_events.append((event.event_id, event_dict))
+
+        # Atomically write the new stream pos progress with the new signatures,
+        # else we may update the pos and crash before writing the new
+        # signatures, thus not re-signing at all!
+        def _write_events_txn(
+            txn: LoggingTransaction,
+            events_to_write: list[tuple[str, JsonDict]],
+            max_stream_pos: int,
+        ) -> None:
+            if events_to_write:
+                self.db_pool.simple_update_many_txn(
+                    txn,
+                    "event_json",
+                    key_names=["event_id"],
+                    key_values=[[event_id] for event_id, _ in events_to_write],
+                    value_names=["json"],
+                    value_values=[
+                        [json_encoder.encode(event_dict)]
+                        for _, event_dict in events_to_write
+                    ],
+                )
+            # Always update the progress even if we re-sign nothing.
+            self.db_pool.updates._background_update_progress_txn(
+                txn,
+                _BackgroundUpdates.EVENT_RESIGN,
+                progress={"last_stream_pos": max_stream_pos},
+            )
+
+            # Invalidate the event cache for re-signed events so that other
+            # workers also pick up the new signatures.
+            for event_id, _ in events_to_write:
+                self.invalidate_get_event_cache_after_txn(txn, event_id)
+                self._send_invalidation_to_replication(
+                    txn, "_get_event_cache", (event_id,)
+                )
+
+        await self.db_pool.runInteraction(
+            "_resign_events._write_events_txn",
+            _write_events_txn,
+            resigned_events,
+            max_stream_pos,
+        )
+
+        # Even if we don't re-sign them, we need to let the background updater
+        # know we're still churning through the events.
+        return len(next_event_ids)
 
 
 def _resolve_stale_data_in_sliding_sync_tables(
