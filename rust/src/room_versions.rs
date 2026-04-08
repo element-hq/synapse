@@ -600,7 +600,12 @@ impl KnownRoomVersionsMapping {
         Ok(())
     }
 
-    fn __getitem__(&self, key: &str) -> PyResult<RoomVersion> {
+    fn __getitem__(&self, key: &Bound<'_, PyAny>) -> PyResult<RoomVersion> {
+        // We need to accept anything as the key, but we know that only strings
+        // are valid keys, so if it's not a string we just raise a KeyError.
+        let Ok(key) = key.extract::<&str>() else {
+            return Err(PyKeyError::new_err(key.to_string()));
+        };
         let versions = self.versions.read().unwrap();
         versions
             .iter()
@@ -609,9 +614,14 @@ impl KnownRoomVersionsMapping {
             .ok_or_else(|| PyKeyError::new_err(key.to_string()))
     }
 
-    fn __contains__(&self, key: &str) -> PyResult<bool> {
+    fn __contains__(&self, key: &Bound<'_, PyAny>) -> bool {
+        // We need to accept anything as the key, but we know that only strings
+        // are valid keys, so if it's not a string we just return false.
+        let Ok(key) = key.extract::<&str>() else {
+            return false;
+        };
         let versions = self.versions.read().unwrap();
-        Ok(versions.iter().any(|v| v.identifier == key))
+        versions.iter().any(|v| v.identifier == key)
     }
 
     fn keys(&self) -> PyResult<Vec<&'static str>> {
