@@ -1,3 +1,91 @@
+# Synapse 1.151.0 (2026-04-07)
+
+## Bugfixes
+
+- Fix `KNOWN_ROOM_VERSIONS.__contains__` raising `TypeError` for non-string keys, which could cause `/sync` to fail for rooms with a `NULL` room version in the database. Bug introduced in [#19589](https://github.com/element-hq/synapse/pull/19589) as part of v1.151.0rc1. ([\#19649](https://github.com/element-hq/synapse/issues/19649))
+
+
+
+
+# Synapse 1.151.0rc1 (2026-03-31)
+
+## Features
+
+- Add stable support for [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284) Policy Servers. ([\#19503](https://github.com/element-hq/synapse/issues/19503))
+- Update and stabilize support for [MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666): Get rooms in common with another user. Contributed by @tulir @ Beeper. ([\#19511](https://github.com/element-hq/synapse/issues/19511))
+- Updated experimental support for [MSC4388: Secure out-of-band channel for sign in with QR](https://github.com/matrix-org/matrix-spec-proposals/pull/4388). ([\#19573](https://github.com/element-hq/synapse/issues/19573))
+- Stabilize `room_version` and `encryption` fields in the space/room `/hierarchy` API (part of [MSC3266](https://github.com/matrix-org/matrix-spec-proposals/pull/3266)). ([\#19576](https://github.com/element-hq/synapse/issues/19576))
+- Introduce a [configuration option](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#matrix_authentication_service) to allow using HTTP/2 over plaintext when Synapse connects to Matrix Authentication Service. ([\#19586](https://github.com/element-hq/synapse/issues/19586))
+
+## Bugfixes
+
+- Fix [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284) Policy Servers implementation to skip signing `org.matrix.msc4284.policy` and `m.room.policy` state events. ([\#19503](https://github.com/element-hq/synapse/issues/19503))
+- Correctly apply [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284) Policy Server signatures to events when the sender and policy server have the same server name. ([\#19503](https://github.com/element-hq/synapse/issues/19503))
+- Allow Synapse to start up even when discovery fails for an OpenID Connect provider. ([\#19509](https://github.com/element-hq/synapse/issues/19509))
+- Fix quarantine media admin APIs sometimes returning inaccurate counts for remote media. ([\#19559](https://github.com/element-hq/synapse/issues/19559))
+- Fix `Build and push complement image` CI job not having `poetry` available for the Complement runner script. ([\#19578](https://github.com/element-hq/synapse/issues/19578))
+- Increase timeout for policy server requests to avoid repeated requests for checking media. ([\#19629](https://github.com/element-hq/synapse/issues/19629))
+
+## Deprecations and Removals
+
+- Remove support for [MSC3852: Expose user agent information on Device](https://github.com/matrix-org/matrix-spec-proposals/pull/3852) as the MSC was closed. ([\#19430](https://github.com/element-hq/synapse/issues/19430))
+
+## Internal Changes
+
+- Fix small comment typo in config output from the `demo/start.sh` script. ([\#19538](https://github.com/element-hq/synapse/issues/19538))
+- Add MSC3820 comment context to `RoomVersion` attributes. ([\#19577](https://github.com/element-hq/synapse/issues/19577))
+- Remove `redacted_because` from internal unsigned. ([\#19581](https://github.com/element-hq/synapse/issues/19581))
+- Prevent sending registration emails if registration is disabled. ([\#19585](https://github.com/element-hq/synapse/issues/19585))
+- Port `RoomVersion` to Rust. ([\#19589](https://github.com/element-hq/synapse/issues/19589))
+- Only show failing Complement tests in the formatted output in CI. ([\#19590](https://github.com/element-hq/synapse/issues/19590))
+- Ensure old Complement test files are removed when downloading a Complement checkout via `./scripts-dev/complement.sh`. ([\#19592](https://github.com/element-hq/synapse/issues/19592))
+- Update `HomeserverTestCase.pump()` docstring to demystify behavior (Twisted reactor/clock). ([\#19602](https://github.com/element-hq/synapse/issues/19602))
+- Deprecate `HomeserverTestCase.pump()` in favor of more direct `HomeserverTestCase.reactor.advance(...)` usage. ([\#19602](https://github.com/element-hq/synapse/issues/19602))
+- Lower the Postgres database `statement_timeout` to 10m (previously 1h). ([\#19604](https://github.com/element-hq/synapse/issues/19604))
+
+
+
+
+# Synapse 1.150.0 (2026-03-24)
+
+No significant changes since 1.150.0rc1.
+
+
+
+
+# Synapse 1.150.0rc1 (2026-03-17)
+
+## Features
+
+- Add experimental support for the [MSC4370](https://github.com/matrix-org/matrix-spec-proposals/pull/4370) Federation API `GET /extremities` endpoint. ([\#19314](https://github.com/element-hq/synapse/issues/19314))
+- [MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): When persisting a delayed event to the timeline, include its `delay_id` in the event's `unsigned` section in `/sync` responses to the event sender. ([\#19479](https://github.com/element-hq/synapse/issues/19479))
+- Expose [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) over the legacy (v3) /sync API. ([\#19487](https://github.com/element-hq/synapse/issues/19487))
+- When Matrix Authentication Service (MAS) integration is enabled, allow MAS to set the user locked status in Synapse. ([\#19554](https://github.com/element-hq/synapse/issues/19554))
+
+## Bugfixes
+
+- Fix `Build and push complement image` CI job pointing to non-existent image. ([\#19523](https://github.com/element-hq/synapse/issues/19523))
+- Fix a bug introduced in v1.26.0 that caused deactivated, erased users to not be removed from the user directory. ([\#19542](https://github.com/element-hq/synapse/issues/19542))
+
+## Improved Documentation
+
+- In the Admin API documentation, always express path parameters as `/<param>` instead of as `/$param`. ([\#19307](https://github.com/element-hq/synapse/issues/19307))
+- Update docs to clarify `outbound_federation_restricted_to` can also be used with the [Secure Border Gateway (SBG)](https://element.io/en/server-suite/secure-border-gateways). ([\#19517](https://github.com/element-hq/synapse/issues/19517))
+- Unify Complement developer docs. ([\#19518](https://github.com/element-hq/synapse/issues/19518))
+
+## Internal Changes
+
+- Put membership updates in a background resumable task when changing the avatar or the display name. ([\#19311](https://github.com/element-hq/synapse/issues/19311))
+- Add in-repo Complement test to sanity check Synapse version matches git checkout (testing what we think we are). ([\#19476](https://github.com/element-hq/synapse/issues/19476))
+- Migrate `dev` dependencies to [PEP 735](https://peps.python.org/pep-0735/) dependency groups. ([\#19490](https://github.com/element-hq/synapse/issues/19490))
+- Remove the optional `systemd-python` dependency and the `systemd` extra on the `synapse` package. ([\#19491](https://github.com/element-hq/synapse/issues/19491))
+- Avoid re-computing the event ID when cloning events. ([\#19527](https://github.com/element-hq/synapse/issues/19527))
+- Allow caching of the `/versions` and `/auth_metadata` public endpoints. ([\#19530](https://github.com/element-hq/synapse/issues/19530))
+- Add a few labels to the number groupings in the `Processed request` logs. ([\#19548](https://github.com/element-hq/synapse/issues/19548))
+
+
+
+
 # Synapse 1.149.1 (2026-03-11)
 
 ## Internal Changes

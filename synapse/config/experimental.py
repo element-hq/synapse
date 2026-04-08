@@ -422,9 +422,6 @@ class ExperimentalConfig(Config):
         # previously calculated push actions.
         self.msc2654_enabled: bool = experimental.get("msc2654_enabled", False)
 
-        # MSC2666: Query mutual rooms between two users.
-        self.msc2666_enabled: bool = experimental.get("msc2666_enabled", False)
-
         # MSC2815 (allow room moderators to view redacted event content)
         self.msc2815_enabled: bool = experimental.get("msc2815_enabled", False)
 
@@ -444,9 +441,6 @@ class ExperimentalConfig(Config):
 
         # MSC3848: Introduce errcodes for specific event sending failures
         self.msc3848_enabled: bool = experimental.get("msc3848_enabled", False)
-
-        # MSC3852: Expose last seen user agent field on /_matrix/client/v3/devices.
-        self.msc3852_enabled: bool = experimental.get("msc3852_enabled", False)
 
         # MSC3866: M_USER_AWAITING_APPROVAL error code
         raw_msc3866_config = experimental.get("msc3866", {})
@@ -483,8 +477,7 @@ class ExperimentalConfig(Config):
         self.msc1767_enabled: bool = experimental.get("msc1767_enabled", False)
         if self.msc1767_enabled:
             # Enable room version (and thus applicable push rules from MSC3931/3932)
-            version_id = RoomVersions.MSC1767v10.identifier
-            KNOWN_ROOM_VERSIONS[version_id] = RoomVersions.MSC1767v10
+            KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC1767v10)
 
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
@@ -544,9 +537,9 @@ class ExperimentalConfig(Config):
         # See: https://github.com/element-hq/synapse/issues/19433
         msc4388_mode = experimental.get("msc4388_mode", "off")
 
-        if msc4388_mode not in ["off", "public", "authenticated"]:
+        if msc4388_mode not in ["off", "open", "authenticated"]:
             raise ConfigError(
-                "msc4388_mode must be one of 'off', 'public' or 'authenticated'",
+                "msc4388_mode must be one of 'off', 'open' or 'authenticated'",
                 ("experimental", "msc4388_mode"),
             )
         self.msc4388_enabled: bool = msc4388_mode != "off"

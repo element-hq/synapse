@@ -26,7 +26,7 @@ jobs:
       linting: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.linting }}
       linting_readme: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.linting_readme }}
     steps:
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
         # We only check on PRs
         if: startsWith(github.ref, 'refs/pull/')
@@ -91,11 +91,11 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: "3.x"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: "all"
       - run: poetry run scripts-dev/generate_sample_config.sh --check
       - run: poetry run scripts-dev/config-lint.sh
@@ -134,7 +134,7 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           install-project: "false"
 
       - name: Run ruff check
@@ -157,7 +157,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
@@ -169,7 +169,7 @@ jobs:
           # https://github.com/matrix-org/synapse/pull/15376#issuecomment-1498983775
           # To make CI green, err towards caution and install the project.
           install-project: "true"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
 
       # Cribbed from
       # https://github.com/AustinScola/mypy-cache-github-action/blob/85ea4f2972abed39b33bd02c36e341b28ca59213/src/restore.ts#L10-L17
@@ -221,7 +221,7 @@ jobs:
         with:
           components: clippy
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo clippy -- -D warnings
 
@@ -240,7 +240,7 @@ jobs:
         with:
           toolchain: nightly-2026-02-01
           components: clippy
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo clippy --all-features -- -D warnings
 
@@ -257,7 +257,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
@@ -265,7 +265,7 @@ jobs:
           # Install like a normal project from source with all optional dependencies
           extras: all
           install-project: "true"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
 
       - name: Ensure `Cargo.lock` is up to date (no stray changes after install)
         # The `::error::` syntax is using GitHub Actions' error annotations, see
@@ -296,7 +296,7 @@ jobs:
           # `.rustfmt.toml`.
           toolchain: nightly-2025-04-23
           components: rustfmt
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo fmt --check
 
@@ -393,12 +393,12 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: ${{ matrix.job.python-version }}
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: ${{ matrix.job.extras }}
       - name: Await PostgreSQL
         if: ${{ matrix.job.postgres-version }}
@@ -437,7 +437,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       # There aren't wheels for some of the older deps, so we need to install
       # their build dependencies
@@ -500,7 +500,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: ${{ matrix.python-version }}
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: ${{ matrix.extras }}
       - run: poetry run trial --jobs=2 tests
       - name: Dump logs
@@ -552,7 +552,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Run SyTest
         run: /bootstrap.sh synapse
@@ -561,7 +561,7 @@ jobs:
         if: ${{ always() }}
         run: /sytest/scripts/tap_to_gha.pl /logs/results.tap
       - name: Upload SyTest logs
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: ${{ always() }}
         with:
           name: Sytest Logs - ${{ job.status }} - (${{ join(matrix.job.*, ', ') }})
@@ -595,7 +595,7 @@ jobs:
       - run: sudo apt-get -qq install xmlsec1 postgresql-client
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: "postgres"
       - run: .ci/scripts/test_export_data_command.sh
         env:
@@ -648,7 +648,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: ${{ matrix.python-version }}
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: "postgres"
       - run: .ci/scripts/test_synapse_port_db.sh
         id: run_tester_script
@@ -658,7 +658,7 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: postgres
       - name: "Upload schema differences"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: ${{ failure() && !cancelled() && steps.run_tester_script.outcome == 'failure' }}
         with:
           name: Schema dumps
@@ -703,19 +703,19 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       # We use `poetry` in `complement.sh`
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           # Matches the `path` where we checkout Synapse above
           working-directory: "synapse"
 
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
 
-      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           cache-dependency-path: complement/go.sum
           go-version-file: complement/go.mod
@@ -744,6 +744,12 @@ jobs:
       - name: Formatted sanity check Complement test logs
         # Always run this step if we attempted to run the Complement tests.
         if: always() && steps.run_sanity_check_complement_image_test.outcome != 'skipped'
+        # We do not hide successful tests in `gotestfmt` here as the list of sanity
+        # check tests is so short. Feel free to change this when we get more tests.
+        #
+        # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
+        # it derives several values under `$settings` and passes them to our
+        # custom `.ci/complement_package.gotpl` template to render the output.
         run: cat /tmp/gotest-sanity-check-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
 
       - name: Run Complement Tests
@@ -764,10 +770,15 @@ jobs:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
 
-      - name: Formatted Complement test logs
+      - name: Formatted Complement test logs (only failing are shown)
         # Always run this step if we attempted to run the Complement tests.
         if: always() && steps.run_complement_tests.outcome != 'skipped'
-        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
+        # Hide successful tests in order to reduce the verbosity of the otherwise very large output.
+        #
+        # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
+        # it derives several values under `$settings` and passes them to our
+        # custom `.ci/complement_package.gotpl` template to render the output.
+        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
 
       - name: Run in-repo Complement Tests
         id: run_in_repo_complement_tests
@@ -787,10 +798,15 @@ jobs:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
 
-      - name: Formatted in-repo Complement test logs
+      - name: Formatted in-repo Complement test logs (only failing are shown)
         # Always run this step if we attempted to run the Complement tests.
         if: always() && steps.run_in_repo_complement_tests.outcome != 'skipped'
-        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
+        # Hide successful tests in order to reduce the verbosity of the otherwise very large output.
+        #
+        # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
+        # it derives several values under `$settings` and passes them to our
+        # custom `.ci/complement_package.gotpl` template to render the output.
+        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
 
   cargo-test:
     if: ${{ needs.changes.outputs.rust == 'true' }}
@@ -806,7 +822,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo test
 
@@ -826,7 +842,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: nightly-2022-12-01
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo bench --no-run
 

@@ -1,1 +1,0 @@
-When Matrix Authentication Service (MAS) integration is enabled, allow MAS to set the user locked status in Synapse.
