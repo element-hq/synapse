@@ -878,7 +878,7 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(0, len(channel.json_body["changes"]))
         # we should be returning a value for `from` which actually makes sense
-        self.assertEqual(0, channel.json_body["next_batch"])
+        self.assertEqual(1, channel.json_body["next_batch"])
 
 
 class QuarantineMediaByIDTestCase(_AdminMediaTests):
