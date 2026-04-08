@@ -63,7 +63,9 @@ class MSC4242StateDagsTests(HomeserverTestCase):
         second_id = self.helper.send(self.room_id, body="test2")["event_id"]
         second_prev_state_events = self._get_prev_state_events(second_id)
         assert len(second_prev_state_events) == 1
-        self.assertEquals(first_prev_state_events, second_prev_state_events)
+        self.assertIncludes(
+            set(first_prev_state_events), set(second_prev_state_events), exact=True
+        )
 
         # send an auth event, which should change the prev_state_events on *subsequent* events
         join_rule_state_event_id = self.helper.send_state(
@@ -77,12 +79,18 @@ class MSC4242StateDagsTests(HomeserverTestCase):
         join_rule_prev_state_event_ids = self._get_prev_state_events(
             join_rule_state_event_id
         )
-        self.assertEquals(second_prev_state_events, join_rule_prev_state_event_ids)
+        self.assertIncludes(
+            set(second_prev_state_events),
+            set(join_rule_prev_state_event_ids),
+            exact=True,
+        )
 
         # prev_state_events should always point to the join rule now
         third_event_id = self.helper.send(self.room_id, body="test3")["event_id"]
         third_prev_state_events = self._get_prev_state_events(third_event_id)
-        self.assertEquals(third_prev_state_events, [join_rule_state_event_id])
+        self.assertIncludes(
+            set(third_prev_state_events), {join_rule_state_event_id}, exact=True
+        )
         # and non-auth state should also update prev_state_events
         name_state_event_id = self.helper.send_state(
             self.room_id,
@@ -93,10 +101,14 @@ class MSC4242StateDagsTests(HomeserverTestCase):
             tok="nope",
         )["event_id"]
         name_prev_state_event_ids = self._get_prev_state_events(name_state_event_id)
-        self.assertEquals(name_prev_state_event_ids, [join_rule_state_event_id])
+        self.assertIncludes(
+            set(name_prev_state_event_ids), {join_rule_state_event_id}, exact=True
+        )
         fourth_event_id = self.helper.send(self.room_id, body="test4")["event_id"]
         fourth_prev_state_events = self._get_prev_state_events(fourth_event_id)
-        self.assertEquals(fourth_prev_state_events, [name_state_event_id])
+        self.assertIncludes(
+            set(fourth_prev_state_events), {name_state_event_id}, exact=True
+        )
 
 
 class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
@@ -183,10 +195,11 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             return
 
         new_extrems = set(self.get_success(coroutine))
-        self.assertEqual(
+        self.assertIncludes(
             new_extrems,
-            want_new_extrems,
-            f"want_new_extrems={want_new_extrems} got={new_extrems}",
+            set(want_new_extrems),
+            exact=True,
+            message=f"want_new_extrems={want_new_extrems} got={new_extrems}",
         )
 
     def test_calculate_new_state_dag_extremities_simple(self) -> None:

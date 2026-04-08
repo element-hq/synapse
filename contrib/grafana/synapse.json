@@ -6809,6 +6809,155 @@
           ],
           "title": "Stale extremity dropping",
           "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "description": "For a given percentage P, the number X where P% of events were persisted to rooms with X state DAG forward extremities or fewer.",
+          "fieldConfig": {
+            "defaults": {
+              "links": []
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 50
+          },
+          "id": 181,
+          "options": {
+            "alertThreshold": true
+          },
+          "pluginVersion": "9.2.2",
+          "targets": [
+            {
+              "datasource": {
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "expr": "histogram_quantile(0.5, rate(synapse_storage_msc4242_state_dag_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "50%",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "expr": "histogram_quantile(0.75, rate(synapse_storage_msc4242_state_dag_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "75%",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "expr": "histogram_quantile(0.90, rate(synapse_storage_msc4242_state_dag_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "90%",
+              "refId": "C"
+            },
+            {
+              "datasource": {
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "expr": "histogram_quantile(0.99, rate(synapse_storage_msc4242_state_dag_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0))",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "99%",
+              "refId": "D"
+            }
+          ],
+          "title": "Events persisted, by number of state DAG forward extremities in room (quantiles)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "description": "Colour reflects the number of events persisted to rooms with the given number of state DAG forward extremities, or fewer.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 50
+          },
+          "id": 127,
+          "options": {
+            "calculate": false,
+            "calculation": {},
+            "cellGap": 1,
+            "cellValues": {},
+            "color": {
+              "exponent": 0.5,
+              "fill": "#5794F2",
+              "min": 0,
+              "mode": "opacity",
+              "reverse": false,
+              "scale": "exponential",
+              "scheme": "Oranges",
+              "steps": 128
+            },
+            "exemplars": {
+              "color": "rgba(255,0,255,0.7)"
+            },
+            "filterValues": {
+              "le": 1e-9
+            },
+            "legend": {
+              "show": true
+            },
+            "rowsFrame": {
+              "layout": "auto"
+            },
+            "showValue": "never",
+            "tooltip": {
+              "show": true,
+              "yHistogram": true
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 0,
+              "reverse": false,
+              "unit": "short"
+            }
+          },
+          "pluginVersion": "9.2.2",
+          "targets": [
+            {
+              "datasource": {
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "expr": "rate(synapse_storage_msc4242_state_dag_forward_extremities_persisted_bucket{server_name=\"$server_name\"}[$bucket_size]) and on (instance, job, index) (synapse_storage_events_persisted_events_total > 0)",
+              "format": "heatmap",
+              "intervalFactor": 1,
+              "legendFormat": "{{le}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Events persisted, by number of state DAG forward extremities in room (heatmap)",
+          "type": "heatmap"
         }
       ],
       "title": "Extremities",
