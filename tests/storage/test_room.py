@@ -99,7 +99,7 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(_AdminMediaTests):
             quarantined_media_origin_and_media_id.split("/")
         )
 
-        # Ideally we'd also upload remote media to ensure that gets picked up, but that's
+        # Ideally we'd also upload remote media to ensure that `remote_media_cache` gets picked up, but that's
         # a little tricky to set up in the test here. We hope that local and remote media
         # are treated similarly during the background update.
 
