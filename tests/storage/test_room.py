@@ -89,12 +89,10 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(_AdminMediaTests):
         _unaffected_media_response = self.helper.upload_media(
             b"first content", tok=admin_user_tok, expect_code=200
         )
-        quarantined_media_uri = self.helper.upload_media(
+        response = self.helper.upload_media(
             b"second content", tok=admin_user_tok, expect_code=200
-        )["content_uri"]
-        quarantined_media_origin_and_media_id = quarantined_media_uri[
-            6:
-        ]  # cut off 'mxc://'
+        )
+        quarantined_media_origin_and_media_id = response["content_uri"][6:]  # cut off 'mxc://'
         quarantined_media_origin, quarantined_media_id = (
             quarantined_media_origin_and_media_id.split("/")
         )

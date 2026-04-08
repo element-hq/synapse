@@ -249,8 +249,17 @@ class ListQuarantineChanges(RestServlet):
 
         from_id = parse_integer(request, "from", default=0)
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
-        to_id = await self.store.get_current_quarantined_media_stream_id()
 
+        # We need to wait to ensure that our current worker is actually caught up with
+        # the stream position, otherwise we might not return what we think we're returning.
+        if not await self.store.wait_for_quarantined_media_stream_id(from_id):
+            raise SynapseError(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "Timed out while waiting for stream position",
+                errcode=Codes.UNKNOWN,
+            )
+
+        to_id = await self.store.get_current_quarantined_media_stream_id()
         changes = await self.store.get_quarantined_media_changes(
             from_id=from_id,
             to_id=to_id,

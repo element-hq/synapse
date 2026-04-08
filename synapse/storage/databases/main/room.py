@@ -228,12 +228,15 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         Args:
             progress: The progress dictionary from the background update.
-            batch_size: The number of rows in each of the local_media_repository and
-             remote_media_cache tables to process in each batch.
+            batch_size: The number of rows to process in each batch.
 
         Returns:
               The number of rows inserted.
         """
+        # Note: we actually process 2x the batch_size per batch because we use it twice:
+        # once for the local_media_repository table, and once for the remote_media_cache
+        # table. This is fine though - we're still doing the work in batches.
+
         # We track the progress for the local and remote tables separately just in case
         # there are media ID collisions that would make a mess of `ORDER BY media_id
         # LIMIT ?`. If there are collisions towards the end of the returned set, the LIMIT
@@ -249,6 +252,12 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # newly quarantines some media, adding a row to the stream table, then we run
         # over it again in the background update, adding a second row. Duplicate rows are
         # non-issues for us.
+        #
+        # Another similar issue is if Synapse is downgraded partway through the background
+        # update then has more media quarantined. If Synapse is later upgraded again, the
+        # media that was quarantined while downgraded will only be imported if the media
+        # IDs are ordered higher than the last processed media ID. Media that has a lower
+        # ID will be skipped by the background update.
         #
         # Note: Already-quarantined media is indicated by the `quarantined_by` field being
         # non-null. We only want quarantined media, per docstring above.
@@ -1392,15 +1401,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         if to_id < from_id:
             # the to_id is behind the from_id, which means no results
             return []
-
-        # We need to wait to ensure that our current worker is actually caught up with
-        # the stream position, otherwise we might not return what we think we're returning.
-        if not await self.wait_for_quarantined_media_stream_id(to_id):
-            raise SynapseError(
-                HTTPStatus.INTERNAL_SERVER_ERROR,
-                "Timed out while waiting for stream position",
-                errcode=Codes.UNKNOWN,
-            )
 
         return await self.db_pool.runInteraction(
             "get_quarantined_media_changes",

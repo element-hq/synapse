@@ -805,9 +805,10 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
         self.assertEqual(200, channel.code, msg=channel.json_body)
 
     def _local_upload(self, admin_user_tok: str) -> str:
-        return self.helper.upload_media(SMALL_PNG, tok=admin_user_tok, expect_code=200)[
-            "content_uri"
-        ][6:].split("/")[1]  # Cut off 'mxc://' and domain
+        response = self.helper.upload_media(SMALL_PNG, tok=admin_user_tok, expect_code=200)
+        origin_and_media_id = response["content_uri"][6:]  # Cut off 'mxc://'
+        _origin, media_id = origin_and_media_id.split("/")
+        return media_id
 
     def test_list_quarantined_media(self) -> None:
         """
@@ -867,18 +868,17 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
 
     def test_list_quarantined_media_bounds_high(self) -> None:
         """
-        Ensure out of bounds requests with high `from` values return zero results.
+        Ensure out of bounds (token stream position greater than our furthest persisted
+        position) requests with high `from` values are met with an appropriate error.
         """
-        # Page that's very much out of range, so should have no results
+        # Page that's very much out of range
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/media/quarantine_changes?from=900000",
             access_token=self.admin_user_tok,
         )
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(0, len(channel.json_body["changes"]))
-        # we should be returning a value for `from` which actually makes sense
-        self.assertEqual(1, channel.json_body["next_batch"])
+        self.assertEqual(500, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.UNKNOWN, channel.json_body["errcode"])
 
 
 class QuarantineMediaByIDTestCase(_AdminMediaTests):
