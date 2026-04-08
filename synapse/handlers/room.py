@@ -1237,6 +1237,10 @@ class RoomCreationHandler:
         creation_content = config.get("creation_content", {})
         # override any attempt to set room versions via the creation_content
         creation_content["room_version"] = room_version.identifier
+        # We do not currently support federating state DAG rooms.
+        # See related restriction in /send_join requests in federation_client.py.
+        if room_version.msc4242_state_dags:
+            creation_content[EventContentFields.FEDERATE] = False
 
         # trusted private chats have the invited users marked as additional creators
         if (
