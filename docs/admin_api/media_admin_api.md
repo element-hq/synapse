@@ -261,7 +261,7 @@ all records is considered a bug, tracked by issue [#19672](https://github.com/el
 
 **Note**: Servers which had media quarantined before Synapse 1.152.0 may see 
 duplicate records returned by this API. This is due to how the background update
-works to populate the underlying database table. 
+works to populate the underlying database table.
 
 **Note**: Due to the above, this API should be considered *best effort* and expected
 to have missing or duplicate records.
@@ -283,7 +283,7 @@ Response:
 ```json
 {
   "next_batch": 4,
-  "rows": [
+  "changes": [
     { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": true },
     { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": false },
     { "origin": "another.example.org", "media_id": "abcdefg12345...", "quarantined": true }
