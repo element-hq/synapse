@@ -737,20 +737,77 @@ class PerDestinationQueue:
         self._pending_pdus = []
 
 
+@attr.s(slots=True, auto_attribs=True, frozen=True)
+class _TransactionCompletionInformation:
+    """
+    This holds information that is acquired when preparing a transaction
+    and that is useful for marking the transaction as complete once it has
+    been successfully sent.
+    """
+
+    device_stream_id: int | None
+    """
+    This is the stream ID of the latest to-device message (`device_federation_outbox`) to be
+    sent (or None if none sent).
+
+    When the transaction completes, to-device messages up to this point will be deleted from
+    the outbox.
+    """
+
+    device_list_id: int | None
+    """
+    This is the stream ID of the latest device list to be sent (or None if none sent).
+
+    When the transaction completes, we will mark device lists up to this point as having been
+    sent.
+    """
+
+    last_stream_ordering: int | None
+    """
+    This is the stream ordering of the last PDU that was sent (or None if none sent).
+
+    When the transaction completes, this should be stored as our position in the events stream.
+    """
+
+    pdus: list[EventBase]
+    """
+    These PDUs were sent in the transaction.
+    """
+
+
 @attr.s(slots=True, auto_attribs=True)
 class _TransactionQueueManager:
     """A helper async context manager for pulling stuff off the queues and
     tracking what was last successfully sent, etc.
+
+    Internally, consists of two primitive operations:
+    - preparing transactions, producing the data that should be sent and tracking information
+      that is useful for completion.
+    - completing transactions, which updates the state in the database and the PerDestinationQueue.
     """
 
-    queue: PerDestinationQueue
+    _queue: PerDestinationQueue
 
-    _device_stream_id: int | None = None
-    _device_list_id: int | None = None
-    _last_stream_ordering: int | None = None
-    _pdus: list[EventBase] = attr.Factory(list)
+    _completion_info: _TransactionCompletionInformation | None = None
 
     async def __aenter__(self) -> tuple[list[EventBase], list[Edu]]:
+        assert self._completion_info is None, "_TransactionQueueManager is single-use"
+
+        pdus, edus, completion_info = await self._prepare_new_transaction(self._queue)
+
+        self._completion_info = completion_info
+
+        return pdus, edus
+
+    @staticmethod
+    async def _prepare_new_transaction(
+        queue: PerDestinationQueue,
+    ) -> tuple[list[EventBase], list[Edu], _TransactionCompletionInformation]:
+        """
+        Prepare a new transaction by calculating what we want to send
+        and preparing information that is useful once we have completed the transaction.
+        """
+
         # First we calculate the EDUs we want to send, if any.
 
         # There's a maximum number of EDUs that can be sent with a transaction,
@@ -767,30 +824,30 @@ class _TransactionQueueManager:
         pending_edus = []
 
         # Add presence EDU.
-        if self.queue._pending_presence:
+        if queue._pending_presence:
             # Only send max 50 presence entries in the EDU, to bound the amount
             # of data we're sending.
             presence_to_add: list[JsonDict] = []
             while (
-                self.queue._pending_presence
+                queue._pending_presence
                 and len(presence_to_add) < MAX_PRESENCE_STATES_PER_EDU
             ):
-                _, presence = self.queue._pending_presence.popitem(last=False)
+                _, presence = queue._pending_presence.popitem(last=False)
                 presence_to_add.append(
-                    format_user_presence_state(presence, self.queue._clock.time_msec())
+                    format_user_presence_state(presence, queue._clock.time_msec())
                 )
 
             pending_edus.append(
                 Edu(
-                    origin=self.queue.server_name,
-                    destination=self.queue._destination,
+                    origin=queue.server_name,
+                    destination=queue._destination,
                     edu_type=EduTypes.PRESENCE,
                     content={"push": presence_to_add},
                 )
             )
 
         # Add read receipt EDUs.
-        pending_edus.extend(self.queue._get_receipt_edus(limit=5))
+        pending_edus.extend(queue._get_receipt_edus(limit=5))
         edu_limit = MAX_EDUS_PER_TRANSACTION - len(pending_edus)
 
         # Next, prioritize to-device messages so that existing encryption channels
@@ -799,54 +856,63 @@ class _TransactionQueueManager:
         (
             to_device_edus,
             device_stream_id,
-        ) = await self.queue._get_to_device_message_edus(
+        ) = await queue._get_to_device_message_edus(
             edu_limit - NUMBER_OF_RESERVED_EDUS_PER_TRANSACTION
         )
 
+        device_stream_id_upon_completion: int | None = None
         if to_device_edus:
-            self._device_stream_id = device_stream_id
+            # We can advance our position in the device stream after the transaction completes.
+            device_stream_id_upon_completion = device_stream_id
         else:
-            self.queue._last_device_stream_id = device_stream_id
+            # We can advance our position in the device stream immediately, as there's nothing to send.
+            queue._last_device_stream_id = device_stream_id
 
         pending_edus.extend(to_device_edus)
         edu_limit -= len(to_device_edus)
 
         # Add device list update EDUs.
-        device_update_edus, dev_list_id = await self.queue._get_device_update_edus(
-            edu_limit
-        )
+        device_update_edus, dev_list_id = await queue._get_device_update_edus(edu_limit)
 
+        device_list_id_upon_completion: int | None = None
         if device_update_edus:
-            self._device_list_id = dev_list_id
+            # We can advance our position in the device list stream after the transaction completes.
+            device_list_id_upon_completion = dev_list_id
         else:
-            self.queue._last_device_list_stream_id = dev_list_id
+            # We can advance our position in the device list stream immediately, as there's nothing to send.
+            queue._last_device_list_stream_id = dev_list_id
 
         pending_edus.extend(device_update_edus)
         edu_limit -= len(device_update_edus)
 
         # Finally add any other types of EDUs if there is room.
-        other_edus = self.queue._pop_pending_edus(edu_limit)
+        other_edus = queue._pop_pending_edus(edu_limit)
         pending_edus.extend(other_edus)
         edu_limit -= len(other_edus)
-        while edu_limit > 0 and self.queue._pending_edus_keyed:
-            _, val = self.queue._pending_edus_keyed.popitem()
+        while edu_limit > 0 and queue._pending_edus_keyed:
+            _, val = queue._pending_edus_keyed.popitem()
             pending_edus.append(val)
             edu_limit -= 1
 
         # Now we look for any PDUs to send, by getting up to 50 PDUs from the
         # queue
-        self._pdus = self.queue._pending_pdus[:50]
+        pdus = queue._pending_pdus[:50]
 
-        if not self._pdus and not pending_edus:
-            return [], []
+        last_stream_ordering: int | None = None
+        if pdus:
+            last_stream_ordering = pdus[-1].internal_metadata.stream_ordering
+            assert last_stream_ordering
 
-        if self._pdus:
-            self._last_stream_ordering = self._pdus[
-                -1
-            ].internal_metadata.stream_ordering
-            assert self._last_stream_ordering
-
-        return self._pdus, pending_edus
+        return (
+            pdus,
+            pending_edus,
+            _TransactionCompletionInformation(
+                device_list_id=device_list_id_upon_completion,
+                device_stream_id=device_stream_id_upon_completion,
+                last_stream_ordering=last_stream_ordering,
+                pdus=pdus,
+            ),
+        )
 
     async def __aexit__(
         self,
@@ -858,32 +924,42 @@ class _TransactionQueueManager:
             # Failed to send transaction, so we bail out.
             return
 
+        assert self._completion_info is not None
+        await self._complete_transaction(self._queue, self._completion_info)
+
+    @staticmethod
+    async def _complete_transaction(
+        queue: PerDestinationQueue, info: _TransactionCompletionInformation
+    ) -> None:
+        """
+        Handle the fact that a transaction has been successfully completed.
+        """
         # Successfully sent transactions, so we remove pending PDUs from the queue
-        if self._pdus:
-            self.queue._pending_pdus = self.queue._pending_pdus[len(self._pdus) :]
+        if info.pdus:
+            queue._pending_pdus = queue._pending_pdus[len(info.pdus) :]
 
         # Succeeded to send the transaction so we record where we have sent up
         # to in the various streams
 
-        if self._device_stream_id:
-            await self.queue._store.delete_device_msgs_for_remote(
-                self.queue._destination, self._device_stream_id
+        if info.device_stream_id:
+            await queue._store.delete_device_msgs_for_remote(
+                queue._destination, info.device_stream_id
             )
-            self.queue._last_device_stream_id = self._device_stream_id
+            queue._last_device_stream_id = info.device_stream_id
 
         # also mark the device updates as sent
-        if self._device_list_id:
+        if info.device_list_id:
             logger.info(
-                "Marking as sent %r %r", self.queue._destination, self._device_list_id
+                "Marking as sent %r %r", queue._destination, info.device_list_id
             )
-            await self.queue._store.mark_as_sent_devices_by_remote(
-                self.queue._destination, self._device_list_id
+            await queue._store.mark_as_sent_devices_by_remote(
+                queue._destination, info.device_list_id
             )
-            self.queue._last_device_list_stream_id = self._device_list_id
+            queue._last_device_list_stream_id = info.device_list_id
 
-        if self._last_stream_ordering:
+        if info.last_stream_ordering:
             # we sent some PDUs and it was successful, so update our
             # last_successful_stream_ordering in the destinations table.
-            await self.queue._store.set_destination_last_successful_stream_ordering(
-                self.queue._destination, self._last_stream_ordering
+            await queue._store.set_destination_last_successful_stream_ordering(
+                queue._destination, info.last_stream_ordering
             )
