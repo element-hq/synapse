@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import Dict, Iterable, List, Tuple, cast
+from typing import Iterable, cast
 
 from synapse.config.appservice import load_appservices
 from synapse.config.homeserver import HomeServerConfig
@@ -44,7 +44,7 @@ def run_upgrade(
     config: HomeServerConfig,
 ) -> None:
     cur.execute("SELECT name FROM users")
-    rows = cast(Iterable[Tuple[str]], cur.fetchall())
+    rows = cast(Iterable[tuple[str]], cur.fetchall())
 
     config_files = []
     try:
@@ -54,7 +54,7 @@ def run_upgrade(
 
     appservices = load_appservices(config.server.server_name, config_files)
 
-    owned: Dict[str, List[str]] = {}
+    owned: dict[str, list[str]] = {}
 
     for row in rows:
         user_id = row[0]

@@ -23,21 +23,16 @@ import logging
 import urllib.parse
 from typing import (
     TYPE_CHECKING,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
     Sequence,
-    Tuple,
     TypeVar,
-    Union,
 )
 
 from prometheus_client import Counter
 from typing_extensions import ParamSpec, TypeGuard
 
-from synapse.api.constants import EventTypes, Membership, ThirdPartyEntityKind
+from synapse.api.constants import ThirdPartyEntityKind
 from synapse.api.errors import CodeMessageException, HttpResponseException
 from synapse.appservice import (
     ApplicationService,
@@ -45,12 +40,13 @@ from synapse.appservice import (
     TransactionUnusedFallbackKeys,
 )
 from synapse.events import EventBase
-from synapse.events.utils import SerializeEventConfig, serialize_event
+from synapse.events.utils import SerializeEventConfig
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID
 from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -132,15 +128,16 @@ class ApplicationServiceApi(SimpleHttpClient):
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.config = hs.config.appservice
+        self._event_serializer = hs.get_event_client_serializer()
 
-        self.protocol_meta_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
+        self.protocol_meta_cache: ResponseCache[tuple[str, str]] = ResponseCache(
             clock=hs.get_clock(),
             name="as_protocol_meta",
             server_name=self.server_name,
-            timeout_ms=HOUR_IN_MS,
+            timeout=Duration(hours=1),
         )
 
-    def _get_headers(self, service: "ApplicationService") -> Dict[bytes, List[bytes]]:
+    def _get_headers(self, service: "ApplicationService") -> dict[bytes, list[bytes]]:
         """This makes sure we have always the auth header and opentracing headers set."""
 
         # This is also ensured before in the functions. However this is needed to please
@@ -210,8 +207,8 @@ class ApplicationServiceApi(SimpleHttpClient):
         service: "ApplicationService",
         kind: str,
         protocol: str,
-        fields: Dict[bytes, List[bytes]],
-    ) -> List[JsonDict]:
+        fields: dict[bytes, list[bytes]],
+    ) -> list[JsonDict]:
         if kind == ThirdPartyEntityKind.USER:
             required_field = "userid"
         elif kind == ThirdPartyEntityKind.LOCATION:
@@ -225,7 +222,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         assert service.hs_token is not None
 
         try:
-            args: Mapping[bytes, Union[List[bytes], str]] = fields
+            args: Mapping[bytes, list[bytes] | str] = fields
             if self.config.use_appservice_legacy_authorization:
                 args = {
                     **fields,
@@ -261,11 +258,11 @@ class ApplicationServiceApi(SimpleHttpClient):
 
     async def get_3pe_protocol(
         self, service: "ApplicationService", protocol: str
-    ) -> Optional[JsonDict]:
+    ) -> JsonDict | None:
         if service.url is None:
             return {}
 
-        async def _get() -> Optional[JsonDict]:
+        async def _get() -> JsonDict | None:
             # This is required by the configuration.
             assert service.hs_token is not None
             try:
@@ -303,7 +300,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         key = (service.id, protocol)
         return await self.protocol_meta_cache.wrap(key, _get)
 
-    async def ping(self, service: "ApplicationService", txn_id: Optional[str]) -> None:
+    async def ping(self, service: "ApplicationService", txn_id: str | None) -> None:
         # The caller should check that url is set
         assert service.url is not None, "ping called without URL being set"
 
@@ -320,12 +317,12 @@ class ApplicationServiceApi(SimpleHttpClient):
         self,
         service: "ApplicationService",
         events: Sequence[EventBase],
-        ephemeral: List[JsonMapping],
-        to_device_messages: List[JsonMapping],
+        ephemeral: list[JsonMapping],
+        to_device_messages: list[JsonMapping],
         one_time_keys_count: TransactionOneTimeKeysCount,
         unused_fallback_keys: TransactionUnusedFallbackKeys,
         device_list_summary: DeviceListUpdates,
-        txn_id: Optional[int] = None,
+        txn_id: int | None = None,
     ) -> bool:
         """
         Push data to an application service.
@@ -347,7 +344,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         # This is required by the configuration.
         assert service.hs_token is not None
 
-        serialized_events = self._serialize(service, events)
+        serialized_events = await self._serialize(service, events)
 
         if txn_id is None:
             logger.warning(
@@ -429,9 +426,9 @@ class ApplicationServiceApi(SimpleHttpClient):
         return False
 
     async def claim_client_keys(
-        self, service: "ApplicationService", query: List[Tuple[str, str, str, int]]
-    ) -> Tuple[
-        Dict[str, Dict[str, Dict[str, JsonDict]]], List[Tuple[str, str, str, int]]
+        self, service: "ApplicationService", query: list[tuple[str, str, str, int]]
+    ) -> tuple[
+        dict[str, dict[str, dict[str, JsonDict]]], list[tuple[str, str, str, int]]
     ]:
         """Claim one time keys from an application service.
 
@@ -457,7 +454,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         assert service.hs_token is not None
 
         # Create the expected payload shape.
-        body: Dict[str, Dict[str, List[str]]] = {}
+        body: dict[str, dict[str, list[str]]] = {}
         for user_id, device, algorithm, count in query:
             body.setdefault(user_id, {}).setdefault(device, []).extend(
                 [algorithm] * count
@@ -502,8 +499,8 @@ class ApplicationServiceApi(SimpleHttpClient):
         return response, missing
 
     async def query_keys(
-        self, service: "ApplicationService", query: Dict[str, List[str]]
-    ) -> Dict[str, Dict[str, Dict[str, JsonDict]]]:
+        self, service: "ApplicationService", query: dict[str, list[str]]
+    ) -> dict[str, dict[str, dict[str, JsonDict]]]:
         """Query the application service for keys.
 
         Note that any error (including a timeout) is treated as the application
@@ -543,30 +540,23 @@ class ApplicationServiceApi(SimpleHttpClient):
 
         return response
 
-    def _serialize(
+    async def _serialize(
         self, service: "ApplicationService", events: Iterable[EventBase]
-    ) -> List[JsonDict]:
+    ) -> list[JsonDict]:
         time_now = self.clock.time_msec()
-        return [
-            serialize_event(
-                e,
-                time_now,
-                config=SerializeEventConfig(
-                    as_client_event=True,
-                    # If this is an invite or a knock membership event, and we're interested
-                    # in this user, then include any stripped state alongside the event.
-                    include_stripped_room_state=(
-                        e.type == EventTypes.Member
-                        and (
-                            e.membership == Membership.INVITE
-                            or e.membership == Membership.KNOCK
-                        )
-                        and service.is_interested_in_user(e.state_key)
-                    ),
-                    # Appservices are considered 'trusted' by the admin and should have
-                    # applicable metadata on their events.
-                    include_admin_metadata=True,
-                ),
-            )
-            for e in events
-        ]
+        return await self._event_serializer.serialize_events(
+            list(events),
+            time_now,
+            config=SerializeEventConfig(
+                as_client_event=True,
+                # If this is an invite or a knock membership event, then include
+                # any stripped state alongside the event. We could narrow this
+                # down to only users the appservice is "interested in", however
+                # it's not worth the complexity of doing so, and it's simpler to
+                # just include it for all users.
+                include_stripped_room_state=True,
+                # Appservices are considered 'trusted' by the admin and should have
+                # applicable metadata on their events.
+                include_admin_metadata=True,
+            ),
+        )

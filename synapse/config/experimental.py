@@ -3,6 +3,7 @@
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -59,7 +60,7 @@ class ClientAuthMethod(enum.Enum):
     PRIVATE_KEY_JWT = "private_key_jwt"
 
 
-def _parse_jwks(jwks: Optional[JsonDict]) -> Optional["JsonWebKey"]:
+def _parse_jwks(jwks: JsonDict | None) -> Optional["JsonWebKey"]:
     """A helper function to parse a JWK dict into a JsonWebKey."""
 
     if jwks is None:
@@ -71,7 +72,7 @@ def _parse_jwks(jwks: Optional[JsonDict]) -> Optional["JsonWebKey"]:
 
 
 def _check_client_secret(
-    instance: "MSC3861", _attribute: attr.Attribute, _value: Optional[str]
+    instance: "MSC3861", _attribute: attr.Attribute, _value: str | None
 ) -> None:
     if instance._client_secret and instance._client_secret_path:
         raise ConfigError(
@@ -88,7 +89,7 @@ def _check_client_secret(
 
 
 def _check_admin_token(
-    instance: "MSC3861", _attribute: attr.Attribute, _value: Optional[str]
+    instance: "MSC3861", _attribute: attr.Attribute, _value: str | None
 ) -> None:
     if instance._admin_token and instance._admin_token_path:
         raise ConfigError(
@@ -124,7 +125,7 @@ class MSC3861:
     issuer: str = attr.ib(default="", validator=attr.validators.instance_of(str))
     """The URL of the OIDC Provider."""
 
-    issuer_metadata: Optional[JsonDict] = attr.ib(default=None)
+    issuer_metadata: JsonDict | None = attr.ib(default=None)
     """The issuer metadata to use, otherwise discovered from /.well-known/openid-configuration as per MSC2965."""
 
     client_id: str = attr.ib(
@@ -138,7 +139,7 @@ class MSC3861:
     )
     """The auth method used when calling the introspection endpoint."""
 
-    _client_secret: Optional[str] = attr.ib(
+    _client_secret: str | None = attr.ib(
         default=None,
         validator=[
             attr.validators.optional(attr.validators.instance_of(str)),
@@ -150,7 +151,7 @@ class MSC3861:
     when using any of the client_secret_* client auth methods.
     """
 
-    _client_secret_path: Optional[str] = attr.ib(
+    _client_secret_path: str | None = attr.ib(
         default=None,
         validator=[
             attr.validators.optional(attr.validators.instance_of(str)),
@@ -196,19 +197,19 @@ class MSC3861:
                 ("experimental", "msc3861", "client_auth_method"),
             )
 
-    introspection_endpoint: Optional[str] = attr.ib(
+    introspection_endpoint: str | None = attr.ib(
         default=None,
         validator=attr.validators.optional(attr.validators.instance_of(str)),
     )
     """The URL of the introspection endpoint used to validate access tokens."""
 
-    account_management_url: Optional[str] = attr.ib(
+    account_management_url: str | None = attr.ib(
         default=None,
         validator=attr.validators.optional(attr.validators.instance_of(str)),
     )
     """The URL of the My Account page on the OIDC Provider as per MSC2965."""
 
-    _admin_token: Optional[str] = attr.ib(
+    _admin_token: str | None = attr.ib(
         default=None,
         validator=[
             attr.validators.optional(attr.validators.instance_of(str)),
@@ -220,7 +221,7 @@ class MSC3861:
     This is used by the OIDC provider, to make admin calls to Synapse.
     """
 
-    _admin_token_path: Optional[str] = attr.ib(
+    _admin_token_path: str | None = attr.ib(
         default=None,
         validator=[
             attr.validators.optional(attr.validators.instance_of(str)),
@@ -232,7 +233,7 @@ class MSC3861:
     external file.
     """
 
-    def client_secret(self) -> Optional[str]:
+    def client_secret(self) -> str | None:
         """Returns the secret given via `client_secret` or `client_secret_path`."""
         if self._client_secret_path:
             return read_secret_from_file_once(
@@ -241,7 +242,7 @@ class MSC3861:
             )
         return self._client_secret
 
-    def admin_token(self) -> Optional[str]:
+    def admin_token(self) -> str | None:
         """Returns the admin token given via `admin_token` or `admin_token_path`."""
         if self._admin_token_path:
             return read_secret_from_file_once(
@@ -366,7 +367,11 @@ class MSC3866Config:
 
 
 class ExperimentalConfig(Config):
-    """Config section for enabling experimental features"""
+    """Config section for enabling experimental features
+
+    All new experimental features should have a tracking issue with the
+    `T-ExperimentalFeatures` label, kept open as long as the experimental
+    feature is present in Synapse."""
 
     section = "experimental"
 
@@ -378,29 +383,8 @@ class ExperimentalConfig(Config):
         # MSC3026 (busy presence state)
         self.msc3026_enabled: bool = experimental.get("msc3026_enabled", False)
 
-        # MSC2697 (device dehydration)
-        # Enabled by default since this option was added after adding the feature.
-        # It is not recommended that both MSC2697 and MSC3814 both be enabled at
-        # once.
-        self.msc2697_enabled: bool = experimental.get("msc2697_enabled", True)
-
         # MSC3814 (dehydrated devices with SSSS)
-        # This is an alternative method to achieve the same goals as MSC2697.
-        # It is not recommended that both MSC2697 and MSC3814 both be enabled at
-        # once.
         self.msc3814_enabled: bool = experimental.get("msc3814_enabled", False)
-
-        if self.msc2697_enabled and self.msc3814_enabled:
-            raise ConfigError(
-                "MSC2697 and MSC3814 should not both be enabled.",
-                (
-                    "experimental_features",
-                    "msc3814_enabled",
-                ),
-            )
-
-        # MSC3244 (room version capabilities)
-        self.msc3244_enabled: bool = experimental.get("msc3244_enabled", True)
 
         # MSC3266 (room summary api)
         self.msc3266_enabled: bool = experimental.get("msc3266_enabled", False)
@@ -410,11 +394,6 @@ class ExperimentalConfig(Config):
         # have opted in to receive them. If enabled, this adds to-device messages to that list.
         self.msc2409_to_device_messages_enabled: bool = experimental.get(
             "msc2409_to_device_messages_enabled", False
-        )
-
-        # The portion of MSC3202 which is related to device masquerading.
-        self.msc3202_device_masquerading_enabled: bool = experimental.get(
-            "msc3202_device_masquerading", False
         )
 
         # The portion of MSC3202 related to transaction extensions:
@@ -463,9 +442,6 @@ class ExperimentalConfig(Config):
         # MSC3848: Introduce errcodes for specific event sending failures
         self.msc3848_enabled: bool = experimental.get("msc3848_enabled", False)
 
-        # MSC3852: Expose last seen user agent field on /_matrix/client/v3/devices.
-        self.msc3852_enabled: bool = experimental.get("msc3852_enabled", False)
-
         # MSC3866: M_USER_AWAITING_APPROVAL error code
         raw_msc3866_config = experimental.get("msc3866", {})
         self.msc3866 = MSC3866Config(**raw_msc3866_config)
@@ -501,8 +477,7 @@ class ExperimentalConfig(Config):
         self.msc1767_enabled: bool = experimental.get("msc1767_enabled", False)
         if self.msc1767_enabled:
             # Enable room version (and thus applicable push rules from MSC3931/3932)
-            version_id = RoomVersions.MSC1767v10.identifier
-            KNOWN_ROOM_VERSIONS[version_id] = RoomVersions.MSC1767v10
+            KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC1767v10)
 
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
@@ -528,12 +503,17 @@ class ExperimentalConfig(Config):
             "msc4069_profile_inhibit_propagation", False
         )
 
-        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version:
+        # See: https://github.com/element-hq/synapse/issues/19434
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
 
-        self.msc4108_delegation_endpoint: Optional[str] = experimental.get(
+        self.msc4108_delegation_endpoint: str | None = experimental.get(
             "msc4108_delegation_endpoint", None
         )
+
+        # MSC4370: Get extremities federation endpoint
+        # See https://github.com/element-hq/synapse/issues/19524
+        self.msc4370_enabled = experimental.get("msc4370_enabled", False)
 
         auth_delegated = self.msc3861.enabled or (
             config.get("matrix_authentication_service") or {}
@@ -553,8 +533,34 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
+        # MSC4388: Secure out-of-band channel for sign in with QR:
+        # See: https://github.com/element-hq/synapse/issues/19433
+        msc4388_mode = experimental.get("msc4388_mode", "off")
+
+        if msc4388_mode not in ["off", "open", "authenticated"]:
+            raise ConfigError(
+                "msc4388_mode must be one of 'off', 'open' or 'authenticated'",
+                ("experimental", "msc4388_mode"),
+            )
+        self.msc4388_enabled: bool = msc4388_mode != "off"
+        self.msc4388_requires_authentication: bool = msc4388_mode == "authenticated"
+
+        if self.msc4388_enabled and not (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False):
+            raise ConfigError(
+                "MSC4388 requires matrix_authentication_service to be enabled",
+                ("experimental", "msc4388_enabled"),
+            )
+
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
+
+        # MSC4143: Matrix RTC Transport using Livekit Backend
+        self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
+
+        # MSC4169: Backwards-compatible redaction sending using `/send`
+        self.msc4169_enabled: bool = experimental.get("msc4169_enabled", False)
 
         # MSC4210: Remove legacy mentions
         self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
@@ -590,5 +596,11 @@ class ExperimentalConfig(Config):
         self.msc4293_enabled: bool = experimental.get("msc4293_enabled", False)
 
         # MSC4306: Thread Subscriptions
-        # (and MSC4308: sliding sync extension for thread subscriptions)
+        # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
+
+        # MSC4354: Sticky Events
+        # Tracked in: https://github.com/element-hq/synapse/issues/19409
+        # Note that sticky events persisted before this feature is enabled will not be
+        # considered sticky by the local homeserver.
+        self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)

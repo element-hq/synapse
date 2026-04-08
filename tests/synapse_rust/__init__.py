@@ -1,4 +1,3 @@
-#
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright (C) 2025 New Vector, Ltd
@@ -10,7 +9,3 @@
 #
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
-#
-
-RECOMMENDATION_OK = "ok"
-RECOMMENDATION_SPAM = "spam"

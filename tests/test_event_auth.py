@@ -20,7 +20,7 @@
 #
 
 import unittest
-from typing import Any, Collection, Dict, Iterable, List, Optional
+from typing import Any, Collection, Iterable
 
 from parameterized import parameterized
 
@@ -39,7 +39,7 @@ class _StubEventSourceStore:
     """A stub implementation of the EventSourceStore"""
 
     def __init__(self) -> None:
-        self._store: Dict[str, EventBase] = {}
+        self._store: dict[str, EventBase] = {}
 
     def add_event(self, event: EventBase) -> None:
         self._store[event.event_id] = event
@@ -54,7 +54,7 @@ class _StubEventSourceStore:
         redact_behaviour: EventRedactBehaviour,
         get_prev_content: bool = False,
         allow_rejected: bool = False,
-    ) -> Dict[str, EventBase]:
+    ) -> dict[str, EventBase]:
         assert allow_rejected
         assert not get_prev_content
         assert redact_behaviour == EventRedactBehaviour.as_is
@@ -745,7 +745,7 @@ class EventAuthTestCase(unittest.TestCase):
         test_room_v10_rejects_string_power_levels above handles the string case.
         """
 
-        def create_event(pl_event_content: Dict[str, Any]) -> EventBase:
+        def create_event(pl_event_content: dict[str, Any]) -> EventBase:
             return make_event_from_dict(
                 {
                     "room_id": TEST_ROOM_ID,
@@ -759,7 +759,7 @@ class EventAuthTestCase(unittest.TestCase):
                 room_version=RoomVersions.V10,
             )
 
-        contents: Iterable[Dict[str, Any]] = [
+        contents: Iterable[dict[str, Any]] = [
             {"notifications": {"room": None}},
             {"users": {"@alice:wonderland": []}},
             {"users_default": {}},
@@ -797,8 +797,8 @@ def _member_event(
     room_version: RoomVersion,
     user_id: str,
     membership: str,
-    sender: Optional[str] = None,
-    additional_content: Optional[dict] = None,
+    sender: str | None = None,
+    additional_content: dict | None = None,
 ) -> EventBase:
     return make_event_from_dict(
         {
@@ -818,7 +818,7 @@ def _member_event(
 def _join_event(
     room_version: RoomVersion,
     user_id: str,
-    additional_content: Optional[dict] = None,
+    additional_content: dict | None = None,
 ) -> EventBase:
     return _member_event(
         room_version,
@@ -861,7 +861,7 @@ def _alias_event(room_version: RoomVersion, sender: str, **kwargs: Any) -> Event
 
 def _build_auth_dict_for_room_version(
     room_version: RoomVersion, auth_events: Iterable[EventBase]
-) -> List:
+) -> list:
     if room_version.event_format == EventFormatVersions.ROOM_V1_V2:
         return [(e.event_id, "not_used") for e in auth_events]
     else:
@@ -871,7 +871,7 @@ def _build_auth_dict_for_room_version(
 def _random_state_event(
     room_version: RoomVersion,
     sender: str,
-    auth_events: Optional[Iterable[EventBase]] = None,
+    auth_events: Iterable[EventBase] | None = None,
 ) -> EventBase:
     if auth_events is None:
         auth_events = []

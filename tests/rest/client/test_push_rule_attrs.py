@@ -18,6 +18,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from http import HTTPStatus
+
 import synapse
 from synapse.api.errors import Codes
 from synapse.rest.client import login, push_rule, room
@@ -485,4 +487,24 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
                 ],
             },
             channel.json_body,
+        )
+
+    def test_no_user_defined_postcontent_rules(self) -> None:
+        """
+        Tests that clients are not permitted to create MSC4306 `postcontent` rules.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+
+        channel = self.make_request(
+            "PUT",
+            "/pushrules/global/postcontent/some.user.rule",
+            {},
+            access_token=token,
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(
+            Codes.INVALID_PARAM,
+            channel.json_body["errcode"],
         )

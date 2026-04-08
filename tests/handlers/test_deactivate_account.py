@@ -28,7 +28,7 @@ from synapse.rest.client import account, login, room
 from synapse.server import HomeServer
 from synapse.synapse_rust.push import PushRule
 from synapse.types import UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

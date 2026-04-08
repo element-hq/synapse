@@ -28,7 +28,7 @@ from synapse.api.urls import ConsentURIBuilder
 from synapse.rest.client import login, room
 from synapse.rest.consent import consent_resource
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeSite, make_request

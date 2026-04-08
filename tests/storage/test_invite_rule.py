@@ -1,4 +1,8 @@
-from synapse.storage.invite_rule import InviteRule, InviteRulesConfig
+from synapse.storage.invite_rule import (
+    AllowAllInviteRulesConfig,
+    InviteRule,
+    MSC4155InviteRulesConfig,
+)
 from synapse.types import UserID
 
 from tests import unittest
@@ -10,23 +14,23 @@ ignored_user = UserID.from_string("@ignored:ignore.example.org")
 
 
 class InviteFilterTestCase(unittest.TestCase):
-    def test_empty(self) -> None:
+    def test_allow_all(self) -> None:
         """Permit by default"""
-        config = InviteRulesConfig(None)
+        config = AllowAllInviteRulesConfig()
         self.assertEqual(
             config.get_invite_rule(regular_user.to_string()), InviteRule.ALLOW
         )
 
     def test_ignore_invalid(self) -> None:
         """Invalid strings are ignored"""
-        config = InviteRulesConfig({"blocked_users": ["not a user"]})
+        config = MSC4155InviteRulesConfig({"blocked_users": ["not a user"]})
         self.assertEqual(
             config.get_invite_rule(blocked_user.to_string()), InviteRule.ALLOW
         )
 
     def test_user_blocked(self) -> None:
         """Permit all, except explicitly blocked users"""
-        config = InviteRulesConfig({"blocked_users": [blocked_user.to_string()]})
+        config = MSC4155InviteRulesConfig({"blocked_users": [blocked_user.to_string()]})
         self.assertEqual(
             config.get_invite_rule(blocked_user.to_string()), InviteRule.BLOCK
         )
@@ -36,7 +40,7 @@ class InviteFilterTestCase(unittest.TestCase):
 
     def test_user_ignored(self) -> None:
         """Permit all, except explicitly ignored users"""
-        config = InviteRulesConfig({"ignored_users": [ignored_user.to_string()]})
+        config = MSC4155InviteRulesConfig({"ignored_users": [ignored_user.to_string()]})
         self.assertEqual(
             config.get_invite_rule(ignored_user.to_string()), InviteRule.IGNORE
         )
@@ -46,7 +50,7 @@ class InviteFilterTestCase(unittest.TestCase):
 
     def test_user_precedence(self) -> None:
         """Always take allowed over ignored, ignored over blocked, and then block."""
-        config = InviteRulesConfig(
+        config = MSC4155InviteRulesConfig(
             {
                 "allowed_users": [allowed_user.to_string()],
                 "ignored_users": [allowed_user.to_string(), ignored_user.to_string()],
@@ -70,7 +74,7 @@ class InviteFilterTestCase(unittest.TestCase):
     def test_server_blocked(self) -> None:
         """Block all users on the server except those allowed."""
         user_on_same_server = UserID("blocked", allowed_user.domain)
-        config = InviteRulesConfig(
+        config = MSC4155InviteRulesConfig(
             {
                 "allowed_users": [allowed_user.to_string()],
                 "blocked_servers": [allowed_user.domain],
@@ -86,7 +90,7 @@ class InviteFilterTestCase(unittest.TestCase):
     def test_server_ignored(self) -> None:
         """Ignore all users on the server except those allowed."""
         user_on_same_server = UserID("ignored", allowed_user.domain)
-        config = InviteRulesConfig(
+        config = MSC4155InviteRulesConfig(
             {
                 "allowed_users": [allowed_user.to_string()],
                 "ignored_servers": [allowed_user.domain],
@@ -104,7 +108,7 @@ class InviteFilterTestCase(unittest.TestCase):
         blocked_user_on_same_server = UserID("blocked", allowed_user.domain)
         ignored_user_on_same_server = UserID("ignored", allowed_user.domain)
         allowed_user_on_same_server = UserID("another", allowed_user.domain)
-        config = InviteRulesConfig(
+        config = MSC4155InviteRulesConfig(
             {
                 "ignored_users": [ignored_user_on_same_server.to_string()],
                 "blocked_users": [blocked_user_on_same_server.to_string()],
@@ -129,7 +133,7 @@ class InviteFilterTestCase(unittest.TestCase):
 
     def test_server_precedence(self) -> None:
         """Always take allowed over ignored, ignored over blocked, and then block."""
-        config = InviteRulesConfig(
+        config = MSC4155InviteRulesConfig(
             {
                 "allowed_servers": [allowed_user.domain],
                 "ignored_servers": [allowed_user.domain, ignored_user.domain],
@@ -152,7 +156,7 @@ class InviteFilterTestCase(unittest.TestCase):
 
     def test_server_glob(self) -> None:
         """Test that glob patterns match"""
-        config = InviteRulesConfig({"blocked_servers": ["*.example.org"]})
+        config = MSC4155InviteRulesConfig({"blocked_servers": ["*.example.org"]})
         self.assertEqual(
             config.get_invite_rule(allowed_user.to_string()), InviteRule.BLOCK
         )

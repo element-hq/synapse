@@ -20,7 +20,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, profile, room, thread_subscriptions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -111,7 +111,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             {},
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
         # Assert the subscription was saved
         channel = self.make_request(
@@ -119,8 +119,8 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
-        self.assertEqual(channel.json_body, {"automatic": False})
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body, {"automatic": False}, channel.json_body)
 
         # Now also register an automatic subscription; it should not
         # override the manual subscription
@@ -130,7 +130,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             {"automatic": self.threaded_events[0]},
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
         # Assert the manual subscription was not overridden
         channel = self.make_request(
@@ -138,8 +138,8 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
-        self.assertEqual(channel.json_body, {"automatic": False})
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body, {"automatic": False}, channel.json_body)
 
     def test_subscribe_automatic_then_manual(self) -> None:
         """Test subscribing to a thread, first an automatic subscription then a manual subscription.
@@ -160,8 +160,8 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
-        self.assertEqual(channel.json_body, {"automatic": True})
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body, {"automatic": True}, channel.json_body)
 
         # Now also register a manual subscription
         channel = self.make_request(
@@ -170,7 +170,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             {},
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
         # Assert the manual subscription was not overridden
         channel = self.make_request(
@@ -178,8 +178,8 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
-        self.assertEqual(channel.json_body, {"automatic": False})
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body, {"automatic": False}, channel.json_body)
 
     def test_unsubscribe(self) -> None:
         """Test subscribing to a thread, then unsubscribing."""
@@ -191,7 +191,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             },
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
         # Assert the subscription was saved
         channel = self.make_request(
@@ -199,23 +199,23 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
-        self.assertEqual(channel.json_body, {"automatic": True})
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body, {"automatic": True}, channel.json_body)
 
         channel = self.make_request(
             "DELETE",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
         channel = self.make_request(
             "GET",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
-        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND", channel.json_body)
 
     def test_set_thread_subscription_nonexistent_thread(self) -> None:
         """Test setting subscription settings for a nonexistent thread."""
@@ -225,8 +225,8 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             {},
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
-        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND", channel.json_body)
 
     def test_set_thread_subscription_no_access(self) -> None:
         """Test that a user can't set thread subscription for a thread they can't access."""
@@ -239,8 +239,8 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             {},
             access_token=no_access_token,
         )
-        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
-        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND", channel.json_body)
 
     def test_invalid_body(self) -> None:
         """Test that sending invalid subscription settings is rejected."""
@@ -251,7 +251,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             {"automatic": True},
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
 
         channel = self.make_request(
             "PUT",
@@ -260,7 +260,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             {"automatic": "$malformedEventId"},
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
 
     def test_auto_subscribe_cause_event_not_in_thread(self) -> None:
         """

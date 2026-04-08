@@ -22,7 +22,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.storage.databases.main.transactions import DestinationRetryTimings
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

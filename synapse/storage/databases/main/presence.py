@@ -21,13 +21,8 @@
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Tuple,
-    Union,
     cast,
 )
 
@@ -116,8 +111,8 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
         )
 
     async def update_presence(
-        self, presence_states: List[UserPresenceState]
-    ) -> Tuple[int, int]:
+        self, presence_states: list[UserPresenceState]
+    ) -> tuple[int, int]:
         assert self._can_persist_presence
 
         stream_ordering_manager = self._presence_id_gen.get_next_mult(
@@ -142,8 +137,8 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
     def _update_presence_txn(
         self,
         txn: LoggingTransaction,
-        stream_orderings: List[int],
-        presence_states: List[UserPresenceState],
+        stream_orderings: list[int],
+        presence_states: list[UserPresenceState],
     ) -> None:
         for stream_id, state in zip(stream_orderings, presence_states):
             txn.call_after(
@@ -193,7 +188,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
 
     async def get_all_presence_updates(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, list]], int, bool]:
+    ) -> tuple[list[tuple[int, list]], int, bool]:
         """Get updates for presence replication stream.
 
         Args:
@@ -220,7 +215,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
 
         def get_all_presence_updates_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Tuple[int, list]], int, bool]:
+        ) -> tuple[list[tuple[int, list]], int, bool]:
             sql = """
                 SELECT stream_id, user_id, state, last_active_ts,
                     last_federation_update_ts, last_user_sync_ts,
@@ -232,7 +227,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
             """
             txn.execute(sql, (last_id, current_id, limit))
             updates = cast(
-                List[Tuple[int, list]],
+                list[tuple[int, list]],
                 [(row[0], row[1:]) for row in txn],
             )
 
@@ -263,7 +258,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
         # TODO All these columns are nullable, but we don't expect that:
         #      https://github.com/matrix-org/synapse/issues/16467
         rows = cast(
-            List[Tuple[str, str, int, int, int, Optional[str], Union[int, bool]]],
+            list[tuple[str, str, int, int, int, str | None, int | bool]],
             await self.db_pool.simple_select_many_batch(
                 table="presence_stream",
                 column="user_id",
@@ -320,7 +315,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
     @cached()
     async def _get_full_presence_stream_token_for_user(
         self, user_id: str
-    ) -> Optional[int]:
+    ) -> int | None:
         """Get the presence token corresponding to the last full presence update
         for this user.
 
@@ -375,7 +370,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
     async def get_presence_for_all_users(
         self,
         include_offline: bool = True,
-    ) -> Dict[str, UserPresenceState]:
+    ) -> dict[str, UserPresenceState]:
         """Retrieve the current presence state for all users.
 
         Note that the presence_stream table is culled frequently, so it should only
@@ -402,7 +397,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
             # TODO All these columns are nullable, but we don't expect that:
             #      https://github.com/matrix-org/synapse/issues/16467
             rows = cast(
-                List[Tuple[str, str, int, int, int, Optional[str], Union[int, bool]]],
+                list[tuple[str, str, int, int, int, str | None, int | bool]],
                 await self.db_pool.runInteraction(
                     "get_presence_for_all_users",
                     self.db_pool.simple_select_list_paginate_txn,
@@ -457,7 +452,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
     def get_presence_stream_id_gen(self) -> MultiWriterIdGenerator:
         return self._presence_id_gen
 
-    def _get_active_presence(self, db_conn: Connection) -> List[UserPresenceState]:
+    def _get_active_presence(self, db_conn: Connection) -> list[UserPresenceState]:
         """Fetch non-offline presence from the database so that we can register
         the appropriate time outs.
         """
@@ -488,7 +483,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
             for user_id, state, last_active_ts, last_federation_update_ts, last_user_sync_ts, status_msg, currently_active in rows
         ]
 
-    def take_presence_startup_info(self) -> List[UserPresenceState]:
+    def take_presence_startup_info(self) -> list[UserPresenceState]:
         active_on_startup = self._presence_on_startup
         self._presence_on_startup = []
         return active_on_startup

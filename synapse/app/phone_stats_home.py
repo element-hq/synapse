@@ -22,40 +22,35 @@ import logging
 import math
 import resource
 import sys
-from typing import TYPE_CHECKING, List, Mapping, Sized, Tuple
+from typing import TYPE_CHECKING, Mapping, Sized
 
 from prometheus_client import Gauge
 
 from twisted.internet import defer
 
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
-)
 from synapse.types import JsonDict
-from synapse.util.constants import ONE_HOUR_SECONDS, ONE_MINUTE_SECONDS
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger("synapse.app.homeserver")
 
-MILLISECONDS_PER_SECOND = 1000
-
-INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS = 5 * ONE_MINUTE_SECONDS
+INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME = Duration(minutes=5)
 """
 We wait 5 minutes to send the first set of stats as the server can be quite busy the
 first few minutes
 """
 
-PHONE_HOME_INTERVAL_SECONDS = 3 * ONE_HOUR_SECONDS
+PHONE_HOME_INTERVAL = Duration(hours=3)
 """
 Phone home stats are sent every 3 hours
 """
 
 # Contains the list of processes we will be monitoring
 # currently either 0 or 1
-_stats_process: List[Tuple[int, "resource.struct_rusage"]] = []
+_stats_process: list[tuple[int, "resource.struct_rusage"]] = []
 
 # Gauges to expose monthly active user control metrics
 current_mau_gauge = Gauge(
@@ -83,14 +78,12 @@ registered_reserved_users_mau_gauge = Gauge(
 def phone_stats_home(
     hs: "HomeServer",
     stats: JsonDict,
-    stats_process: List[Tuple[int, "resource.struct_rusage"]] = _stats_process,
+    stats_process: list[tuple[int, "resource.struct_rusage"]] = _stats_process,
 ) -> "defer.Deferred[None]":
-    server_name = hs.hostname
-
     async def _phone_stats_home(
         hs: "HomeServer",
         stats: JsonDict,
-        stats_process: List[Tuple[int, "resource.struct_rusage"]] = _stats_process,
+        stats_process: list[tuple[int, "resource.struct_rusage"]] = _stats_process,
     ) -> None:
         """Collect usage statistics and send them to the configured endpoint.
 
@@ -200,8 +193,8 @@ def phone_stats_home(
         except Exception as e:
             logger.warning("Error reporting stats: %s", e)
 
-    return run_as_background_process(
-        "phone_stats_home", server_name, _phone_stats_home, hs, stats, stats_process
+    return hs.run_as_background_process(
+        "phone_stats_home", _phone_stats_home, hs, stats, stats_process
     )
 
 
@@ -225,13 +218,13 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     # table will decrease
     clock.looping_call(
         hs.get_datastores().main.generate_user_daily_visits,
-        5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND,
+        Duration(minutes=5),
     )
 
     # monthly active user limiting functionality
     clock.looping_call(
         hs.get_datastores().main.reap_monthly_active_users,
-        ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND,
+        Duration(hours=1),
     )
     hs.get_datastores().main.reap_monthly_active_users()
 
@@ -263,32 +256,37 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
                 float(hs.config.server.max_mau_value)
             )
 
-        return run_as_background_process(
+        return hs.run_as_background_process(
             "generate_monthly_active_users",
-            server_name,
             _generate_monthly_active_users,
         )
 
     if hs.config.server.limit_usage_by_mau or hs.config.server.mau_stats_only:
         generate_monthly_active_users()
-        clock.looping_call(generate_monthly_active_users, 5 * 60 * 1000)
+        clock.looping_call(generate_monthly_active_users, Duration(minutes=5))
     # End of monthly active user settings
 
     if hs.config.metrics.report_stats:
         logger.info("Scheduling stats reporting for 3 hour intervals")
         clock.looping_call(
             phone_stats_home,
-            PHONE_HOME_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND,
+            PHONE_HOME_INTERVAL,
             hs,
             stats,
         )
 
         # We need to defer this init for the cases that we daemonize
         # otherwise the process ID we get is that of the non-daemon process
-        clock.call_later(0, performance_stats_init)
+        clock.call_later(
+            Duration(seconds=0),
+            performance_stats_init,
+        )
 
         # We wait 5 minutes to send the first set of stats as the server can
         # be quite busy the first few minutes
         clock.call_later(
-            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS, phone_stats_home, hs, stats
+            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME,
+            phone_stats_home,
+            hs,
+            stats,
         )

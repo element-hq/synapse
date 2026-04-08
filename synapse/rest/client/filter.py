@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import AuthError, NotFoundError, StoreError, SynapseError
 from synapse.http.server import HttpServer
@@ -48,7 +48,7 @@ class GetFilterRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, filter_id: str
-    ) -> Tuple[int, JsonMapping]:
+    ) -> tuple[int, JsonMapping]:
         target_user = UserID.from_string(user_id)
         requester = await self.auth.get_user_by_req(request)
 
@@ -87,7 +87,7 @@ class CreateFilterRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         target_user = UserID.from_string(user_id)
         requester = await self.auth.get_user_by_req(request)
 

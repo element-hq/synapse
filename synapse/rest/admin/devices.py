@@ -20,7 +20,7 @@
 #
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.http.servlet import (
@@ -56,7 +56,7 @@ class DeviceRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, device_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
@@ -76,7 +76,7 @@ class DeviceRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str, device_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
@@ -92,7 +92,7 @@ class DeviceRestServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, device_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
@@ -128,7 +128,7 @@ class DevicesRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
@@ -157,7 +157,7 @@ class DevicesRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """Creates a new device for the user."""
         await assert_requester_is_admin(self.auth, request)
 
@@ -201,7 +201,7 @@ class DeleteDevicesRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)

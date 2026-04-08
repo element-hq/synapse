@@ -12,7 +12,7 @@ The available account validity callbacks are:
 _First introduced in Synapse v1.39.0_
 
 ```python
-async def is_user_expired(user: str) -> Optional[bool]
+async def is_user_expired(user: str) -> bool | None
 ```
 
 Called when processing any authenticated request (except for logout requests). The module

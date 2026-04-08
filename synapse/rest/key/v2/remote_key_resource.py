@@ -21,13 +21,13 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING, Dict, Mapping, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Mapping
 
+from pydantic import ConfigDict, StrictInt, StrictStr
 from signedjson.sign import sign_json
 
 from twisted.web.server import Request
 
-from synapse._pydantic_compat import Extra, StrictInt, StrictStr
 from synapse.crypto.keyring import ServerKeyFetcher
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -38,8 +38,8 @@ from synapse.http.servlet import (
 from synapse.storage.keys import FetchKeyResultForRemote
 from synapse.types import JsonDict
 from synapse.types.rest import RequestBodyModel
-from synapse.util import json_decoder
 from synapse.util.async_helpers import yieldable_gather_results
+from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -48,10 +48,9 @@ logger = logging.getLogger(__name__)
 
 
 class _KeyQueryCriteriaDataModel(RequestBodyModel):
-    class Config:
-        extra = Extra.allow
+    model_config = ConfigDict(extra="allow")
 
-    minimum_valid_until_ts: Optional[StrictInt]
+    minimum_valid_until_ts: StrictInt | None
 
 
 class RemoteKey(RestServlet):
@@ -113,7 +112,7 @@ class RemoteKey(RestServlet):
     CATEGORY = "Federation requests"
 
     class PostBody(RequestBodyModel):
-        server_keys: Dict[StrictStr, Dict[StrictStr, _KeyQueryCriteriaDataModel]]
+        server_keys: dict[StrictStr, dict[StrictStr, _KeyQueryCriteriaDataModel]]
 
     def __init__(self, hs: "HomeServer"):
         self.fetcher = ServerKeyFetcher(hs)
@@ -143,8 +142,8 @@ class RemoteKey(RestServlet):
         )
 
     async def on_GET(
-        self, request: Request, server: str, key_id: Optional[str] = None
-    ) -> Tuple[int, JsonDict]:
+        self, request: Request, server: str, key_id: str | None = None
+    ) -> tuple[int, JsonDict]:
         if server and key_id:
             # Matrix 1.6 drops support for passing the key_id, this is incompatible
             # with earlier versions and is allowed in order to support both.
@@ -168,7 +167,7 @@ class RemoteKey(RestServlet):
 
         return 200, await self.query_keys(query, query_remote_on_cache_miss=True)
 
-    async def on_POST(self, request: Request) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: Request) -> tuple[int, JsonDict]:
         content = parse_and_validate_json_object_from_request(request, self.PostBody)
 
         query = content.server_keys
@@ -177,16 +176,16 @@ class RemoteKey(RestServlet):
 
     async def query_keys(
         self,
-        query: Dict[str, Dict[str, _KeyQueryCriteriaDataModel]],
+        query: dict[str, dict[str, _KeyQueryCriteriaDataModel]],
         query_remote_on_cache_miss: bool = False,
     ) -> JsonDict:
         logger.info("Handling query for keys %r", query)
 
-        server_keys: Dict[Tuple[str, str], Optional[FetchKeyResultForRemote]] = {}
+        server_keys: dict[tuple[str, str], FetchKeyResultForRemote | None] = {}
         for server_name, key_ids in query.items():
             if key_ids:
                 results: Mapping[
-                    str, Optional[FetchKeyResultForRemote]
+                    str, FetchKeyResultForRemote | None
                 ] = await self.store.get_server_keys_json_for_remote(
                     server_name, key_ids
                 )
@@ -199,13 +198,13 @@ class RemoteKey(RestServlet):
                 ((server_name, key_id), res) for key_id, res in results.items()
             )
 
-        json_results: Set[bytes] = set()
+        json_results: set[bytes] = set()
 
         time_now_ms = self.clock.time_msec()
 
         # Map server_name->key_id->int. Note that the value of the int is unused.
         # XXX: why don't we just use a set?
-        cache_misses: Dict[str, Dict[str, int]] = {}
+        cache_misses: dict[str, dict[str, int]] = {}
         for (server_name, key_id), key_result in server_keys.items():
             if not query[server_name]:
                 # all keys were requested. Just return what we have without worrying

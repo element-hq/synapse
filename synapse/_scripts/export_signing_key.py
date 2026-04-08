@@ -22,13 +22,13 @@
 import argparse
 import sys
 import time
-from typing import NoReturn, Optional
+from typing import NoReturn
 
 from signedjson.key import encode_verify_key_base64, get_verify_key, read_signing_keys
 from signedjson.types import VerifyKey
 
 
-def exit(status: int = 0, message: Optional[str] = None) -> NoReturn:
+def exit(status: int = 0, message: str | None = None) -> NoReturn:
     if message:
         print(message, file=sys.stderr)
     sys.exit(status)

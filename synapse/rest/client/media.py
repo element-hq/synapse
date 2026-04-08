@@ -22,8 +22,8 @@
 
 import logging
 import re
-from typing import Optional
 
+from synapse.api.errors import Codes, cs_error
 from synapse.http.server import (
     HttpServer,
     respond_with_json,
@@ -231,12 +231,28 @@ class DownloadResource(RestServlet):
         request: SynapseRequest,
         server_name: str,
         media_id: str,
-        file_name: Optional[str] = None,
+        file_name: str | None = None,
     ) -> None:
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)
 
-        await self.auth.get_user_by_req(request, allow_guest=True)
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        is_admin = await self.auth.is_server_admin(requester)
+        bypass_quarantine = False
+        if parse_string(request, "admin_unsafely_bypass_quarantine") == "true":
+            if is_admin:
+                logger.info("Admin bypassing quarantine for media download")
+                bypass_quarantine = True
+            else:
+                respond_with_json(
+                    request,
+                    400,
+                    cs_error(
+                        "Must be a server admin to bypass quarantine",
+                        code=Codes.UNKNOWN,
+                    ),
+                    send_cors=True,
+                )
 
         set_cors_headers(request)
         set_corp_headers(request)
@@ -260,7 +276,11 @@ class DownloadResource(RestServlet):
 
         if self._is_mine_server_name(server_name):
             await self.media_repo.get_local_media(
-                request, media_id, file_name, max_timeout_ms
+                request,
+                media_id,
+                file_name,
+                max_timeout_ms,
+                bypass_quarantine=bypass_quarantine,
             )
         else:
             ip_address = request.getClientAddress().host
@@ -272,6 +292,7 @@ class DownloadResource(RestServlet):
                 max_timeout_ms,
                 ip_address,
                 True,
+                bypass_quarantine=bypass_quarantine,
             )
 
 

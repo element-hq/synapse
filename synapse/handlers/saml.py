@@ -20,7 +20,7 @@
 #
 import logging
 import re
-from typing import TYPE_CHECKING, Callable, Dict, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Callable
 
 import attr
 import saml2
@@ -54,7 +54,7 @@ class Saml2SessionData:
     creation_time: int
     # The user interactive authentication session ID associated with this SAML
     # session (or None if this SAML session is for an initial login).
-    ui_auth_session_id: Optional[str] = None
+    ui_auth_session_id: str | None = None
 
 
 class SamlHandler:
@@ -90,7 +90,7 @@ class SamlHandler:
         self.idp_brand = hs.config.saml2.idp_brand
 
         # a map from saml session id to Saml2SessionData object
-        self._outstanding_requests_dict: Dict[str, Saml2SessionData] = {}
+        self._outstanding_requests_dict: dict[str, Saml2SessionData] = {}
 
         self._sso_handler = hs.get_sso_handler()
         self._sso_handler.register_identity_provider(self)
@@ -98,8 +98,8 @@ class SamlHandler:
     async def handle_redirect_request(
         self,
         request: SynapseRequest,
-        client_redirect_url: Optional[bytes],
-        ui_auth_session_id: Optional[str] = None,
+        client_redirect_url: bytes | None,
+        ui_auth_session_id: str | None = None,
     ) -> str:
         """Handle an incoming request to /login/sso/redirect
 
@@ -303,7 +303,7 @@ class SamlHandler:
                 emails=result.get("emails", []),
             )
 
-        async def grandfather_existing_users() -> Optional[str]:
+        async def grandfather_existing_users() -> str | None:
             # backwards-compatibility hack: see if there is an existing user with a
             # suitable mapping from the uid
             if (
@@ -341,7 +341,7 @@ class SamlHandler:
     def _remote_id_from_saml_response(
         self,
         saml2_auth: saml2.response.AuthnResponse,
-        client_redirect_url: Optional[str],
+        client_redirect_url: str | None,
     ) -> str:
         """Extract the unique remote id from a SAML2 AuthnResponse
 
@@ -393,7 +393,7 @@ def dot_replace_for_mxid(username: str) -> str:
     return username
 
 
-MXID_MAPPER_MAP: Dict[str, Callable[[str], str]] = {
+MXID_MAPPER_MAP: dict[str, Callable[[str], str]] = {
     "hexencode": map_username_to_mxid_localpart,
     "dotreplace": dot_replace_for_mxid,
 }
@@ -509,7 +509,7 @@ class DefaultSamlMappingProvider:
         return SamlConfig(mxid_source_attribute, mxid_mapper)
 
     @staticmethod
-    def get_saml_attributes(config: SamlConfig) -> Tuple[Set[str], Set[str]]:
+    def get_saml_attributes(config: SamlConfig) -> tuple[set[str], set[str]]:
         """Returns the required attributes of a SAML
 
         Args:

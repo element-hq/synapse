@@ -21,6 +21,7 @@
 
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import Mock
 
 from synapse.config import ConfigError
@@ -231,7 +232,10 @@ class MSC3861OAuthDelegation(TestCase):
         reactor, clock = get_clock()
         with self.assertRaises(ConfigError):
             setup_test_homeserver(
-                self.addCleanup, reactor=reactor, clock=clock, config=config
+                cleanup_func=self.addCleanup,
+                config=config,
+                reactor=reactor,
+                clock=clock,
             )
 
     def test_jwt_auth_cannot_be_enabled(self) -> None:
@@ -306,7 +310,9 @@ class MasAuthDelegation(TestCase):
     def test_secret_and_secret_path_are_mutually_exclusive(self) -> None:
         with tempfile.NamedTemporaryFile() as f:
             self.config_dict["matrix_authentication_service"]["secret"] = "verysecret"
-            self.config_dict["matrix_authentication_service"]["secret_path"] = f.name
+            self.config_dict["matrix_authentication_service"]["secret_path"] = Path(
+                f.name
+            )
             with self.assertRaises(ConfigError):
                 self.parse_config()
 
@@ -314,13 +320,15 @@ class MasAuthDelegation(TestCase):
         with tempfile.NamedTemporaryFile(buffering=0) as f:
             f.write(b"53C237")
             del self.config_dict["matrix_authentication_service"]["secret"]
-            self.config_dict["matrix_authentication_service"]["secret_path"] = f.name
+            self.config_dict["matrix_authentication_service"]["secret_path"] = Path(
+                f.name
+            )
             config = self.parse_config()
             self.assertEqual(config.mas.secret(), "53C237")
 
     def test_secret_path_must_exist(self) -> None:
         del self.config_dict["matrix_authentication_service"]["secret"]
-        self.config_dict["matrix_authentication_service"]["secret_path"] = (
+        self.config_dict["matrix_authentication_service"]["secret_path"] = Path(
             "/not/a/valid/file"
         )
         with self.assertRaises(ConfigError):
@@ -395,7 +403,10 @@ class MasAuthDelegation(TestCase):
         reactor, clock = get_clock()
         with self.assertRaises(ConfigError):
             setup_test_homeserver(
-                self.addCleanup, reactor=reactor, clock=clock, config=config
+                cleanup_func=self.addCleanup,
+                config=config,
+                reactor=reactor,
+                clock=clock,
             )
 
     @skip_unless(HAS_AUTHLIB, "requires authlib")

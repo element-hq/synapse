@@ -21,7 +21,7 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -59,6 +59,7 @@ from synapse.http.site import SynapseRequest
 from synapse.metrics import SERVER_NAME_LABEL, threepid_send_requests
 from synapse.push.mailer import Mailer
 from synapse.types import JsonDict
+from synapse.util.duration import Duration
 from synapse.util.msisdn import phone_number_to_msisdn
 from synapse.util.ratelimitutils import FederationRateLimiter
 from synapse.util.stringutils import assert_valid_client_secret, random_string
@@ -85,6 +86,7 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
         self.server_name = hs.hostname
         self.identity_handler = hs.get_identity_handler()
         self.config = hs.config
+        self._registration_enabled = hs.config.registration.enable_registration
 
         if self.hs.config.email.can_verify_email:
             self.registration_mailer = Mailer(
@@ -100,7 +102,7 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
                 template_text=self.config.email.email_already_in_use_template_text,
             )
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if not self.hs.config.email.can_verify_email:
             logger.warning(
                 "Email registration has been disabled due to lack of email config"
@@ -108,6 +110,14 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
             raise SynapseError(
                 400, "Email-based registration has been disabled on this server"
             )
+
+        if not self._registration_enabled:
+            raise SynapseError(
+                403,
+                "Registration is disabled on this homeserver",
+                Codes.FORBIDDEN,
+            )
+
         body = parse_json_object_from_request(request)
 
         assert_params_in_dict(body, ["client_secret", "email", "send_attempt"])
@@ -150,7 +160,9 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
                 # Also wait for some random amount of time between 100ms and 1s to make it
                 # look like we did something.
                 await self.already_in_use_mailer.send_already_in_use_mail(email)
-                await self.hs.get_clock().sleep(random.randint(1, 10) / 10)
+                await self.hs.get_clock().sleep(
+                    Duration(milliseconds=random.randint(100, 1000))
+                )
                 return 200, {"sid": random_string(16)}
 
             raise SynapseError(400, "Email is already in use", Codes.THREEPID_IN_USE)
@@ -183,7 +195,7 @@ class MsisdnRegisterRequestTokenRestServlet(RestServlet):
         self.server_name = hs.hostname
         self.identity_handler = hs.get_identity_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_json_object_from_request(request)
 
         assert_params_in_dict(
@@ -219,7 +231,9 @@ class MsisdnRegisterRequestTokenRestServlet(RestServlet):
                 # comments for request_token_inhibit_3pid_errors.
                 # Also wait for some random amount of time between 100ms and 1s to make it
                 # look like we did something.
-                await self.hs.get_clock().sleep(random.randint(1, 10) / 10)
+                await self.hs.get_clock().sleep(
+                    Duration(milliseconds=random.randint(100, 1000))
+                )
                 return 200, {"sid": random_string(16)}
 
             raise SynapseError(
@@ -352,7 +366,7 @@ class UsernameAvailabilityRestServlet(RestServlet):
             hs.config.registration.inhibit_user_in_use_error
         )
 
-    async def on_GET(self, request: Request) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: Request) -> tuple[int, JsonDict]:
         if not self.hs.config.registration.enable_registration:
             raise SynapseError(
                 403, "Registration has been disabled", errcode=Codes.FORBIDDEN
@@ -402,7 +416,7 @@ class RegistrationTokenValidityRestServlet(RestServlet):
             cfg=hs.config.ratelimiting.rc_registration_token_validity,
         )
 
-    async def on_GET(self, request: Request) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: Request) -> tuple[int, JsonDict]:
         await self.ratelimiter.ratelimit(None, (request.getClientAddress().host,))
 
         if not self.hs.config.registration.enable_registration:
@@ -453,7 +467,7 @@ class RegisterRestServlet(RestServlet):
         )
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_json_object_from_request(request)
 
         client_addr = request.getClientAddress().host
@@ -782,8 +796,12 @@ class RegisterRestServlet(RestServlet):
         user_id, appservice = await self.registration_handler.appservice_register(
             username, as_token
         )
-        if appservice.msc4190_device_management:
-            body["inhibit_login"] = True
+        if appservice.msc4190_device_management and not body.get("inhibit_login"):
+            raise SynapseError(
+                400,
+                "This appservice has MSC4190 enabled, so the inhibit_login parameter must be set to true.",
+                errcode=Codes.APPSERVICE_LOGIN_UNSUPPORTED,
+            )
 
         return await self._create_registration_details(
             user_id,
@@ -848,8 +866,8 @@ class RegisterRestServlet(RestServlet):
         return result
 
     async def _do_guest_registration(
-        self, params: JsonDict, address: Optional[str] = None
-    ) -> Tuple[int, JsonDict]:
+        self, params: JsonDict, address: str | None = None
+    ) -> tuple[int, JsonDict]:
         if not self.hs.config.registration.allow_guest_access:
             raise SynapseError(403, "Guest access is disabled")
         user_id = await self.registration_handler.register_user(
@@ -909,7 +927,7 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
         self.ratelimiter = hs.get_registration_ratelimiter()
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_json_object_from_request(request)
 
         client_addr = request.getClientAddress().host
@@ -922,6 +940,12 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
                 403,
                 "Registration has been disabled. Only m.login.application_service registrations are allowed.",
                 errcode=Codes.FORBIDDEN,
+            )
+        if not body.get("inhibit_login"):
+            raise SynapseError(
+                400,
+                "This server uses OAuth2, so the inhibit_login parameter must be set to true for appservice registrations.",
+                errcode=Codes.APPSERVICE_LOGIN_UNSUPPORTED,
             )
 
         kind = parse_string(request, "kind", default="user")
@@ -960,7 +984,7 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
 
 def _calculate_registration_flows(
     config: HomeServerConfig, auth_handler: AuthHandler
-) -> List[List[str]]:
+) -> list[list[str]]:
     """Get a suitable flows list for registration
 
     Args:

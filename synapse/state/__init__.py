@@ -26,15 +26,9 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    DefaultDict,
-    Dict,
-    FrozenSet,
-    List,
     Mapping,
     Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 import attr
@@ -60,6 +54,7 @@ from synapse.types import StateMap, StrCollection
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure, measure_func
 from synapse.util.stringutils import shortstr
 
@@ -102,10 +97,10 @@ class _StateCacheEntry:
 
     def __init__(
         self,
-        state: Optional[StateMap[str]],
-        state_group: Optional[int],
-        prev_group: Optional[int] = None,
-        delta_ids: Optional[StateMap[str]] = None,
+        state: StateMap[str] | None,
+        state_group: int | None,
+        prev_group: int | None = None,
+        delta_ids: StateMap[str] | None = None,
     ):
         if state is None and state_group is None and prev_group is None:
             raise Exception("One of state, state_group or prev_group must be not None")
@@ -117,7 +112,7 @@ class _StateCacheEntry:
         #
         # This can be None if we have a `state_group` (as then we can fetch the
         # state from the DB.)
-        self._state: Optional[StateMap[str]] = (
+        self._state: StateMap[str] | None = (
             immutabledict(state) if state is not None else None
         )
 
@@ -126,7 +121,7 @@ class _StateCacheEntry:
         self.state_group = state_group
 
         self.prev_group = prev_group
-        self.delta_ids: Optional[StateMap[str]] = (
+        self.delta_ids: StateMap[str] | None = (
             immutabledict(delta_ids) if delta_ids is not None else None
         )
 
@@ -212,7 +207,7 @@ class StateHandler:
         self,
         room_id: str,
         event_ids: StrCollection,
-        state_filter: Optional[StateFilter] = None,
+        state_filter: StateFilter | None = None,
         await_full_state: bool = True,
     ) -> StateMap[str]:
         """Fetch the state after each of the given event IDs. Resolve them and return.
@@ -246,7 +241,7 @@ class StateHandler:
 
     async def get_current_user_ids_in_room(
         self, room_id: str, latest_event_ids: StrCollection
-    ) -> Set[str]:
+    ) -> set[str]:
         """
         Get the users IDs who are currently in a room.
 
@@ -271,7 +266,7 @@ class StateHandler:
 
     async def get_hosts_in_room_at_events(
         self, room_id: str, event_ids: StrCollection
-    ) -> FrozenSet[str]:
+    ) -> frozenset[str]:
         """Get the hosts that were in a room at the given event ids
 
         Args:
@@ -289,9 +284,9 @@ class StateHandler:
     async def calculate_context_info(
         self,
         event: EventBase,
-        state_ids_before_event: Optional[StateMap[str]] = None,
-        partial_state: Optional[bool] = None,
-        state_group_before_event: Optional[int] = None,
+        state_ids_before_event: StateMap[str] | None = None,
+        partial_state: bool | None = None,
+        state_group_before_event: int | None = None,
     ) -> UnpersistedEventContextBase:
         """
         Calulates the contents of an unpersisted event context, other than the current
@@ -462,8 +457,8 @@ class StateHandler:
     async def compute_event_context(
         self,
         event: EventBase,
-        state_ids_before_event: Optional[StateMap[str]] = None,
-        partial_state: Optional[bool] = None,
+        state_ids_before_event: StateMap[str] | None = None,
+        partial_state: bool | None = None,
     ) -> EventContext:
         """Build an EventContext structure for a non-outlier event.
 
@@ -642,13 +637,16 @@ class StateResolutionHandler:
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
 
-        self.resolve_linearizer = Linearizer(name="state_resolve_lock")
+        self.resolve_linearizer = Linearizer(
+            name="state_resolve_lock", clock=self.clock
+        )
 
         # dict of set of event_ids -> _StateCacheEntry.
-        self._state_cache: ExpiringCache[FrozenSet[int], _StateCacheEntry] = (
+        self._state_cache: ExpiringCache[frozenset[int], _StateCacheEntry] = (
             ExpiringCache(
                 cache_name="state_cache",
                 server_name=self.server_name,
+                hs=hs,
                 clock=self.clock,
                 max_len=100000,
                 expiry_ms=EVICTION_TIMEOUT_SECONDS * 1000,
@@ -662,18 +660,18 @@ class StateResolutionHandler:
         #
 
         # tracks the amount of work done on state res per room
-        self._state_res_metrics: DefaultDict[str, _StateResMetrics] = defaultdict(
+        self._state_res_metrics: defaultdict[str, _StateResMetrics] = defaultdict(
             _StateResMetrics
         )
 
-        self.clock.looping_call(self._report_metrics, 120 * 1000)
+        self.clock.looping_call(self._report_metrics, Duration(minutes=2))
 
     async def resolve_state_groups(
         self,
         room_id: str,
         room_version: str,
         state_groups_ids: Mapping[int, StateMap[str]],
-        event_map: Optional[Dict[str, EventBase]],
+        event_map: dict[str, EventBase] | None,
         state_res_store: "StateResolutionStore",
     ) -> _StateCacheEntry:
         """Resolves conflicts between a set of state groups
@@ -773,7 +771,7 @@ class StateResolutionHandler:
         room_id: str,
         room_version: str,
         state_sets: Sequence[StateMap[str]],
-        event_map: Optional[Dict[str, EventBase]],
+        event_map: dict[str, EventBase] | None,
         state_res_store: "StateResolutionStore",
     ) -> StateMap[str]:
         """
@@ -881,7 +879,7 @@ class StateResolutionHandler:
         items = self._state_res_metrics.items()
 
         # log the N biggest rooms
-        biggest: List[Tuple[str, _StateResMetrics]] = heapq.nlargest(
+        biggest: list[tuple[str, _StateResMetrics]] = heapq.nlargest(
             n_to_log, items, key=lambda i: extract_key(i[1])
         )
         metrics_logger.debug(
@@ -937,7 +935,7 @@ def _make_state_cache_entry(
 
     # failing that, look for the closest match.
     prev_group = None
-    delta_ids: Optional[StateMap[str]] = None
+    delta_ids: StateMap[str] | None = None
 
     for old_group, old_state in state_groups_ids.items():
         if old_state.keys() - new_state.keys():
@@ -972,7 +970,7 @@ class StateResolutionStore:
 
     def get_events(
         self, event_ids: StrCollection, allow_rejected: bool = False
-    ) -> Awaitable[Dict[str, EventBase]]:
+    ) -> Awaitable[dict[str, EventBase]]:
         """Get events from the database
 
         Args:
@@ -993,9 +991,9 @@ class StateResolutionStore:
     def get_auth_chain_difference(
         self,
         room_id: str,
-        state_sets: List[Set[str]],
-        conflicted_state: Optional[Set[str]],
-        additional_backwards_reachable_conflicted_events: Optional[Set[str]],
+        state_sets: list[set[str]],
+        conflicted_state: set[str] | None,
+        additional_backwards_reachable_conflicted_events: set[str] | None,
     ) -> Awaitable[StateDifference]:
         """ "Given sets of state events figure out the auth chain difference (as
         per state res v2 algorithm).

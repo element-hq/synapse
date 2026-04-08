@@ -23,7 +23,7 @@
 
 import logging
 import re
-from typing import Any, Awaitable, Callable, Iterable, Pattern, Tuple, TypeVar, cast
+from typing import Any, Awaitable, Callable, Iterable, Pattern, TypeVar, cast
 
 from synapse.api.errors import InteractiveAuthIncompleteError
 from synapse.api.urls import CLIENT_API_PREFIX
@@ -86,7 +86,7 @@ def set_timeline_upper_limit(filter_json: JsonDict, filter_timeline_limit: int) 
         )
 
 
-C = TypeVar("C", bound=Callable[..., Awaitable[Tuple[int, JsonDict]]])
+C = TypeVar("C", bound=Callable[..., Awaitable[tuple[int, JsonDict]]])
 
 
 def interactive_auth_handler(orig: C) -> C:
@@ -104,7 +104,7 @@ def interactive_auth_handler(orig: C) -> C:
         await self.auth_handler.check_auth
     """
 
-    async def wrapped(*args: Any, **kwargs: Any) -> Tuple[int, JsonDict]:
+    async def wrapped(*args: Any, **kwargs: Any) -> tuple[int, JsonDict]:
         try:
             return await orig(*args, **kwargs)
         except InteractiveAuthIncompleteError as e:

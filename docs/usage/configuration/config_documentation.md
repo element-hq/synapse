@@ -653,6 +653,8 @@ This setting has the following sub-options:
 
 * `endpoint` (string): The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted. Defaults to `"http://localhost:8080"`.
 
+* `force_http2` (boolean): Force HTTP/2 over plaintext (H2C) when connecting to MAS. MAS supports this natively, but a reverse proxy between Synapse and MAS may not. Defaults to `false`.
+
 * `secret` (string|null): A shared secret that will be used to authenticate requests from and to MAS.
 
 * `secret_path` (string|null): Alternative to `secret`, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
@@ -956,7 +958,7 @@ server_context: context
 ---
 ### `limit_remote_rooms`
 
-*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. Room complexity is an arbitrary measure based on factors such as the number of users in the room.
+*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. In Synapse, the complexity of a room is measured by the number of current state events in a room, divided by 500. "Current" here means the latest state, i.e. if a user joins, then leaves, then joins, that will count as 1 current `m.room.member` state event.
 
 This setting has the following sub-options:
 
@@ -2006,9 +2008,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_reports:
-  per_user:
-    per_second: 1.0
-    burst_count: 5.0
+  per_second: 1.0
+  burst_count: 5.0
 ```
 
 Example configuration:
@@ -2031,9 +2032,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_room_creation:
-  per_user:
-    per_second: 0.016
-    burst_count: 10.0
+  per_second: 0.016
+  burst_count: 10.0
 ```
 
 Example configuration:
@@ -2041,6 +2041,25 @@ Example configuration:
 rc_room_creation:
   per_second: 1.0
   burst_count: 5.0
+```
+---
+### `rc_user_directory`
+
+*(object)* This option allows admins to ratelimit searches in the user directory.
+
+_Added in Synapse 1.145.0._
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_user_directory:
+  per_second: 0.016
+  burst_count: 200.0
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
@@ -2092,6 +2111,16 @@ enable_authenticated_media: false
 Example configuration:
 ```yaml
 enable_media_repo: false
+```
+---
+### `enable_local_media_storage`
+
+*(boolean)* Enable the local on-disk media storage provider. When disabled, media is stored only in configured `media_storage_providers` and temporary files are used for processing.
+**Warning:** If this option is set to `false` and no `media_storage_providers` are configured, all media requests will return 404 errors as there will be no storage backend available. Defaults to `true`.
+
+Example configuration:
+```yaml
+enable_local_media_storage: false
 ```
 ---
 ### `media_store_path`
@@ -2168,8 +2197,11 @@ max_upload_size: 60M
 ### `media_upload_limits`
 
 *(array)* A list of media upload limits defining how much data a given user can upload in a given time period.
+These limits are applied in addition to the `max_upload_size` limit above (which applies to individual uploads).
 
 An empty list means no limits are applied.
+
+These settings can be overridden using the `get_media_upload_limits_for_user` module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
 
 Defaults to `[]`.
 
@@ -2570,6 +2602,28 @@ turn_user_lifetime: 2h
 Example configuration:
 ```yaml
 turn_allow_guests: false
+```
+---
+### `matrix_rtc`
+
+*(object)* Options related to MatrixRTC. Defaults to `{}`.
+
+This setting has the following sub-options:
+
+* `transports` (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to `[]`.
+
+  Options for each entry include:
+
+  * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
+
+  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+
+Example configuration:
+```yaml
+matrix_rtc:
+  transports:
+  - type: livekit
+    livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```
 ---
 ## Registration
@@ -3792,7 +3846,7 @@ This setting has the following sub-options:
 
 * `localdb_enabled` (boolean): Set to false to disable authentication against the local password database. This is ignored if `enabled` is false, and is only useful if you have other `password_providers`. Defaults to `true`.
 
-* `pepper` (string|null): Set the value here to a secret random string for extra security. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
+* `pepper` (string|null): A secret random string that will be appended to user's passwords before they are hashed. This improves the security of short passwords. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
 
 * `policy` (object): Define and enforce a password policy, such as minimum lengths for passwords, etc. This is an implementation of MSC2000.
 
@@ -4432,7 +4486,7 @@ stream_writers:
 ---
 ### `outbound_federation_restricted_to`
 
-*(array)* When using workers, you can restrict outbound federation traffic to only go through a specific subset of workers. Any worker specified here must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.
+*(array)* You can restrict outbound federation traffic to only go through a specific subset of workers including the [Secure Border Gateway (SBG)](https://element.io/en/server-suite/secure-border-gateways). Any worker specified here (including the SBG) must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.
 
 Also see the [worker documentation](../../workers.md#restrict-outbound-federation-traffic-to-a-specific-set-of-workers) for more info.
 

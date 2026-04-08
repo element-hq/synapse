@@ -23,12 +23,13 @@ import logging
 import os
 import re
 import threading
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Mapping
 
 import attr
 
 from synapse.types import JsonDict
 from synapse.util.check_dependencies import check_requirements
+from synapse.util.duration import Duration
 
 from ._base import Config, ConfigError
 
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 _CACHE_PREFIX = "SYNAPSE_CACHE_FACTOR"
 
 # Map from canonicalised cache name to cache.
-_CACHES: Dict[str, Callable[[float], None]] = {}
+_CACHES: dict[str, Callable[[float], None]] = {}
 
 # a lock on the contents of _CACHES
 _CACHES_LOCK = threading.Lock()
@@ -53,7 +54,7 @@ class CacheProperties:
     default_factor_size: float = float(
         os.environ.get(_CACHE_PREFIX, _DEFAULT_FACTOR_SIZE)
     )
-    resize_all_caches_func: Optional[Callable[[], None]] = None
+    resize_all_caches_func: Callable[[], None] | None = None
 
 
 properties = CacheProperties()
@@ -104,11 +105,11 @@ class CacheConfig(Config):
     _environ: Mapping[str, str] = os.environ
 
     event_cache_size: int
-    cache_factors: Dict[str, float]
+    cache_factors: dict[str, float]
     global_factor: float
     track_memory_usage: bool
-    expiry_time_msec: Optional[int]
-    sync_response_cache_duration: int
+    expiry_time_msec: int | None
+    sync_response_cache_duration: Duration
 
     @staticmethod
     def reset() -> None:
@@ -207,8 +208,12 @@ class CacheConfig(Config):
             min_cache_ttl = self.cache_autotuning.get("min_cache_ttl")
             self.cache_autotuning["min_cache_ttl"] = self.parse_duration(min_cache_ttl)
 
-        self.sync_response_cache_duration = self.parse_duration(
+        sync_response_cache_duration_ms = self.parse_duration(
             cache_config.get("sync_response_cache_duration", "2m")
+        )
+
+        self.sync_response_cache_duration = Duration(
+            milliseconds=sync_response_cache_duration_ms
         )
 
     def resize_all_caches(self) -> None:

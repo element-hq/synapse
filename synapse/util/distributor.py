@@ -20,15 +20,12 @@
 #
 import logging
 from typing import (
+    TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
-    Dict,
     Generic,
-    List,
-    Optional,
     TypeVar,
-    Union,
 )
 
 from typing_extensions import ParamSpec
@@ -36,9 +33,12 @@ from typing_extensions import ParamSpec
 from twisted.internet import defer
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import UserID
 from synapse.util.async_helpers import maybe_awaitable
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
+
 
 logger = logging.getLogger(__name__)
 
@@ -58,15 +58,15 @@ class Distributor:
       model will do for today.
     """
 
-    def __init__(self, server_name: str) -> None:
+    def __init__(self, hs: "HomeServer") -> None:
         """
         Args:
             server_name: The homeserver name of the server (used to label metrics)
                 (this should be `hs.hostname`).
         """
-        self.server_name = server_name
-        self.signals: Dict[str, Signal] = {}
-        self.pre_registration: Dict[str, List[Callable]] = {}
+        self.hs = hs
+        self.signals: dict[str, Signal] = {}
+        self.pre_registration: dict[str, list[Callable]] = {}
 
     def declare(self, name: str) -> None:
         if name in self.signals:
@@ -97,8 +97,8 @@ class Distributor:
         if name not in self.signals:
             raise KeyError("%r does not have a signal named %s" % (self, name))
 
-        run_as_background_process(
-            name, self.server_name, self.signals[name].fire, *args, **kwargs
+        self.hs.run_as_background_process(
+            name, self.signals[name].fire, *args, **kwargs
         )
 
 
@@ -118,7 +118,7 @@ class Signal(Generic[P]):
 
     def __init__(self, name: str):
         self.name: str = name
-        self.observers: List[Callable[P, Any]] = []
+        self.observers: list[Callable[P, Any]] = []
 
     def observe(self, observer: Callable[P, Any]) -> None:
         """Adds a new callable to the observer list which will be invoked by
@@ -127,7 +127,7 @@ class Signal(Generic[P]):
         Each observer callable may return a Deferred."""
         self.observers.append(observer)
 
-    def fire(self, *args: P.args, **kwargs: P.kwargs) -> "defer.Deferred[List[Any]]":
+    def fire(self, *args: P.args, **kwargs: P.kwargs) -> "defer.Deferred[list[Any]]":
         """Invokes every callable in the observer list, passing in the args and
         kwargs. Exceptions thrown by observers are logged but ignored. It is
         not an error to fire a signal with no observers.
@@ -135,7 +135,7 @@ class Signal(Generic[P]):
         Returns a Deferred that will complete when all the observers have
         completed."""
 
-        async def do(observer: Callable[P, Union[R, Awaitable[R]]]) -> Optional[R]:
+        async def do(observer: Callable[P, R | Awaitable[R]]) -> R | None:
             try:
                 return await maybe_awaitable(observer(*args, **kwargs))
             except Exception as e:

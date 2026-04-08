@@ -30,7 +30,7 @@ from signedjson.sign import sign_json
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.util import json_encoder
+from synapse.util.json import json_encoder
 
 
 def main() -> None:

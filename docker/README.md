@@ -75,6 +75,9 @@ The following environment variables are supported in `generate` mode:
   particularly tricky.
 * `SYNAPSE_LOG_TESTING`: if set, Synapse will log additional information useful
   for testing.
+* `SYNAPSE_ENABLE_METRICS`: if set to `1`, the metrics listener will be enabled on the
+  main and worker processes. Defaults to `0` (disabled). The main process will listen on
+  port `19090` and workers on port `19091 + <worker index>`.
 
 ## Postgres
 

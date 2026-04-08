@@ -21,7 +21,7 @@
 import inspect
 import sys
 import traceback
-from typing import Any, Dict, Optional
+from typing import Any
 
 from twisted.conch import manhole_ssh
 from twisted.conch.insults import insults
@@ -71,7 +71,7 @@ EddTrx3TNpr1D5m/f+6mnXWrc8u9y1+GNx9yz889xMjIBTBI9KqaaOs=
 -----END RSA PRIVATE KEY-----"""
 
 
-def manhole(settings: ManholeConfig, globals: Dict[str, Any]) -> ServerFactory:
+def manhole(settings: ManholeConfig, globals: dict[str, Any]) -> ServerFactory:
     """Starts a ssh listener with password authentication using
     the given username and password. Clients connecting to the ssh
     listener will find themselves in a colored python shell with
@@ -130,7 +130,7 @@ class SynapseManhole(ColoredManhole):
 
 
 class SynapseManholeInterpreter(ManholeInterpreter):
-    def showsyntaxerror(self, filename: Optional[str] = None) -> None:
+    def showsyntaxerror(self, filename: str | None = None) -> None:
         """Display the syntax error that just occurred.
 
         Overrides the base implementation, ignoring sys.excepthook. We always want

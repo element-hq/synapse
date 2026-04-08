@@ -20,12 +20,12 @@
 #
 
 import secrets
-from typing import Generator, List, Tuple, cast
+from typing import Generator, cast
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -52,9 +52,9 @@ class UpdateUpsertManyTests(unittest.HomeserverTestCase):
             )
         )
 
-    def _dump_table_to_tuple(self) -> Generator[Tuple[int, str, str], None, None]:
+    def _dump_table_to_tuple(self) -> Generator[tuple[int, str, str], None, None]:
         yield from cast(
-            List[Tuple[int, str, str]],
+            list[tuple[int, str, str]],
             self.get_success(
                 self.storage.db_pool.simple_select_list(
                     self.table_name, None, ["id, username, value"]

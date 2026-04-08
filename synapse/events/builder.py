@@ -19,12 +19,12 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any
 
 import attr
 from signedjson.types import SigningKey
 
-from synapse.api.constants import MAX_DEPTH, EventTypes
+from synapse.api.constants import MAX_DEPTH, EventTypes, StickyEvent, StickyEventField
 from synapse.api.room_versions import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     EventFormatVersions,
@@ -38,7 +38,7 @@ from synapse.storage.databases.main import DataStore
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import EventID, JsonDict, StrCollection
 from synapse.types.state import StateFilter
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -83,18 +83,22 @@ class EventBuilder:
     room_version: RoomVersion
 
     # MSC4291 makes the room ID == the create event ID. This means the create event has no room_id.
-    room_id: Optional[str]
+    room_id: str | None
     type: str
     sender: str
 
     content: JsonDict = attr.Factory(dict)
     unsigned: JsonDict = attr.Factory(dict)
+    sticky: StickyEventField | None = None
+    """
+    Fields for MSC4354: Sticky Events
+    """
 
     # These only exist on a subset of events, so they raise AttributeError if
     # someone tries to get them when they don't exist.
-    _state_key: Optional[str] = None
-    _redacts: Optional[str] = None
-    _origin_server_ts: Optional[int] = None
+    _state_key: str | None = None
+    _redacts: str | None = None
+    _origin_server_ts: int | None = None
 
     internal_metadata: EventInternalMetadata = attr.Factory(
         lambda: EventInternalMetadata({})
@@ -125,9 +129,9 @@ class EventBuilder:
 
     async def build(
         self,
-        prev_event_ids: List[str],
-        auth_event_ids: Optional[List[str]],
-        depth: Optional[int] = None,
+        prev_event_ids: list[str],
+        auth_event_ids: list[str] | None,
+        depth: int | None = None,
     ) -> EventBase:
         """Transform into a fully signed and hashed event
 
@@ -205,8 +209,8 @@ class EventBuilder:
 
         format_version = self.room_version.event_format
         # The types of auth/prev events changes between event versions.
-        prev_events: Union[StrCollection, List[Tuple[str, Dict[str, str]]]]
-        auth_events: Union[List[str], List[Tuple[str, Dict[str, str]]]]
+        prev_events: StrCollection | list[tuple[str, dict[str, str]]]
+        auth_events: list[str] | list[tuple[str, dict[str, str]]]
         if format_version == EventFormatVersions.ROOM_V1_V2:
             auth_events = await self._store.add_event_hashes(auth_event_ids)
             prev_events = await self._store.add_event_hashes(prev_event_ids)
@@ -228,7 +232,7 @@ class EventBuilder:
         # the db)
         depth = min(depth, MAX_DEPTH)
 
-        event_dict: Dict[str, Any] = {
+        event_dict: dict[str, Any] = {
             "auth_events": auth_events,
             "prev_events": prev_events,
             "type": self.type,
@@ -268,6 +272,9 @@ class EventBuilder:
 
         if self._origin_server_ts is not None:
             event_dict["origin_server_ts"] = self._origin_server_ts
+
+        if self.sticky is not None:
+            event_dict[StickyEvent.EVENT_FIELD_NAME] = self.sticky
 
         return create_local_event_from_event_dict(
             clock=self._clock,
@@ -318,6 +325,7 @@ class EventBuilderFactory:
             unsigned=key_values.get("unsigned", {}),
             redacts=key_values.get("redacts", None),
             origin_server_ts=key_values.get("origin_server_ts", None),
+            sticky=key_values.get(StickyEvent.EVENT_FIELD_NAME, None),
         )
 
 
@@ -327,7 +335,7 @@ def create_local_event_from_event_dict(
     signing_key: SigningKey,
     room_version: RoomVersion,
     event_dict: JsonDict,
-    internal_metadata_dict: Optional[JsonDict] = None,
+    internal_metadata_dict: JsonDict | None = None,
 ) -> EventBase:
     """Takes a fully formed event dict, ensuring that fields like
     `origin_server_ts` have correct values for a locally produced event,

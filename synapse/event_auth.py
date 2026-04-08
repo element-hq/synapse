@@ -20,21 +20,18 @@
 #
 #
 
+import collections
 import collections.abc
 import logging
 import typing
+from collections import ChainMap
 from typing import (
     Any,
-    ChainMap,
-    Dict,
     Iterable,
-    List,
     Mapping,
     MutableMapping,
     Optional,
     Protocol,
-    Set,
-    Tuple,
     Union,
     cast,
 )
@@ -63,13 +60,13 @@ from synapse.api.room_versions import (
     KNOWN_ROOM_VERSIONS,
     EventFormatVersions,
     RoomVersion,
-    RoomVersions,
 )
 from synapse.events import is_creator
 from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
     MutableStateMap,
+    StateKey,
     StateMap,
     StrCollection,
     UserID,
@@ -91,7 +88,7 @@ class _EventSourceStore(Protocol):
         redact_behaviour: EventRedactBehaviour,
         get_prev_content: bool = False,
         allow_rejected: bool = False,
-    ) -> Dict[str, "EventBase"]: ...
+    ) -> dict[str, "EventBase"]: ...
 
 
 def validate_event_for_room_version(event: "EventBase") -> None:
@@ -164,7 +161,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
 async def check_state_independent_auth_rules(
     store: _EventSourceStore,
     event: "EventBase",
-    batched_auth_events: Optional[Mapping[str, "EventBase"]] = None,
+    batched_auth_events: Mapping[str, "EventBase"] | None = None,
 ) -> None:
     """Check that an event complies with auth rules that are independent of room state
 
@@ -385,25 +382,6 @@ def check_state_dependent_auth_rules(
     logger.debug("Allowing! %s", event)
 
 
-# Set of room versions where Synapse did not apply event key size limits
-# in bytes, but rather in codepoints.
-# In these room versions, we are more lenient with event size validation.
-LENIENT_EVENT_BYTE_LIMITS_ROOM_VERSIONS = {
-    RoomVersions.V1,
-    RoomVersions.V2,
-    RoomVersions.V3,
-    RoomVersions.V4,
-    RoomVersions.V5,
-    RoomVersions.V6,
-    RoomVersions.V7,
-    RoomVersions.V8,
-    RoomVersions.V9,
-    RoomVersions.V10,
-    RoomVersions.MSC1767v10,
-    RoomVersions.MSC3757v10,
-}
-
-
 def _check_size_limits(event: "EventBase") -> None:
     """
     Checks the size limits in a PDU.
@@ -442,9 +420,7 @@ def _check_size_limits(event: "EventBase") -> None:
     if len(event.event_id) > 255:
         raise EventSizeError("'event_id' too large", unpersistable=True)
 
-    strict_byte_limits = (
-        event.room_version not in LENIENT_EVENT_BYTE_LIMITS_ROOM_VERSIONS
-    )
+    strict_byte_limits = event.room_version.strict_event_byte_limits_room_versions
 
     # Byte size check: if these fail, then be lenient to avoid breaking rooms.
     if len(event.user_id.encode("utf-8")) > 255:
@@ -792,7 +768,7 @@ def _check_joined_room(
 
 
 def get_send_level(
-    etype: str, state_key: Optional[str], power_levels_event: Optional["EventBase"]
+    etype: str, state_key: str | None, power_levels_event: Optional["EventBase"]
 ) -> int:
     """Get the power level required to send an event of a given type
 
@@ -993,7 +969,7 @@ def _check_power_levels(
     user_level = get_user_power_level(event.user_id, auth_events)
 
     # Check other levels:
-    levels_to_check: List[Tuple[str, Optional[str]]] = [
+    levels_to_check: list[tuple[str, str | None]] = [
         ("users_default", None),
         ("events_default", None),
         ("state_default", None),
@@ -1031,12 +1007,12 @@ def _check_power_levels(
             new_loc = new_loc.get(dir, {})
 
         if level_to_check in old_loc:
-            old_level: Optional[int] = int(old_loc[level_to_check])
+            old_level: int | None = int(old_loc[level_to_check])
         else:
             old_level = None
 
         if level_to_check in new_loc:
-            new_level: Optional[int] = int(new_loc[level_to_check])
+            new_level: int | None = int(new_loc[level_to_check])
         else:
             new_level = None
 
@@ -1191,7 +1167,7 @@ def _verify_third_party_invite(
     return False
 
 
-def get_public_keys(invite_event: "EventBase") -> List[Dict[str, Any]]:
+def get_public_keys(invite_event: "EventBase") -> list[dict[str, Any]]:
     public_keys = []
     if "public_key" in invite_event.content:
         o = {"public_key": invite_event.content["public_key"]}
@@ -1204,8 +1180,8 @@ def get_public_keys(invite_event: "EventBase") -> List[Dict[str, Any]]:
 
 def auth_types_for_event(
     room_version: RoomVersion, event: Union["EventBase", "EventBuilder"]
-) -> Set[Tuple[str, str]]:
-    """Given an event, return a list of (EventType, StateKey) that may be
+) -> set[StateKey]:
+    """Given an event, return a list of (state event type, state key) that may be
     needed to auth the event. The returned list may be a superset of what
     would actually be required depending on the full state of the room.
 

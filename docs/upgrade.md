@@ -117,6 +117,151 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.150.0
+
+## Removal of the `systemd` pip extra
+
+The `matrix-synapse[systemd]` pip extra has been removed.
+If you use `systemd.journal.JournalHandler` in your logging configuration
+(e.g. `contrib/systemd/log_config.yaml`), you must now install
+`systemd-python` manually in Synapse's runtime environment:
+
+```bash
+pip install systemd-python
+```
+
+No action is needed if you do not use journal logging, or if you installed
+Synapse from the Debian packages (which handle this automatically).
+
+## Module API: Deprecation of the `deactivation` parameter in the `set_displayname` method
+
+If you have Synapse modules installed that use the `set_displayname` method to change
+the display name of your users, please ensure that it doesn't pass the optional
+`deactivation` parameter.
+
+This parameter is now deprecated and it is intended to be removed in 2027.
+No immediate change is necessary, however once the parameter is removed, modules passing it will produce errors.
+[Issue #19546](https://github.com/element-hq/synapse/issues/19546) tracks this removal.
+
+From this version, when the parameter is passed, an error such as
+``Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: False). This will break in 2027.`` will be logged. The method will otherwise continue to work.
+
+## Updated request log format (`Processed request: ...`)
+
+The [request log format](usage/administration/request_log.md) has slightly changed to
+include `ru=(...)` and `db=(...)` labels to better disambiguate the number groupings.
+Previously, these values appeared without labels.
+
+This only matters if you have third-party tooling that parses the Synapse logs.
+
+# Upgrading to v1.146.0
+
+## Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka
+
+Ubuntu 25.04 Plucky Puffin [is end-of-life as of 17 Jan
+2026](https://endoflife.date/ubuntu). This release drops support for Ubuntu
+25.04, and in its place adds support for Ubuntu 25.10 Questing Quokka.
+
+## Removal of MSC2697 (Legacy) Dehydrated devices
+
+The endpoints for
+[MSC2697](https://github.com/matrix-org/matrix-spec-proposals/pull/2697) have now
+been removed, since the MSC is closed. Developers who rely on this feature should
+migrate to [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814)
+which introduces support for a newer version of dehydrated devices.
+
+# Upgrading to v1.144.0
+
+## Worker support for unstable MSC4140 `/restart` endpoint
+
+The following unstable endpoint pattern may now be routed to worker processes:
+
+```
+^/_matrix/client/unstable/org.matrix.msc4140/delayed_events/.*/restart$
+```
+
+## Unstable mutual rooms endpoint is now behind an experimental feature flag
+
+The unstable mutual rooms endpoint from
+[MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666)
+(`/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`) is now
+disabled by default.  If you rely on this unstable endpoint, you must now set
+`experimental_features.msc2666_enabled: true` in your configuration to keep
+using it.
+
+# Upgrading to v1.143.0
+
+## Dropping support for PostgreSQL 13
+
+In line with our [deprecation policy](deprecation_policy.md), we've dropped
+support for PostgreSQL 13, as it is no longer supported upstream.
+This release of Synapse requires PostgreSQL 14+.
+
+# Upgrading to v1.142.0
+
+## Python 3.10+ is now required
+
+The minimum supported Python version has been increased from v3.9 to v3.10.
+You will need Python 3.10+ to run Synapse v1.142.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+## SQLite 3.40.0+ is now required
+
+The minimum supported SQLite version has been increased from 3.27.0 to 3.40.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+
+# Upgrading to v1.141.0
+
+## Docker images now based on Debian `trixie` with Python 3.13
+
+The Docker images are now based on Debian `trixie` and use Python 3.13. If you
+are using the Docker images as a base image you may need to e.g. adjust the
+paths you mount any additional Python packages at.
+
+# Upgrading to v1.140.0
+
+## Users of `synapse-s3-storage-provider` must update the module to `v1.6.0`
+
+Deployments that make use of the
+[synapse-s3-storage-provider](https://github.com/matrix-org/synapse-s3-storage-provider/)
+module must update it to
+[v1.6.0](https://github.com/matrix-org/synapse-s3-storage-provider/releases/tag/v1.6.0),
+otherwise users will be unable to upload or download media.
+
+# Upgrading to v1.139.0
+
+## `/register` requests from old application service implementations may break when using MAS
+
+Application Services that do not set `inhibit_login=true` when calling `POST
+/_matrix/client/v3/register` will receive the error
+`IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED` in response. This is a
+result of [MSC4190: Device management for application
+services](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) which
+adds new endpoints for application services to create encryption-ready devices
+with other than `/login` or `/register` without `inhibit_login=true`.
+
+If an application service you use starts to fail with the mentioned error,
+ensure it is up to date. If it is, then kindly let the author know that they
+need to update their implementation to call `/register` with
+`inhibit_login=true`.
+
+# Upgrading to v1.138.2
+
+## Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin
+
+Ubuntu 24.10 Oracular Oriole [has been end-of-life since 10 Jul
+2025](https://endoflife.date/ubuntu). This release drops support for Ubuntu
+24.10, and in its place adds support for Ubuntu 25.04 Plucky Puffin.
+
+This notice also applies to the v1.139.0 release.
+
 # Upgrading to v1.136.0
 
 ## Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`
@@ -736,7 +881,7 @@ the names of Prometheus metrics.
 If you want to test your changes before legacy names are disabled by default,
 you may specify `enable_legacy_metrics: false` in your homeserver configuration.
 
-A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html?highlight=metrics%20deprecated#renaming-of-metrics--deprecation-of-old-names-in-12).
+A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12).
 
 
 ## Deprecation of the `generate_short_term_login_token` module API method
@@ -2331,7 +2476,7 @@ back to v1.3.1, subject to the following:
 
 Some counter metrics have been renamed, with the old names deprecated.
 See [the metrics
-documentation](metrics-howto.md#renaming-of-metrics--deprecation-of-old-names-in-12)
+documentation](https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12)
 for details.
 
 # Upgrading to v1.1.0

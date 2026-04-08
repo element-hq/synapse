@@ -22,7 +22,7 @@
 import logging
 import time
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, Tuple
+from typing import TYPE_CHECKING, Any
 
 from synapse.api.errors import (
     CodeMessageException,
@@ -58,7 +58,7 @@ class AppservicePingRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, appservice_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         if not requester.app_service:
@@ -97,7 +97,7 @@ class AppservicePingRestServlet(RestServlet):
                 Codes.AS_PING_CONNECTION_TIMEOUT,
             )
         except CodeMessageException as e:
-            additional_fields: Dict[str, Any] = {"status": e.code}
+            additional_fields: dict[str, Any] = {"status": e.code}
             if isinstance(e, HttpResponseException):
                 try:
                     additional_fields["body"] = e.response.decode("utf-8")

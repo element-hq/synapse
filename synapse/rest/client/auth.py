@@ -67,7 +67,11 @@ class AuthRestServlet(RestServlet):
         if not session:
             raise SynapseError(400, "No session supplied")
 
-        if stagetype == "org.matrix.cross_signing_reset":
+        # We support the unstable (`org.matrix.cross_signing_reset`) name from MSC4312 until
+        # enough clients have adopted the stable name (`m.oauth`).
+        # Note: `org.matrix.cross_signing_reset` *is* the stable name of the *action* in the
+        # authorization server metadata. The unstable status only applies to the UIA stage name.
+        if stagetype == "m.oauth" or stagetype == "org.matrix.cross_signing_reset":
             if self.hs.config.mas.enabled:
                 assert isinstance(self.auth, MasDelegatedAuth)
 

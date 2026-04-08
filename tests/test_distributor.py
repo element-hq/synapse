@@ -26,9 +26,10 @@ from synapse.util.distributor import Distributor
 from . import unittest
 
 
-class DistributorTestCase(unittest.TestCase):
+class DistributorTestCase(unittest.HomeserverTestCase):
     def setUp(self) -> None:
-        self.dist = Distributor(server_name="test_server")
+        super().setUp()
+        self.dist = Distributor(hs=self.hs)
 
     def test_signal_dispatch(self) -> None:
         self.dist.declare("alert")

@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 import synapse.server
 from synapse.api.constants import EventTypes
@@ -36,8 +36,8 @@ async def inject_member_event(
     room_id: str,
     sender: str,
     membership: str,
-    target: Optional[str] = None,
-    extra_content: Optional[dict] = None,
+    target: str | None = None,
+    extra_content: dict | None = None,
     **kwargs: Any,
 ) -> EventBase:
     """Inject a membership event into a room."""
@@ -61,8 +61,8 @@ async def inject_member_event(
 
 async def inject_event(
     hs: synapse.server.HomeServer,
-    room_version: Optional[str] = None,
-    prev_event_ids: Optional[List[str]] = None,
+    room_version: str | None = None,
+    prev_event_ids: list[str] | None = None,
     **kwargs: Any,
 ) -> EventBase:
     """Inject a generic event into a room
@@ -86,10 +86,10 @@ async def inject_event(
 
 async def create_event(
     hs: synapse.server.HomeServer,
-    room_version: Optional[str] = None,
-    prev_event_ids: Optional[List[str]] = None,
+    room_version: str | None = None,
+    prev_event_ids: list[str] | None = None,
     **kwargs: Any,
-) -> Tuple[EventBase, EventContext]:
+) -> tuple[EventBase, EventContext]:
     if room_version is None:
         room_version = await hs.get_datastores().main.get_room_version_id(
             kwargs["room_id"]
