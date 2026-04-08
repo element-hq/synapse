@@ -86,12 +86,18 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(_AdminMediaTests):
 
         # Upload two distinct media items so we can quarantine one. If they shared content,
         # then the quarantine-by-hash code would hit both.
-        _unaffected_media_response = self.helper.upload_media(b"first content", tok=admin_user_tok, expect_code=200)
+        _unaffected_media_response = self.helper.upload_media(
+            b"first content", tok=admin_user_tok, expect_code=200
+        )
         quarantined_media_uri = self.helper.upload_media(
             b"second content", tok=admin_user_tok, expect_code=200
         )["content_uri"]
-        quarantined_media_origin_and_media_id = quarantined_media_uri[6:]  # cut off 'mxc://'
-        quarantined_media_origin, quarantined_media_id = quarantined_media_origin_and_media_id.split("/")
+        quarantined_media_origin_and_media_id = quarantined_media_uri[
+            6:
+        ]  # cut off 'mxc://'
+        quarantined_media_origin, quarantined_media_id = (
+            quarantined_media_origin_and_media_id.split("/")
+        )
 
         # Ideally we'd also upload remote media to ensure that gets picked up, but that's
         # a little tricky to set up in the test here. We hope that local and remote media
@@ -115,6 +121,7 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(_AdminMediaTests):
         # Do that table clear we mentioned above
         def _wipe_table(txn: Cursor) -> None:
             txn.execute("DELETE FROM quarantined_media_changes")
+
         self.get_success(
             self.store.db_pool.runInteraction(
                 "test_populates_quarantined_only._wipe_table", _wipe_table
