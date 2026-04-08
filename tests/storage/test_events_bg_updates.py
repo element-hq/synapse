@@ -14,17 +14,21 @@
 #
 
 
+import signedjson.key
 from canonicaljson import encode_canonical_json
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.room_versions import RoomVersion, RoomVersions
+from synapse.rest import admin
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.storage.background_updates import BackgroundUpdater
 from synapse.types.storage import _BackgroundUpdates
 from synapse.util.clock import Clock
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, override_config
 
 
 class TestFixupMaxDepthCapBgUpdate(HomeserverTestCase):
@@ -287,3 +291,86 @@ class TestRedactionsRecheckBgUpdate(HomeserverTestCase):
         self.assertTrue(self._get_recheck("$redact5:test"))
         self.assertFalse(self._get_recheck("$redact6:test"))
         self.assertTrue(self._get_recheck("$redact7:test"))
+
+
+class TestResignEventsBgUpdate(HomeserverTestCase):
+    """Test the background update that re-signs events."""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.updates: BackgroundUpdater = self.hs.get_datastores().main.db_pool.updates
+        self.store = self.hs.get_datastores().main
+        self.db_pool = self.store.db_pool
+
+        self.room_id = "!testroom:example.com"
+
+    @override_config({"caches": {"global_factor": 1}, "event_cache_size": "999"})
+    def test_events_are_resigned_after_bg_update_runs(self) -> None:
+        """Test that the background update correctly re-signs existing events with the
+        new key"""
+
+        # Ensure all background updates have finished running
+        self.wait_for_background_updates()
+
+        # Set up a room with a local and remote user in it.
+        self.register_user("user", "pass")
+        token = self.login("user", "pass")
+
+        # Create new room
+        room_id = self.helper.create_room_as(
+            "user", room_version=RoomVersions.V12.identifier, tok=token
+        )
+
+        # Send a message
+        body = self.helper.send(room_id, body="Test", tok=token)
+
+        old_event = self.get_success(self.store.get_event(body["event_id"]))
+        old_key_id = f"{self.hs.signing_key.alg}:{self.hs.signing_key.version}"
+
+        # Ensure the message event is in the cache so that we test the cache is
+        # invalidated properly
+        res = self.store._get_event_cache.get_local((old_event.event_id,))
+        self.assertEqual(res.event, old_event, "Event not cached as expected.")  # type: ignore
+
+        # Ensure message event is signed with original signing key
+        self.assertIn(
+            old_key_id, old_event.signatures[self.hs.config.server.server_name]
+        )
+
+        # Generate a new signing key
+        self.hs.signing_key = signedjson.key.generate_signing_key("new-test-key")
+
+        # Reinsert the background update as it was already run at the start of
+        # the test.
+        self.get_success(
+            self.db_pool.simple_insert(
+                table="background_updates",
+                values={
+                    "update_name": "event_resign",
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.updates.start_doing_background_updates()
+        # Ensure the background updates have finished running
+        self.wait_for_background_updates()
+
+        # Get the event from the database again
+        new_event = self.get_success(self.store.get_event(body["event_id"]))
+        new_key_id = f"{self.hs.signing_key.alg}:{self.hs.signing_key.version}"
+
+        # Ensure message event is signed with new signing key, and not with the original
+        # signing key
+        self.assertNotIn(
+            old_key_id, new_event.signatures[self.hs.config.server.server_name]
+        )
+        self.assertIn(
+            new_key_id, new_event.signatures[self.hs.config.server.server_name]
+        )
