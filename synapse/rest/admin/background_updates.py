@@ -150,6 +150,8 @@ class BackgroundUpdateStartJobRestServlet(RestServlet):
                     "populate_user_directory_process_users",
                 ),
             ]
+        elif job_name == "event_resign":
+            jobs = [("event_resign", "{}", "")]
         else:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Invalid job_name")
 
