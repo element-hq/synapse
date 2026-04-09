@@ -250,6 +250,7 @@ class ListQuarantineChanges(RestServlet):
         from_id = parse_integer(request, "from", default=0)
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
 
+        # Validate the `from` token
         max_id = await self.store.get_max_allocated_quarantined_media_stream_id()
         if from_id > max_id:
             # The caller is trying to get future data, which we don't allow because
