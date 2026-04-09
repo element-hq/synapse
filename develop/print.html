@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5ec416dc.js";
+            window.path_to_searchindex_js = "searchindex-fce8fe59.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -20266,6 +20266,8 @@ Readers must also advance their record of the writer’s current position for th
 necessary registration and event handling.</p>
 <p><strong>Create your stream:</strong></p>
 <ul>
+<li>Create a Postgres-specific database delta file to <a href="https://github.com/element-hq/synapse/blob/35b55e962aa0bed3b2da5a3c12e3783ddf7604ca/synapse/storage/schema/main/delta/93/01_sticky_events_seq.sql.postgres#L14-L18">add a new <code>SEQUENCE</code></a> (this will be referenced by the <code>MultiWriterIdGenerator</code> below).</li>
+<li>Update <code>synapse/_scripts/synapse_port_db.py</code> so it knows about your new <code>SEQUENCE</code>: <a href="https://github.com/element-hq/synapse/blob/35b55e962aa0bed3b2da5a3c12e3783ddf7604ca/synapse/_scripts/synapse_port_db.py#L883C24-L888">add a new <code>_setup_sequence(...)</code></a></li>
 <li><a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/replication/tcp/streams/_base.py#L728">create a stream class and stream row class</a>
 <ul>
 <li>will need an <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L75">ID generator</a>
