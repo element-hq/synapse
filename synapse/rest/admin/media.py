@@ -249,9 +249,9 @@ class ListQuarantineChanges(RestServlet):
 
         from_id = parse_integer(request, "from", default=0)
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
-        to_id = await self.store.get_max_quarantined_media_stream_id()
 
-        if to_id < from_id:
+        max_id = await self.store.get_max_quarantined_media_stream_id()
+        if from_id > max_id:
             # The caller is trying to get future data, which isn't possible.
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
@@ -275,6 +275,7 @@ class ListQuarantineChanges(RestServlet):
                 errcode=Codes.UNKNOWN,
             )
 
+        to_id = await self.store.get_current_quarantined_media_stream_id()
         changes = await self.store.get_quarantined_media_changes(
             from_id=from_id,
             to_id=to_id,
