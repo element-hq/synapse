@@ -249,6 +249,15 @@ class ListQuarantineChanges(RestServlet):
 
         from_id = parse_integer(request, "from", default=0)
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
+        to_id = await self.store.get_current_quarantined_media_stream_id()
+
+        if to_id < from_id:
+            # The caller is trying to get future data, which isn't possible.
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "The `from` position is ahead of the currently persisted position.",
+                errcode=Codes.INVALID_PARAM,
+            )
 
         # We need to wait to ensure that our current worker is actually caught up with
         # the stream position, otherwise we might not return what we think we're returning.
@@ -262,7 +271,6 @@ class ListQuarantineChanges(RestServlet):
                 errcode=Codes.UNKNOWN,
             )
 
-        to_id = await self.store.get_current_quarantined_media_stream_id()
         changes = await self.store.get_quarantined_media_changes(
             from_id=from_id,
             to_id=to_id,

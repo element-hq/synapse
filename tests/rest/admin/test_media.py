@@ -879,8 +879,8 @@ class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
             "/_synapse/admin/v1/media/quarantine_changes?from=900000",
             access_token=self.admin_user_tok,
         )
-        self.assertEqual(500, channel.code, msg=channel.json_body)
-        self.assertEqual(Codes.UNKNOWN, channel.json_body["errcode"])
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
 
 class QuarantineMediaByIDTestCase(_AdminMediaTests):
