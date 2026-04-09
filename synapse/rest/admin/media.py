@@ -255,7 +255,11 @@ class ListQuarantineChanges(RestServlet):
             # The caller is trying to get future data, which isn't possible.
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
-                "The `from` position is ahead of the currently persisted position.",
+                "The `from` token is considered invalid because it includes stream positions "
+                "greater than the furthest persisted position across all of the workers."
+                "This indicates either a Synapse programming error (as we should never hand out "
+                "invalid future tokens) or a fabricated `from` token. If you've modified the token, "
+                "you can try paginating from the beginning again.",
                 errcode=Codes.INVALID_PARAM,
             )
 
