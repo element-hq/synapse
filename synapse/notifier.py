@@ -864,8 +864,9 @@ class Notifier:
         original_stream_token = stream_token
         max_token = await self.event_sources.bound_future_token(stream_token)
         assert stream_token.is_before_or_eq(max_token), (
-            f"Unable to wait for invalid future stream token (token={original_stream_token} has positions "
-            "ahead of our max persisted position {max_token})"
+            f"Refusing to wait for invalid future stream token (token={original_stream_token} "
+            "that has positions ahead of our max persisted position {max_token}) "
+            "(Synapse programming error)"
         )
 
         # Start waiting until we've caught up to the `stream_token`
@@ -927,8 +928,9 @@ class Notifier:
         # bad patterns upstream where people can continue to use the unbounded token.
         max_persisted_position = await id_gen.get_max_allocated_token()
         assert max_persisted_position >= token.get_max_stream_pos(), (
-            f"Unable to wait for invalid future token (token={token} has positions "
-            "ahead of our max persisted position {max_persisted_position})"
+            f"Refusing to wait for invalid future token (token={token} "
+            "that has positions ahead of our max persisted position {max_persisted_position}) "
+            "(Synapse programming error)"
         )
 
         # Start waiting until we've caught up to the `stream_token`
