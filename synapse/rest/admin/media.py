@@ -250,9 +250,13 @@ class ListQuarantineChanges(RestServlet):
         from_id = parse_integer(request, "from", default=0)
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
 
-        max_id = await self.store.get_max_quarantined_media_stream_id()
+        max_id = await self.store.get_max_allocated_quarantined_media_stream_id()
         if from_id > max_id:
-            # The caller is trying to get future data, which isn't possible.
+            # The caller is trying to get future data, which we don't allow because
+            # we know it's an invalid state that should never happen. We could
+            # wait until we reach the token but we might as well now waste our
+            # resources on that which is why `wait_for_quarantined_media_stream_id(...)`
+            # has assertions around this.
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "The `from` token is considered invalid because it includes stream positions "
