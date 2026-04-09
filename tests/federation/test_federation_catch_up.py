@@ -153,7 +153,6 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
         )
 
         self.helper.send(room, "wombats!", tok=u1_token)
-        self.pump()
 
         lsso_1 = self.get_success(
             self.hs.get_datastores().main.get_destination_last_successful_stream_ordering(

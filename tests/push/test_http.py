@@ -159,9 +159,6 @@ class HTTPPusherTests(HomeserverTestCase):
         self.assertEqual(len(pushers), 1)
         last_stream_ordering = pushers[0].last_stream_ordering
 
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
-
         # It hasn't succeeded yet, so the stream ordering shouldn't have moved
         pushers = list(
             self.get_success(
@@ -182,7 +179,6 @@ class HTTPPusherTests(HomeserverTestCase):
 
         # Make the push succeed
         self.push_attempts[0][0].callback({})
-        self.pump()
 
         # The stream ordering has increased
         pushers = list(
@@ -205,7 +201,6 @@ class HTTPPusherTests(HomeserverTestCase):
 
         # Make the second push succeed
         self.push_attempts[1][0].callback({})
-        self.pump()
 
         # The stream ordering has increased, again
         pushers = list(
@@ -284,12 +279,8 @@ class HTTPPusherTests(HomeserverTestCase):
             tok=other_access_token,
         )
 
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
-
         # Make the push succeed
         self.push_attempts[0][0].callback({})
-        self.pump()
 
         # Check our push made it with high priority
         self.assertEqual(len(self.push_attempts), 1)
@@ -308,7 +299,6 @@ class HTTPPusherTests(HomeserverTestCase):
 
         # Check no push notifications are sent regarding the membership changes
         # (that would confuse the test)
-        self.pump()
         self.assertEqual(len(self.push_attempts), 1)
 
         # Send another encrypted event
@@ -330,8 +320,6 @@ class HTTPPusherTests(HomeserverTestCase):
             tok=other_access_token,
         )
 
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
         self.assertEqual(len(self.push_attempts), 2)
         self.assertEqual(
             self.push_attempts[1][1], "http://example.com/_matrix/push/v1/notify"
@@ -385,12 +373,8 @@ class HTTPPusherTests(HomeserverTestCase):
         # Send a message
         self.helper.send(room, body="Hi!", tok=other_access_token)
 
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
-
         # Make the push succeed
         self.push_attempts[0][0].callback({})
-        self.pump()
 
         # Check our push made it with high priority — this is a one-to-one room
         self.assertEqual(len(self.push_attempts), 1)
@@ -406,14 +390,11 @@ class HTTPPusherTests(HomeserverTestCase):
 
         # Check no push notifications are sent regarding the membership changes
         # (that would confuse the test)
-        self.pump()
         self.assertEqual(len(self.push_attempts), 1)
 
         # Send another event
         self.helper.send(room, body="Welcome!", tok=other_access_token)
 
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
         self.assertEqual(len(self.push_attempts), 2)
         self.assertEqual(
             self.push_attempts[1][1], "http://example.com/_matrix/push/v1/notify"
@@ -472,12 +453,8 @@ class HTTPPusherTests(HomeserverTestCase):
         # Send a message
         self.helper.send(room, body="Oh, user, hello!", tok=other_access_token)
 
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
-
         # Make the push succeed
         self.push_attempts[0][0].callback({})
-        self.pump()
 
         # Check our push made it with high priority
         self.assertEqual(len(self.push_attempts), 1)
@@ -489,8 +466,6 @@ class HTTPPusherTests(HomeserverTestCase):
         # Send another event, this time with no mention
         self.helper.send(room, body="Are you there?", tok=other_access_token)
 
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
         self.assertEqual(len(self.push_attempts), 2)
         self.assertEqual(
             self.push_attempts[1][1], "http://example.com/_matrix/push/v1/notify"
@@ -554,12 +529,8 @@ class HTTPPusherTests(HomeserverTestCase):
             tok=other_access_token,
         )
 
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
-
         # Make the push succeed
         self.push_attempts[0][0].callback({})
-        self.pump()
 
         # Check our push made it with high priority
         self.assertEqual(len(self.push_attempts), 1)
@@ -573,8 +544,6 @@ class HTTPPusherTests(HomeserverTestCase):
             room, body="@room the spider is gone", tok=yet_another_access_token
         )
 
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
         self.assertEqual(len(self.push_attempts), 2)
         self.assertEqual(
             self.push_attempts[1][1], "http://example.com/_matrix/push/v1/notify"
@@ -703,7 +672,6 @@ class HTTPPusherTests(HomeserverTestCase):
         self.helper.send(room_id, body="HELLO???", tok=other_access_token)
 
     def _advance_time_and_make_push_succeed(self, expected_push_attempts: int) -> None:
-        self.pump()
         self.push_attempts[expected_push_attempts - 1][0].callback({})
 
     def _check_push_attempt(
@@ -1084,7 +1052,6 @@ class HTTPPusherTests(HomeserverTestCase):
                 index += 1
 
             self.reactor.advance(1)
-            self.pump()
 
         self.assertEqual(len(self.push_attempts), 11)
 
@@ -1150,7 +1117,6 @@ class HTTPPusherTests(HomeserverTestCase):
         self.helper.send(room, body="Hi!", tok=other_access_token)
 
         # Advance time a bit, so the pusher will register something has happened
-        self.pump()
 
         # One push was attempted to be sent
         self.assertEqual(len(self.push_attempts), 1)
@@ -1218,17 +1184,14 @@ class HTTPPusherTests(HomeserverTestCase):
             self.push_attempts[0][2]["notification"]["content"]["body"], "Message 1"
         )
         self.push_attempts[0][0].callback({})
-        self.pump()
 
         # Send another message, this time it fails
         self.helper.send(room, body="Message 2", tok=other_access_token)
         self.assertEqual(len(self.push_attempts), 2)
         self.push_attempts[1][0].errback(Exception("couldn't connect"))
-        self.pump()
 
         # Sending yet another message doesn't trigger a push immediately
         self.helper.send(room, body="Message 3", tok=other_access_token)
-        self.pump()
         self.assertEqual(len(self.push_attempts), 2)
 
         # .. but waiting for a bit will cause more pushes

@@ -97,7 +97,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
             access_token=self.access_token,
             await_result=False,
         )
-        self.pump()
 
         clients = self.reactor.tcpClients
         self.assertGreaterEqual(len(clients), 1)
@@ -161,8 +160,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request.write(b"Hello!")
         request.finish()
 
-        self.pump(0.1)
-
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.result["body"], b"Hello!")
 
@@ -187,8 +184,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(b"Hello!")
         request1.finish()
 
-        self.pump(0.1)
-
         self.assertEqual(channel1.code, 200, channel1.result["body"])
         self.assertEqual(channel1.result["body"], b"Hello!")
 
@@ -197,8 +192,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request2.responseHeaders.setRawHeaders(b"Content-Type", [b"text/plain"])
         request2.write(b"Hello!")
         request2.finish()
-
-        self.pump(0.1)
 
         self.assertEqual(channel2.code, 200, channel2.result["body"])
         self.assertEqual(channel2.result["body"], b"Hello!")
@@ -233,8 +226,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(b"Hello!")
         request1.finish()
 
-        self.pump(0.1)
-
         # With local storage disabled and no storage providers,
         # we expect a 404 error
         self.assertEqual(channel1.code, 404, channel1.result["body"])
@@ -244,8 +235,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request2.responseHeaders.setRawHeaders(b"Content-Type", [b"text/plain"])
         request2.write(b"Hello!")
         request2.finish()
-
-        self.pump(0.1)
 
         # Same for the second request
         self.assertEqual(channel2.code, 404, channel2.result["body"])
@@ -273,8 +262,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(SMALL_PNG)
         request1.finish()
 
-        self.pump(0.1)
-
         self.assertEqual(channel1.code, 200, channel1.result["body"])
         self.assertEqual(channel1.result["body"], SMALL_PNG)
 
@@ -282,8 +269,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request2.responseHeaders.setRawHeaders(b"Content-Type", [b"image/png"])
         request2.write(SMALL_PNG)
         request2.finish()
-
-        self.pump(0.1)
 
         self.assertEqual(channel2.code, 200, channel2.result["body"])
         self.assertEqual(channel2.result["body"], SMALL_PNG)
@@ -359,7 +344,6 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
             access_token=self.access_token,
             await_result=False,
         )
-        self.pump()
 
         clients = self.reactor.tcpClients
         self.assertGreaterEqual(len(clients), 1)
@@ -425,8 +409,6 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request.write(self.file_data)
         request.finish()
 
-        self.pump(0.1)
-
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.result["body"], b"file_to_stream")
 
@@ -453,8 +435,6 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(self.file_data)
         request1.finish()
 
-        self.pump(0.1)
-
         self.assertEqual(channel1.code, 200, channel1.result["body"])
         self.assertEqual(channel1.result["body"], b"file_to_stream")
 
@@ -466,8 +446,6 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         )
         request2.write(self.file_data)
         request2.finish()
-
-        self.pump(0.1)
 
         self.assertEqual(channel2.code, 200, channel2.result["body"])
         self.assertEqual(channel2.result["body"], b"file_to_stream")
@@ -501,7 +479,6 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(self.file_data)
         request1.finish()
 
-        self.pump(0.1)
         # With local storage disabled and no storage providers,
         # we expect a 404 error
         self.assertEqual(channel1.code, 404, channel1.result["body"])
@@ -514,8 +491,6 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         )
         request2.write(self.file_data)
         request2.finish()
-
-        self.pump(0.1)
 
         self.assertEqual(channel2.code, 404, channel2.result["body"])
 
@@ -547,8 +522,6 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(b"\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n")
         request1.finish()
 
-        self.pump(0.1)
-
         self.assertEqual(channel1.code, 200, channel1.result["body"])
         self.assertEqual(channel1.result["body"], SMALL_PNG)
 
@@ -561,8 +534,6 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request2.write(SMALL_PNG)
         request2.write(b"\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n")
         request2.finish()
-
-        self.pump(0.1)
 
         self.assertEqual(channel2.code, 200, channel2.result["body"])
         self.assertEqual(channel2.result["body"], SMALL_PNG)
