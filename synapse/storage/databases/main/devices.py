@@ -674,19 +674,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 and device_id == self_signing_key_by_user[user_id]["device_id"]
             )
 
-            is_cross_signing_key_update = (
-                is_master_key_update or is_self_signing_key_update
-            )
-
-            if (
-                is_cross_signing_key_update
-                and user_id not in cross_signing_keys_by_user
-            ):
-                # This will give rise to 2 device updates.
-                # If we don't have the budget, stop here!
-                if remaining_length_budget < 2:
-                    break
-
             if is_master_key_update:
                 result = cross_signing_keys_by_user.setdefault(user_id, {})
                 result["master_key"] = master_key_by_user[user_id]["key_info"]
