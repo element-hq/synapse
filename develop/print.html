@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fce8fe59.js";
+            window.path_to_searchindex_js = "searchindex-214430a4.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -12668,6 +12668,12 @@ configured as stream writer for the <code>device_lists</code> stream:</p>
 ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
 ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 </code></pre>
+<h5 id="the-quarantined_media_changes-stream"><a class="header" href="#the-quarantined_media_changes-stream">The <code>quarantined_media_changes</code> stream</a></h5>
+<p>The <code>quarantined_media_changes</code> stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly to one of the workers
+configured as stream writer for the <code>quarantined_media_changes</code> stream:</p>
+<pre><code>^/_synapse/admin/v1/quarantine_media/.*$
+</code></pre>
 <h4 id="restrict-outbound-federation-traffic-to-a-specific-set-of-workers"><a class="header" href="#restrict-outbound-federation-traffic-to-a-specific-set-of-workers">Restrict outbound federation traffic to a specific set of workers</a></h4>
 <p>The
 <a href="#outbound_federation_restricted_to"><code>outbound_federation_restricted_to</code></a>
@@ -13703,6 +13709,31 @@ not want to get quarantined, especially when
 <p>Where <code>media_id</code> is in the  form of <code>abcdefg12345...</code>.</p>
 <p>Response:</p>
 <pre><code class="language-json">{}
+</code></pre>
+<h2 id="listing-quarantined-media-changes"><a class="header" href="#listing-quarantined-media-changes">Listing quarantined media changes</a></h2>
+<p>When media is quarantined or unquarantined, a change record is created in the
+database. This API returns those change records in the order they were created.</p>
+<p><strong>Note</strong>: This API should be considered <em>best-effort</em> and expected to have missing or
+duplicate records. Currently, this only captures any media explicitly (un)quarantined by
+the media quarantine admin API, and the other cases are tracked by
+https://github.com/element-hq/synapse/issues/19672. Historical media uploaded before
+Synapse 1.152.0 is backfilled in a background update on a best-effort basis.</p>
+<p>Each page has a maximum of 100 records. The first page has the oldest records,
+paginating forwards with each <code>next_batch</code> value.</p>
+<p>Request:</p>
+<pre><code>GET /_synapse/admin/v1/media/quarantine_changes?from=2
+</code></pre>
+<p>Where <code>from</code> is the <code>next_batch</code> value from a previous request. It is optional
+and defaults to the first page (the value <code>0</code>).</p>
+<p>Response:</p>
+<pre><code class="language-json">{
+  "next_batch": 4,
+  "changes": [
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": true },
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": false },
+    { "origin": "another.example.org", "media_id": "abcdefg12345...", "quarantined": true }
+  ]
+}
 </code></pre>
 <h1 id="delete-local-media"><a class="header" href="#delete-local-media">Delete local media</a></h1>
 <p>This API deletes the <em>local</em> media from the disk of your own server.
