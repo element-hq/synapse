@@ -86,13 +86,15 @@ class FlagExistingQuarantinedMediaBackgroundUpdatesTestCase(_AdminMediaTests):
 
         # Upload two distinct media items so we can quarantine one. If they shared content,
         # then the quarantine-by-hash code would hit both.
-        _unaffected_media_response = self.helper.upload_media(
+        _unaffected_media_upload_response = self.helper.upload_media(
             b"first content", tok=admin_user_tok, expect_code=200
         )
-        response = self.helper.upload_media(
+        # Upload the media we're going to quarantine
+        media_upload_response = self.helper.upload_media(
             b"second content", tok=admin_user_tok, expect_code=200
         )
-        quarantined_media_origin_and_media_id = response["content_uri"][
+        # Extract media ID from the response
+        quarantined_media_origin_and_media_id = media_upload_response["content_uri"][
             6:
         ]  # cut off 'mxc://'
         quarantined_media_origin, quarantined_media_id = (
