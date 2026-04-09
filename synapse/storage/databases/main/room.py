@@ -1302,13 +1302,13 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return local_media_ids
 
-    async def get_current_quarantined_media_stream_id(self) -> int:
-        """Gets the position of the quarantined media changes stream.
+    async def get_max_quarantined_media_stream_id(self) -> int:
+        """Gets the maximum position of the quarantined media changes stream.
 
         Returns:
-            int - the current stream ID
+            int - the maximum stream ID
         """
-        return self._quarantined_media_changes_id_gen.get_current_token()
+        return self._quarantined_media_changes_id_gen.get_max_allocated_token()
 
     async def wait_for_quarantined_media_stream_id(self, target_id: int) -> bool:
         """Waits until the quarantined media changes stream reaches the given stream ID.
