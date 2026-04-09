@@ -230,6 +230,70 @@ class UnquarantineMediaByID(RestServlet):
         return HTTPStatus.OK, {}
 
 
+class ListQuarantineChanges(RestServlet):
+    """Lists the quarantine changes to media.
+
+    Uses the pagination format described by https://spec.matrix.org/v1.18/appendices/#pagination
+    """
+
+    PATTERNS = admin_patterns("/media/quarantine_changes$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        self.auth = hs.get_auth()
+        self.server_name = hs.hostname
+        self.replication = hs.get_replication_data_handler()
+
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        await assert_requester_is_admin(self.auth, request)
+
+        from_id = parse_integer(request, "from", default=0)
+        limit = 100  # arbitrary; not enough to cause problems (hopefully)
+        to_id = await self.store.get_current_quarantined_media_stream_id()
+
+        if to_id < from_id:
+            # The caller is trying to get future data, which isn't possible.
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "The `from` position is ahead of the currently persisted position.",
+                errcode=Codes.INVALID_PARAM,
+            )
+
+        # We need to wait to ensure that our current worker is actually caught up with
+        # the stream position, otherwise we might not return what we think we're returning.
+        if not await self.store.wait_for_quarantined_media_stream_id(from_id):
+            raise SynapseError(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "Timed out while waiting for the worker serving this request to catch up to the given "
+                "`from` stream position. Assuming this is a valid `from` token, this indicates an issue "
+                "with Synapse or the worker deployment lagging behind the replication stream. Please try "
+                "the request again later.",
+                errcode=Codes.UNKNOWN,
+            )
+
+        changes = await self.store.get_quarantined_media_changes(
+            from_id=from_id,
+            to_id=to_id,
+            limit=limit,
+        )
+
+        serialized_changes = [
+            {
+                "origin": c.origin if c.origin is not None else self.server_name,
+                "media_id": c.media_id,
+                "quarantined": c.quarantined,
+            }
+            for c in changes
+        ]
+
+        # We know the last record will have the highest stream ID, so use that one. If
+        # there aren't any records, just return the `to_id` value because it'll be the
+        # furthest stream position possible.
+        next_batch = changes[-1].stream_id if len(changes) > 0 else to_id
+
+        return HTTPStatus.OK, {"next_batch": next_batch, "changes": serialized_changes}
+
+
 class ProtectMediaByID(RestServlet):
     """Protect local media from being quarantined."""
 
@@ -529,6 +593,7 @@ def register_servlets_for_media_repo(hs: "HomeServer", http_server: HttpServer) 
     QuarantineMediaByID(hs).register(http_server)
     UnquarantineMediaByID(hs).register(http_server)
     QuarantineMediaByUser(hs).register(http_server)
+    ListQuarantineChanges(hs).register(http_server)
     ProtectMediaByID(hs).register(http_server)
     UnprotectMediaByID(hs).register(http_server)
     ListMediaInRoom(hs).register(http_server)

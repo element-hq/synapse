@@ -21,6 +21,7 @@
 #
 
 import logging
+from dataclasses import dataclass
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
@@ -44,6 +45,7 @@ from synapse.api.errors import StoreError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase
+from synapse.replication.tcp.streams._base import QuarantinedMediaStream
 from synapse.replication.tcp.streams.partial_state import UnPartialStatedRoomStream
 from synapse.storage._base import (
     db_to_json,
@@ -58,8 +60,14 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
-from synapse.types import JsonDict, RetentionPolicy, StrCollection, ThirdPartyInstanceID
+from synapse.types import (
+    JsonDict,
+    RetentionPolicy,
+    StrCollection,
+    ThirdPartyInstanceID,
+)
 from synapse.util.caches.descriptors import cached, cachedList
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import MXC_REGEX
 
@@ -100,6 +108,14 @@ class RoomStats(LargestRoomStats):
     encryption: str | None
     federatable: bool
     public: bool
+
+
+@dataclass(frozen=True)
+class QuarantinedMediaUpdate:
+    stream_id: int  # for the quarantined_media_changes stream
+    origin: str
+    media_id: str
+    quarantined: bool
 
 
 class RoomSortOrder(Enum):
@@ -162,11 +178,169 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             writers=["master"],
         )
 
+        self._can_write_quarantined_media_changes = (
+            self._instance_name in hs.config.worker.writers.quarantined_media_changes
+        )
+
+        self._quarantined_media_changes_id_gen: MultiWriterIdGenerator = (
+            MultiWriterIdGenerator(
+                db_conn=db_conn,
+                db=database,
+                notifier=hs.get_replication_notifier(),
+                stream_name=QuarantinedMediaStream.NAME,
+                server_name=self.server_name,
+                instance_name=self._instance_name,
+                tables=[("quarantined_media_changes", "instance_name", "stream_id")],
+                sequence_name="quarantined_media_id_seq",
+                writers=hs.config.worker.writers.quarantined_media_changes,
+            )
+        )
+
+        # Register a background update to flag already-quarantined media in the quarantine
+        # media changes table. This is to populate the API endpoint which consumes the
+        # table with initial data that callers expect (namely, a list of currently
+        # quarantined media).
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA,
+            self._flag_existing_quarantined_media,
+        )
+
+    async def _flag_existing_quarantined_media(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """Background update function to flag existing already-quarantined media in
+        the new `quarantine_media_changes` table.
+
+        This only flags quarantined media as the API which reads the table is only
+        concerned with *changes* to the quarantined state - media does not start as
+        quarantined, so if it's already quarantined then it has changed state at
+        some point. Media which isn't quarantined has not changed state (as far as
+        this function can tell).
+
+        We don't know when the media was originally quarantined, so this inserts as if
+        the media was quarantined now and are processed in an arbitrary order.
+
+        Further, due to lack of timestamp or history, media which was quarantined then
+        unquarantined will not be picked up by this background task.
+
+        Function signature is as per `register_background_update_handler` requirements.
+
+        Args:
+            progress: The progress dictionary from the background update.
+            batch_size: The number of rows to process in each batch.
+
+        Returns:
+              The number of rows inserted.
+        """
+        # Note: we actually process 2x the batch_size per batch because we use it twice:
+        # once for the local_media_repository table, and once for the remote_media_cache
+        # table. This is fine though - we're still doing the work in batches.
+
+        # We track the progress for the local and remote tables separately just in case
+        # there are media ID collisions that would make a mess of `ORDER BY media_id
+        # LIMIT ?`. If there are collisions towards the end of the returned set, the LIMIT
+        # might cut off some rows and make a future call with `WHERE media_id > ?` miss
+        # them too. By tracking each table separately, we avoid this kind of issue.
+        last_local_media_id = progress.get("last_local_media_id", "")
+        last_remote_media_id = progress.get("last_remote_media_id", "")
+        last_remote_origin = progress.get("last_remote_origin", "")
+
+        # The `ORDER BY` here would normally miss records if the admin (un)quarantined a
+        # record, but that doesn't affect the background update because we also insert
+        # into the stream table upon quarantine status changing. Worst case is the admin
+        # newly quarantines some media, adding a row to the stream table, then we run
+        # over it again in the background update, adding a second row. Duplicate rows are
+        # non-issues for us.
+        #
+        # Another similar issue is if Synapse is downgraded partway through the background
+        # update then has more media quarantined. If Synapse is later upgraded again, the
+        # media that was quarantined while downgraded will only be imported if the media
+        # IDs are ordered higher than the last processed media ID. Media that has a lower
+        # ID will be skipped by the background update.
+        #
+        # Note: Already-quarantined media is indicated by the `quarantined_by` field being
+        # non-null. We only want quarantined media, per docstring above.
+        #
+        # This background update is considered *best effort* for the reasons above. Data
+        # might be missing or duplicated, and that's just going to have to be okay. This
+        # is further reinforced by not all changes being captured by the table anyway.
+        # See https://github.com/element-hq/synapse/issues/19672 for more details.
+        def flag_quarantined(txn: LoggingTransaction) -> int:
+            # It doesn't matter which order we do these in, as long as we do both of them.
+            txn.execute(
+                """
+                SELECT NULL AS media_origin, media_id
+                FROM local_media_repository
+                WHERE quarantined_by IS NOT NULL
+                    AND media_id > ?
+                ORDER BY media_id
+                LIMIT ?
+            """,
+                (last_local_media_id, batch_size),
+            )
+            local_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
+            if len(local_media_result) > 0:
+                self._insert_quarantine_changes_txn(txn, local_media_result, True)
+
+            # We use a >= ? on the media origin to avoid missing records when media IDs
+            # collide between origins (the table's unique constraint is on `(media_origin, media_id)`).
+            # Filtering by `(media_origin, media_id)` also makes sure we're using an index.
+            txn.execute(
+                """
+                SELECT media_origin, media_id
+                FROM remote_media_cache
+                WHERE quarantined_by IS NOT NULL
+                    AND media_origin >= ? AND media_id > ?
+                ORDER BY media_origin, media_id
+                LIMIT ?
+            """,
+                (last_remote_origin, last_remote_media_id, batch_size),
+            )
+            remote_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
+            if len(remote_media_result) > 0:
+                self._insert_quarantine_changes_txn(txn, remote_media_result, True)
+
+            self.db_pool.updates._background_update_progress_txn(
+                txn,
+                _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA,
+                {
+                    "last_local_media_id": local_media_result[-1][1]
+                    if len(local_media_result) > 0
+                    else last_local_media_id,
+                    "last_remote_media_id": remote_media_result[-1][1]
+                    if len(remote_media_result) > 0
+                    else last_remote_media_id,
+                    "last_remote_origin": remote_media_result[-1][0]
+                    if len(remote_media_result) > 0
+                    else last_remote_origin,
+                },
+            )
+
+            return len(local_media_result) + len(remote_media_result)
+
+        logger.info(
+            "Flagging existing quarantined media with local offset %s and remote offset %s/%s",
+            last_local_media_id,
+            last_remote_origin,
+            last_remote_media_id,
+        )
+        num_flagged = await self.db_pool.runInteraction(
+            "_flag_existing_quarantined_media.flag_quarantined",
+            flag_quarantined,
+        )
+        if num_flagged <= 0:  # probably never negative, but why trust computers?
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA
+            )
+        return num_flagged
+
     def process_replication_position(
         self, stream_name: str, instance_name: str, token: int
     ) -> None:
         if stream_name == UnPartialStatedRoomStream.NAME:
             self._un_partial_stated_rooms_stream_id_gen.advance(instance_name, token)
+        elif stream_name == QuarantinedMediaStream.NAME:
+            self._quarantined_media_changes_id_gen.advance(instance_name, token)
         return super().process_replication_position(stream_name, instance_name, token)
 
     async def store_room(
@@ -1128,6 +1302,180 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return local_media_ids
 
+    async def get_current_quarantined_media_stream_id(self) -> int:
+        """Gets the position of the quarantined media changes stream.
+
+        Returns:
+            int - the current stream ID
+        """
+        return self._quarantined_media_changes_id_gen.get_current_token()
+
+    async def wait_for_quarantined_media_stream_id(self, target_id: int) -> bool:
+        """Waits until the quarantined media changes stream reaches the given stream ID.
+
+        See https://github.com/element-hq/synapse/pull/19644 for more details.
+
+        TODO: Replace function and call sites with https://github.com/element-hq/synapse/pull/19644
+
+        Args:
+            target_id: The stream ID to wait for.
+
+        Returns:
+            True when caught up to the target stream ID.
+            False when timing out while waiting.
+        """
+        # We ideally would use something like `wait_for_stream_position` in the meantime,
+        # but that short circuits if the instance name matches the current instance name.
+        # Doing so means that if *another* writer is actually leading the to_id, then we'll
+        # assume that we're caught up when we aren't.
+        #
+        # NOTE: Because this is implemented to wait for stream positions by integer ID,
+        # we're technically waiting for *all* workers to catch up rather than just waiting
+        # for *our* worker to catch up. This is okay for now because the quarantined media
+        # stream should be pretty fast to update, and if it's not then the only thing we're
+        # affecting is an admin API that probably has a tool automatically retrying requests
+        # anyway. https://github.com/element-hq/synapse/pull/19644 does the waiting properly
+        # so this should be replaced by that (or similar).
+
+        # Get the minimum shared position/ID across all workers
+        current_id = self._quarantined_media_changes_id_gen.get_current_token()
+        if current_id >= target_id:
+            return True  # nothing to wait for: we're already caught up.
+
+        # "This should never happen". Tokens we hand out via the API should exist. If they
+        # don't, then we're in a bad state and need to explode.
+        max_persisted_position = (
+            await self._quarantined_media_changes_id_gen.get_max_allocated_token()
+        )
+        assert max_persisted_position >= target_id, (
+            f"Unable to wait for invalid future token (token={target_id} has positions "
+            f"ahead of our max persisted position={max_persisted_position})"
+        )
+
+        # Start waiting until we've caught up to the `stream_token`
+        start = self.clock.time_msec()
+        logged = False
+        while True:
+            # Like above, get the minimum shared ID across all workers
+            current_id = self._quarantined_media_changes_id_gen.get_current_token()
+            if current_id >= target_id:
+                return True
+
+            now = self.clock.time_msec()
+
+            # Timed out
+            if now - start > 10_000:
+                return False
+
+            if not logged:
+                logger.info(
+                    "Waiting for current token to reach %s; currently at %s",
+                    target_id,
+                    current_id,
+                )
+                logged = True
+
+            # TODO: be better
+            await self.clock.sleep(Duration(milliseconds=500))
+
+    async def get_quarantined_media_changes(
+        self, *, from_id: int, to_id: int, limit: int
+    ) -> list[QuarantinedMediaUpdate]:
+        """
+        Get updates to quarantined media in stream ordering since `from_id`.
+
+        Paginating forwards: from_id < x <= to_id, (ascending order)
+
+        Args:
+            from_id: The starting stream ID (exclusive)
+            to_id: The ending stream ID (inclusive)
+            limit: The maximum number of rows to return
+
+        Returns:
+            List of `QuarantinedMediaUpdate` update rows in stream ordering (ascending order).
+
+        Raises:
+            SynapseError: If waiting for `to_id` took too long.
+        """
+        if to_id < from_id:
+            # the to_id is behind the from_id, which means no results
+            return []
+
+        return await self.db_pool.runInteraction(
+            "get_quarantined_media_changes",
+            self._get_quarantined_media_changes_txn,
+            from_id,
+            to_id,
+            limit,
+        )
+
+    def _get_quarantined_media_changes_txn(
+        self, txn: LoggingTransaction, from_id: int, to_id: int, limit: int
+    ) -> list[QuarantinedMediaUpdate]:
+        txn.execute(
+            """
+            SELECT stream_id, origin, media_id, quarantined
+            FROM quarantined_media_changes
+            WHERE ? < stream_id AND stream_id <= ?
+            ORDER BY stream_id ASC
+            LIMIT ?
+            """,
+            (from_id, to_id, limit),
+        )
+        return [
+            QuarantinedMediaUpdate(
+                stream_id=stream_id,
+                origin=origin,
+                media_id=media_id,
+                quarantined=quarantined,
+            )
+            for stream_id, origin, media_id, quarantined in txn
+        ]
+
+    def _insert_quarantine_changes_txn(
+        self,
+        txn: LoggingTransaction,
+        origins_and_media_ids: list[tuple[str | None, str]],
+        quarantined: bool,
+    ) -> None:
+        """Records media being (un)quarantined in the stream.
+
+        Args:
+            txn (cursor)
+            origins_and_media_ids: The [origin, media_id] tuples to record. The origin
+                may be None if the media is local.
+            quarantined: Whether the media is being quarantined or unquarantined.
+        """
+        assert self._can_write_quarantined_media_changes
+        medias_with_stream_ids = zip(
+            origins_and_media_ids,
+            self._quarantined_media_changes_id_gen.get_next_mult_txn(
+                txn, len(origins_and_media_ids)
+            ),
+            strict=True,
+        )
+        self.db_pool.simple_insert_many_txn(
+            txn,
+            "quarantined_media_changes",
+            keys=(
+                "instance_name",
+                "stream_id",
+                "origin",
+                "media_id",
+                "quarantined",
+            ),
+            values=[
+                (
+                    self._instance_name,
+                    stream_id,
+                    origin,
+                    media_id,
+                    quarantined,
+                )
+                for (origin, media_id), stream_id in medias_with_stream_ids
+            ],
+        )
+
     def _quarantine_local_media_txn(
         self,
         txn: LoggingTransaction,
@@ -1161,9 +1509,23 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             if quarantined_by is not None:
                 sql += " AND safe_from_quarantine = FALSE"
 
+            sql += " RETURNING media_id"
+
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
-            # Note that a rowcount of -1 can be used to indicate no rows were affected.
-            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
+            media_ids_affected = txn.fetchall()
+            # We use `len(media_ids_affected)` here and below because both queries may
+            # affect fewer or more rows than the `media_ids` input. For example, if the
+            # media_ids point to already-quarantined media, then nothing was updated.
+            # Similarly, the below query might find more media than the `media_ids`
+            # because it's searching for hashes instead.
+            total_media_quarantined += len(media_ids_affected)
+            if len(media_ids_affected) > 0:
+                # Flag media that was newly (un)quarantined in the changes table.
+                self._insert_quarantine_changes_txn(
+                    txn,
+                    [(None, media_id) for (media_id,) in media_ids_affected],
+                    quarantined_by is not None,
+                )
 
         # Update any media that was identified via hash.
         if hashes:
@@ -1178,8 +1540,17 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             if quarantined_by is not None:
                 sql += " AND safe_from_quarantine = FALSE"
 
+            sql += " RETURNING media_id"
+
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
-            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
+            media_ids_affected = txn.fetchall()
+            total_media_quarantined += len(media_ids_affected)
+            if len(media_ids_affected) > 0:
+                self._insert_quarantine_changes_txn(
+                    txn,
+                    [(None, media_id) for (media_id,) in media_ids_affected],
+                    quarantined_by is not None,
+                )
 
         return total_media_quarantined
 
@@ -1212,10 +1583,18 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             sql = f"""
                 UPDATE remote_media_cache
                 SET quarantined_by = ?
-                WHERE {sql_in_list_clause}"""
+                WHERE {sql_in_list_clause}
+                RETURNING media_origin, media_id"""
 
             txn.execute(sql, [quarantined_by] + sql_args)
-            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
+            media_ids_affected = cast(list[tuple[str | None, str]], txn.fetchall())
+            total_media_quarantined += len(media_ids_affected)
+            if len(media_ids_affected) > 0:
+                self._insert_quarantine_changes_txn(
+                    txn,
+                    media_ids_affected,
+                    quarantined_by is not None,
+                )
 
         if hashes:
             sql_many_clause_sql, sql_many_clause_args = make_in_list_sql_clause(
@@ -1224,9 +1603,17 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             sql = f"""
                 UPDATE remote_media_cache
                 SET quarantined_by = ?
-                WHERE {sql_many_clause_sql}"""
+                WHERE {sql_many_clause_sql}
+                RETURNING media_origin, media_id"""
             txn.execute(sql, [quarantined_by] + sql_many_clause_args)
-            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
+            media_ids_affected = cast(list[tuple[str | None, str]], txn.fetchall())
+            total_media_quarantined += len(media_ids_affected)
+            if len(media_ids_affected) > 0:
+                self._insert_quarantine_changes_txn(
+                    txn,
+                    media_ids_affected,
+                    quarantined_by is not None,
+                )
 
         return total_media_quarantined
 
@@ -2001,6 +2388,7 @@ class _BackgroundUpdates:
     REPLACE_ROOM_DEPTH_MIN_DEPTH = "replace_room_depth_min_depth"
     POPULATE_ROOMS_CREATOR_COLUMN = "populate_rooms_creator_column"
     ADD_ROOM_TYPE_COLUMN = "add_room_type_column"
+    FLAG_EXISTING_QUARANTINED_MEDIA = "flag_existing_quarantined_media"
 
 
 _REPLACE_ROOM_DEPTH_SQL_COMMANDS = (
