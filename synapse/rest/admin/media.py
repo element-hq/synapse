@@ -255,7 +255,10 @@ class ListQuarantineChanges(RestServlet):
         if not await self.store.wait_for_quarantined_media_stream_id(from_id):
             raise SynapseError(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
-                "Timed out while waiting for stream position",
+                "Timed out while waiting for the worker serving this request to catch up to the given "
+                "`from` stream position. Assuming this is a valid `from` token, this indicates an issue "
+                "with Synapse or the worker deployment lagging behind the replication stream. Please try "
+                "the request again later.",
                 errcode=Codes.UNKNOWN,
             )
 
