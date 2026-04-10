@@ -1745,17 +1745,17 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         return devices
 
-    @cached()
-    async def _get_min_device_lists_changes_in_room(self) -> int:
+    def _get_min_device_lists_changes_in_room_txn(self, txn: LoggingTransaction) -> int:
         """Returns the minimum stream ID that we have entries for
         `device_lists_changes_in_room`
         """
 
-        return await self.db_pool.simple_select_one_onecol(
+        return self.db_pool.simple_select_one_onecol_txn(
+            txn,
             table="device_lists_changes_in_room",
             keyvalues={},
             retcol="COALESCE(MIN(stream_id), 0)",
-            desc="get_min_device_lists_changes_in_room",
+            allow_none=False,
         )
 
     @cancellable
@@ -1774,12 +1774,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         if not room_ids:
             return set()
 
-        min_stream_id = await self._get_min_device_lists_changes_in_room()
-
-        # Return early if there are no rows to process in device_lists_changes_in_room
-        if min_stream_id > from_token.stream:
-            return None
-
         changed_room_ids = self._device_list_room_stream_cache.get_entities_changed(
             room_ids, from_token.stream
         )
@@ -1794,35 +1788,39 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         def _get_device_list_changes_in_rooms_txn(
             txn: LoggingTransaction,
-            chunk: list[str],
-        ) -> set[str]:
-            clause, args = make_in_list_sql_clause(
-                self.database_engine, "room_id", chunk
-            )
-            args.append(from_token.stream)
-            args.append(to_token.get_max_stream_pos())
+        ) -> set[str] | None:
+            # Check if the from_token is too old.
+            lowest_known_stream_id = self._get_min_device_lists_changes_in_room_txn(txn)
+            if lowest_known_stream_id > from_token.stream:
+                return None
 
-            txn.execute(sql.format(clause=clause), args)
-            return {
-                user_id
-                for (user_id, stream_id, instance_name) in txn
-                if MultiWriterStreamToken.is_stream_position_in_range(
-                    low=from_token,
-                    high=to_token,
-                    instance_name=instance_name,
-                    pos=stream_id,
+            changes: set[str] = set()
+
+            for chunk in batch_iter(changed_room_ids, 1000):
+                clause, args = make_in_list_sql_clause(
+                    self.database_engine, "room_id", chunk
                 )
-            }
+                args.append(from_token.stream)
+                args.append(to_token.get_max_stream_pos())
 
-        changes = set()
-        for chunk in batch_iter(changed_room_ids, 1000):
-            changes |= await self.db_pool.runInteraction(
-                "get_device_list_changes_in_rooms",
-                _get_device_list_changes_in_rooms_txn,
-                chunk,
-            )
+                txn.execute(sql.format(clause=clause), args)
+                changes.update(
+                    user_id
+                    for (user_id, stream_id, instance_name) in txn
+                    if MultiWriterStreamToken.is_stream_position_in_range(
+                        low=from_token,
+                        high=to_token,
+                        instance_name=instance_name,
+                        pos=stream_id,
+                    )
+                )
 
-        return changes
+            return changes
+
+        return await self.db_pool.runInteraction(
+            "get_device_list_changes_in_rooms",
+            _get_device_list_changes_in_rooms_txn,
+        )
 
     async def get_all_device_list_changes(self, from_id: int, to_id: int) -> set[str]:
         """Return the set of rooms where devices have changed since the given
@@ -1831,26 +1829,32 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         Will raise an exception if the given stream ID is too old.
         """
 
-        min_stream_id = await self._get_min_device_lists_changes_in_room()
-
-        if min_stream_id > from_id:
-            raise Exception("stream ID is too old")
-
-        sql = """
-            SELECT DISTINCT room_id FROM device_lists_changes_in_room
-            WHERE stream_id > ? AND stream_id <= ?
-        """
-
         def _get_all_device_list_changes_txn(
             txn: LoggingTransaction,
-        ) -> set[str]:
+        ) -> set[str] | None:
+            # Check if the from_token is too old. We do this each time as we may
+            # prune the table in between runs.
+            lowest_known_stream_id = self._get_min_device_lists_changes_in_room_txn(txn)
+            if lowest_known_stream_id > from_id:
+                return None
+
+            sql = """
+                SELECT DISTINCT room_id FROM device_lists_changes_in_room
+                WHERE stream_id > ? AND stream_id <= ?
+            """
+
             txn.execute(sql, (from_id, to_id))
             return {room_id for (room_id,) in txn}
 
-        return await self.db_pool.runInteraction(
+        room_ids = await self.db_pool.runInteraction(
             "get_all_device_list_changes",
             _get_all_device_list_changes_txn,
         )
+
+        if room_ids is None:
+            raise Exception("Given stream ID is too old")
+
+        return room_ids
 
     async def get_device_list_changes_in_room(
         self, room_id: str, min_stream_id: int
@@ -1864,20 +1868,19 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             list cannot be calculated.
         """
 
-        lowest_known_stream_id = await self._get_min_device_lists_changes_in_room()
-
-        # Return early if there are no rows to process in device_lists_changes_in_room
-        if lowest_known_stream_id > min_stream_id:
-            return None
-
-        sql = """
-            SELECT DISTINCT user_id, device_id FROM device_lists_changes_in_room
-            WHERE room_id = ? AND stream_id > ?
-        """
-
         def get_device_list_changes_in_room_txn(
             txn: LoggingTransaction,
-        ) -> Collection[tuple[str, str]]:
+        ) -> Collection[tuple[str, str]] | None:
+            # Check if the from_token is too old.
+            lowest_known_stream_id = self._get_min_device_lists_changes_in_room_txn(txn)
+            if lowest_known_stream_id > min_stream_id:
+                return None
+
+            sql = """
+                SELECT DISTINCT user_id, device_id FROM device_lists_changes_in_room
+                WHERE room_id = ? AND stream_id > ?
+            """
+
             txn.execute(sql, (room_id, min_stream_id))
             return cast(Collection[tuple[str, str]], txn.fetchall())
 
@@ -2566,12 +2569,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             for row in txn:
                 num_deleted += 1
                 min_stream_id = max(min_stream_id, row[0])
-
-            # Make sure to invalidate the cache of the minimum stream ID after
-            # deleting.
-            self._invalidate_cache_and_stream(
-                txn, self._get_min_device_lists_changes_in_room, keys=()
-            )
 
             return num_deleted
 

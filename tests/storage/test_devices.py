@@ -402,7 +402,10 @@ class DeviceStoreTestCase(HomeserverTestCase):
         # Record the minimum stream ID before pruning, so we can check that this
         # correctly updates after pruning (as it is cached).
         starting_min_device_lists_id = self.get_success(
-            self.store._get_min_device_lists_changes_in_room()
+            self.store.db_pool.runInteraction(
+                "get_min_device_lists_changes_in_room",
+                self.store._get_min_device_lists_changes_in_room_txn,
+            )
         )
 
         # Now we add some more entries.
@@ -444,6 +447,9 @@ class DeviceStoreTestCase(HomeserverTestCase):
 
         # Check that the minimum stream ID cache has been advanced after pruning.
         min_device_lists_id = self.get_success(
-            self.store._get_min_device_lists_changes_in_room()
+            self.store.db_pool.runInteraction(
+                "get_min_device_lists_changes_in_room",
+                self.store._get_min_device_lists_changes_in_room_txn,
+            )
         )
         self.assertGreater(min_device_lists_id, starting_min_device_lists_id)
