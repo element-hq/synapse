@@ -98,6 +98,9 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
             await_result=False,
         )
 
+        # Needed under Postgres
+        self.pump()
+
         clients = self.reactor.tcpClients
         self.assertGreaterEqual(len(clients), 1)
         (host, port, client_factory, _timeout, _bindAddress) = clients.pop()
@@ -160,6 +163,9 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request.write(b"Hello!")
         request.finish()
 
+        # Needed under Postgres
+        self.pump(0.1)
+
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.result["body"], b"Hello!")
 
@@ -184,6 +190,9 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(b"Hello!")
         request1.finish()
 
+        # Needed under Postgres
+        self.pump(0.1)
+
         self.assertEqual(channel1.code, 200, channel1.result["body"])
         self.assertEqual(channel1.result["body"], b"Hello!")
 
@@ -192,6 +201,9 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request2.responseHeaders.setRawHeaders(b"Content-Type", [b"text/plain"])
         request2.write(b"Hello!")
         request2.finish()
+
+        # Needed under Postgres
+        self.pump(0.1)
 
         self.assertEqual(channel2.code, 200, channel2.result["body"])
         self.assertEqual(channel2.result["body"], b"Hello!")
@@ -226,6 +238,9 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(b"Hello!")
         request1.finish()
 
+        # Needed under Postgres
+        self.pump(0.1)
+
         # With local storage disabled and no storage providers,
         # we expect a 404 error
         self.assertEqual(channel1.code, 404, channel1.result["body"])
@@ -235,6 +250,9 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request2.responseHeaders.setRawHeaders(b"Content-Type", [b"text/plain"])
         request2.write(b"Hello!")
         request2.finish()
+
+        # Needed under Postgres
+        self.pump(0.1)
 
         # Same for the second request
         self.assertEqual(channel2.code, 404, channel2.result["body"])
@@ -262,6 +280,9 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(SMALL_PNG)
         request1.finish()
 
+        # Needed under Postgres
+        self.pump(0.1)
+
         self.assertEqual(channel1.code, 200, channel1.result["body"])
         self.assertEqual(channel1.result["body"], SMALL_PNG)
 
@@ -269,6 +290,9 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request2.responseHeaders.setRawHeaders(b"Content-Type", [b"image/png"])
         request2.write(SMALL_PNG)
         request2.finish()
+
+        # Needed under Postgres
+        self.pump(0.1)
 
         self.assertEqual(channel2.code, 200, channel2.result["body"])
         self.assertEqual(channel2.result["body"], SMALL_PNG)
@@ -345,6 +369,9 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
             await_result=False,
         )
 
+        # Needed under Postgres
+        self.pump()
+
         clients = self.reactor.tcpClients
         self.assertGreaterEqual(len(clients), 1)
         (host, port, client_factory, _timeout, _bindAddress) = clients.pop()
@@ -409,6 +436,9 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request.write(self.file_data)
         request.finish()
 
+        # Needed under Postgres
+        self.pump(0.1)
+
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.result["body"], b"file_to_stream")
 
@@ -435,6 +465,9 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(self.file_data)
         request1.finish()
 
+        # Needed under Postgres
+        self.pump(0.1)
+
         self.assertEqual(channel1.code, 200, channel1.result["body"])
         self.assertEqual(channel1.result["body"], b"file_to_stream")
 
@@ -446,6 +479,9 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         )
         request2.write(self.file_data)
         request2.finish()
+
+        # Needed under Postgres
+        self.pump(0.1)
 
         self.assertEqual(channel2.code, 200, channel2.result["body"])
         self.assertEqual(channel2.result["body"], b"file_to_stream")
@@ -479,6 +515,9 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(self.file_data)
         request1.finish()
 
+        # Needed under Postgres
+        self.pump(0.1)
+
         # With local storage disabled and no storage providers,
         # we expect a 404 error
         self.assertEqual(channel1.code, 404, channel1.result["body"])
@@ -491,6 +530,9 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         )
         request2.write(self.file_data)
         request2.finish()
+
+        # Needed under Postgres
+        self.pump(0.1)
 
         self.assertEqual(channel2.code, 404, channel2.result["body"])
 
@@ -522,6 +564,9 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request1.write(b"\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n")
         request1.finish()
 
+        # Needed under Postgres
+        self.pump(0.1)
+
         self.assertEqual(channel1.code, 200, channel1.result["body"])
         self.assertEqual(channel1.result["body"], SMALL_PNG)
 
@@ -534,6 +579,9 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         request2.write(SMALL_PNG)
         request2.write(b"\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n")
         request2.finish()
+
+        # Needed under Postgres
+        self.pump(0.1)
 
         self.assertEqual(channel2.code, 200, channel2.result["body"])
         self.assertEqual(channel2.result["body"], SMALL_PNG)

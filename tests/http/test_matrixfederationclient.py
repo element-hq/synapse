@@ -847,6 +847,9 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
             self.hs.get_federation_http_client().get_json("remoteserv:8008", "foo/bar")
         )
 
+        # Needed under Postgres
+        self.pump()
+
         # Make sure that the request was proxied through the `federation_sender` worker
         mock_agent_on_federation_sender.request.assert_called_once_with(
             b"GET",
@@ -895,6 +898,9 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
         test_request_from_main_process_d = defer.ensureDeferred(
             self.hs.get_federation_http_client().get_json("remoteserv:8008", "foo/bar")
         )
+
+        # Needed under Postgres
+        self.pump(0.1)
 
         # Make sure that the request was proxied through the `federation_sender` worker
         mock_agent_on_federation_sender.request.assert_called_with(
@@ -969,6 +975,9 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
                 "remoteserv:8008", "foo/bar"
             )
         )
+
+        # Needed under Postgres
+        self.pump()
 
         # Make sure that the request was proxied through the `federation_sender` worker
         mock_agent_on_federation_sender.request.assert_called_once_with(
@@ -1060,6 +1069,9 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
         test_request_from_main_process_d = defer.ensureDeferred(
             self.hs.get_federation_http_client().get_json("remoteserv:8008", "foo/bar")
         )
+
+        # Needed under Postgres
+        self.pump(0.1)
 
         # Make sure that the request was *NOT* proxied through the `federation_sender`
         # worker
