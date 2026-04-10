@@ -2535,7 +2535,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         # clearing out all the old entries.
         #
         # We set a minimum stream ID so that when we delete in batches the
-        # database doesn't have to scan through all the rows that were just
+        # database doesn't have to scan through all the (dead) tuples that were just
         # deleted to find the next batch to delete.
         delete_sql = """
             DELETE FROM device_lists_changes_in_room
