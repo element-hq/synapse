@@ -2655,6 +2655,7 @@ class DeviceBackgroundUpdateStore(SQLBaseStore):
             index_name="device_lists_changes_in_room_inserted_ts_idx",
             table="device_lists_changes_in_room",
             columns=["inserted_ts"],
+            where_clause="inserted_ts IS NOT NULL",
         )
 
     async def _drop_device_list_streams_non_unique_indexes(
