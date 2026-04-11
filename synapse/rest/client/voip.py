@@ -24,7 +24,7 @@ import hashlib
 import hmac
 import logging
 from typing import TYPE_CHECKING
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from synapse.http.client import SimpleHttpClient
 from synapse.http.server import HttpServer
@@ -99,7 +99,7 @@ def _parse_cloudflare_turn_response(response: JsonDict, ttl: int) -> JsonDict:
             url
             for url in candidate_urls
             if url.startswith(("turn:", "turns:"))
-            and ":53" not in url.split("?", 1)[0]
+            and urlparse(url).port != 53
         ]
         if not candidate_turn_uris:
             continue
@@ -141,6 +141,14 @@ class VoipRestServlet(RestServlet):
         self.http_client: SimpleHttpClient = hs.get_proxied_http_client()
 
     async def _get_turn_broker_credentials(self, ttl: int) -> JsonDict | None:
+        """Fetch TURN credentials from a federated TURN broker.
+
+        The broker ensures all homeservers in a federation receive the same
+        TURN credentials, so ICE candidate pairs can match across servers
+        during cross-domain calls.
+
+        Returns None if federation deployment mode is not enabled.
+        """
         if not self.hs.config.voip.turn_federation_deployment:
             return None
 
@@ -165,6 +173,14 @@ class VoipRestServlet(RestServlet):
         return _validate_turn_credentials_response(response, ttl)
 
     async def _get_cloudflare_turn_credentials(self, ttl: int) -> JsonDict | None:
+        """Fetch short-lived TURN credentials from Cloudflare's TURN API.
+
+        Synapse calls the Cloudflare API server-side and converts the response
+        into the standard Matrix TURN format. The API token is never exposed
+        to clients.
+
+        Returns None if Cloudflare TURN is not enabled.
+        """
         if not self.hs.config.voip.turn_cloudflare_enabled:
             return None
 
