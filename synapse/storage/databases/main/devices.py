@@ -1780,12 +1780,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         if not changed_room_ids:
             return set()
 
-        sql = """
-            SELECT user_id, stream_id, instance_name
-            FROM device_lists_changes_in_room
-            WHERE {clause} AND stream_id > ? AND stream_id <= ?
-        """
-
         def _get_device_list_changes_in_rooms_txn(
             txn: LoggingTransaction,
         ) -> set[str] | None:
@@ -1803,7 +1797,12 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 args.append(from_token.stream)
                 args.append(to_token.get_max_stream_pos())
 
-                txn.execute(sql.format(clause=clause), args)
+                sql = f"""
+                    SELECT user_id, stream_id, instance_name
+                    FROM device_lists_changes_in_room
+                    WHERE {clause} AND stream_id > ? AND stream_id <= ?
+                """
+                txn.execute(sql, args)
                 changes.update(
                     user_id
                     for (user_id, stream_id, instance_name) in txn
