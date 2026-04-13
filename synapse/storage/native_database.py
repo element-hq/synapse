@@ -66,7 +66,7 @@ class NativeConnectionPool:
         self._db_args: dict[str, Any] = {
             k: v
             for k, v in db_config.config.get("args", {}).items()
-            if not k.startswith("cp_")
+            if not k.startswith("cp_") and k != 'check_same_thread'
         }
 
         # For in-memory SQLite, use single worker and allow cross-thread access
@@ -122,6 +122,7 @@ class NativeConnectionPool:
         if conn is not None and not self._engine.is_connection_closed(conn):
             return conn
 
+        self._db_args.pop("check_same_thread", None)
         # Create a new raw connection
         raw_conn = self._engine.module.connect(**self._db_args)
 

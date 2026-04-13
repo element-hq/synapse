@@ -62,7 +62,7 @@ class DatabaseConnectionConfig:
 
         if db_engine == "sqlite3":
             db_config.setdefault("args", {}).update(
-                {"cp_min": 1, "cp_max": 1, "check_same_thread": False}
+                {"cp_min": 1, "cp_max": 1} # , "check_same_thread": False}
             )
 
         data_stores = db_config.get("data_stores")

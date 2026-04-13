@@ -21,7 +21,7 @@
 # in `poetry export` in the past.
 
 ARG DEBIAN_VERSION=trixie
-ARG PYTHON_VERSION=3.13
+ARG PYTHON_VERSION=3.14
 ARG POETRY_VERSION=2.2.1
 
 ###
@@ -34,7 +34,7 @@ FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DE
 WORKDIR /synapse
 
 # Copy just what we need to run `poetry export`...
-COPY pyproject.toml poetry.lock /synapse/
+COPY pyproject.toml /synapse/
 
 
 # If specified, we won't verify the hashes of dependencies.
@@ -54,13 +54,21 @@ ENV UV_LINK_MODE=copy
 # Otherwise, just create an empty requirements file so that the Dockerfile can
 # proceed.
 ARG POETRY_VERSION
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uvx --with poetry-plugin-export==1.10.0 \
+  poetry@${POETRY_VERSION} lock 
+
 RUN --mount=type=cache,target=/root/.cache/uv \
   if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-    uvx --with poetry-plugin-export==1.9.0 \
-        poetry@${POETRY_VERSION} export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
+  uvx --with poetry-plugin-export==1.10.0 \
+  poetry@${POETRY_VERSION} export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
   else \
-    touch /synapse/requirements.txt; \
+  touch /synapse/requirements.txt; \
   fi
+
+RUN sed -i '/^pyopenssl==24\.2\.1/,/^[^ ]/{ /^[^ ]/!d; /^pyopenssl==24\.2\.1/d; }' /synapse/requirements.txt
+RUN sed -i '/^cryptography==43\.0\.3/,/^[^ ]/{ /^[^ ]/!d; /^cryptography==43\.0\.3/d; }' /synapse/requirements.txt
 
 ###
 ### Stage 1: builder
@@ -90,6 +98,7 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=$CARGO_NET_GIT_FETCH_WITH_CLI
 #
 # This is aiming at installing the `[tool.poetry.depdendencies]` from pyproject.toml.
 COPY --from=requirements /synapse/requirements.txt /synapse/
+RUN cat /synapse/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
   uv pip install --prefix="/install" --no-deps -r /synapse/requirements.txt
 
@@ -110,9 +119,9 @@ RUN \
   --mount=type=cache,target=/synapse/target,sharing=locked \
   --mount=type=cache,target=${CARGO_HOME}/registry,sharing=locked \
   if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-    uv pip install --prefix="/install" --no-deps /synapse[all]; \
+  uv pip install --prefix="/install" --no-deps /synapse[all]; \
   else \
-    uv pip install --prefix="/install" /synapse[all]; \
+  uv pip install --prefix="/install" /synapse[all]; \
   fi
 
 ###
@@ -135,31 +144,31 @@ RUN \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update -qq && \
   apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
-      curl \
-      gosu \
-      libjpeg62-turbo \
-      libpq5 \
-      libwebp7 \
-      xmlsec1 \
-      libjemalloc2 \
-    | grep '^\w' > /tmp/pkg-list && \
+  curl \
+  gosu \
+  libjpeg62-turbo \
+  libpq5 \
+  libwebp7 \
+  xmlsec1 \
+  libjemalloc2 \
+  | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
-    mkdir -p /tmp/debs-${arch} && \
-    chown _apt:root /tmp/debs-${arch} && \
-    cd /tmp/debs-${arch} && \
-    apt-get -o APT::Architecture="${arch}" download $(cat /tmp/pkg-list); \
+  mkdir -p /tmp/debs-${arch} && \
+  chown _apt:root /tmp/debs-${arch} && \
+  cd /tmp/debs-${arch} && \
+  apt-get -o APT::Architecture="${arch}" download $(cat /tmp/pkg-list); \
   done
 
 # Extract the debs for each architecture
 RUN \
   for arch in arm64 amd64; do \
-    mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
-    for deb in /tmp/debs-${arch}/*.deb; do \
-      package_name=$(dpkg-deb -I ${deb} | awk '/^ Package: .*$/ {print $2}'); \
-      echo "Extracting: ${package_name}"; \
-      dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
-      dpkg --extract $deb /install-${arch}; \
-    done; \
+  mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
+  for deb in /tmp/debs-${arch}/*.deb; do \
+  package_name=$(dpkg-deb -I ${deb} | awk '/^ Package: .*$/ {print $2}'); \
+  echo "Extracting: ${package_name}"; \
+  dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
+  dpkg --extract $deb /install-${arch}; \
+  done; \
   done
 
 

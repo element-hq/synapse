@@ -6,7 +6,7 @@ readme = "README.rst"
 authors = [
     { name = "Matrix.org Team and Contributors", email = "packages@matrix.org" }
 ]
-requires-python = ">=3.10.0,<4.0.0"
+requires-python = ">=3.13.0,<4.0.0"
 license = "AGPL-3.0-or-later OR LicenseRef-Element-Commercial"
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -108,6 +108,9 @@ dependencies = [
     # zope-interface is still used by some remaining compatibility code
     "zope-interface>=5.2",
     "aiohttp (>=3.13.3,<4.0.0)",
+    "redis (>=7.4.0,<8.0.0)",
+    "psycopg2 (>=2.9.11,<3.0.0)",
+    "pytest (>=9.0.3,<10.0.0)",
 ]
 
 [project.optional-dependencies]
