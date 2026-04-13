@@ -213,10 +213,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     def test_background_update_room_membership_resume_after_restart(self) -> None:
         """Test that room membership updates triggered by changing the avatar or the display name are resumed after a restart."""
-
+        initial_displayname = "Frank"
+        updated_displayname = "Frank Jr."
         self.get_success(
             self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank"
+                self.frank,
+                synapse.types.create_requester(self.frank),
+                initial_displayname,
             )
         )
 
@@ -230,7 +233,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         room_id_3 = self.helper.create_room_as(
             self.frank.to_string(), tok=self.frank_token
         )
-
 
         # Set read receipts with different timestamps (simulate different read times)
         # Room 1 should be most recent, then room 2, then room 3
@@ -290,7 +292,9 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             state_tuple = (EventTypes.Member, self.frank.to_string())
             self.get_success(
                 self.handler.set_displayname(
-                    self.frank, synapse.types.create_requester(self.frank), "Frank Jr."
+                    self.frank,
+                    synapse.types.create_requester(self.frank),
+                    updated_displayname,
                 )
             )
 
@@ -301,7 +305,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 )
             )
             self.assertEqual(
-                membership[state_tuple].content["displayname"], "Frank Jr."
+                membership[state_tuple].content["displayname"], updated_displayname
             )
 
             # Simulate a synapse restart by emptying the list of running tasks
@@ -321,7 +325,9 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     room_id_2, StateFilter.from_types([state_tuple])
                 )
             )
-            self.assertEqual(membership[state_tuple].content["displayname"], "Frank")
+            self.assertEqual(
+                membership[state_tuple].content["displayname"], initial_displayname
+            )
 
             cancelled_task = self.get_success(
                 self.task_scheduler.get_tasks(
@@ -348,7 +354,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 )
             )
             self.assertEqual(
-                membership[state_tuple].content["displayname"], "Frank Jr."
+                membership[state_tuple].content["displayname"], updated_displayname
             )
             membership = self.get_success(
                 self.storage_controllers.state.get_current_state(
@@ -356,9 +362,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 )
             )
             self.assertEqual(
-                membership[state_tuple].content["displayname"], "Frank Jr."
+                membership[state_tuple].content["displayname"], updated_displayname
             )
-
 
     def test_room_update_ordering_by_read_receipt(self) -> None:
         """Test that rooms are updated in order of most recent read receipt."""
@@ -385,7 +390,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         event_3 = self.helper.send(room_id_3, "Hello 3", tok=self.frank_token)
 
         # Set read receipts with different timestamps (simulate different read times)
-        # Room 2 should be most recent, then room 3, then room 1
+        # Room 3 is the most recent, then room 2, then room 1
         self.get_success(
             self.store.insert_receipt(
                 room_id_1,
@@ -398,20 +403,20 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.get_success(
             self.store.insert_receipt(
-                room_id_3,
+                room_id_2,
                 ReceiptTypes.READ,
                 user_id=self.frank.to_string(),
-                event_ids=[event_3["event_id"]],
+                event_ids=[event_2["event_id"]],
                 thread_id=None,
                 data={"ts": 200},
             )
         )
         self.get_success(
             self.store.insert_receipt(
-                room_id_2,
+                room_id_3,
                 ReceiptTypes.READ,
                 user_id=self.frank.to_string(),
-                event_ids=[event_2["event_id"]],
+                event_ids=[event_3["event_id"]],
                 thread_id=None,
                 data={"ts": 300},
             )
