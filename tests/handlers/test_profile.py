@@ -227,12 +227,46 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         room_id_2 = self.helper.create_room_as(
             self.frank.to_string(), tok=self.frank_token
         )
+        room_id_3 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
 
-        # Ensure `room_id_1` comes before `room_id_2` alphabetically
-        if room_id_1 > room_id_2:
-            room_id_1, room_id_2 = room_id_2, room_id_1
 
-        # Without read receipts, both rooms should be processed in alphabetical order
+        # Set read receipts with different timestamps (simulate different read times)
+        # Room 1 should be most recent, then room 2, then room 3
+        event_3 = self.helper.send(room_id_3, "Hello 3", tok=self.frank_token)
+        event_2 = self.helper.send(room_id_2, "Hello 2", tok=self.frank_token)
+        event_1 = self.helper.send(room_id_1, "Hello 1", tok=self.frank_token)
+        self.get_success(
+            self.store.insert_receipt(
+                room_id_3,
+                ReceiptTypes.READ,
+                user_id=self.frank.to_string(),
+                event_ids=[event_3["event_id"]],
+                thread_id=None,
+                data={"ts": 100},
+            )
+        )
+        self.get_success(
+            self.store.insert_receipt(
+                room_id_2,
+                ReceiptTypes.READ,
+                user_id=self.frank.to_string(),
+                event_ids=[event_2["event_id"]],
+                thread_id=None,
+                data={"ts": 200},
+            )
+        )
+        self.get_success(
+            self.store.insert_receipt(
+                room_id_1,
+                ReceiptTypes.READ,
+                user_id=self.frank.to_string(),
+                event_ids=[event_1["event_id"]],
+                thread_id=None,
+                data={"ts": 300},
+            )
+        )
 
         original_update_membership = self.hs.get_room_member_handler().update_membership
 
@@ -241,7 +275,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         async def potentially_slow_update_membership(
             *args: Any, **kwargs: Any
         ) -> tuple[str, int]:
-            if args[2] == room_id_2:
+            if args[2] == room_id_2 or args[2] == room_id_3:
                 await self.clock.sleep(Duration(milliseconds=10))
             if args[2] == room_id_1:
                 nonlocal room_1_updated
@@ -316,6 +350,15 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.assertEqual(
                 membership[state_tuple].content["displayname"], "Frank Jr."
             )
+            membership = self.get_success(
+                self.storage_controllers.state.get_current_state(
+                    room_id_3, StateFilter.from_types([state_tuple])
+                )
+            )
+            self.assertEqual(
+                membership[state_tuple].content["displayname"], "Frank Jr."
+            )
+
 
     def test_room_update_ordering_by_read_receipt(self) -> None:
         """Test that rooms are updated in order of most recent read receipt."""

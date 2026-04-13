@@ -20,7 +20,6 @@
 #
 import logging
 import random
-from bisect import bisect_right
 from typing import TYPE_CHECKING
 
 from twisted.internet.defer import CancelledError
@@ -671,6 +670,27 @@ class ProfileHandler:
 
         target_user_str = target_user.to_string()
 
+        # Compute the ordered list of rooms upfront to ensure consistency across restarts
+        all_room_ids = await self.store.get_rooms_for_user(target_user_str)
+
+        # Get the user's latest read receipts for all rooms
+        user_receipts = await self.store.get_receipts_for_user_with_orderings(
+            target_user_str,
+            [ReceiptTypes.READ, ReceiptTypes.READ_PRIVATE],
+        )
+
+        # Sort rooms by most recent read receipt (highest stream_ordering first),
+        # with fallback to alphabetical ordering for rooms without receipts
+        def sort_key(room_id: str) -> tuple[int, str]:
+            if room_id in user_receipts:
+                # Rooms with receipts: sort by stream_ordering (descending) then by room_id
+                return (-user_receipts[room_id]["stream_ordering"], room_id)
+            else:
+                # Rooms without receipts: sort alphabetically after all rooms with receipts
+                return (0, room_id)
+
+        room_ids = sorted(all_room_ids, key=sort_key)
+
         # Cancel any ongoing profile membership updates for this user,
         # and start a new one.
         async with self._worker_locks.acquire_lock(
@@ -691,6 +711,7 @@ class ProfileHandler:
                 resource_id=target_user_str,
                 params={
                     "requester_authenticated_entity": requester.authenticated_entity,
+                    "ordered_room_ids": room_ids,
                 },
             )
 
@@ -702,33 +723,16 @@ class ProfileHandler:
         assert task.params
 
         target_user = UserID.from_string(task.resource_id)
-        all_room_ids = await self.store.get_rooms_for_user(target_user.to_string())
 
-        # Get the user's latest read receipts for all rooms
-        user_receipts = await self.store.get_receipts_for_user_with_orderings(
-            target_user.to_string(),
-            [ReceiptTypes.READ, ReceiptTypes.READ_PRIVATE],
-        )
-
-        # Sort rooms by most recent read receipt (highest stream_ordering first),
-        # with fallback to alphabetical ordering for rooms without receipts
-        def sort_key(room_id: str) -> tuple[int, str]:
-            if room_id in user_receipts:
-                # Rooms with receipts: sort by stream_ordering (descending) then by room_id
-                return (-user_receipts[room_id]["stream_ordering"], room_id)
-            else:
-                # Rooms without receipts: sort alphabetically after all rooms with receipts
-                return (0, room_id)
-
-        room_ids = sorted(all_room_ids, key=sort_key)
+        # Use the precomputed room ordering from task params to ensure consistency
+        room_ids = task.params.get("ordered_room_ids", [])
 
         last_room_id = task.result.get("last_room_id", None) if task.result else None
 
         if last_room_id:
             # Filter out room IDs that have already been handled
-            # by finding the first room ID greater than the last handled room ID
-            # and slicing the list from that point onwards.
-            room_ids = room_ids[bisect_right(room_ids, last_room_id) :]
+            last_index = room_ids.index(last_room_id, 0)
+            room_ids = room_ids[last_index + 1 :]
 
         requester = create_requester(
             user_id=target_user,
