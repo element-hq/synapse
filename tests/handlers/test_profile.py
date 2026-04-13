@@ -215,59 +215,9 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         """Test that room membership updates triggered by changing the avatar or the display name are resumed after a restart."""
         initial_displayname = "Frank"
         updated_displayname = "Frank Jr."
-        self.get_success(
-            self.handler.set_displayname(
-                self.frank,
-                synapse.types.create_requester(self.frank),
-                initial_displayname,
-            )
-        )
 
-        room_id_1 = self.helper.create_room_as(
-            self.frank.to_string(), tok=self.frank_token
-        )
-
-        room_id_2 = self.helper.create_room_as(
-            self.frank.to_string(), tok=self.frank_token
-        )
-        room_id_3 = self.helper.create_room_as(
-            self.frank.to_string(), tok=self.frank_token
-        )
-
-        # Set read receipts with different timestamps (simulate different read times)
-        # Room 1 should be most recent, then room 2, then room 3
-        event_3 = self.helper.send(room_id_3, "Hello 3", tok=self.frank_token)
-        event_2 = self.helper.send(room_id_2, "Hello 2", tok=self.frank_token)
-        event_1 = self.helper.send(room_id_1, "Hello 1", tok=self.frank_token)
-        self.get_success(
-            self.store.insert_receipt(
-                room_id_3,
-                ReceiptTypes.READ,
-                user_id=self.frank.to_string(),
-                event_ids=[event_3["event_id"]],
-                thread_id=None,
-                data={"ts": 100},
-            )
-        )
-        self.get_success(
-            self.store.insert_receipt(
-                room_id_2,
-                ReceiptTypes.READ,
-                user_id=self.frank.to_string(),
-                event_ids=[event_2["event_id"]],
-                thread_id=None,
-                data={"ts": 200},
-            )
-        )
-        self.get_success(
-            self.store.insert_receipt(
-                room_id_1,
-                ReceiptTypes.READ,
-                user_id=self.frank.to_string(),
-                event_ids=[event_1["event_id"]],
-                thread_id=None,
-                data={"ts": 300},
-            )
+        room_id_1, room_id_2, room_id_3 = self._setup_displayname_and_rooms(
+            initial_displayname
         )
 
         original_update_membership = self.hs.get_room_member_handler().update_membership
@@ -369,62 +319,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         """Test that rooms are updated in order of most recent read receipt."""
         initial_displayname = "Frank"
         updated_displayname = "Frank Jr."
-        self.get_success(
-            self.handler.set_displayname(
-                self.frank,
-                synapse.types.create_requester(self.frank),
-                initial_displayname,
-            )
-        )
 
-        # Create three rooms
-        room_id_1 = self.helper.create_room_as(
-            self.frank.to_string(), tok=self.frank_token
-        )
-        room_id_2 = self.helper.create_room_as(
-            self.frank.to_string(), tok=self.frank_token
-        )
-        room_id_3 = self.helper.create_room_as(
-            self.frank.to_string(), tok=self.frank_token
-        )
-
-        # Send an event in each room to create something to mark as read
-        event_1 = self.helper.send(room_id_1, "Hello 1", tok=self.frank_token)
-        event_2 = self.helper.send(room_id_2, "Hello 2", tok=self.frank_token)
-        event_3 = self.helper.send(room_id_3, "Hello 3", tok=self.frank_token)
-
-        # Set read receipts with different timestamps (simulate different read times)
-        # Room 3 is the most recent, then room 2, then room 1
-        self.get_success(
-            self.store.insert_receipt(
-                room_id_1,
-                ReceiptTypes.READ,
-                user_id=self.frank.to_string(),
-                event_ids=[event_1["event_id"]],
-                thread_id=None,
-                data={"ts": 100},
-            )
-        )
-        self.get_success(
-            self.store.insert_receipt(
-                room_id_2,
-                ReceiptTypes.READ,
-                user_id=self.frank.to_string(),
-                event_ids=[event_2["event_id"]],
-                thread_id=None,
-                data={"ts": 200},
-            )
-        )
-        self.get_success(
-            self.store.insert_receipt(
-                room_id_3,
-                ReceiptTypes.READ,
-                user_id=self.frank.to_string(),
-                event_ids=[event_3["event_id"]],
-                thread_id=None,
-                data={"ts": 300},
-            )
-        )
+        self._setup_displayname_and_rooms(initial_displayname)
 
         # Track the order in which rooms are updated
         room_update_order = []
@@ -468,6 +364,67 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         # Verify rooms were updated in order of most recent read receipt (highest stream_ordering first)
         self.assertEqual(len(room_update_order), 3)
         self.assertEqual(room_update_order, rooms_by_stream_ordering)
+
+    def _setup_displayname_and_rooms(
+        self, initial_displayname: str
+    ) -> tuple[str, str, str]:
+        """Helper to set up initial displayname and create three rooms.
+        Returns tuples of (room_id_1, room_id_2, room_id_3) where room_id_1
+        is the room with the most recent read receipt, then room_id_2, then room_id_3."""
+        self.get_success(
+            self.handler.set_displayname(
+                self.frank,
+                synapse.types.create_requester(self.frank),
+                initial_displayname,
+            )
+        )
+
+        # Create three rooms
+        room_id_1 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+        room_id_2 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+        room_id_3 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+        # Set read receipts with different timestamps (simulate different read times)
+        # Room 1 should be most recent, then room 2, then room 3
+        event_3 = self.helper.send(room_id_3, "Hello 3", tok=self.frank_token)
+        event_2 = self.helper.send(room_id_2, "Hello 2", tok=self.frank_token)
+        event_1 = self.helper.send(room_id_1, "Hello 1", tok=self.frank_token)
+        self.get_success(
+            self.store.insert_receipt(
+                room_id_3,
+                ReceiptTypes.READ,
+                user_id=self.frank.to_string(),
+                event_ids=[event_3["event_id"]],
+                thread_id=None,
+                data={"ts": 100},
+            )
+        )
+        self.get_success(
+            self.store.insert_receipt(
+                room_id_2,
+                ReceiptTypes.READ,
+                user_id=self.frank.to_string(),
+                event_ids=[event_2["event_id"]],
+                thread_id=None,
+                data={"ts": 200},
+            )
+        )
+        self.get_success(
+            self.store.insert_receipt(
+                room_id_1,
+                ReceiptTypes.READ,
+                user_id=self.frank.to_string(),
+                event_ids=[event_1["event_id"]],
+                thread_id=None,
+                data={"ts": 300},
+            )
+        )
+        return room_id_1, room_id_2, room_id_3
 
     def test_room_update_ordering_with_no_receipts_fallback(self) -> None:
         """Test that rooms without read receipts fall back to alphabetical ordering."""
