@@ -367,9 +367,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     def test_room_update_ordering_by_read_receipt(self) -> None:
         """Test that rooms are updated in order of most recent read receipt."""
+        initial_displayname = "Frank"
+        updated_displayname = "Frank Jr."
         self.get_success(
             self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank"
+                self.frank,
+                synapse.types.create_requester(self.frank),
+                initial_displayname,
             )
         )
 
@@ -440,7 +444,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 self.handler.set_displayname(
                     self.frank,
                     synapse.types.create_requester(self.frank),
-                    "Frank Updated",
+                    updated_displayname,
                 )
             )
 
