@@ -2811,13 +2811,13 @@ class EventsBackgroundUpdatesStore(
             next_event_ids,
             redact_behaviour=EventRedactBehaviour.as_is,
         )
-        verify_key = get_verify_key(self.hs.signing_key)
+        current_verify_key = get_verify_key(self.hs.signing_key)
 
         # Re-sign any events that need it.
         # A list of event IDs and their newly signed event dicts.
         resigned_events: list[tuple[str, JsonDict]] = []
         for event in next_events:
-            if not event_needs_resigning(event, self.hs.hostname, verify_key):
+            if not event_needs_resigning(event, self.hs.hostname, current_verify_key):
                 continue
 
             # If old_key is set, only re-sign events whose signature verifies
