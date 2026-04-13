@@ -291,7 +291,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         start_id = self.store.get_max_sticky_events_stream_id()
 
         # Create and persist a sticky event that is soft-failed
-        softfailed_sticky_event = self.get_success(
+        soft_failed_sticky_event = self.get_success(
             inject_event(
                 self.hs,
                 room_id=room_id,
@@ -315,7 +315,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(len(updates), 1)
-        self.assertEqual(updates[0].event_id, softfailed_sticky_event.event_id)
+        self.assertEqual(updates[0].event_id, soft_failed_sticky_event.event_id)
 
     def test_policy_server_spammy_events_are_not_tracked(self) -> None:
         """
