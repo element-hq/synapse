@@ -34,8 +34,5 @@ CREATE TABLE IF NOT EXISTS msc4242_state_dag_edges(
     -- one of the `prev_state_events` for this event ID. We must have it since we must have the entire state DAG.
     -- can be NULL for the create event.
     prev_state_event_id TEXT REFERENCES events(event_id)
-    -- calculated depth for this event ID. There is some denormalisation here as we're storing the depth
-    -- multiple times for each prev_state_event_id.
-    -- depth BIGINT NOT NULL
 );
 CREATE UNIQUE INDEX msc4242_state_dag_edges_key ON msc4242_state_dag_edges(room_id, event_id, prev_state_event_id);

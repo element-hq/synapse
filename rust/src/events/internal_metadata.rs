@@ -60,7 +60,7 @@ enum EventInternalMetadataData {
     DelayId(Box<str>),
     TokenId(i64),
     DeviceId(Box<str>),
-    CalculatedAuthEventIDs(Vec<String>),
+    CalculatedAuthEventIDs(Vec<String>), // MSC4242: State DAGs
 }
 
 impl EventInternalMetadataData {
