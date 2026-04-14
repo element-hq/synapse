@@ -1835,16 +1835,16 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             where_clause = "WHERE " + " AND ".join(filters) if len(filters) > 0 else ""
 
             # Don't count reports against rooms which have been deleted/purged
-            sql = """
+            sql = f"""
                 SELECT COUNT(*) as total_room_reports
                 FROM room_reports AS rr
                 JOIN room_stats_state ON room_stats_state.room_id = rr.room_id
-                {}
-                """.format(where_clause)
+                {where_clause}
+            """
             txn.execute(sql, args)
             count = cast(tuple[int], txn.fetchone())[0]
 
-            sql = """
+            sql = f"""
                 SELECT
                     rr.id,
                     rr.received_ts,
@@ -1861,10 +1861,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 ORDER BY rr.received_ts {order}
                 LIMIT ?
                 OFFSET ?
-            """.format(
-                where_clause=where_clause,
-                order=order,
-            )
+            """
 
             args += [limit, start]
             txn.execute(sql, args)
