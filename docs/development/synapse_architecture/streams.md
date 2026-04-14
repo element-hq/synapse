@@ -179,6 +179,13 @@ necessary registration and event handling.
   - don't forget the super call
 - add local-only [invalidations to your writer transactions](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L201)
 
+**Update docs:**
+- Update the [*Stream
+  writers*](https://github.com/element-hq/synapse/blob/develop/docs/workers.md#stream-writers)
+  section in the worker docs with a new section for the stream
+- If this stream can only be handled by specific workers, add a new section to the
+  [upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md).
+
 **For streams to be used in sync:**
 - add a new field to [`StreamToken`](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/types/__init__.py#L1003)
   - add a new [`StreamKeyType`](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/types/__init__.py#L999)
