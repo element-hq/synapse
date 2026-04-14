@@ -37,7 +37,7 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-214430a4.js";
+            window.path_to_searchindex_js = "../../../searchindex-c92faf9d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../toc-4dc10a98.js"></script>
@@ -264,6 +264,12 @@ background updates which won’t be cancelled once started.</p>
 <ul>
 <li><code>populate_stats_process_rooms</code> - Recalculate the stats for all rooms.</li>
 <li><code>regenerate_directory</code> - Recalculate the <a href="../../../user_directory.html">user directory</a> if it is stale or out of sync.</li>
+<li><code>event_resign</code> - Re-sign all locally-sent events with the current signing key. This is useful after rotating the server’s signing key to ensure all historical events are signed with the new key. Optional additional parameters:
+<ul>
+<li><code>old_key</code> - Only re-sign events whose signature verifies against this key. Format: <code>"ed25519:key_id base64_public_key"</code> (e.g. <code>"ed25519:my_old_key XGX0JRS2Af3be3knz2fBiRbApjm2Dh61gXDJA8kcJNI"</code>).</li>
+<li><code>before_ts</code> - Only re-sign events with a <code>received_ts</code> less than this value (milliseconds since the epoch).</li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
