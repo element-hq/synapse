@@ -1,0 +1,1 @@
+Fix `/sync` `timeline` state duplicated in `state` when lazy-loading.

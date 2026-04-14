@@ -1087,6 +1087,13 @@ class SyncHandler:
                     if event.sender not in first_event_by_sender_map:
                         first_event_by_sender_map[event.sender] = event
 
+                    # Add to the `timeline_state` first before we check whether members
+                    # are in the `timeline` just below. Otherwise, we will end up with
+                    # extra things in `state` that should have only been in the
+                    # `timeline`.
+                    if event.is_state():
+                        timeline_state[(event.type, event.state_key)] = event.event_id
+
                     # When using `state_after`, there is no special treatment with
                     # regards to state also being in the `timeline`. Always fetch
                     # relevant membership regardless of whether the state event is in
@@ -1101,9 +1108,6 @@ class SyncHandler:
                     elif (EventTypes.Member, event.sender) not in timeline_state:
                         members_to_fetch.add(event.sender)
                     # FIXME: we also care about invite targets etc.
-
-                    if event.is_state():
-                        timeline_state[(event.type, event.state_key)] = event.event_id
 
             else:
                 timeline_state = {
