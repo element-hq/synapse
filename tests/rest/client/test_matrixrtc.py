@@ -62,27 +62,9 @@ class MatrixRtcTestCase(HomeserverTestCase):
         )
 
     @override_config({"experimental_features": {"msc4143_enabled": True}})
-    def test_matrixrtc_endpoint_accessible_without_authentication(self) -> None:
-        """The /rtc/transports endpoint is a public discovery endpoint.
-        Clients use it to check MatrixRTC support before establishing a session,
-        so it must not require authentication.
-        """
+    def test_matrixrtc_endpoint_requires_authentication(self) -> None:
         channel = self.make_request("GET", f"{PATH_PREFIX}/rtc/transports")
-        self.assertEqual(200, channel.code, channel.json_body)
-
-    @override_config(
-        {
-            "experimental_features": {"msc4143_enabled": True},
-            "matrix_rtc": {"transports": [RTC_ENDPOINT]},
-        }
-    )
-    def test_matrixrtc_endpoint_accessible_without_authentication_with_transport(
-        self,
-    ) -> None:
-        """Unauthenticated requests must still receive transport data."""
-        channel = self.make_request("GET", f"{PATH_PREFIX}/rtc/transports")
-        self.assertEqual(200, channel.code, channel.json_body)
-        self.assert_dict({"rtc_transports": [RTC_ENDPOINT]}, channel.json_body)
+        self.assertEqual(401, channel.code, channel.json_body)
 
     @override_config(
         {

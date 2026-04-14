@@ -1,1 +1,1 @@
-Fix `/_matrix/client/unstable/org.matrix.msc4143/rtc/transports` returning 401 for unauthenticated requests. This endpoint is a public discovery endpoint used by clients (e.g. Element X) to check MatrixRTC support before establishing a session. Also advertise `org.matrix.msc4143` in `unstable_features` when `msc4143_enabled` is set.
+Advertise `org.matrix.msc4143` in `unstable_features` when `msc4143_enabled` is set.
