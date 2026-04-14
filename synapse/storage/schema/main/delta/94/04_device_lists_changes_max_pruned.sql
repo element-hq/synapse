@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS device_lists_changes_in_room_max_pruned_stream_id (
     stream_id BIGINT NOT NULL
 );
 
--- Seed with the current minimum stream_id minus 1, or 0 if the table is empty.
+-- We assume that nothing has been deleted from the device_lists_changes_in_room
+-- table, so we can set the initial value to 0.
 INSERT INTO device_lists_changes_in_room_max_pruned_stream_id (stream_id)
-    SELECT COALESCE(MIN(stream_id) - 1, 0) FROM device_lists_changes_in_room;
+    SELECT 0 FROM device_lists_changes_in_room;
