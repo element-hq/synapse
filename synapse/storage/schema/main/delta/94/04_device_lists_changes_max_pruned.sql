@@ -24,5 +24,4 @@ CREATE TABLE IF NOT EXISTS device_lists_changes_in_room_max_pruned_stream_id (
 
 -- We assume that nothing has been deleted from the device_lists_changes_in_room
 -- table, so we can set the initial value to 0.
-INSERT INTO device_lists_changes_in_room_max_pruned_stream_id (stream_id)
-    SELECT 0 FROM device_lists_changes_in_room;
+INSERT INTO device_lists_changes_in_room_max_pruned_stream_id (stream_id) VALUES (0);
