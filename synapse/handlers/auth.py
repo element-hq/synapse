@@ -1739,7 +1739,7 @@ class AuthHandler:
             return False
 
     async def start_sso_ui_auth(
-        self, request: SynapseRequest, session_id: str, preferred_idp_id: Optional[str]
+        self, request: SynapseRequest, session_id: str, preferred_idp_id: str | None
     ) -> str:
         """
         Get the HTML for the SSO redirect confirmation page.
@@ -1748,7 +1748,7 @@ class AuthHandler:
             request: The incoming HTTP request
             session_id: The user interactive authentication session ID.
             preferred_idp_id: The ID of the identity provider to use. If `None` one will
-                be picked randomly from those the user has already signed in with.
+                be picked unpredictably from those the user has already signed in with.
 
         Returns:
             The HTML to render.
@@ -1778,7 +1778,7 @@ class AuthHandler:
             if sso_auth_provider is None:
                 raise SynapseError(
                     400,
-                    "Unknown IdP: '%s'" % (preferred_idp_id,),
+                    f"Unknown Identity Provider: '{preferred_idp_id}'",
                     errcode=Codes.INVALID_PARAM,
                 )
         else:
