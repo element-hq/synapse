@@ -895,7 +895,7 @@ class EventCreationHandler:
         if not prev_event:
             return None
 
-        if prev_event and event.user_id == prev_event.user_id:
+        if prev_event and event.sender == prev_event.sender:
             prev_content = encode_canonical_json(prev_event.content)
             next_content = encode_canonical_json(event.content)
             if prev_content == next_content:
@@ -1541,7 +1541,7 @@ class EventCreationHandler:
                 EventTypes.Message,
                 EventTypes.Encrypted,
             ]:
-                await self.store.set_room_participation(event.user_id, event.room_id)
+                await self.store.set_room_participation(event.sender, event.room_id)
 
             if event.internal_metadata.is_out_of_band_membership():
                 # the only sort of out-of-band-membership events we expect to see here are
@@ -2098,7 +2098,7 @@ class EventCreationHandler:
                             "Could not find event %s" % (event.redacts,)
                         )
 
-                    if event.user_id != original_event.user_id:
+                    if event.sender != original_event.sender:
                         raise AuthError(
                             403, "You don't have permission to redact events"
                         )
