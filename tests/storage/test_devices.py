@@ -399,12 +399,12 @@ class DeviceStoreTestCase(HomeserverTestCase):
         self.assertEqual(count, 10 * len(room_ids))
         self.assertEqual(min_device_id, "device_id0")
 
-        # Record the minimum stream ID before pruning, so we can check that this
-        # correctly updates after pruning (as it is cached).
-        starting_min_device_lists_id = self.get_success(
+        # Record the max pruned stream ID before pruning, so we can check
+        # that this correctly updates after pruning.
+        starting_max_pruned_id = self.get_success(
             self.store.db_pool.runInteraction(
-                "get_min_device_lists_changes_in_room",
-                self.store._get_min_device_lists_changes_in_room_txn,
+                "get_max_pruned_device_lists_changes_in_room",
+                self.store._get_max_pruned_device_lists_changes_in_room_txn,
             )
         )
 
@@ -442,14 +442,16 @@ class DeviceStoreTestCase(HomeserverTestCase):
             self.reactor.advance(Duration(milliseconds=110).as_secs())
 
         count, min_device_id = get_devices_in_room_status()
+        # We should always keep the most recent entries so that we can
+        # calculate the maximum stream ID used.
         self.assertEqual(count, len(room_ids))
         self.assertEqual(min_device_id, "device_id19")
 
-        # Check that the minimum stream ID cache has been advanced after pruning.
-        min_device_lists_id = self.get_success(
+        # Check that the max pruned stream ID has been advanced after pruning.
+        max_pruned_id = self.get_success(
             self.store.db_pool.runInteraction(
-                "get_min_device_lists_changes_in_room",
-                self.store._get_min_device_lists_changes_in_room_txn,
+                "get_max_pruned_device_lists_changes_in_room",
+                self.store._get_max_pruned_device_lists_changes_in_room_txn,
             )
         )
-        self.assertGreater(min_device_lists_id, starting_min_device_lists_id)
+        self.assertGreater(max_pruned_id, starting_max_pruned_id)

@@ -1745,16 +1745,21 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         return devices
 
-    def _get_min_device_lists_changes_in_room_txn(self, txn: LoggingTransaction) -> int:
-        """Returns the minimum stream ID that we have entries for
-        `device_lists_changes_in_room`
+    def _get_max_pruned_device_lists_changes_in_room_txn(
+        self, txn: LoggingTransaction
+    ) -> int:
+        """Returns the maximum stream ID that has been pruned from
+        `device_lists_changes_in_room`.
+
+        Any queries for stream IDs less than this value cannot be answered
+        completely, as the data has been deleted.
         """
 
         return self.db_pool.simple_select_one_onecol_txn(
             txn,
-            table="device_lists_changes_in_room",
+            table="device_lists_changes_in_room_max_pruned_stream_id",
             keyvalues={},
-            retcol="COALESCE(MIN(stream_id), 0)",
+            retcol="stream_id",
             allow_none=False,
         )
 
@@ -1783,9 +1788,11 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         def _get_device_list_changes_in_rooms_txn(
             txn: LoggingTransaction,
         ) -> set[str] | None:
-            # Check if the from_token is too old.
-            lowest_known_stream_id = self._get_min_device_lists_changes_in_room_txn(txn)
-            if lowest_known_stream_id > from_token.stream:
+            # Check if the from_token is too old (i.e. data has been pruned).
+            max_pruned_stream_id = (
+                self._get_max_pruned_device_lists_changes_in_room_txn(txn)
+            )
+            if max_pruned_stream_id > from_token.stream:
                 return None
 
             changes: set[str] = set()
@@ -1831,10 +1838,16 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         def _get_all_device_list_changes_txn(
             txn: LoggingTransaction,
         ) -> set[str] | None:
-            # Check if the from_token is too old. We do this each time as we may
-            # prune the table in between runs.
-            lowest_known_stream_id = self._get_min_device_lists_changes_in_room_txn(txn)
-            if lowest_known_stream_id > from_id:
+            # Check if the from_token is too old (i.e. data has been pruned).
+            max_pruned_stream_id = (
+                self._get_max_pruned_device_lists_changes_in_room_txn(txn)
+            )
+            if max_pruned_stream_id > from_id:
+                logger.warning(
+                    "Given stream ID is too old %d < %d",
+                    from_id,
+                    max_pruned_stream_id,
+                )
                 return None
 
             sql = """
@@ -1851,7 +1864,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         )
 
         if room_ids is None:
-            raise Exception("Given stream ID is too old")
+            raise Exception(f"Given stream ID is too old {from_id}")
 
         return room_ids
 
@@ -1870,9 +1883,11 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         def get_device_list_changes_in_room_txn(
             txn: LoggingTransaction,
         ) -> Collection[tuple[str, str]] | None:
-            # Check if the from_token is too old.
-            lowest_known_stream_id = self._get_min_device_lists_changes_in_room_txn(txn)
-            if lowest_known_stream_id > min_stream_id:
+            # Check if the from_token is too old (i.e. data has been pruned).
+            max_pruned_stream_id = (
+                self._get_max_pruned_device_lists_changes_in_room_txn(txn)
+            )
+            if max_pruned_stream_id > min_stream_id:
                 return None
 
             sql = """
@@ -2511,10 +2526,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         if prune_before_stream_id is None:
             return
 
-        # Get the max stream ID that we have in the table, so that we avoid
-        # deleting it. We want to keep the max stream ID so that the minimum
-        # stream ID can be calculated in
-        # `_get_min_device_lists_changes_in_room`.
+        # Get the max stream ID in the table so we avoid deleting it. We need
+        # to keep the latest row so that we can calculate the maximum stream ID
+        # used.
         max_stream_id = await self.db_pool.simple_select_one_onecol(
             table="device_lists_changes_in_room",
             keyvalues={},
@@ -2586,6 +2600,15 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             await self.clock.sleep(Duration(milliseconds=100))
 
         if num_rows_deleted:
+            # Update the max pruned stream ID tracking table so that the
+            # safety check knows data up to this point has been deleted.
+            await self.db_pool.simple_update_one(
+                table="device_lists_changes_in_room_max_pruned_stream_id",
+                keyvalues={},
+                updatevalues={"stream_id": prune_before_stream_id},
+                desc="prune_device_lists_changes_in_room_update_max_pruned",
+            )
+
             logger.info(
                 "Pruned %d rows from device_lists_changes_in_room", num_rows_deleted
             )
