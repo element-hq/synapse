@@ -61,23 +61,26 @@ class AuthRestServlet(RestServlet):
             hs.config.registration.registration_token_template
         )
         self.success_template = hs.config.registration.fallback_success_template
+        self._msc4450_enabled = hs.config.experimental.msc4450_enabled
 
     async def on_GET(self, request: SynapseRequest, stagetype: str) -> None:
         session = parse_string(request, "session")
         if not session:
             raise SynapseError(400, "No session supplied")
 
-        # Unstable query parameter which allows clients to specify the IDP
-        # they wish to use for SSO.
-        # XXX: This needs an MSC and an experimental flag.
-        idp_id: Optional[str] = parse_string(request, "io.element.idp_id")
+        # MSC4450 query parameter which allows clients to specify the Identity Provider
+        # they wish to use for legacy SSO during User-Interactive Authentication.
+        idp_id: Optional[str] = None
 
-        if idp_id is not None and stagetype != LoginType.SSO:
-            raise SynapseError(
-                400,
-                Codes.INVALID_PARAM,
-                "idp_id can only be specified for the `m.login.sso` auth type",
-            )
+        if self._msc4450_enabled:
+            idp_id = parse_string(request, "io.element.idp_id")
+
+            if idp_id is not None and stagetype != LoginType.SSO:
+                raise SynapseError(
+                    400,
+                    Codes.INVALID_PARAM,
+                    "idp_id can only be specified for the `m.login.sso` auth type",
+                )
 
         # We support the unstable (`org.matrix.cross_signing_reset`) name from MSC4312 until
         # enough clients have adopted the stable name (`m.oauth`).
