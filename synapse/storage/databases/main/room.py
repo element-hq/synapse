@@ -1882,7 +1882,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return True
 
-    async def get_user_report(self, report_id: int) -> dict[str, Any] | None:
+    async def get_user_report(
+        self, report_id: int
+    ) -> tuple[int, int, str, str, str] | None:
         """Retrieve a user report
 
         Args:
@@ -1892,38 +1894,12 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             report does not exist.
         """
 
-        def _get_user_report_txn(
-            txn: LoggingTransaction, report_id: int
-        ) -> dict[str, Any] | None:
-            sql = """
-                SELECT
-                    id,
-                    received_ts,
-                    target_user_id,
-                    user_id,
-                    reason
-                FROM user_reports
-                WHERE id = ?
-            """
-
-            txn.execute(sql, [report_id])
-            row = txn.fetchone()
-
-            if not row:
-                return None
-
-            user_report = {
-                "id": row[0],
-                "received_ts": row[1],
-                "target_user_id": row[2],
-                "user_id": row[3],
-                "reason": row[4],
-            }
-
-            return user_report
-
-        return await self.db_pool.runInteraction(
-            "get_user_report", _get_user_report_txn, report_id
+        return await self.db_pool.simple_select_one(
+            table="user_reports",
+            keyvalues={"id": report_id},
+            retcols=("id", "received_ts", "target_user_id", "user_id", "reason"),
+            allow_none=True,
+            desc="get_user_report",
         )
 
     async def get_user_reports_paginate(
@@ -1933,7 +1909,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         direction: Direction = Direction.BACKWARDS,
         user_id: str | None = None,
         target_user_id: str | None = None,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> tuple[list[JsonDict], int]:
         """Retrieve a paginated list of user reports
 
         Args:
@@ -1969,15 +1945,14 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
             where_clause = "WHERE " + " AND ".join(filters) if len(filters) > 0 else ""
 
-            sql = """
+            sql = f"""
                 SELECT COUNT(*) as total_user_reports
-                FROM user_reports
-                {}
-                """.format(where_clause)
+                FROM user_reports {where_clause}
+            """
             txn.execute(sql, args)
             count = cast(tuple[int], txn.fetchone())[0]
 
-            sql = """
+            sql = f"""
                 SELECT
                     id,
                     received_ts,
@@ -1989,10 +1964,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 ORDER BY received_ts {order}
                 LIMIT ?
                 OFFSET ?
-            """.format(
-                where_clause=where_clause,
-                order=order,
-            )
+            """
 
             args += [limit, start]
             txn.execute(sql, args)
