@@ -769,7 +769,6 @@ static KNOWN_ROOM_VERSIONS: LazyLock<KnownRoomVersionsMapping> = LazyLock::new(|
         ROOM_VERSION_MSC3757V10,
         ROOM_VERSION_MSC3757V11,
         ROOM_VERSION_HYDRA_V11,
-        ROOM_VERSION_MSC4242V12,
     ];
 
     KnownRoomVersionsMapping {

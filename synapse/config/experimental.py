@@ -479,6 +479,11 @@ class ExperimentalConfig(Config):
             # Enable room version (and thus applicable push rules from MSC3931/3932)
             KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC1767v10)
 
+        self.msc4242_enabled: bool = experimental.get("msc4242_enabled", False)
+        if self.msc4242_enabled:
+            # Enable the room version
+            KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC4242v12)
+
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
 

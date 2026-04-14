@@ -25,7 +25,7 @@ from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, override_config
 
 
 class MSC4242StateDagsTests(HomeserverTestCase):
@@ -51,6 +51,7 @@ class MSC4242StateDagsTests(HomeserverTestCase):
         assert prev_state_events is not None
         return prev_state_events
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_forward_extremities_are_calculated(self) -> None:
         """
         Check that forward extremities are set as prev_state_events and that they don't change
@@ -202,6 +203,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             message=f"want_new_extrems={want_new_extrems} got={new_extrems}",
         )
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_calculate_new_state_dag_extremities_simple(self) -> None:
         # Simple linear chain
         self._test(
@@ -215,6 +217,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             want_new_extrems={"$4"},
         )
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_calculate_new_state_dag_extremities_fork(self) -> None:
         # Simple fork so we end up with two forward extrems
         self._test(
@@ -228,6 +231,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             want_new_extrems={"$3", "$4"},
         )
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_calculate_new_state_dag_extremities_merge(self) -> None:
         # Simple fork so we end up with two forward extrems
         self._test(
@@ -241,6 +245,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             want_new_extrems={"$4"},
         )
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_calculate_new_state_dag_extremities_fork_on_existing(self) -> None:
         # Fork where we are adding to older events
         self.seen_event_ids = {"$1", "$2", "$3"}
@@ -253,6 +258,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             want_new_extrems={"$4", "$5"},
         )
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_calculate_new_state_dag_extremities_merge_on_existing(self) -> None:
         # Merge where we are merging to older events
         self.seen_event_ids = {"$1", "$2", "$3"}
@@ -264,6 +270,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             want_new_extrems={"$4"},
         )
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_calculate_new_state_dag_extremities_merge_on_not_current(self) -> None:
         # Merge where we are merging to older events
         self.seen_event_ids = {"$1", "$2", "$3"}
@@ -275,6 +282,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             want_new_extrems={"$3", "$4"},
         )
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_calculate_new_state_dag_extremities_append_with_rejected(self) -> None:
         # rejected events cannot be forward extremities
         self.seen_event_ids = {"$1", "$2", "$3"}
@@ -295,6 +303,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             want_new_extrems={"$3"},
         )
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_calculate_new_state_dag_extremities_append_with_rejected_in_chain(
         self,
     ) -> None:
@@ -311,6 +320,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             want_new_extrems={"$5"},
         )
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_calculate_new_state_dag_extremities_missing_prevs_raises(self) -> None:
         self._test(
             current_fwds=[],
@@ -324,6 +334,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             want_raises=True,
         )
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_calculate_new_state_dag_extremities_complex(self) -> None:
         """
             1
