@@ -430,7 +430,8 @@ class FilteredEvent:
     """The event to be serialized."""
 
     membership: str | None
-    """The user's membership at the time of the event.
+    """The user whose requesting the event's membership at the time of the
+    event was sent.
 
     This is None if we didn't compute the membership. In Synapse this happens a)
     when returning state events to state endpoints, or b) when the event is
