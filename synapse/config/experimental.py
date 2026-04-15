@@ -479,6 +479,7 @@ class ExperimentalConfig(Config):
             # Enable room version (and thus applicable push rules from MSC3931/3932)
             KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC1767v10)
 
+        # MSC4242: State DAGs
         self.msc4242_enabled: bool = experimental.get("msc4242_enabled", False)
         if self.msc4242_enabled:
             # Enable the room version

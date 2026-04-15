@@ -2131,9 +2131,9 @@ class RoomMemberMasterHandler(RoomMemberHandler):
         prev_event_ids = [previous_membership_event.event_id]
         auth_event_ids = None
         # Authorise the leave by referencing the previous membership
-        prev_state_events = None
+        prev_state_event_ids = None
         if previous_membership_event.room_version.msc4242_state_dags:
-            prev_state_events = [
+            prev_state_event_ids = [
                 previous_membership_event.event_id,
             ]
         else:
@@ -2142,8 +2142,8 @@ class RoomMemberMasterHandler(RoomMemberHandler):
             )
 
         # State DAG rooms should not have auth events specified
-        if prev_state_events:
-            assert auth_event_ids is None
+        # Normal rooms should not have prev state event IDs specified
+        assert not (prev_state_event_ids is not None and auth_event_ids is not None)
         # Try several times, it could fail with PartialStateConflictError
         # in handle_new_client_event, cf comment in except block.
         max_retries = 5
@@ -2159,7 +2159,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
                     prev_event_ids=prev_event_ids,
                     auth_event_ids=auth_event_ids,
                     outlier=True,
-                    prev_state_events=prev_state_events,
+                    prev_state_events=prev_state_event_ids,
                 )
                 context = await unpersisted_context.persist(event)
                 event.internal_metadata.out_of_band_membership = True
