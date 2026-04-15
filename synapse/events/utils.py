@@ -677,9 +677,6 @@ class EventClientSerializer:
         if not isinstance(event, FilteredEvent):
             return event
 
-        base_event = event.event
-        membership = event.membership
-
         # Force-enable server admin metadata because the only time an event with
         # relevant metadata will be when the admin requested it via their admin
         # client config account data. Also, it's "just" some `unsigned` fields, so
@@ -693,12 +690,12 @@ class EventClientSerializer:
             config = attr.evolve(config, msc4354_enabled=True)
 
         serialized_event = _serialize_event(
-            base_event, time_now, config=config, membership=membership
+            event.event, time_now, config=config, membership=event.membership
         )
 
         # If the event was redacted, fetch the redaction event from the database
         # and include it in the serialized event's unsigned section.
-        redacted_by: str | None = base_event.internal_metadata.redacted_by
+        redacted_by: str | None = event.event.internal_metadata.redacted_by
         if redacted_by is not None:
             serialized_event.setdefault("unsigned", {})["redacted_by"] = redacted_by
             if redaction_map is not None:
@@ -725,7 +722,7 @@ class EventClientSerializer:
 
         new_unsigned = {}
         for callback in self._add_extra_fields_to_unsigned_client_event_callbacks:
-            u = await callback(base_event)
+            u = await callback(event.event)
             new_unsigned.update(u)
 
         if new_unsigned:
@@ -743,9 +740,9 @@ class EventClientSerializer:
 
         # Check if there are any bundled aggregations to include with the event.
         if bundle_aggregations:
-            if base_event.event_id in bundle_aggregations:
+            if event.event.event_id in bundle_aggregations:
                 await self._inject_bundled_aggregations(
-                    base_event,
+                    event.event,
                     time_now,
                     config,
                     bundle_aggregations,
