@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Sequence, cast
 
 import attr
 
@@ -33,6 +33,7 @@ from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.opentracing import trace
 from synapse.rest.admin._base import assert_user_is_admin
+from synapse.storage.databases.main.events_worker import EventGapEntry
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
     JsonMapping,
@@ -79,7 +80,7 @@ class GetMessagesResult:
     Everything needed to serialize a `/messages` response.
     """
 
-    messages_chunk: list[EventBase]
+    messages_chunk: Sequence[EventBase]
     """
     A list of room events.
 
@@ -92,6 +93,11 @@ class GetMessagesResult:
     available. Clients should continue to paginate until no `end_token` property is returned.
     """
 
+    gaps: Sequence[EventGapEntry]
+    """
+    A list of gaps in the `messages_chunk`
+    """
+
     bundled_aggregations: dict[str, BundledAggregations]
     """
     A map of event ID to the bundled aggregations for the events in the chunk.
@@ -99,7 +105,7 @@ class GetMessagesResult:
     If an event doesn't have any bundled aggregations, it may not appear in the map.
     """
 
-    state: list[EventBase] | None
+    state: Sequence[EventBase] | None
     """
     A list of state events relevant to showing the chunk. For example, if
     lazy_load_members is enabled in the filter then this may contain the membership
@@ -467,12 +473,14 @@ class PaginationHandler:
     @trace
     async def get_messages(
         self,
+        *,
         requester: Requester,
         room_id: str,
         pagin_config: PaginationConfig,
         as_client_event: bool = True,
         event_filter: Filter | None = None,
         use_admin_priviledge: bool = False,
+        backfill: bool = True,
     ) -> GetMessagesResult:
         """Get messages in a room.
 
@@ -485,6 +493,8 @@ class PaginationHandler:
             use_admin_priviledge: if `True`, return all events, regardless
                 of whether `user` has access to them. To be used **ONLY**
                 from the admin API.
+            backfill: If false, we skip backfill altogether. When true, we backfill as a
+                best effort.
 
         Returns:
             Pagination API results
@@ -575,7 +585,7 @@ class PaginationHandler:
             event_filter=event_filter,
         )
 
-        if pagin_config.direction == Direction.BACKWARDS:
+        if backfill and pagin_config.direction == Direction.BACKWARDS:
             # We use a `Set` because there can be multiple events at a given depth
             # and we only care about looking at the unique continum of depths to
             # find gaps.
@@ -674,6 +684,7 @@ class PaginationHandler:
         if not events:
             return GetMessagesResult(
                 messages_chunk=[],
+                gaps=[],
                 bundled_aggregations={},
                 state=None,
                 start_token=from_token,
@@ -696,6 +707,7 @@ class PaginationHandler:
         if not events:
             return GetMessagesResult(
                 messages_chunk=[],
+                gaps=[],
                 bundled_aggregations={},
                 state=None,
                 start_token=from_token,
@@ -723,8 +735,13 @@ class PaginationHandler:
             events, user_id
         )
 
+        gaps = await self.store.get_events_next_to_gaps(
+            events=events, direction=pagin_config.direction
+        )
+
         return GetMessagesResult(
             messages_chunk=events,
+            gaps=gaps,
             bundled_aggregations=aggregations,
             state=state,
             start_token=from_token,

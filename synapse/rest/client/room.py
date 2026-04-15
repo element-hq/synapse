@@ -79,7 +79,14 @@ from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main import DataStore
 from synapse.streams.config import PaginationConfig
-from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
+from synapse.types import (
+    JsonDict,
+    Requester,
+    StreamKeyType,
+    StreamToken,
+    ThirdPartyInstanceID,
+    UserID,
+)
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
@@ -854,6 +861,18 @@ async def encode_messages_response(
                 bundle_aggregations=get_messages_result.bundled_aggregations,
             )
         ),
+        "org.matrix.msc3871.gaps": [
+            {
+                "prev_pagination_token": await get_messages_result.start_token.copy_and_replace(
+                    StreamKeyType.ROOM, gap.prev_token
+                ).to_string(serialize_deps.store),
+                "event_id": gap.event_id,
+                "next_pagination_token": await get_messages_result.start_token.copy_and_replace(
+                    StreamKeyType.ROOM, gap.next_token
+                ).to_string(serialize_deps.store),
+            }
+            for gap in get_messages_result.gaps
+        ],
         "start": await get_messages_result.start_token.to_string(serialize_deps.store),
     }
 
@@ -893,6 +912,16 @@ class RoomMessageListRestServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, room_id: str
     ) -> tuple[int, JsonDict]:
+        """
+        Query paremeters:
+            dir
+            from
+            to
+            limit
+            filter
+            backfill: If false, we skip backfill altogether. When true, we backfill as a
+                best effort.
+        """
         processing_start_time = self.clock.time_msec()
         # Fire off and hope that we get a result by the end.
         #
@@ -922,6 +951,8 @@ class RoomMessageListRestServlet(RestServlet):
         ):
             as_client_event = False
 
+        backfill = parse_boolean(request, "backfill", default=True)
+
         serialize_options = SerializeEventConfig(
             as_client_event=as_client_event, requester=requester
         )
@@ -932,6 +963,7 @@ class RoomMessageListRestServlet(RestServlet):
             pagin_config=pagination_config,
             as_client_event=as_client_event,
             event_filter=event_filter,
+            backfill=backfill,
         )
 
         # Useful for debugging timeline/pagination issues. For example, if a client
