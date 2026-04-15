@@ -615,7 +615,7 @@ def _serialize_event(
                 )
 
     if membership is not None:
-        d.setdefault("unsigned", {})[EventUnsignedContentFields.MEMBERSHIP] = membership
+        d["unsigned"][EventUnsignedContentFields.MEMBERSHIP] = membership
 
     return d
 
