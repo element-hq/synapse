@@ -29,7 +29,10 @@ dependencies = [
     # We require 2.0.0 for immutabledict support.
     "canonicaljson>=2.0.0,<3.0.0",
     # we use the type definitions added in signedjson 1.1.
-    "signedjson>=1.1.0,<2.0.0",
+    # 1.1.0 erroneously removed decode_verify_key_base64 (reintroduced in 1.1.1).
+    # 1.1.1 is mispackaged (importlib-metadata dependency without minimum version bound)
+    # 1.1.2, 1.1.3 and 1.1.4 were all released on the same day, so no good reason to use the older version.
+    "signedjson>=1.1.4,<2.0.0",
     # validating SSL certs for IP addresses requires service_identity 18.1.
     "service-identity>=18.1.0",
     # Twisted 18.9 introduces some logger improvements that the structured

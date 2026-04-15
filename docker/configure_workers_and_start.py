@@ -119,7 +119,7 @@ WORKERS_CONFIG: dict[str, dict[str, Any]] = {
     },
     "media_repository": {
         "app": "synapse.app.generic_worker",
-        "listener_resources": ["media", "client"],
+        "listener_resources": ["media", "client", "replication"],
         "endpoint_patterns": [
             "^/_matrix/media/",
             "^/_synapse/admin/v1/purge_media_cache$",
