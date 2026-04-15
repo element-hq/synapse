@@ -16,6 +16,17 @@ import enum
 
 
 class Sentinel(enum.Enum):
+    """
+    Internal marker sentinel for distinguishing a default state from user-suppliable values.
+    Has no meaning on its own.
+
+    Use this when you want to be absolutely sure that the marker came from Synapse code
+    and not from request body parsing.
+
+    If you want a Pydantic-compatible Sentinel that is suitable for expressing
+    'absent from some parsed JSON payload' or equivalent, see `Absent`.
+    """
+
     # defining a sentinel in this way allows mypy to correctly handle the
     # type of a dictionary lookup and subsequent type narrowing.
     UNSET_SENTINEL = object()

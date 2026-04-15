@@ -27,8 +27,10 @@ from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
+    Annotated,
     Any,
     ClassVar,
+    Final,
     Literal,
     Mapping,
     Match,
@@ -41,8 +43,12 @@ from typing import (
     overload,
 )
 
+import annotated_types
 import attr
+import pydantic_core.core_schema
 from immutabledict import immutabledict
+from pydantic import GetCoreSchemaHandler, StrictInt
+from pydantic_core import CoreSchema
 from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
 from typing_extensions import Self
@@ -107,6 +113,89 @@ StrCollection = tuple[str, ...] | list[str] | AbstractSet[str]
 #
 # Unlike StrCollection, StrSequence is an ordered collection of strings.
 StrSequence = tuple[str, ...] | list[str]
+
+
+class AbsentType(Enum):
+    """
+    Type of a sentinel to use as an alternative to `None`
+    for when we really mean 'absent' and not JSON null.
+
+    For a Sentinel for internal (non-API-facing) use, instead consider
+    `Sentinel.UNSET_SENTINEL`.
+
+    It is falsy (like None is), so shorthand forms like `x or 0` can be used.
+    """
+
+    # Making this an Enum member makes this compatible with type narrowing,
+    # meaning `x is not Absent` will narrow `x: int | AbsentType` to `x: int` etc.
+    _Absent = object()
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: object, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        def _reject_from_json(v: object) -> "AbsentType":
+            """
+            Reject the JSON value, no matter what it is, since absent values
+            are meant to be ... absent, thus have nothing they can be deserialised
+            from.
+            """
+            raise ValueError("AbsentType cannot be deserialized from JSON")
+
+        # `json_or_python_schema` wrapper needed for Pydantic < 2.10
+        # but can be replaced with just the `is_instance_schema` after that version.
+        return pydantic_core.core_schema.json_or_python_schema(
+            json_schema=pydantic_core.core_schema.no_info_plain_validator_function(
+                _reject_from_json
+            ),
+            python_schema=pydantic_core.core_schema.is_instance_schema(cls),
+        )
+
+    def __copy__(self) -> "AbsentType":
+        """
+        Copy implementation used by `copy.copy()`.
+        Always use the same instance.
+
+        Without this and the deep version `__deepcopy__`,
+        `copy.copy(Absent)` on Python 3.10 (olddeps)
+        had a problem where it tried to construct a new Absent
+        as part of a deepcopy operation and resulted in:
+            ValueError: <object object at 0x7f64b3b6d930> is not a valid AbsentType
+        """
+        return self
+
+    def __deepcopy__(self, memo: object) -> "AbsentType":
+        """
+        Copy implementation used by `copy.deepcopy()`.
+        Always use the same instance.
+        """
+        return self
+
+    def __bool__(self) -> Literal[False]:
+        return False
+
+    def __str__(self) -> str:
+        return "Absent"
+
+    def __repr__(self) -> str:
+        return "Absent"
+
+
+Absent: Final = AbsentType._Absent
+"""
+Sentinel to use as an alternative to `None`
+for when we really mean 'absent' and not JSON null.
+
+For a Sentinel for internal (non-API-facing) use, instead consider
+`Sentinel.UNSET_SENTINEL`.
+"""
+
+
+NonNegativeStrictInt = Annotated[StrictInt, annotated_types.Ge(0)]
+"""A strict integer that must be greater than or equal to zero.
+
+Should be preferred in place of Pydantic's own (lax) NonNegativeInt.
+"""
 
 
 # Note that this seems to require inheriting *directly* from Interface in order

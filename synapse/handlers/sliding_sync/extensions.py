@@ -11,7 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
-
 import itertools
 import logging
 from collections import ChainMap
@@ -26,11 +25,13 @@ from typing import (
 
 from typing_extensions import TypeAlias, assert_never
 
-from synapse.api.constants import AccountDataTypes, EduTypes
+from synapse.api.constants import AccountDataTypes, EduTypes, StickyEvent
+from synapse.events import EventBase
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
 from synapse.types import (
+    Absent,
     DeviceListUpdates,
     JsonMapping,
     MultiWriterStreamToken,
@@ -47,10 +48,12 @@ from synapse.types.handlers.sliding_sync import (
     SlidingSyncConfig,
     SlidingSyncResult,
 )
+from synapse.types.rest.client import SlidingSyncStickyEventsToken
 from synapse.util.async_helpers import (
     concurrently_execute,
     gather_optional_coroutines,
 )
+from synapse.visibility import filter_and_transform_events_for_client
 
 _ThreadSubscription: TypeAlias = (
     SlidingSyncResult.Extensions.ThreadSubscriptionsExtension.ThreadSubscription
@@ -73,7 +76,10 @@ class SlidingSyncExtensionHandler:
         self.event_sources = hs.get_event_sources()
         self.device_handler = hs.get_device_handler()
         self.push_rules_handler = hs.get_push_rules_handler()
+        self.clock = hs.get_clock()
+        self._storage_controllers = hs.get_storage_controllers()
         self._enable_thread_subscriptions = hs.config.experimental.msc4306_enabled
+        self._enable_sticky_events = hs.config.experimental.msc4354_enabled
 
     @trace
     async def get_extensions_response(
@@ -83,6 +89,7 @@ class SlidingSyncExtensionHandler:
         new_connection_state: "MutablePerConnectionState",
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
+        all_interested_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
@@ -92,11 +99,14 @@ class SlidingSyncExtensionHandler:
         Args:
             sync_config: Sync configuration
             new_connection_state: Snapshot of the current per-connection state
-            new_per_connection_state: A mutable copy of the per-connection
+            new_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state during this request.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
+            all_interested_room_ids: The IDs of all rooms that the client is interested in,
+                even if they don't appear in the current limited window.
+                See `SlidingSyncInterestedRooms.all_rooms`.
             actual_room_response_map: A map of room ID to room results in the the
                 Sliding Sync response.
             to_token: The latest point in the stream to sync up to.
@@ -174,6 +184,19 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
+        sticky_events_coro = None
+        if (
+            sync_config.extensions.sticky_events is not Absent
+            and self._enable_sticky_events
+        ):
+            sticky_events_coro = self.get_sticky_events_extension_response(
+                sync_config=sync_config,
+                sticky_events_request=sync_config.extensions.sticky_events,
+                all_interested_room_ids=all_interested_room_ids,
+                to_token=to_token,
+                from_token=from_token,
+            )
+
         (
             to_device_response,
             e2ee_response,
@@ -181,6 +204,7 @@ class SlidingSyncExtensionHandler:
             receipts_response,
             typing_response,
             thread_subs_response,
+            sticky_events_response,
         ) = await gather_optional_coroutines(
             to_device_coro,
             e2ee_coro,
@@ -188,6 +212,7 @@ class SlidingSyncExtensionHandler:
             receipts_coro,
             typing_coro,
             thread_subs_coro,
+            sticky_events_coro,
         )
 
         return SlidingSyncResult.Extensions(
@@ -197,6 +222,7 @@ class SlidingSyncExtensionHandler:
             receipts=receipts_response,
             typing=typing_response,
             thread_subscriptions=thread_subs_response,
+            sticky_events=sticky_events_response,
         )
 
     def find_relevant_room_ids_for_extension(
@@ -966,4 +992,66 @@ class SlidingSyncExtensionHandler:
             subscribed=subscribed_threads,
             unsubscribed=unsubscribed_threads,
             prev_batch=prev_batch,
+        )
+
+    async def get_sticky_events_extension_response(
+        self,
+        sync_config: SlidingSyncConfig,
+        sticky_events_request: SlidingSyncConfig.Extensions.StickyEventsExtension,
+        all_interested_room_ids: set[str],
+        to_token: StreamToken,
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.StickyEventsExtension | None:
+        if not sticky_events_request.enabled:
+            return None
+        now = self.clock.time_msec()
+        since_token = sticky_events_request.since or SlidingSyncStickyEventsToken(
+            sticky_events_stream_id=0
+        )
+        (
+            sticky_events_to_id,
+            room_to_event_ids,
+        ) = await self.store.get_sticky_events_in_rooms(
+            all_interested_room_ids,
+            from_id=since_token.sticky_events_stream_id,
+            to_id=to_token.sticky_events_key,
+            now=now,
+            limit=min(sticky_events_request.limit, StickyEvent.MAX_EVENTS_IN_SYNC),
+        )
+        # No need to preserve sticky event order here because we will
+        # reassemble it in the right order after.
+        all_sticky_event_ids = {
+            ev_id for evs in room_to_event_ids.values() for ev_id in evs
+        }
+        unfiltered_events = await self.store.get_events_as_list(all_sticky_event_ids)
+        filtered_events = await filter_and_transform_events_for_client(
+            self._storage_controllers,
+            sync_config.user.to_string(),
+            unfiltered_events,
+            # As per MSC4354:
+            # > History visibility checks MUST NOT be applied to sticky events.
+            # > Any joined user is authorised to see sticky events for the duration they remain sticky.
+            always_include_ids=frozenset(all_sticky_event_ids),
+        )
+        filtered_event_map = {ev.event_id: ev for ev in filtered_events}
+
+        room_id_to_sticky_events: dict[str, list[EventBase]] = {}
+        for room_id, sticky_event_ids in room_to_event_ids.items():
+            filtered_events_for_room = [
+                filtered_event_map[event_id]
+                # This reintroduces the correct order
+                # (by the sticky events stream)
+                for event_id in sticky_event_ids
+                if event_id in filtered_event_map
+            ]
+            if len(filtered_events_for_room) == 0:
+                continue
+
+            room_id_to_sticky_events[room_id] = filtered_events_for_room
+
+        return SlidingSyncResult.Extensions.StickyEventsExtension(
+            room_id_to_sticky_events=room_id_to_sticky_events,
+            next_batch=SlidingSyncStickyEventsToken(
+                sticky_events_stream_id=sticky_events_to_id
+            ),
         )
