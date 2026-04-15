@@ -427,7 +427,21 @@ class FilteredEvent:
     """
 
     event: "EventBase"
+    """The event to be serialized."""
+
     membership: str | None
+    """The user's membership at the time of the event.
+
+    This is None if we didn't compute the membership. In Synapse this happens a)
+    when returning state events to state endpoints, or b) when the event is
+    returned to an admin.
+
+    According to the spec we don't have to include the membership for any events
+    if we don't want to, especially if its expensive to compute. In practice
+    clients really only care about events in the room timeline so that in
+    encrypted room they can determine if they should be able to decrypt the
+    event or not.
+    """
 
     @classmethod
     def state(cls, event: "EventBase") -> "FilteredEvent":
