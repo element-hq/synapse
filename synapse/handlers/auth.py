@@ -1778,7 +1778,7 @@ class AuthHandler:
             if sso_auth_provider is None:
                 raise SynapseError(
                     400,
-                    f"Unknown Identity Provider: '{preferred_idp_id}'",
+                    f"Unknown preferred Identity Provider: '{preferred_idp_id}'",
                     errcode=Codes.INVALID_PARAM,
                 )
         else:

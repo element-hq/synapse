@@ -606,7 +606,7 @@ class ExperimentalConfig(Config):
         self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
 
         # MSC4450: Identity Provider selection for User-Interactive Authentication
-        # with Legacy Single Sign-On
+        # with Legacy Single Sign-On (`m.login.sso`)
         # Tracked in: https://github.com/element-hq/synapse/issues/19691
         # Note that this is only applicable to legacy auth, not MAS integration (OAuth 2.0).
         self.msc4450_enabled: bool = experimental.get("msc4450_enabled", False)
