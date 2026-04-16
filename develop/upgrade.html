@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-f7507cb5.js";
+            window.path_to_searchindex_js = "searchindex-0926bf63.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -330,6 +330,15 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11520"><a class="header" href="#upgrading-to-v11520">Upgrading to v1.152.0</a></h1>
+<h2 id="workers-which-quarantine-media-must-be-stream-writers"><a class="header" href="#workers-which-quarantine-media-must-be-stream-writers">Workers which quarantine media must be stream writers</a></h2>
+<p>A new <a href="./workers.html#the-quarantined_media_changes-stream"><code>quarantined_media_changes</code> stream writer</a> is
+introduced. Existing deployments which route the <code>/quarantine_media</code> endpoints to a
+worker (instead of the main process) <em>must</em> also add those workers to the
+<code>quarantined_media_changes</code> stream writer list. Quarantining media will not work without
+this.</p>
+<p>If your deployment does not use workers, or instead uses the main process for
+quarantining media, you do not need to make any changes to your configuration.</p>
 <h1 id="upgrading-to-v11500"><a class="header" href="#upgrading-to-v11500">Upgrading to v1.150.0</a></h1>
 <h2 id="removal-of-the-systemd-pip-extra"><a class="header" href="#removal-of-the-systemd-pip-extra">Removal of the <code>systemd</code> pip extra</a></h2>
 <p>The <code>matrix-synapse[systemd]</code> pip extra has been removed.
