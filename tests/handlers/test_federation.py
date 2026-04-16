@@ -485,7 +485,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         )
         # the auth code requires that a signature exists, but doesn't check that
         # signature... go figure.
-        join_event.signatures[other_server] = {"x": "y"}
+        join_event.signatures.update({other_server: {"x": "y"}})
 
         self.get_success(
             self.hs.get_federation_event_handler().on_send_membership_event(

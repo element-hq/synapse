@@ -10,7 +10,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Mapping
+from typing import Any, Mapping
 
 from synapse.types import JsonDict
 
@@ -154,3 +154,32 @@ def event_visible_to_server(
     Returns:
         Whether the server is allowed to see the unredacted event.
     """
+
+class Signatures:
+    """A class representing the signatures on an event."""
+
+    def __init__(self, signatures: Mapping[str, Mapping[str, str]]): ...
+    def get_signature(self, server_name: str, key_id: str) -> str | None: ...
+    """Get the signature for the given server name and key ID, if it exists."""
+
+    def __getitem__(self, server_name: str) -> Mapping[str, str]: ...
+    """Get the signatures for the given server name. Raises KeyError if there
+    are no signatures for that server."""
+
+    def __contains__(self, server_name: Any) -> bool: ...
+    """Check if there are signatures for the given server name."""
+
+    def __len__(self) -> int: ...
+    """Return the number of servers that have signatures."""
+
+    def add_signature(self, server_name: str, key_id: str, signature: str) -> None: ...
+    """Add a signature for the given server name and key ID."""
+
+    def update(self, signatures: Mapping[str, Mapping[str, str]]) -> None: ...
+    """Update the signatures with the given signatures.
+
+    Will overwrite all existing signatures for the server names provided.
+    """
+
+    def as_dict(self) -> dict[str, dict[str, str]]: ...
+    """Return a copy of the signatures as a dictionary."""
