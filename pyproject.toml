@@ -137,7 +137,7 @@ saml2 = [
     "defusedxml>=0.7.1", # via pysaml2
     "pytz>=2018.3",  # via pysaml2
 ]
-oidc = ["authlib>=0.15.1"]
+oidc = ["authlib>=1.6.11"]
 url-preview = ["lxml>=4.6.3"]
 sentry = ["sentry-sdk>=0.7.2"]
 opentracing = [
@@ -179,7 +179,7 @@ all = [
     # saml2
     "pysaml2>=4.5.0",
     # oidc and jwt
-    "authlib>=0.15.1",
+    "authlib>=1.6.11",
     # url-preview
     "lxml>=4.6.3",
     # sentry
