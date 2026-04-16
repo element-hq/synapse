@@ -427,6 +427,16 @@ impl EventInternalMetadataInner {
         set_property!(self, PolicyServerSpammy, obj);
     }
 
+    fn get_spam_checker_spammy(&self) -> bool {
+        get_property_opt!(self, SpamCheckerSpammy)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    fn set_spam_checker_spammy(&mut self, obj: bool) {
+        set_property!(self, SpamCheckerSpammy, obj);
+    }
+
     pub fn set_redacted(&mut self, obj: bool) {
         set_property!(self, Redacted, obj);
     }
@@ -682,13 +692,12 @@ impl EventInternalMetadata {
 
     #[getter]
     fn get_spam_checker_spammy(&self) -> PyResult<bool> {
-        Ok(get_property_opt!(self, SpamCheckerSpammy)
-            .copied()
-            .unwrap_or(false))
+        Ok(self.read_inner()?.get_spam_checker_spammy())
     }
     #[setter]
-    fn set_spam_checker_spammy(&mut self, obj: bool) {
-        set_property!(self, SpamCheckerSpammy, obj);
+    fn set_spam_checker_spammy(&self, obj: bool) -> PyResult<()> {
+        self.write_inner()?.set_spam_checker_spammy(obj);
+        Ok(())
     }
 
     #[getter]
