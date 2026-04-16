@@ -121,12 +121,13 @@ stacking them up. You can monitor the currently running background updates with
 
 ## Workers which quarantine media must be stream writers
 
-A new `quarantined_media_changes` [stream writer](./workers.md#stream-writers) is
-introduced. Existing deployments which route the `/quarantine_media` endpoints to
-a non-master worker *must* also add those workers to the `quarantined_media_changes`
-stream writer list. Quarantining media will not work without this.
+A new [`quarantined_media_changes` stream writer](./workers.md#the-quarantined_media_changes-stream) is
+introduced. Existing deployments which route the `/quarantine_media` endpoints to a
+worker (instead of the main process) *must* also add those workers to the
+`quarantined_media_changes` stream writer list. Quarantining media will not work without
+this.
 
-If your deployment does not use workers, or instead uses the master process for 
+If your deployment does not use workers, or instead uses the main process for
 quarantining media, you do not need to make any changes to your configuration.
 
 # Upgrading to v1.150.0
