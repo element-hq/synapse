@@ -29,6 +29,7 @@ from synapse.api.constants import Direction, EventTypes, JoinRules, Membership
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.api.filtering import Filter
 from synapse.events.utils import (
+    FilteredEvent,
     SerializeEventConfig,
 )
 from synapse.handlers.pagination import (
@@ -529,7 +530,9 @@ class RoomStateRestServlet(RestServlet):
         )
         events = await self.store.get_events(event_ids.values())
         now = self.clock.time_msec()
-        room_state = await self._event_serializer.serialize_events(events.values(), now)
+        room_state = await self._event_serializer.serialize_events(
+            [FilteredEvent.state(e) for e in events.values()], now
+        )
         ret = {"state": room_state}
 
         return HTTPStatus.OK, ret
@@ -897,7 +900,8 @@ class RoomEventContextServlet(RestServlet):
                 bundle_aggregations=event_context.aggregations,
             ),
             "state": await self._event_serializer.serialize_events(
-                event_context.state, time_now
+                [FilteredEvent.state(e) for e in event_context.state],
+                time_now,
             ),
             "start": event_context.start,
             "end": event_context.end,

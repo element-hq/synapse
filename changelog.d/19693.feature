@@ -1,0 +1,1 @@
+Support [MSC4450: Identity Provider selection for User-Interactive Authentication with Legacy Single Sign-On](https://github.com/matrix-org/matrix-spec-proposals/pull/4450).
