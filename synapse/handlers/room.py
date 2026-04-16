@@ -67,7 +67,7 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase
 from synapse.events.snapshot import UnpersistedEventContext
-from synapse.events.utils import copy_and_fixup_power_levels_contents
+from synapse.events.utils import FilteredEvent, copy_and_fixup_power_levels_contents
 from synapse.handlers.relations import BundledAggregations
 from synapse.rest.admin._base import assert_user_is_admin
 from synapse.streams import EventSource
@@ -109,9 +109,9 @@ FIVE_MINUTES_IN_MS = 5 * 60 * 1000
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventContext:
-    events_before: list[EventBase]
-    event: EventBase
-    events_after: list[EventBase]
+    events_before: list[FilteredEvent]
+    event: FilteredEvent
+    events_after: list[FilteredEvent]
     state: list[EventBase]
     aggregations: dict[str, BundledAggregations]
     start: str
@@ -1916,9 +1916,9 @@ class RoomContextHandler:
         # The user is peeking if they aren't in the room already
         is_peeking = not is_user_in_room
 
-        async def filter_evts(events: list[EventBase]) -> list[EventBase]:
+        async def filter_evts(events: list[EventBase]) -> list[FilteredEvent]:
             if use_admin_priviledge:
-                return events
+                return [FilteredEvent.admin_override(e) for e in events]
             return await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user.to_string(),
@@ -1946,31 +1946,33 @@ class RoomContextHandler:
             events_before = await event_filter.filter(events_before)
             events_after = await event_filter.filter(events_after)
 
-        events_before = await filter_evts(events_before)
-        events_after = await filter_evts(events_after)
+        filtered_events_before = await filter_evts(events_before)
+        filtered_events_after = await filter_evts(events_after)
         # filter_evts can return a pruned event in case the user is allowed to see that
         # there's something there but not see the content, so use the event that's in
         # `filtered` rather than the event we retrieved from the datastore.
-        event = filtered[0]
+        filtered_event = filtered[0]
 
         # Fetch the aggregations.
         aggregations = await self._relations_handler.get_bundled_aggregations(
-            itertools.chain(events_before, (event,), events_after),
+            itertools.chain(
+                filtered_events_before, (filtered_event,), filtered_events_after
+            ),
             user.to_string(),
         )
 
-        if events_after:
-            last_event_id = events_after[-1].event_id
+        if filtered_events_after:
+            last_event_id = filtered_events_after[-1].event.event_id
         else:
             last_event_id = event_id
 
         if event_filter and event_filter.lazy_load_members:
             state_filter = StateFilter.from_lazy_load_member_list(
-                ev.sender
+                ev.event.sender
                 for ev in itertools.chain(
-                    events_before,
-                    (event,),
-                    events_after,
+                    filtered_events_before,
+                    (filtered_event,),
+                    filtered_events_after,
                 )
             )
         else:
@@ -1993,9 +1995,9 @@ class RoomContextHandler:
         token = StreamToken.START
 
         return EventContext(
-            events_before=events_before,
-            event=event,
-            events_after=events_after,
+            events_before=filtered_events_before,
+            event=filtered_event,
+            events_after=filtered_events_after,
             state=state_events,
             aggregations=aggregations,
             start=await token.copy_and_replace(

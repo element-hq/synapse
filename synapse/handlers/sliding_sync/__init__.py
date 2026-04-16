@@ -23,7 +23,7 @@ from typing_extensions import assert_never
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.events import EventBase
-from synapse.events.utils import strip_event
+from synapse.events.utils import FilteredEvent, strip_event
 from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.handlers.sliding_sync.room_lists import (
@@ -679,7 +679,7 @@ class SlidingSyncHandler:
         # membership. Currently, we have to make all of these optional because
         # `invite`/`knock` rooms only have `stripped_state`. See
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
-        timeline_events: list[EventBase] = []
+        timeline_events: list[FilteredEvent] = []
         bundled_aggregations: dict[str, BundledAggregations] | None = None
         limited: bool | None = None
         prev_batch_token: StreamToken | None = None
@@ -739,7 +739,7 @@ class SlidingSyncHandler:
                 # Use `stream_ordering` for updates
                 else paginate_room_events_by_stream_ordering
             )
-            timeline_events, new_room_key, limited = await pagination_method(
+            raw_timeline_events, new_room_key, limited = await pagination_method(
                 room_id=room_id,
                 # The bounds are reversed so we can paginate backwards
                 # (from newer to older events) starting at to_bound.
@@ -752,13 +752,13 @@ class SlidingSyncHandler:
 
             # We want to return the events in ascending order (the last event is the
             # most recent).
-            timeline_events.reverse()
+            raw_timeline_events.reverse()
 
             # Make sure we don't expose any events that the client shouldn't see
             timeline_events = await filter_and_transform_events_for_client(
                 self.storage_controllers,
                 user.to_string(),
-                timeline_events,
+                raw_timeline_events,
                 is_peeking=room_membership_for_user_at_to_token.membership
                 != Membership.JOIN,
                 filter_send_to_client=True,
@@ -778,12 +778,17 @@ class SlidingSyncHandler:
             if from_token is not None:
                 for timeline_event in reversed(timeline_events):
                     # This fields should be present for all persisted events
-                    assert timeline_event.internal_metadata.stream_ordering is not None
-                    assert timeline_event.internal_metadata.instance_name is not None
+                    assert (
+                        timeline_event.event.internal_metadata.stream_ordering
+                        is not None
+                    )
+                    assert (
+                        timeline_event.event.internal_metadata.instance_name is not None
+                    )
 
                     persisted_position = PersistedEventPosition(
-                        instance_name=timeline_event.internal_metadata.instance_name,
-                        stream=timeline_event.internal_metadata.stream_ordering,
+                        instance_name=timeline_event.event.internal_metadata.instance_name,
+                        stream=timeline_event.event.internal_metadata.stream_ordering,
                     )
                     if persisted_position.persisted_after(
                         from_token.stream_token.room_key
@@ -1061,13 +1066,13 @@ class SlidingSyncHandler:
                             if timeline_events is not None:
                                 for timeline_event in timeline_events:
                                     # Anyone who sent a message is relevant
-                                    timeline_membership.add(timeline_event.sender)
+                                    timeline_membership.add(timeline_event.event.sender)
 
                                     # We also care about invite, ban, kick, targets,
                                     # etc.
-                                    if timeline_event.type == EventTypes.Member:
+                                    if timeline_event.event.type == EventTypes.Member:
                                         timeline_membership.add(
-                                            timeline_event.state_key
+                                            timeline_event.event.state_key
                                         )
 
                             # The client needs to know the membership of everyone in
@@ -1480,7 +1485,7 @@ class SlidingSyncHandler:
         self,
         room_id: str,
         to_token: StreamToken,
-        timeline: list[EventBase],
+        timeline: list[FilteredEvent],
         check_outside_timeline: bool,
     ) -> int | None:
         """Get a bump stamp for the room, if we have a bump event and it has
@@ -1500,8 +1505,8 @@ class SlidingSyncHandler:
         # those matches. We iterate backwards and take the stream ordering
         # of the first event that matches the bump event types.
         for timeline_event in reversed(timeline):
-            if timeline_event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
-                new_bump_stamp = timeline_event.internal_metadata.stream_ordering
+            if timeline_event.event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
+                new_bump_stamp = timeline_event.event.internal_metadata.stream_ordering
 
                 # All persisted events have a stream ordering
                 assert new_bump_stamp is not None

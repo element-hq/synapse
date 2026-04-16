@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 from synapse.api.errors import NotFoundError
 from synapse.events.utils import (
+    FilteredEvent,
     SerializeEventConfig,
     format_event_raw,
 )
@@ -66,7 +67,9 @@ class EventRestServlet(RestServlet):
         )
         res = {
             "event": await self._event_serializer.serialize_event(
-                event, self._clock.time_msec(), config=config
+                FilteredEvent.admin_override(event),
+                self._clock.time_msec(),
+                config=config,
             )
         }
 

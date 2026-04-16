@@ -61,7 +61,11 @@ from synapse.events.snapshot import (
     UnpersistedEventContext,
     UnpersistedEventContextBase,
 )
-from synapse.events.utils import SerializeEventConfig, maybe_upsert_event_field
+from synapse.events.utils import (
+    FilteredEvent,
+    SerializeEventConfig,
+    maybe_upsert_event_field,
+)
 from synapse.events.validator import EventValidator
 from synapse.handlers.directory import DirectoryHandler
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
@@ -261,7 +265,7 @@ class MessageHandler:
                 room_state = room_state_events[membership_event_id]
 
         events = await self._event_serializer.serialize_events(
-            room_state.values(),
+            [FilteredEvent.state(e) for e in room_state.values()],
             self.clock.time_msec(),
             config=SerializeEventConfig(requester=requester),
         )
