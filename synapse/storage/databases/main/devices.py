@@ -2553,16 +2553,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         # We set a minimum stream ID so that when we delete in batches the
         # database doesn't have to scan through all the (dead) tuples that were just
         # deleted to find the next batch to delete.
-        delete_sql = """
-            DELETE FROM device_lists_changes_in_room
-            WHERE stream_id IN (
-                SELECT stream_id FROM device_lists_changes_in_room
-                WHERE ? < stream_id AND stream_id <= ?
-                ORDER BY stream_id ASC
-                LIMIT ?
-            )
-            RETURNING stream_id
-        """
+
 
         # The minimum stream ID to delete in the next batch, c.f. comment above.
         # We default to 0 here as that is less than all possible stream IDs.
@@ -2571,6 +2562,16 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         def prune_device_lists_changes_in_room_txn(txn: LoggingTransaction) -> int:
             nonlocal min_stream_id
 
+            delete_sql = """
+                DELETE FROM device_lists_changes_in_room
+                WHERE stream_id IN (
+                    SELECT stream_id FROM device_lists_changes_in_room
+                    WHERE ? < stream_id AND stream_id <= ?
+                    ORDER BY stream_id ASC
+                    LIMIT ?
+                )
+                RETURNING stream_id
+            """
             txn.execute(
                 delete_sql,
                 (min_stream_id, prune_before_stream_id, PRUNE_DEVICE_LISTS_BATCH_SIZE),
