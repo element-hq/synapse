@@ -33,6 +33,7 @@ import attr
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.types import (
     JsonMapping,
     Requester,
@@ -251,32 +252,40 @@ class AdminHandler:
                     topological=last_event.depth,
                 )
 
-                events = await filter_and_transform_events_for_client(
+                filtered_events = await filter_and_transform_events_for_client(
                     self._storage_controllers,
                     user_id,
                     events,
                 )
 
-                writer.write_events(room_id, events)
+                writer.write_events(room_id, filtered_events)
 
                 # Update the extremity tracking dicts
-                for event in events:
+                for filtered_event in filtered_events:
                     # Check if we have any prev events that haven't been
                     # processed yet, and add those to the appropriate dicts.
-                    unseen_events = set(event.prev_event_ids()) - written_events
+                    unseen_events = (
+                        set(filtered_event.event.prev_event_ids()) - written_events
+                    )
                     if unseen_events:
-                        event_to_unseen_prevs[event.event_id] = unseen_events
+                        event_to_unseen_prevs[filtered_event.event.event_id] = (
+                            unseen_events
+                        )
                         for unseen in unseen_events:
                             unseen_to_child_events.setdefault(unseen, set()).add(
-                                event.event_id
+                                filtered_event.event.event_id
                             )
 
                     # Now check if this event is an unseen prev event, if so
                     # then we remove this event from the appropriate dicts.
-                    for child_id in unseen_to_child_events.pop(event.event_id, []):
-                        event_to_unseen_prevs[child_id].discard(event.event_id)
+                    for child_id in unseen_to_child_events.pop(
+                        filtered_event.event.event_id, []
+                    ):
+                        event_to_unseen_prevs[child_id].discard(
+                            filtered_event.event.event_id
+                        )
 
-                    written_events.add(event.event_id)
+                    written_events.add(filtered_event.event.event_id)
 
                 logger.info(
                     "Written %d events in room %s", len(written_events), room_id
@@ -511,7 +520,7 @@ class ExfiltrationWriter(metaclass=abc.ABCMeta):
     """Interface used to specify how to write exported data."""
 
     @abc.abstractmethod
-    def write_events(self, room_id: str, events: list[EventBase]) -> None:
+    def write_events(self, room_id: str, events: list[FilteredEvent]) -> None:
         """Write a batch of events for a room."""
         raise NotImplementedError()
 

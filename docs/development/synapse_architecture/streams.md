@@ -158,6 +158,8 @@ These rough notes and links may help you to create a new stream and add all the
 necessary registration and event handling.
 
 **Create your stream:**
+- Create a Postgres-specific database delta file to [add a new `SEQUENCE`](https://github.com/element-hq/synapse/blob/35b55e962aa0bed3b2da5a3c12e3783ddf7604ca/synapse/storage/schema/main/delta/93/01_sticky_events_seq.sql.postgres#L14-L18) (this will be referenced by the `MultiWriterIdGenerator` below).
+- Update `synapse/_scripts/synapse_port_db.py` so it knows about your new `SEQUENCE`: [add a new `_setup_sequence(...)`](https://github.com/element-hq/synapse/blob/35b55e962aa0bed3b2da5a3c12e3783ddf7604ca/synapse/_scripts/synapse_port_db.py#L883C24-L888)
 - [create a stream class and stream row class](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/replication/tcp/streams/_base.py#L728)
   - will need an [ID generator](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L75)
     - may need [writer configuration](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/config/workers.py#L177), if there isn't already an obvious source of configuration for which workers should be designated as writers to your new stream.

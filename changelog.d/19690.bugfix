@@ -1,0 +1,1 @@
+Fix database migrations failing on platforms where SQLite is configured with `SQLITE_DBCONFIG_DEFENSIVE` by default, such as macOS.

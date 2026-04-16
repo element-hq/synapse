@@ -221,7 +221,6 @@ class EventBase(metaclass=abc.ABCMeta):
     # get_state_key() (and a check for None).
     state_key: DictProperty[str] = DictProperty("state_key")
     type: DictProperty[str] = DictProperty("type")
-    user_id: DictProperty[str] = DictProperty("sender")
 
     @property
     def event_id(self) -> str:
@@ -287,9 +286,6 @@ class EventBase(metaclass=abc.ABCMeta):
         template_json.pop("hashes")
 
         return template_json
-
-    def __getitem__(self, field: str) -> Any | None:
-        return self._dict[field]
 
     def __contains__(self, field: str) -> bool:
         return field in self._dict

@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import cast
+from typing import Any, cast
 
 from twisted.internet.testing import MemoryReactor
 
@@ -238,7 +238,7 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         creator = "@user:other"
         room_id = "!foo:other"
         room_version = RoomVersions.V10
-        shared_kwargs = {
+        shared_kwargs: dict[str, Any] = {
             "room_id": room_id,
             "room_version": room_version.identifier,
         }

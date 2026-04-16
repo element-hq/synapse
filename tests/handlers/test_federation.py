@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import Collection, cast
+from typing import Collection
 from unittest import TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -140,7 +140,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
                 "content": {},
                 "room_id": room_id,
                 "sender": "@yetanotheruser:" + OTHER_SERVER,
-                "depth": cast(int, join_event["depth"]) + 1,
+                "depth": join_event.depth + 1,
                 "prev_events": [join_event.event_id],
                 "auth_events": [],
                 "origin_server_ts": self.clock.time_msec(),
@@ -192,7 +192,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
                 "content": {},
                 "room_id": room_id,
                 "sender": "@yetanotheruser:" + OTHER_SERVER,
-                "depth": cast(int, join_event["depth"]) + 1,
+                "depth": join_event.depth + 1,
                 "prev_events": [join_event.event_id],
                 "auth_events": [],
                 "origin_server_ts": self.clock.time_msec(),
