@@ -448,6 +448,10 @@ impl EventInternalMetadata {
             .map_err(|_| PyRuntimeError::new_err("EventInternalMetadata lock poisoned"))
     }
 
+    /// Get a write lock on the inner data.
+    ///
+    /// Note that callers should be careful not to panic while holding the write
+    /// lock, as this will poison the lock.q
     fn write_inner(&self) -> PyResult<RwLockWriteGuard<'_, EventInternalMetadataInner>> {
         self.inner
             .write()
