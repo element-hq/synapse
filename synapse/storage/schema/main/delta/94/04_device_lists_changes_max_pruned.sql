@@ -13,10 +13,17 @@
 
 
 -- Tracks the maximum stream_id that has been deleted (pruned) from the
--- device_lists_changes_in_room table. This is used to determine whether
--- it's safe to read from that table for a given stream_id — if the
--- requested stream_id is < the value here, the data has been pruned and
--- the table cannot provide a complete answer.
+-- device_lists_changes_in_room table. This is used to determine whether it's
+-- safe to read from that table for a given stream_id — if the requested
+-- stream_id is < the value here, the data has been pruned and the table cannot
+-- provide a complete answer.
+--
+-- We need a separate table, rather than looking at the minimum stream_id in the
+-- device_lists_changes_in_room table, because not all valid stream IDs will
+-- have entries in the table. This could lead to situations where the minimum
+-- stream ID was potentially much more recent than when we actually pruned. This
+-- would cause us to incorrectly think that the table was not safe to read from,
+-- when in fact it was.
 CREATE TABLE IF NOT EXISTS device_lists_changes_in_room_max_pruned_stream_id (
     Lock CHAR(1) NOT NULL DEFAULT 'X' UNIQUE,
     stream_id BIGINT NOT NULL
