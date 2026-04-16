@@ -604,6 +604,11 @@ class UIAuthTests(unittest.HomeserverTestCase):
             flows, [{"stages": ["m.login.sso"]}, {"stages": ["m.login.password"]}]
         )
 
+        # Try to start the User-Interactive Auth against both identity providers.
+        # Make sure we get the identity provider that we ask for.
+        #
+        # We need to try against both to be sure that Synapse doesn't just conveniently happen to
+        # arbitrarily select the identity provider we test.
         for idp_id, provider_config in (
             (
                 TEST_MULTIPLE_OIDC_IDP_ID1,
@@ -614,16 +619,15 @@ class UIAuthTests(unittest.HomeserverTestCase):
                 TEST_MULTIPLE_OIDC_PROVIDERS[1],
             ),
         ):
-            channel = self.make_request(
-                "GET",
-                f"/_matrix/client/v3/auth/m.login.sso/fallback/web?session={auth_session}&io.element.idp_id=oidc-{idp_id}",
-            )
+            endpoint = f"/_matrix/client/v3/auth/m.login.sso/fallback/web?session={auth_session}&io.element.idp_id=oidc-{idp_id}"
+            channel = self.make_request("GET", endpoint)
             self.assertEqual(
                 channel.code,
                 HTTPStatus.OK,
-                f"Attempted /auth with {idp_id} : {channel.text_body}",
+                f"Failed to use the {endpoint} endpoint as part of the UIA flow for idp_id={idp_id} : response_body={channel.text_body}",
             )
 
+            # This 'Continue with ...' text is templated by `synapse/res/templates/sso_auth_confirm.html`
             self.assertIn(
                 f"Continue with {provider_config['idp_name']}",
                 channel.text_body,
