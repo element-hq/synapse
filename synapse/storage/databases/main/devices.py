@@ -2554,7 +2554,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         # database doesn't have to scan through all the (dead) tuples that were just
         # deleted to find the next batch to delete.
 
-
         # The minimum stream ID to delete in the next batch, c.f. comment above.
         # We default to 0 here as that is less than all possible stream IDs.
         min_stream_id = 0
