@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Matrix Invites</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; color: #e3e8ee; background-color: #15191e; }
+		.token-box { 
+			background: #22262e; 
+			padding: 15px; 
+			margin: 10px 0; 
+			border-radius: 8px; 
+			display: flex; 
+			flex-wrap: wrap;
+			gap: 12px; 
+			align-items: center; 
+			border: 1px solid #393f49;
+		}
+
+		.token-code { 
+			font-family: monospace; 
+			font-size: 13px; 
+			background: #15191e; 
+			padding: 8px; 
+			border-radius: 4px; 
+			user-select: all; 
+			color: #8e99a4;
+			word-break: break-all;
+			flex: 1 1 200px;
+			min-width: 0;
+		}
+
+		.btn-group {
+			display: flex;
+			gap: 8px;
+			flex-shrink: 0;
+			margin-left: auto;
+		}
+
+		@media (max-width: 400px) {
+			.btn-group {
+				width: 100%;
+				justify-content: space-between;
+			}
+			.btn-group button {
+				flex: 1;
+			}
+		}
+        button { cursor: pointer; padding: 8px 16px; border: none; border-radius: 4px; font-weight: bold; font-size: 13px; }
+        .btn-create { background: #0ebd66; color: white; }
+        .btn-create:disabled { background: #555; cursor: not-allowed; }
+        .btn-delete { background: #e03650; color: white; }
+        #statusMsg { min-height: 20px; margin-bottom: 10px; font-size: 14px; font-weight: bold; }
+
+        /* i18n visibility protection */
+        [data-i18n] { visibility: hidden; }
+        .i18n-ready [data-i18n] { visibility: visible; }
+	</style>
+</head>
+<body>
+    <h2 data-i18n="widget_title">Invite administration</h2>
+    <p><span data-i18n="widget_active_count">Active invites:</span> <span id="count">0</span>/[[INVITES_LIMIT]]</p>
+	<div id="statusMsg" style="color: #e03650; margin-bottom: 10px; font-size: 14px;"></div>
+    <button id="createBtn" class="btn-create" data-i18n="widget_btn_create">+ Generate invite</button>
+    <div id="tokensList" style="margin-top: 20px;"></div>
+
+<script type="module">
+    import * as MWA from "[[WIDGET_API_URL]]";
+    import { initI18n } from "/libs/i18n.js";
+
+    let api = null;
+    let oidcToken = null;
+    let i18nReady = false;
+    let apiReady = false;
+
+    const WidgetApi = MWA.WidgetApi || (MWA.default && MWA.default.WidgetApi);
+    const MatrixCapabilities = MWA.MatrixCapabilities || (MWA.default && MWA.default.MatrixCapabilities);
+
+    const listContainer = document.getElementById('tokensList');
+    const createBtn = document.getElementById('createBtn');
+    const countSpan = document.getElementById('count');
+
+    initI18n();
+
+    document.addEventListener('i18n:ready', () => {
+        i18nReady = true;
+        document.body.classList.add('i18n-ready');
+        if (!apiReady) {
+            listContainer.innerText = window.t('widget_loading');
+        }
+        checkReady();
+    });
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const widgetId = urlParams.get("widgetId");
+    let parentOrigin = urlParams.get("parentUrl");
+
+    if (parentOrigin) {
+        try { parentOrigin = new URL(parentOrigin).origin; } catch (e) {}
+    }
+
+    if (widgetId && parentOrigin) {
+        try {
+            api = new WidgetApi(widgetId, parentOrigin);
+            api.requestCapabilities([MatrixCapabilities.RequiresClient]);
+            
+            api.on("action:theme_change", (ev) => {
+                ev.preventDefault();
+                const request = ev.detail || ev;
+                api.transport.reply(request, {});
+                const theme = request.data?.theme;
+                if (theme) {
+                    document.body.style.backgroundColor = (theme === 'light') ? '#ffffff' : '#15191e';
+                    document.body.style.color = (theme === 'light') ? '#000000' : '#e3e8ee';
+                }
+            });
+
+            api.on("ready", () => {
+                console.log("Widget API Ready");
+                apiReady = true;
+                checkReady();
+            });
+
+            api.start();
+        } catch (err) {
+            listContainer.innerText = 'API Error: ' + err.message;
+        }
+    }
+
+    function checkReady() {
+        if (i18nReady && apiReady) {
+            loadTokens();
+        }
+    }
+
+
+    async function getAuthToken() {
+        if (!oidcToken) {
+            if (!api) throw new Error("API not initialized");
+            oidcToken = await api.requestOpenIDConnectToken();
+        }
+        return btoa(JSON.stringify(oidcToken));
+    }
+
+    async function loadTokens() {
+        createBtn.disabled = true;
+        try {
+            listContainer.innerHTML = ''; 
+            showMessage(window.t('widget_wait'), false);
+            
+            const token = await getAuthToken();
+            const res = await fetch('/api/tokens', { 
+                headers: { 'Authorization': 'Bearer ' + token } 
+            });
+            if (!res.ok) throw new Error(window.t('widget_err_load'));
+            
+            const data = await res.json();
+            renderTokens(data.tokens || []);
+        } catch (e) {
+            listContainer.innerText = e.message;
+            console.error(e);
+        }
+    }
+
+    function showMessage(msg, isError = true) {
+        const el = document.getElementById('statusMsg');
+        el.innerText = msg;
+        el.style.color = isError ? "#e03650" : "#0ebd66";
+        setTimeout(() => { if(el.innerText === msg) el.innerText = ""; }, 5000);
+    }
+
+    async function deleteToken(tok) {
+        try {
+            const token = await getAuthToken();
+            const res = await fetch('/api/tokens/' + tok, { 
+                method: 'DELETE', 
+                headers: { 'Authorization': 'Bearer ' + token } 
+            });
+            if (!res.ok) throw new Error(window.t('widget_err_delete'));
+            
+            showMessage(window.t('widget_msg_deleted'), false);
+            await loadTokens();
+        } catch (e) {
+            showMessage(e.message);
+        }
+    }
+
+    async function createToken() {
+        createBtn.disabled = true;
+        try {
+            const token = await getAuthToken();
+            const res = await fetch('/api/tokens', { 
+                method: 'POST', 
+                headers: { 'Authorization': 'Bearer ' + token } 
+            });
+            if (!res.ok) throw new Error(window.t('widget_err_create'));
+            
+            showMessage(window.t('widget_msg_created'), false);
+            await loadTokens();
+        } catch (e) {
+            showMessage(e.message);
+            createBtn.disabled = false;
+        }
+    }
+
+    function copyToClipboard(text, btn) {
+        navigator.clipboard.writeText(text).then(() => {
+            const oldText = btn.innerText;
+            btn.innerText = window.t('widget_btn_copied');
+            btn.style.background = "#0ebd66";
+            setTimeout(() => { 
+                btn.innerText = oldText; 
+                btn.style.background = "#393f49";
+            }, 2000);
+        });
+    }
+
+    function renderTokens(tokens) {
+        listContainer.innerHTML = '';
+        countSpan.innerText = tokens.length;
+        
+        const limit = parseInt("[[INVITES_LIMIT]]") || 5;
+        createBtn.disabled = tokens.length >= limit;
+
+        if (tokens.length === 0) {
+            listContainer.innerText = window.t('widget_no_invites');
+            return;
+        }
+
+        tokens.forEach(t => {
+            const div = document.createElement('div');
+            div.className = 'token-box';
+            
+            const fullLink = `${window.location.origin}/invites/${t}`;
+
+            const codeSpan = document.createElement('span');
+            codeSpan.className = 'token-code';
+            codeSpan.innerText = fullLink;
+
+            const btnGroup = document.createElement('div');
+            btnGroup.className = 'btn-group';
+
+            const cpBtn = document.createElement('button');
+            cpBtn.className = 'btn-create';
+            cpBtn.style.background = '#393f49';
+            cpBtn.innerText = window.t('widget_btn_copy');
+            cpBtn.onclick = () => copyToClipboard(fullLink, cpBtn);
+
+            const dlBtn = document.createElement('button');
+            dlBtn.className = 'btn-delete';
+            dlBtn.innerText = window.t('widget_btn_delete');
+            dlBtn.onclick = () => deleteToken(t);
+
+            btnGroup.appendChild(cpBtn);
+            btnGroup.appendChild(dlBtn);
+            
+            div.appendChild(codeSpan);
+            div.appendChild(btnGroup);
+            
+            listContainer.appendChild(div);
+        });
+    }
+
+    createBtn.addEventListener('click', createToken);
+</script>
+
+</body>
+</html>

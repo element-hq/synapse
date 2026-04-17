@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matrix Invite</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+               background-color: #15191e; color: #e3e8ee; display: flex; 
+               justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: #22262e; padding: 30px; border-radius: 12px; 
+                box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; max-width: 400px; width: 90%; }
+        
+        /* Состояния */
+        #state-loading { display: block; }
+        #state-active { display: none; }
+        #state-expired { display: none; }
+
+        .code-box { background: #15191e; padding: 15px; font-family: monospace; 
+                    font-size: 24px; border-radius: 8px; margin: 20px 0; border: 1px solid #393f49; 
+                    color: #0ebd66; letter-spacing: 2px; }
+        
+        .error-icon { font-size: 48px; color: #e03650; margin-bottom: 15px; }
+        
+        button { background: #0ebd66; color: white; border: none; padding: 12px 24px; 
+                 border-radius: 4px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        
+        .status { margin-top: 15px; font-size: 14px; color: #8e99a4; min-height: 20px; }
+        
+        .spinner { border: 4px solid rgba(255,255,255,0.1); border-left-color: #0ebd66; 
+                   border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; 
+                   margin: 0 auto 10px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        [data-i18n] { visibility: hidden; }
+        .i18n-ready [data-i18n] { visibility: visible; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div id="state-loading">
+            <div class="spinner"></div>
+            <p data-i18n="guest_loading">Invite check...</p>
+        </div>
+
+        <div id="state-active">
+            <h2 id="guest-invite-msg"></h2>
+            <p data-i18n="guest_copy_instruction">Copy registration code below...</p>
+            <div id="inviteCode" class="code-box">------</div>
+            <button id="copyBtn" onclick="copyAndRedirect()" data-i18n="guest_btn_copy">Copy and continue</button>
+            <div id="status" class="status"></div>
+        </div>
+
+        <div id="state-expired">
+            <div class="error-icon">⚠️</div>
+            <h2 data-i18n="guest_expired_title">Invite was expired</h2>
+            <p data-i18n="guest_expired_desc">This registration code was already used or denied...</p>
+            <p style="font-size: 0.9rem; color: #8e99a4;" data-i18n="guest_expired_advice">Ask a new invite.</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initI18n } from '/libs/i18n.js';
+
+        const webUrl = "[[WEBCLIENT_URL]]";
+        const domain = webUrl.replace(/^https?:\/\//, '');
+        const code = window.location.pathname.split('/').pop();
+
+        initI18n();
+
+        document.addEventListener('i18n:ready', () => {
+            document.title = `${window.t('guest_title_prefix')} ${domain}`;
+            const h2 = document.getElementById('guest-invite-msg');
+            if (h2) {
+                h2.innerText = `${window.t('guest_invite_prefix')} ${domain}!`;
+            }
+            document.body.classList.add('i18n-ready');
+            
+            if (code && code.length > 2) {
+                checkInvite();
+            } else {
+                document.getElementById('state-loading').innerText = window.t('guest_error_link');
+            }
+        });
+
+        async function checkInvite() {
+            const loadingEl = document.getElementById('state-loading');
+            const activeEl = document.getElementById('state-active');
+            const expiredEl = document.getElementById('state-expired');
+            const codeEl = document.getElementById('inviteCode');
+
+            try {
+                const response = await fetch(`/api/public/check/${code}`);
+                const data = await response.json();
+
+                loadingEl.style.display = 'none';
+
+                if (data.active) {
+                    codeEl.innerText = code;
+                    activeEl.style.display = 'block';
+                } else {
+                    expiredEl.style.display = 'block';
+                }
+            } catch (err) {
+                console.error("Check error:", err);
+                loadingEl.innerText = window.t('guest_error_conn');
+            }
+        }
+
+        window.copyAndRedirect = function() {
+            const btn = document.getElementById('copyBtn');
+            const statusEl = document.getElementById('status');
+            
+            navigator.clipboard.writeText(code).then(() => {
+                btn.disabled = true;
+                btn.innerText = window.t('guest_btn_copied');
+                statusEl.innerText = window.t('guest_redirecting');
+                statusEl.style.color = "#0ebd66";
+
+                setTimeout(() => {
+                    window.location.href = `${webUrl}/#/register?token=${code}`;
+                }, 5000);
+            }).catch(err => {
+                statusEl.innerText = window.t('guest_error_copy');
+                statusEl.style.color = "#e03650";
+            });
+        }
+    </script>
+</body>
+</html>
