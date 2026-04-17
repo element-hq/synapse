@@ -66,7 +66,7 @@ dependencies = [
     "prometheus-client>=0.6.0",
     # we use `order`, which arrived in attrs 19.2.0.
     # Note: 21.1.0 broke `/sync`, see https://github.com/matrix-org/synapse/issues/9936
-    "attrs>=19.2.0,!=21.1.0",
+    "attrs>=26.1.0,!=21.1.0",
     "netaddr>=0.7.18",
     # Jinja 2.x is incompatible with MarkupSafe>=2.1. To ensure that admins do not
     # end up with a broken installation, with recent MarkupSafe but old Jinja, we
