@@ -1919,7 +1919,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
         normal_room_id = self.helper.create_room_as(
             self.admin_user,
             tok=self.admin_user_tok,
-            extra_content={"creation_content": {"type": custom_type}},
+            extra_content={},
         )
 
         space_channel = self.make_request(
@@ -1952,16 +1952,16 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(space_channel_rooms), 1)
         self.assertEqual(space_channel.json_body["total_rooms"], 1)
         self.assertEqual(len(custom_type_channel_rooms), 1)
-        self.assertEqual(custom_type_channel_rooms.json_body["total_rooms"], 1)
+        self.assertEqual(custom_type_channel.json_body["total_rooms"], 1)
         self.assertEqual(len(normal_channel_rooms), 1)
-        self.assertEqual(normal_channel_rooms.json_body["total_rooms"], 1)
+        self.assertEqual(normal_channel.json_body["total_rooms"], 1)
 
         self.assertEqual(space_channel_rooms[0]["room_id"], space_room_id)
         self.assertEqual(space_channel_rooms[0]["room_type"], RoomTypes.SPACE)
         self.assertEqual(custom_type_channel_rooms[0]["room_id"], custom_type_room_id)
         self.assertEqual(custom_type_channel_rooms[0]["room_type"], custom_type)
-        self.assertEqual(custom_type_channel_rooms[0]["room_id"], normal_room_id)
-        self.assertEqual(custom_type_channel_rooms[0]["room_type"], None)
+        self.assertEqual(normal_channel_rooms[0]["room_id"], normal_room_id)
+        self.assertEqual(normal_channel_rooms[0]["room_type"], None)
 
     def test_room_list_sort_order(self) -> None:
         """Test room list sort ordering. alphabetical name versus number of members,
