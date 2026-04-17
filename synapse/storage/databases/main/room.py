@@ -605,6 +605,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         search_term: str | None,
         public_rooms: bool | None,
         empty_rooms: bool | None,
+        room_type: str | None,
     ) -> tuple[list[dict[str, Any]], int]:
         """Function to retrieve a paginated list of rooms as json.
 
@@ -624,6 +625,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                     If true, empty rooms are queried.
                     if false, empty rooms are excluded from the query. When it is
                     none (the default), both empty rooms and none-empty rooms are queried.
+            room_type: Optional flag to filter by the room type, e.g. m.space for spaces.
         Returns:
             A list of room dicts and an integer representing the total number of
             rooms that exist given this query
@@ -657,6 +659,13 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 filter_.append("curr.joined_members = 0")
             else:
                 filter_.append("curr.joined_members <> 0")
+
+        if room_type is not None:
+            if room_type == "":
+                filter_.append("state.room_type IS NULL")
+            else:
+                filter_.append("state.room_type = ?")
+                where_args.append(room_type)
 
         where_clause = "WHERE " + " AND ".join(filter_) if len(filter_) > 0 else ""
 

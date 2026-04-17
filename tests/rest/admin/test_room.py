@@ -1903,6 +1903,66 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(test_alias, r["canonical_alias"])
         self.assertEqual(RoomTypes.SPACE, r["room_type"])
 
+    def test_room_type_filtering(self) -> None:
+        custom_type = "com.example.custom_room_type"
+
+        space_room_id = self.helper.create_room_as(
+            self.admin_user,
+            tok=self.admin_user_tok,
+            extra_content={"creation_content": {"type": RoomTypes.SPACE}},
+        )
+        custom_type_room_id = self.helper.create_room_as(
+            self.admin_user,
+            tok=self.admin_user_tok,
+            extra_content={"creation_content": {"type": custom_type}},
+        )
+        normal_room_id = self.helper.create_room_as(
+            self.admin_user,
+            tok=self.admin_user_tok,
+            extra_content={"creation_content": {"type": custom_type}},
+        )
+
+        space_channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms?room_type={RoomTypes.SPACE}",
+            access_token=self.admin_user_tok,
+        )
+        custom_type_channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms?room_type={custom_type}",
+            access_token=self.admin_user_tok,
+        )
+        normal_channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms?room_type=",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, space_channel.code, msg=space_channel.json_body)
+        self.assertTrue("rooms" in space_channel.json_body)
+        self.assertEqual(200, space_channel.code, msg=custom_type_channel.json_body)
+        self.assertTrue("rooms" in custom_type_channel.json_body)
+        self.assertEqual(200, space_channel.code, msg=normal_channel.json_body)
+        self.assertTrue("rooms" in normal_channel.json_body)
+
+        space_channel_rooms = space_channel.json_body["rooms"]
+        custom_type_channel_rooms = custom_type_channel.json_body["rooms"]
+        normal_channel_rooms = normal_channel.json_body["rooms"]
+
+        self.assertEqual(len(space_channel_rooms), 1)
+        self.assertEqual(space_channel.json_body["total_rooms"], 1)
+        self.assertEqual(len(custom_type_channel_rooms), 1)
+        self.assertEqual(custom_type_channel_rooms.json_body["total_rooms"], 1)
+        self.assertEqual(len(normal_channel_rooms), 1)
+        self.assertEqual(normal_channel_rooms.json_body["total_rooms"], 1)
+
+        self.assertEqual(space_channel_rooms[0]["room_id"], space_room_id)
+        self.assertEqual(space_channel_rooms[0]["room_type"], RoomTypes.SPACE)
+        self.assertEqual(custom_type_channel_rooms[0]["room_id"], custom_type_room_id)
+        self.assertEqual(custom_type_channel_rooms[0]["room_type"], custom_type)
+        self.assertEqual(custom_type_channel_rooms[0]["room_id"], normal_room_id)
+        self.assertEqual(custom_type_channel_rooms[0]["room_type"], None)
+
     def test_room_list_sort_order(self) -> None:
         """Test room list sort ordering. alphabetical name versus number of members,
         reversing the order, etc.
