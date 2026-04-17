@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from __future__ import annotations
 
 import urllib.parse
 from typing import Any, cast
