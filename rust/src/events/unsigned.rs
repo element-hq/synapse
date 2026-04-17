@@ -1,0 +1,321 @@
+/*
+ * This file is licensed under the Affero General Public License (AGPL) version 3.
+ *
+ * Copyright (C) 2026 Element Creations Ltd
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * See the GNU Affero General Public License for more details:
+ * <https://www.gnu.org/licenses/agpl-3.0.html>.
+ *
+ */
+
+use std::sync::{Arc, RwLock, RwLockReadGuard};
+
+use pyo3::{
+    exceptions::{PyKeyError, PyRuntimeError, PyTypeError},
+    pyclass, pymethods,
+    types::{PyAnyMethods, PyDict, PyList, PyListMethods},
+    Bound, FromPyObject, IntoPyObject, IntoPyObjectExt, PyAny, PyErr, PyResult, Python,
+};
+use pythonize::{depythonize, pythonize};
+use serde::{Deserialize, Serialize};
+
+#[pyclass(frozen, skip_from_py_object)]
+#[derive(Debug, Clone)]
+pub struct Unsigned {
+    inner: Arc<RwLock<UnsignedInner>>,
+}
+
+/// The fields in the unsigned data of an event that are persisted in the
+/// database.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedUnsignedFields {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    age_ts: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    replaces_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    invite_room_state: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    knock_room_state: Option<Vec<serde_json::Value>>,
+}
+
+/// The inner representation of the unsigned data of an event, which includes
+/// both the fields that are persisted in the database and the fields that are
+/// only used in memory.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnsignedInner {
+    #[serde(flatten)]
+    persisted_fields: PersistedUnsignedFields,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prev_content: Option<Box<serde_json::Value>>, // We use Box to minimise stack space
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prev_sender: Option<String>,
+}
+
+/// The fields that exist on the unsigned data of an event.
+///
+/// This is used when converting from python to rust, to ensure that if we add a
+/// new field we don't forget to add it to all the necessary places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnsignedField {
+    AgeTs,
+    ReplacesState,
+    InviteRoomState,
+    KnockRoomState,
+    PrevContent,
+    PrevSender,
+}
+
+impl std::str::FromStr for UnsignedField {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "age_ts" => Ok(Self::AgeTs),
+            "replaces_state" => Ok(Self::ReplacesState),
+            "invite_room_state" => Ok(Self::InviteRoomState),
+            "knock_room_state" => Ok(Self::KnockRoomState),
+            "prev_content" => Ok(Self::PrevContent),
+            "prev_sender" => Ok(Self::PrevSender),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Unsigned {
+    fn py_read(&self) -> PyResult<RwLockReadGuard<'_, UnsignedInner>> {
+        self.inner
+            .read()
+            .map_err(|_| PyRuntimeError::new_err("Unsigned lock poisoned"))
+    }
+
+    fn py_write(&self) -> PyResult<std::sync::RwLockWriteGuard<'_, UnsignedInner>> {
+        self.inner
+            .write()
+            .map_err(|_| PyRuntimeError::new_err("Unsigned lock poisoned"))
+    }
+}
+
+#[pymethods]
+impl Unsigned {
+    #[new]
+    fn py_new(unsigned: Bound<'_, PyDict>) -> PyResult<Self> {
+        let inner = UnsignedInner {
+            persisted_fields: unsigned.extract()?,
+            prev_content: None,
+            prev_sender: None,
+        };
+
+        Ok(Self {
+            inner: Arc::new(RwLock::new(inner)),
+        })
+    }
+
+    fn __getitem__<'py>(
+        &self,
+        py: Python<'py>,
+        key: Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let key = key
+            .extract::<&str>()
+            .map_err(|_| PyTypeError::new_err("Unsigned keys must be strings"))?;
+
+        let field: UnsignedField = key
+            .parse()
+            .map_err(|_| PyKeyError::new_err(format!("Unsigned has no key '{key}'")))?;
+
+        let unsigned = self.py_read()?;
+
+        match field {
+            UnsignedField::AgeTs => Ok(unsigned
+                .persisted_fields
+                .age_ts
+                .ok_or_else(|| PyKeyError::new_err("age_ts"))?
+                .into_bound_py_any(py)?),
+            UnsignedField::ReplacesState => Ok((unsigned.persisted_fields.replaces_state)
+                .as_ref()
+                .ok_or_else(|| PyKeyError::new_err("replaces_state"))?
+                .into_bound_py_any(py)?),
+            UnsignedField::InviteRoomState => Ok(room_state_to_py(
+                py,
+                unsigned
+                    .persisted_fields
+                    .invite_room_state
+                    .as_ref()
+                    .ok_or_else(|| PyKeyError::new_err("invite_room_state"))?,
+            )?),
+            UnsignedField::KnockRoomState => Ok(room_state_to_py(
+                py,
+                unsigned
+                    .persisted_fields
+                    .knock_room_state
+                    .as_ref()
+                    .ok_or_else(|| PyKeyError::new_err("knock_room_state"))?,
+            )?),
+            UnsignedField::PrevContent => Ok(pythonize(
+                py,
+                unsigned
+                    .prev_content
+                    .as_ref()
+                    .ok_or_else(|| PyKeyError::new_err("prev_content"))?,
+            )?),
+            UnsignedField::PrevSender => Ok((unsigned.prev_sender)
+                .as_ref()
+                .ok_or_else(|| PyKeyError::new_err("prev_sender"))?
+                .into_bound_py_any(py)?),
+        }
+    }
+
+    fn __contains__(&self, key: Bound<'_, PyAny>) -> PyResult<bool> {
+        let Ok(key) = key.extract::<&str>() else {
+            return Ok(false);
+        };
+
+        let Ok(field) = key.parse::<UnsignedField>() else {
+            return Ok(false);
+        };
+
+        let unsigned = self.py_read()?;
+
+        let exists = match field {
+            UnsignedField::AgeTs => unsigned.persisted_fields.age_ts.is_some(),
+            UnsignedField::ReplacesState => unsigned.persisted_fields.replaces_state.is_some(),
+            UnsignedField::InviteRoomState => unsigned.persisted_fields.invite_room_state.is_some(),
+            UnsignedField::KnockRoomState => unsigned.persisted_fields.knock_room_state.is_some(),
+            UnsignedField::PrevContent => unsigned.prev_content.is_some(),
+            UnsignedField::PrevSender => unsigned.prev_sender.is_some(),
+        };
+
+        Ok(exists)
+    }
+
+    fn __setitem__(&self, key: Bound<'_, PyAny>, value: Bound<'_, PyAny>) -> PyResult<()> {
+        let key = key
+            .extract::<&str>()
+            .map_err(|_| PyTypeError::new_err("Unsigned keys must be strings"))?;
+
+        let field: UnsignedField = key
+            .parse()
+            .map_err(|_| PyKeyError::new_err(format!("Unsigned has no key '{key}'")))?;
+
+        let mut unsigned = self.py_write()?;
+
+        match field {
+            UnsignedField::AgeTs => unsigned.persisted_fields.age_ts = Some(value.extract()?),
+            UnsignedField::ReplacesState => {
+                unsigned.persisted_fields.replaces_state = Some(value.extract()?)
+            }
+            UnsignedField::InviteRoomState => {
+                unsigned.persisted_fields.invite_room_state = Some(room_state_from_py(value)?)
+            }
+            UnsignedField::KnockRoomState => {
+                unsigned.persisted_fields.knock_room_state = Some(room_state_from_py(value)?)
+            }
+            UnsignedField::PrevContent => {
+                unsigned.prev_content = Some(Box::new(depythonize(&value)?))
+            }
+            UnsignedField::PrevSender => unsigned.prev_sender = Some(value.extract()?),
+        }
+
+        Ok(())
+    }
+
+    fn __delitem__(&self, key: Bound<'_, PyAny>) -> PyResult<()> {
+        let key = key
+            .extract::<&str>()
+            .map_err(|_| PyTypeError::new_err("Unsigned keys must be strings"))?;
+
+        let field: UnsignedField = key
+            .parse()
+            .map_err(|_| PyKeyError::new_err(format!("Unsigned has no key '{key}'")))?;
+
+        let mut unsigned = self.py_write()?;
+
+        match field {
+            UnsignedField::AgeTs => unsigned.persisted_fields.age_ts = None,
+            UnsignedField::ReplacesState => unsigned.persisted_fields.replaces_state = None,
+            UnsignedField::InviteRoomState => unsigned.persisted_fields.invite_room_state = None,
+            UnsignedField::KnockRoomState => unsigned.persisted_fields.knock_room_state = None,
+            UnsignedField::PrevContent => unsigned.prev_content = None,
+            UnsignedField::PrevSender => unsigned.prev_sender = None,
+        }
+
+        Ok(())
+    }
+
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: Bound<'py, PyAny>,
+        default: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Option<Bound<'py, PyAny>>> {
+        match self.__getitem__(py, key) {
+            Ok(value) => Ok(Some(value)),
+            Err(err) => {
+                if err.is_instance_of::<PyKeyError>(py) {
+                    Ok(default)
+                } else {
+                    Err(err)
+                }
+            }
+        }
+    }
+
+    fn for_persistence<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        self.py_read()?.persisted_fields.into_pyobject(py)
+    }
+
+    fn for_event<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        Ok(pythonize(py, &*self.py_read()?)?)
+    }
+}
+
+impl<'py> IntoPyObject<'py> for &PersistedUnsignedFields {
+    type Target = PyAny;
+
+    type Output = Bound<'py, Self::Target>;
+
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(pythonize(py, self)?)
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for PersistedUnsignedFields {
+    type Error = PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        Ok(depythonize(&obj)?)
+    }
+}
+
+fn room_state_to_py<'py>(
+    py: Python<'py>,
+    state: &[serde_json::Value],
+) -> PyResult<Bound<'py, PyAny>> {
+    let py_list = PyList::empty(py);
+
+    for item in state {
+        py_list.append(pythonize(py, item)?)?;
+    }
+
+    py_list.into_bound_py_any(py)
+}
+
+fn room_state_from_py(value: Bound<'_, PyAny>) -> PyResult<Vec<serde_json::Value>> {
+    let py_list = value.cast::<PyList>()?;
+
+    let mut state = Vec::with_capacity(py_list.len());
+    for item in py_list.iter() {
+        state.push(pythonize::depythonize(&item)?);
+    }
+
+    Ok(state)
+}

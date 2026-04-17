@@ -43,7 +43,7 @@ from synapse.api.constants import (
     StickyEvent,
 )
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.synapse_rust.events import EventInternalMetadata, Signatures
+from synapse.synapse_rust.events import EventInternalMetadata, Signatures, Unsigned
 from synapse.types import (
     JsonDict,
     StateKey,
@@ -203,7 +203,7 @@ class EventBase(metaclass=abc.ABCMeta):
 
         self.room_version = room_version
         self.signatures = Signatures(signatures)
-        self.unsigned = unsigned
+        self.unsigned = Unsigned(unsigned)
         self.rejected_reason = rejected_reason
 
         self._dict = event_dict
@@ -250,9 +250,25 @@ class EventBase(metaclass=abc.ABCMeta):
         return self._dict.get("state_key")
 
     def get_dict(self) -> JsonDict:
+        """Convert the event to a dictionary suitable for serialisation."""
         d = dict(self._dict)
         d.update(
-            {"signatures": self.signatures.as_dict(), "unsigned": dict(self.unsigned)}
+            {
+                "signatures": self.signatures.as_dict(),
+                "unsigned": self.unsigned.for_event(),
+            }
+        )
+
+        return d
+
+    def get_dict_for_persistence(self) -> JsonDict:
+        """Convert the event to a dictionary suitable for persistence."""
+        d = dict(self._dict)
+        d.update(
+            {
+                "signatures": self.signatures.as_dict(),
+                "unsigned": self.unsigned.for_persistence(),
+            }
         )
 
         return d
@@ -388,7 +404,7 @@ class FrozenEvent(EventBase):
             for name, sigs in event_dict.pop("signatures", {}).items()
         }
 
-        unsigned = dict(event_dict.pop("unsigned", {}))
+        unsigned = event_dict.pop("unsigned", {})
 
         # We intern these strings because they turn up a lot (especially when
         # caching).
@@ -442,7 +458,7 @@ class FrozenEventV2(EventBase):
 
         assert "event_id" not in event_dict
 
-        unsigned = dict(event_dict.pop("unsigned", {}))
+        unsigned = event_dict.pop("unsigned", {})
 
         # We intern these strings because they turn up a lot (especially when
         # caching).

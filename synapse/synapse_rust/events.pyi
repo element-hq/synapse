@@ -183,3 +183,33 @@ class Signatures:
 
     def as_dict(self) -> dict[str, dict[str, str]]: ...
     """Return a copy of the signatures as a dictionary."""
+
+class Unsigned:
+    """A class representing the unsigned data of an event."""
+
+    def __init__(self, unsigned_dict: JsonDict): ...
+    def __getitem__(self, key: str) -> Any: ...
+    """Get the value for the given key.
+
+    Raises KeyError if the key is unset or not recognised."""
+
+    def __setitem__(self, key: str, value: Any) -> None: ...
+    """Set the value for the given key.
+
+    Raises KeyError if the key is not recognised."""
+
+    def __delitem__(self, key: str) -> None: ...
+    """Delete the value for the given key.
+
+    Raises KeyError if the key is unset or not recognised."""
+
+    def __contains__(self, key: Any) -> bool: ...
+    def get(self, key: str, default: Any = None) -> Any: ...
+    """Get the value for the given key, or ``default`` if the key is unset."""
+
+    def for_persistence(self) -> JsonDict: ...
+    """Return a dict of the fields that should be persisted to the database."""
+
+    def for_event(self) -> JsonDict: ...
+    """Return a dict of all unsigned fields, including those only kept in
+    memory, suitable for inclusion in an event."""
