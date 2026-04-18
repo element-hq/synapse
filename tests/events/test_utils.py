@@ -67,25 +67,31 @@ def MockEvent(**kwargs: Any) -> EventBase:
 class TestMaybeUpsertEventField(stdlib_unittest.TestCase):
     def test_update_okay(self) -> None:
         event = make_event_from_dict({"event_id": "$1234"})
-        success = maybe_upsert_event_field(event, event.unsigned, "key", "value")
+        success = maybe_upsert_event_field(
+            event, event.unsigned, "replaces_state", "value"
+        )
         self.assertTrue(success)
-        self.assertEqual(event.unsigned["key"], "value")
+        self.assertEqual(event.unsigned["replaces_state"], "value")
 
     def test_update_not_okay(self) -> None:
         event = make_event_from_dict({"event_id": "$1234"})
         LARGE_STRING = "a" * 100_000
-        success = maybe_upsert_event_field(event, event.unsigned, "key", LARGE_STRING)
+        success = maybe_upsert_event_field(
+            event, event.unsigned, "replaces_state", LARGE_STRING
+        )
         self.assertFalse(success)
-        self.assertNotIn("key", event.unsigned)
+        self.assertNotIn("replaces_state", event.unsigned)
 
     def test_update_not_okay_leaves_original_value(self) -> None:
         event = make_event_from_dict(
-            {"event_id": "$1234", "unsigned": {"key": "value"}}
+            {"event_id": "$1234", "unsigned": {"replaces_state": "value"}}
         )
         LARGE_STRING = "a" * 100_000
-        success = maybe_upsert_event_field(event, event.unsigned, "key", LARGE_STRING)
+        success = maybe_upsert_event_field(
+            event, event.unsigned, "replaces_state", LARGE_STRING
+        )
         self.assertFalse(success)
-        self.assertEqual(event.unsigned["key"], "value")
+        self.assertEqual(event.unsigned["replaces_state"], "value")
 
 
 class PruneEventTestCase(stdlib_unittest.TestCase):
@@ -623,7 +629,7 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
             {
                 "type": "A",
                 "event_id": "$test:domain",
-                "unsigned": {"a": 1, "b": 2},
+                "unsigned": {"age_ts": 1, "replaces_state": "2"},
             },
             RoomVersions.V1,
             {"txn_id": "txn"},
@@ -634,10 +640,14 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
         self.assertEqual(original.internal_metadata.instance_name, "worker1")
 
         cloned = clone_event(original)
-        cloned.unsigned["b"] = 3
+        cloned.unsigned["age_ts"] = 3
 
-        self.assertEqual(original.unsigned, {"a": 1, "b": 2})
-        self.assertEqual(cloned.unsigned, {"a": 1, "b": 3})
+        self.assertEqual(
+            original.unsigned.for_event(), {"age_ts": 1, "replaces_state": "2"}
+        )
+        self.assertEqual(
+            cloned.unsigned.for_event(), {"age_ts": 3, "replaces_state": "2"}
+        )
         self.assertEqual(cloned.internal_metadata.stream_ordering, 1234)
         self.assertEqual(cloned.internal_metadata.instance_name, "worker1")
         self.assertEqual(cloned.internal_metadata.txn_id, "txn")
