@@ -1,1 +1,1 @@
-Fix bug where synapse would return 400 (M_BAD_JSON) when sending a message with 'mentions' field and `check_event_allowed` callback registered. Contributed by @gaetan-sbt. 
+Fix bug where Synapse would return 400 (`M_BAD_JSON`) when sending a message with 'mentions' field and `check_event_allowed` callback registered. Contributed by @gaetan-sbt.
