@@ -2583,35 +2583,45 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 num_deleted += 1
                 min_stream_id = max(min_stream_id, row[0])
 
+            if num_deleted:
+                # Update the max pruned stream ID tracking table so that the
+                # safety check knows data up to this point has been deleted.
+                self.db_pool.simple_update_one_txn(
+                    txn,
+                    table="device_lists_changes_in_room_max_pruned_stream_id",
+                    keyvalues={},
+                    updatevalues={"stream_id": min_stream_id},
+                )
+
             return num_deleted
 
-        num_rows_deleted = 0
+        progress_num_rows_deleted = 0
         while True:
             batch_deleted = await self.db_pool.runInteraction(
                 "prune_device_lists_changes_in_room",
                 prune_device_lists_changes_in_room_txn,
             )
-            num_rows_deleted += batch_deleted
-            if batch_deleted < PRUNE_DEVICE_LISTS_BATCH_SIZE:
+
+            finished = batch_deleted < PRUNE_DEVICE_LISTS_BATCH_SIZE
+
+            progress_num_rows_deleted += batch_deleted
+
+            # Periodically report progress in the logs. We do this either when
+            # we've deleted a significant number of rows or when we've finished
+            # deleting all rows in this round.
+            if finished or progress_num_rows_deleted > 10000:
+                logger.info(
+                    "Pruned %d rows from device_lists_changes_in_room",
+                    progress_num_rows_deleted,
+                )
+                progress_num_rows_deleted = 0
+
+            if finished:
                 break
 
             # Sleep for a short time to avoid hammering the database too much if
             # there are a lot of rows to delete.
             await self.clock.sleep(Duration(milliseconds=100))
-
-        if num_rows_deleted:
-            # Update the max pruned stream ID tracking table so that the
-            # safety check knows data up to this point has been deleted.
-            await self.db_pool.simple_update_one(
-                table="device_lists_changes_in_room_max_pruned_stream_id",
-                keyvalues={},
-                updatevalues={"stream_id": prune_before_stream_id},
-                desc="prune_device_lists_changes_in_room_update_max_pruned",
-            )
-
-            logger.info(
-                "Pruned %d rows from device_lists_changes_in_room", num_rows_deleted
-            )
 
 
 class DeviceBackgroundUpdateStore(SQLBaseStore):
