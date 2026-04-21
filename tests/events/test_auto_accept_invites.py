@@ -380,7 +380,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         join_updates, _ = sync_join(self, inviting_user_id)
         # Assert that the last event in the room was not a member event for the target user.
         self.assertEqual(
-            join_updates[0].timeline.events[-1].content["membership"], "invite"
+            join_updates[0].timeline.events[-1].event.content["membership"], "invite"
         )
 
     @override_config(
@@ -423,7 +423,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         join_updates, b = sync_join(self, inviting_user_id)
         # Assert that the last event in the room was not a member event for the target user.
         self.assertEqual(
-            join_updates[0].timeline.events[-1].content["membership"], "invite"
+            join_updates[0].timeline.events[-1].event.content["membership"], "invite"
         )
 
     @override_config(
@@ -466,7 +466,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         join_updates, b = sync_join(self, inviting_user_id)
         # Assert that the last event in the room was not a member event for the target user.
         self.assertEqual(
-            join_updates[0].timeline.events[-1].content["membership"], "invite"
+            join_updates[0].timeline.events[-1].event.content["membership"], "invite"
         )
 
     @override_config(
@@ -509,7 +509,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         join_updates, b = sync_join(self, inviting_user_id)
         # Assert that the last event in the room was not a member event for the target user.
         self.assertEqual(
-            join_updates[0].timeline.events[-1].content["membership"], "invite"
+            join_updates[0].timeline.events[-1].event.content["membership"], "invite"
         )
 
 

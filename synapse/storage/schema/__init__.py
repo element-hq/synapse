@@ -174,6 +174,7 @@ Changes in SCHEMA_VERSION = 93
 
 Changes in SCHEMA_VERSION = 94
     - Add `recheck` column (boolean, default true) to the `redactions` table.
+    - MSC4242: Add state DAG tables.
 """
 
 
