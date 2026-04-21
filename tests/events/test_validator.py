@@ -47,6 +47,7 @@ class EventValidatorTestCase(stdlib_unittest.TestCase):
                 "m.mentions": {"user_ids": ["@moderator:example.com"]},
             }
         )
+        // Sanity check that the event is valid before freezing
         EventValidator().validate_new(event, config)
         event.freeze()
         # Before [PR #19634](https://github.com/element-hq/synapse/pull/19634) this would throw.
