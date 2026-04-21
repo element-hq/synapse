@@ -38,7 +38,10 @@ def make_message_event(content: dict) -> EventBase:
 
 class EventValidatorTestCase(stdlib_unittest.TestCase):
     def test_validate_new_with_mentions_succeeds_even_when_frozen(self) -> None:
-        """Test that validate_new accepts an event with valid m.mentions content even when frozen."""
+        """
+        Test that `EventValidator.validate_new` accepts an event with valid `m.mentions`
+        content even when the event is frozen.
+        """
         config = default_config("test", parse=True)
         event = make_message_event(
             {
