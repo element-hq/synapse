@@ -50,5 +50,5 @@ class EventValidatorTestCase(stdlib_unittest.TestCase):
         // Sanity check that the event is valid before freezing
         EventValidator().validate_new(event, config)
         event.freeze()
-        # Before [PR #19634](https://github.com/element-hq/synapse/pull/19634) this would throw.
+        # Event should still be valid after freezing
         EventValidator().validate_new(event, config)
