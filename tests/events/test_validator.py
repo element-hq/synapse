@@ -46,8 +46,8 @@ class EventValidatorTestCase(HomeserverTestCase):
         event = make_message_event(
             {
                 "msgtype": "m.text",
-                "body": "@user:example.com hello",
-                "m.mentions": {"user_ids": ["@moderator:example.com"]},
+                "body": "@alice:example.com hello",
+                "m.mentions": {"user_ids": ["@alice:example.com"]},
             }
         )
         // Sanity check that the event is valid before freezing
