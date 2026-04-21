@@ -178,23 +178,34 @@ class SlidingSyncHandler:
                 to_token=now_token,
             )
         else:
-            # Otherwise, we wait for something to happen and report it to the user.
-            async def current_sync_callback(
-                before_token: StreamToken, after_token: StreamToken
-            ) -> SlidingSyncResult:
-                return await self.current_sync_for_user(
-                    sync_config,
-                    from_token=from_token,
-                    to_token=after_token,
-                )
-
-            result = await self.notifier.wait_for_events(
-                sync_config.user.to_string(),
-                timeout_ms,
-                current_sync_callback,
-                from_token=from_token.stream_token,
+            # Check once against the current token before waiting. This handles
+            # request-shape changes, like stronger room subscriptions, which can
+            # produce a non-empty response without any new stream activity.
+            now_token = self.event_sources.get_current_token()
+            result = await self.current_sync_for_user(
+                sync_config,
+                from_token=from_token,
+                to_token=now_token,
             )
-            did_wait = True
+
+            if not result:
+                # Otherwise, we wait for something to happen and report it to the user.
+                async def current_sync_callback(
+                    before_token: StreamToken, after_token: StreamToken
+                ) -> SlidingSyncResult:
+                    return await self.current_sync_for_user(
+                        sync_config,
+                        from_token=from_token,
+                        to_token=after_token,
+                    )
+
+                result = await self.notifier.wait_for_events(
+                    sync_config.user.to_string(),
+                    timeout_ms,
+                    current_sync_callback,
+                    from_token=now_token,
+                )
+                did_wait = True
 
         return result, did_wait
 
