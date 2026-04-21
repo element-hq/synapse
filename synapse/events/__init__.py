@@ -34,6 +34,7 @@ from typing import (
 )
 
 import attr
+from typing_extensions import deprecated
 from unpaddedbase64 import encode_base64
 
 from synapse.api.constants import (
@@ -364,6 +365,7 @@ class EventBase(metaclass=abc.ABCMeta):
         )
 
     # Using `__getitem__` is deprecated. Only used by modules.
+    @deprecated("Use attribute access instead")
     def __getitem__(self, field: str) -> Any | None:
         return self._dict[field]
 
