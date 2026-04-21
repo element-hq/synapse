@@ -276,3 +276,33 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         self.assertFalse(
             capabilities["org.matrix.msc4267.forget_forced_upon_leave"]["enabled"]
         )
+
+    @override_config(
+        {"url_preview_enabled": True, "url_preview_ip_range_blacklist": ["127.0.0.1"]}
+    )
+    def test_url_previews_enabled(self) -> None:
+        access_token = self.get_success(
+            self.auth_handler.create_access_token_for_user_id(
+                self.user, device_id=None, valid_until_ms=None
+            )
+        )
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertTrue(capabilities["io.element.msc4452.preview_url"]["enabled"])
+
+    @override_config(
+        {
+            "url_preview_enabled": False,
+        }
+    )
+    def test_url_previews_disabled(self) -> None:
+        access_token = self.get_success(
+            self.auth_handler.create_access_token_for_user_id(
+                self.user, device_id=None, valid_until_ms=None
+            )
+        )
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertFalse(capabilities["io.element.msc4452.preview_url"]["enabled"])

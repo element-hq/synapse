@@ -74,6 +74,9 @@ class CapabilitiesRestServlet(RestServlet):
                 "m.get_login_token": {
                     "enabled": self.config.auth.login_via_existing_enabled,
                 },
+                "io.element.msc4452.preview_url": {
+                    "enabled": self.config.media.url_preview_enabled,
+                },
             }
         }
 
