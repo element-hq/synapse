@@ -36,7 +36,7 @@ def make_message_event(content: dict) -> EventBase:
     )
 
 
-class EventValidatorTestCase(stdlib_unittest.TestCase):
+class EventValidatorTestCase(HomeserverTestCase):
     def test_validate_new_with_mentions_succeeds_even_when_frozen(self) -> None:
         """
         Test that `EventValidator.validate_new` accepts an event with valid `m.mentions`
