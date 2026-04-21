@@ -219,6 +219,9 @@ class EventBase(metaclass=abc.ABCMeta):
     state_key: DictProperty[str] = DictProperty("state_key")
     type: DictProperty[str] = DictProperty("type")
 
+    # This is a deprecated property, use `sender` instead. Only used by modules.
+    user_id: DictProperty[str] = DictProperty("sender")
+
     @property
     def event_id(self) -> str:
         raise NotImplementedError()
@@ -359,6 +362,10 @@ class EventBase(metaclass=abc.ABCMeta):
             f"outlier={self.internal_metadata.is_outlier()}"
             ">"
         )
+
+    # Using `__getitem__` is deprecated. Only used by modules.
+    def __getitem__(self, field: str) -> Any | None:
+        return self._dict[field]
 
 
 class FrozenEvent(EventBase):
