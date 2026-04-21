@@ -23,7 +23,7 @@
 import logging
 import re
 
-from synapse.api.errors import Codes, cs_error
+from synapse.api.errors import Codes, SynapseError, cs_error
 from synapse.http.server import (
     HttpServer,
     respond_with_json,
@@ -79,10 +79,13 @@ class PreviewURLServlet(RestServlet):
         self.clock = hs.get_clock()
         self.media_repo = media_repo
         self.media_storage = media_storage
-        assert self.media_repo.url_previewer is not None
         self.url_previewer = self.media_repo.url_previewer
 
     async def on_GET(self, request: SynapseRequest) -> None:
+        if self.url_previewer is None:
+            # If we have no url_previewer then it has been disabled by the server.
+            raise SynapseError(403, "URL Previews are disabled", Codes.FORBIDDEN)
+
         requester = await self.auth.get_user_by_req(request)
         url = parse_string(request, "url", required=True)
         ts = parse_integer(request, "ts")
@@ -299,10 +302,7 @@ class DownloadResource(RestServlet):
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     media_repo = hs.get_media_repository()
-    if hs.config.media.url_preview_enabled:
-        PreviewURLServlet(hs, media_repo, media_repo.media_storage).register(
-            http_server
-        )
+    PreviewURLServlet(hs, media_repo, media_repo.media_storage).register(http_server)
     MediaConfigResource(hs).register(http_server)
     ThumbnailResource(hs, media_repo, media_repo.media_storage).register(http_server)
     DownloadResource(hs, media_repo).register(http_server)

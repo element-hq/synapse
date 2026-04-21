@@ -1573,6 +1573,27 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, channel.result)
 
 
+class URLPreviewDisabledTests(unittest.HomeserverTestCase):
+    servlets = [
+        media.register_servlets,
+    ]
+
+    def test_disabled_previews(self) -> None:
+        """Tests that disabling URL previews gives back a sane response."""
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/preview_url?url=" + quote("http://example.com"),
+            shorthand=False,
+            await_result=False,
+        )
+        self.pump()
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(
+            channel.json_body,
+            {"errcode": "M_FORBIDDEN", "error": "URL Previews are disabled"},
+        )
+
+
 class MediaConfigTest(unittest.HomeserverTestCase):
     servlets = [
         media.register_servlets,
