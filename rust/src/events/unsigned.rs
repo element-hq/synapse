@@ -25,14 +25,15 @@ use pythonize::{depythonize, pythonize};
 use serde::{Deserialize, Serialize};
 
 #[pyclass(frozen, skip_from_py_object)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(transparent)]
 pub struct Unsigned {
     inner: Arc<RwLock<UnsignedInner>>,
 }
 
 /// The fields in the unsigned data of an event that are persisted in the
 /// database.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PersistedUnsignedFields {
     #[serde(skip_serializing_if = "Option::is_none")]
     age_ts: Option<i64>,
@@ -47,7 +48,7 @@ struct PersistedUnsignedFields {
 /// The inner representation of the unsigned data of an event, which includes
 /// both the fields that are persisted in the database and the fields that are
 /// only used in memory.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UnsignedInner {
     #[serde(flatten)]
     persisted_fields: PersistedUnsignedFields,
