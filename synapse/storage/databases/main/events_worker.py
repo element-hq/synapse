@@ -786,7 +786,6 @@ class EventsWorkerStore(SQLBaseStore):
                         allow_none=True,
                     )
                     if prev:
-                        event.unsigned = event.unsigned
                         event.unsigned["prev_content"] = prev.content
                         event.unsigned["prev_sender"] = prev.sender
 
