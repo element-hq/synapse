@@ -1437,7 +1437,7 @@ class RoomCreationHandler:
         room_config: JsonDict,
         invite_list: list[str],
         initial_state: MutableStateMap,
-        creation_content: JsonDict,
+        creation_content: JsonMapping,
         room_alias: RoomAlias | None = None,
         power_level_content_override: JsonDict | None = None,
         creator_join_profile: JsonDict | None = None,
@@ -1508,7 +1508,7 @@ class RoomCreationHandler:
 
         async def create_event(
             etype: str,
-            content: JsonDict,
+            content: JsonMapping,
             for_batch: bool,
             **kwargs: Any,
         ) -> tuple[EventBase, synapse.events.snapshot.UnpersistedEventContextBase]:
@@ -1561,6 +1561,7 @@ class RoomCreationHandler:
         if creation_event_with_context is None:
             # MSC2175 removes the creator field from the create event.
             if not room_version.implicit_room_creator:
+                creation_content = dict(creation_content)
                 creation_content["creator"] = creator_id
             creation_event, unpersisted_creation_context = await create_event(
                 EventTypes.Create, creation_content, False

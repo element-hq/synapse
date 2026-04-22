@@ -44,9 +44,15 @@ from synapse.api.constants import (
     StickyEvent,
 )
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.synapse_rust.events import EventInternalMetadata, Signatures, Unsigned
+from synapse.synapse_rust.events import (
+    EventInternalMetadata,
+    JsonObject,
+    Signatures,
+    Unsigned,
+)
 from synapse.types import (
     JsonDict,
+    JsonMapping,
     StateKey,
     StrCollection,
 )
@@ -216,7 +222,7 @@ class EventBase(metaclass=abc.ABCMeta):
         self.internal_metadata = EventInternalMetadata(internal_metadata_dict)
 
     depth: DictProperty[int] = DictProperty("depth")
-    content: DictProperty[JsonDict] = DictProperty("content")
+    content: DictProperty[JsonMapping] = DictProperty("content")
     hashes: DictProperty[dict[str, str]] = DictProperty("hashes")
     origin_server_ts: DictProperty[int] = DictProperty("origin_server_ts")
     sender: DictProperty[str] = DictProperty("sender")
