@@ -320,3 +320,134 @@ fn room_state_from_py(value: Bound<'_, PyAny>) -> PyResult<Vec<serde_json::Value
 
     Ok(state)
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_unsigned_field_from_str_valid() {
+        assert_eq!("age_ts".parse(), Ok(UnsignedField::AgeTs));
+        assert_eq!("replaces_state".parse(), Ok(UnsignedField::ReplacesState));
+        assert_eq!(
+            "invite_room_state".parse(),
+            Ok(UnsignedField::InviteRoomState)
+        );
+        assert_eq!(
+            "knock_room_state".parse(),
+            Ok(UnsignedField::KnockRoomState)
+        );
+        assert_eq!("prev_content".parse(), Ok(UnsignedField::PrevContent));
+        assert_eq!("prev_sender".parse(), Ok(UnsignedField::PrevSender));
+    }
+
+    #[test]
+    fn test_unsigned_field_from_str_invalid() {
+        assert_eq!("".parse::<UnsignedField>(), Err(()));
+        assert_eq!("unknown".parse::<UnsignedField>(), Err(()));
+        // Case-sensitive: upper-case should not match.
+        assert_eq!("AGE_TS".parse::<UnsignedField>(), Err(()));
+        // Must be an exact match, no whitespace.
+        assert_eq!(" age_ts".parse::<UnsignedField>(), Err(()));
+    }
+
+    #[test]
+    fn test_persisted_fields_serialize_empty_is_empty_object() {
+        let fields = PersistedUnsignedFields::default();
+        let json = serde_json::to_value(&fields).unwrap();
+        assert_eq!(json, json!({}));
+    }
+
+    #[test]
+    fn test_persisted_fields_serialize_populated() {
+        let fields = PersistedUnsignedFields {
+            age_ts: Some(1234),
+            replaces_state: Some("$prev:example.com".to_string()),
+            invite_room_state: Some(vec![json!({"type": "m.room.name"})]),
+            knock_room_state: Some(vec![json!({"type": "m.room.topic"})]),
+        };
+        let json = serde_json::to_value(&fields).unwrap();
+        assert_eq!(
+            json,
+            json!({
+                "age_ts": 1234,
+                "replaces_state": "$prev:example.com",
+                "invite_room_state": [{"type": "m.room.name"}],
+                "knock_room_state": [{"type": "m.room.topic"}],
+            })
+        );
+    }
+
+    #[test]
+    fn test_unsigned_inner_flattens_persisted_fields() {
+        let inner = UnsignedInner {
+            persisted_fields: PersistedUnsignedFields {
+                age_ts: Some(99),
+                ..Default::default()
+            },
+            prev_content: Some(Box::new(json!({"body": "hi"}))),
+            prev_sender: Some("@alice:example.com".to_string()),
+        };
+
+        let json = serde_json::to_value(&inner).unwrap();
+        assert_eq!(
+            json,
+            json!({
+                "age_ts": 99,
+                "prev_content": {"body": "hi"},
+                "prev_sender": "@alice:example.com",
+            })
+        );
+    }
+
+    #[test]
+    fn test_unsigned_inner_roundtrip() {
+        let original = UnsignedInner {
+            persisted_fields: PersistedUnsignedFields {
+                age_ts: Some(10),
+                replaces_state: Some("$state:example.com".to_string()),
+                invite_room_state: None,
+                knock_room_state: None,
+            },
+            prev_content: Some(Box::new(json!({"membership": "join"}))),
+            prev_sender: None,
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let roundtripped: UnsignedInner = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(roundtripped.persisted_fields.age_ts, Some(10));
+        assert_eq!(
+            roundtripped.persisted_fields.replaces_state.as_deref(),
+            Some("$state:example.com")
+        );
+        assert_eq!(
+            roundtripped.prev_content.as_deref(),
+            Some(&json!({"membership": "join"}))
+        );
+        assert_eq!(roundtripped.prev_sender, None);
+    }
+
+    #[test]
+    fn test_unsigned_serializes_transparently() {
+        // `Unsigned` is `#[serde(transparent)]` over its inner, so serializing
+        // an empty default should yield an empty object rather than a wrapper.
+        let unsigned = Unsigned::default();
+        let json = serde_json::to_value(&unsigned).unwrap();
+        assert_eq!(json, json!({}));
+    }
+
+    #[test]
+    fn test_unsigned_deserialize_from_flat_object() {
+        let json = json!({
+            "age_ts": 5,
+            "prev_sender": "@bob:example.com",
+        });
+        let unsigned: Unsigned = serde_json::from_value(json).unwrap();
+        let inner = unsigned.inner.read().unwrap();
+        assert_eq!(inner.persisted_fields.age_ts, Some(5));
+        assert_eq!(inner.prev_sender.as_deref(), Some("@bob:example.com"));
+    }
+}
