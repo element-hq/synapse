@@ -1575,18 +1575,24 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
 class URLPreviewDisabledTests(unittest.HomeserverTestCase):
     servlets = [
+        admin.register_servlets,
+        login.register_servlets,
         media.register_servlets,
     ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.register_user("user", "password")
+        self.tok = self.login("user", "password")
 
     def test_disabled_previews(self) -> None:
         """Tests that disabling URL previews gives back a sane response."""
         channel = self.make_request(
             "GET",
             "/_matrix/client/v1/media/preview_url?url=" + quote("http://example.com"),
-            shorthand=False,
-            await_result=False,
+            access_token=self.tok,
         )
-        self.pump()
         self.assertEqual(channel.code, 403, channel.result)
         self.assertEqual(
             channel.json_body,
