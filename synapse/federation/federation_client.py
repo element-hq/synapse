@@ -126,6 +126,9 @@ class SendJoinResult:
     # Always contains the server we joined off.
     servers_in_room: AbstractSet[str]
 
+    # Only valid for state DAG rooms (MSC4242)
+    state_dag: list[EventBase] | None
+
 
 class FederationClient(FederationBase):
     def __init__(self, hs: "HomeServer"):
@@ -1108,11 +1111,12 @@ class FederationClient(FederationBase):
             SynapseError: if the chosen remote server returns a 300/400 code, or
                 no servers successfully handle the request.
         """
-        # See related restriction in /createRoom requests in handlers/room.py
-        if room_version.msc4242_state_dags:
-            raise UnsupportedRoomVersionError(
-                "Homeserver does not support this room version over federation"
-            )
+
+        def find_create_event(events: list[EventBase]) -> EventBase | None:
+            for e in events:
+                if (e.type, e.state_key) == (EventTypes.Create, ""):
+                    return e
+            return None
 
         async def send_request(destination: str) -> SendJoinResult:
             response = await self._do_send_join(
@@ -1142,13 +1146,16 @@ class FederationClient(FederationBase):
 
             state = response.state
             auth_chain = response.auth_events
+            state_dag: list[EventBase] = []
+            if room_version.msc4242_state_dags:
+                if not response.state_dag:
+                    raise InvalidResponseError("No state_dag returned")
+                state_dag = response.state_dag
 
-            create_event = None
-            for e in state:
-                if (e.type, e.state_key) == (EventTypes.Create, ""):
-                    create_event = e
-                    break
-
+            # Validate the create event and room version are what we expect to see.
+            create_event = find_create_event(
+                state_dag if room_version.msc4242_state_dags else state
+            )
             if create_event is None:
                 # If the state doesn't have a create event then the room is
                 # invalid, and it would fail auth checks anyway.
@@ -1166,62 +1173,7 @@ class FederationClient(FederationBase):
                     % (create_room_version,)
                 )
 
-            logger.info(
-                "Processing from send_join %d events", len(state) + len(auth_chain)
-            )
-
-            # We now go and check the signatures and hashes for the event. Note
-            # that we limit how many events we process at a time to keep the
-            # memory overhead from exploding.
-            valid_pdus_map: dict[str, EventBase] = {}
-
-            async def _execute(pdu: EventBase) -> None:
-                valid_pdu = await self._check_sigs_and_hash_and_fetch_one(
-                    pdu=pdu,
-                    origin=destination,
-                    room_version=room_version,
-                )
-
-                if valid_pdu:
-                    valid_pdus_map[valid_pdu.event_id] = valid_pdu
-
-            await concurrently_execute(
-                _execute, itertools.chain(state, auth_chain), 10000
-            )
-
-            # NB: We *need* to copy to ensure that we don't have multiple
-            # references being passed on, as that causes... issues.
-            signed_state = [
-                copy.copy(valid_pdus_map[p.event_id])
-                for p in state
-                if p.event_id in valid_pdus_map
-            ]
-
-            signed_auth = [
-                valid_pdus_map[p.event_id]
-                for p in auth_chain
-                if p.event_id in valid_pdus_map
-            ]
-
-            # NB: We *need* to copy to ensure that we don't have multiple
-            # references being passed on, as that causes... issues.
-            for s in signed_state:
-                s.internal_metadata = s.internal_metadata.copy()
-
-            # double-check that the auth chain doesn't include a different create event
-            auth_chain_create_events = [
-                e.event_id
-                for e in signed_auth
-                if (e.type, e.state_key) == (EventTypes.Create, "")
-            ]
-            if auth_chain_create_events and auth_chain_create_events != [
-                create_event.event_id
-            ]:
-                raise InvalidResponseError(
-                    "Unexpected create event(s) in auth chain: %s"
-                    % (auth_chain_create_events,)
-                )
-
+            # Validate and set faster room joins fields
             servers_in_room = None
             if response.servers_in_room is not None:
                 servers_in_room = set(response.servers_in_room)
@@ -1241,6 +1193,103 @@ class FederationClient(FederationBase):
                 # Fix things up in case the remote homeserver is badly behaved.
                 servers_in_room.add(destination)
 
+            logger.info(
+                "Processing from send_join %d events",
+                len(state_dag)
+                if room_version.msc4242_state_dags
+                else (len(state) + len(auth_chain)),
+            )
+
+            # We now go and check the signatures and hashes for the event. Note
+            # that we limit how many events we process at a time to keep the
+            # memory overhead from exploding.
+            valid_pdus_map: dict[str, EventBase] = {}
+
+            async def _execute(pdu: EventBase) -> None:
+                valid_pdu = await self._check_sigs_and_hash_and_fetch_one(
+                    pdu=pdu,
+                    origin=destination,
+                    room_version=room_version,
+                )
+
+                if valid_pdu:
+                    valid_pdus_map[valid_pdu.event_id] = valid_pdu
+
+            # Verify signatures/hashes on events, and make sure they all refer to the same room.
+            if room_version.msc4242_state_dags:
+                if state or auth_chain:
+                    raise InvalidResponseError(
+                        "State DAG rooms must not set state or auth_chain fields"
+                    )
+                await concurrently_execute(_execute, itertools.chain(state_dag), 10000)
+                # Copy valid PDUs along with internal metadata.
+                # It's unclear why this is needed but the code seems to expect it.
+                signed_state_dag = [
+                    copy.copy(valid_pdus_map[p.event_id])
+                    for p in state_dag
+                    if p.event_id in valid_pdus_map
+                ]
+                for s in signed_state_dag:
+                    s.internal_metadata = s.internal_metadata.copy()
+
+                # Verify each event is for this room (and thus has the same create event as it is v12+)
+                for state_event in signed_state_dag:
+                    if state_event.room_id != pdu.room_id:
+                        raise InvalidResponseError(
+                            "%s in state_dag belongs to room %s, not %s which we are joining"
+                            % (state_event.event_id, state_event.room_id, pdu.room_id)
+                        )
+                return SendJoinResult(
+                    event=event,
+                    state=[],
+                    auth_chain=[],
+                    state_dag=signed_state_dag,
+                    origin=destination,
+                    partial_state=response.members_omitted,
+                    servers_in_room=servers_in_room or frozenset(),
+                )
+            else:
+                if state_dag:
+                    raise InvalidResponseError(
+                        "Room does not support state DAGs but set state_dag field"
+                    )
+                await concurrently_execute(
+                    _execute, itertools.chain(state, auth_chain), 10000
+                )
+
+                # NB: We *need* to copy to ensure that we don't have multiple
+                # references being passed on, as that causes... issues.
+                signed_state = [
+                    copy.copy(valid_pdus_map[p.event_id])
+                    for p in state
+                    if p.event_id in valid_pdus_map
+                ]
+
+                signed_auth = [
+                    valid_pdus_map[p.event_id]
+                    for p in auth_chain
+                    if p.event_id in valid_pdus_map
+                ]
+
+                # NB: We *need* to copy to ensure that we don't have multiple
+                # references being passed on, as that causes... issues.
+                for s in signed_state:
+                    s.internal_metadata = s.internal_metadata.copy()
+
+                # double-check that the auth chain doesn't include a different create event
+                auth_chain_create_events = [
+                    e.event_id
+                    for e in signed_auth
+                    if (e.type, e.state_key) == (EventTypes.Create, "")
+                ]
+                if auth_chain_create_events and auth_chain_create_events != [
+                    create_event.event_id
+                ]:
+                    raise InvalidResponseError(
+                        "Unexpected create event(s) in auth chain: %s"
+                        % (auth_chain_create_events,)
+                    )
+
             return SendJoinResult(
                 event=event,
                 state=signed_state,
@@ -1248,6 +1297,7 @@ class FederationClient(FederationBase):
                 origin=destination,
                 partial_state=response.members_omitted,
                 servers_in_room=servers_in_room or frozenset(),
+                state_dag=None,
             )
 
         # MSC3083 defines additional error codes for room joins.
@@ -1548,6 +1598,7 @@ class FederationClient(FederationBase):
         limit: int,
         min_depth: int,
         timeout: int,
+        state_dag: bool = False,
     ) -> list[EventBase]:
         """Tries to fetch events we are missing. This is called when we receive
         an event without having received all of its ancestors.
@@ -1563,6 +1614,7 @@ class FederationClient(FederationBase):
             limit: Maximum number of events to return.
             min_depth: Minimum depth of events to return.
             timeout: Max time to wait in ms
+            state_dag: True to walk the state DAG (MSC4242 rooms)
         """
         try:
             content = await self.transport_layer.get_missing_events(
@@ -1573,6 +1625,7 @@ class FederationClient(FederationBase):
                 limit=limit,
                 min_depth=min_depth,
                 timeout=timeout,
+                state_dag=state_dag,
             )
 
             room_version = await self.store.get_room_version(room_id)
