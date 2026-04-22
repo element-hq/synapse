@@ -1586,6 +1586,11 @@ class URLPreviewDisabledTests(unittest.HomeserverTestCase):
         self.register_user("user", "password")
         self.tok = self.login("user", "password")
 
+    @override_config(
+        {
+            "url_preview_enabled": False,
+        }
+    )
     def test_disabled_previews(self) -> None:
         """Tests that disabling URL previews gives back a sane response."""
         channel = self.make_request(
