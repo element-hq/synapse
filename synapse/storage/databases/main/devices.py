@@ -79,6 +79,19 @@ DROP_DEVICE_LIST_STREAMS_NON_UNIQUE_INDEXES = (
 
 BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES = "remove_dup_outbound_pokes"
 
+# Background update name for adding an index on
+# `device_lists_changes_in_room.inserted_ts`.
+BG_UPDATE_ADD_INSERTED_TS_INDEX = "device_lists_changes_in_room_inserted_ts_idx"
+
+
+# Prunes entries out of the `device_lists_changes_in_room` table that are more
+# than this old.
+PRUNE_DEVICE_LISTS_CHANGES_IN_ROOM_AGE = Duration(days=30)
+
+# The number of rows to delete at once when pruning old entries out of the
+# `device_lists_changes_in_room` table.
+PRUNE_DEVICE_LISTS_BATCH_SIZE = 1000
+
 
 class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     _device_list_id_gen: MultiWriterIdGenerator
@@ -193,6 +206,10 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         if hs.config.worker.run_background_tasks:
             self.clock.looping_call(
                 self._prune_old_outbound_device_pokes, Duration(hours=1)
+            )
+            self.clock.looping_call(
+                self._prune_device_lists_changes_in_room,
+                Duration(hours=1),
             )
 
     def process_replication_rows(
@@ -1143,6 +1160,35 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             The set of user_ids whose devices have changed since `from_key` (exclusive)
                 until `to_key` (inclusive).
         """
+        return {
+            user_id
+            for user_id, _ in await self.get_device_changes_for_users(
+                from_key, user_ids, to_key
+            )
+        }
+
+    @cancellable
+    async def get_device_changes_for_users(
+        self,
+        from_key: MultiWriterStreamToken,
+        user_ids: Collection[str],
+        to_key: MultiWriterStreamToken | None = None,
+    ) -> set[tuple[str, str]]:
+        """Get set of user/device ID tuple whose devices have changed since `from_key` that
+        are in the given list of user_ids.
+
+        Args:
+            from_key: The minimum device lists stream token to query device list changes for,
+                exclusive.
+            user_ids: If provided, only check if these users have changed their device lists.
+                Otherwise changes from all users are returned.
+            to_key: The maximum device lists stream token to query device list changes for,
+                inclusive. If None then no upper limit is applied.
+
+        Returns:
+            The set of user/device ID tuples whose devices have changed since `from_key`
+            (exclusive) until `to_key` (inclusive).
+        """
         # Get set of users who *may* have changed. Users not in the returned
         # list have definitely not changed.
         user_ids_to_check = self._device_list_stream_cache.get_entities_changed(
@@ -1156,18 +1202,18 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         if to_key is None:
             to_key = self.get_device_stream_token()
 
-        def _get_users_whose_devices_changed_txn(
+        def get_device_changes_for_users_txn(
             txn: LoggingTransaction,
             from_key: MultiWriterStreamToken,
             to_key: MultiWriterStreamToken,
-        ) -> set[str]:
+        ) -> set[tuple[str, str]]:
             sql = """
-                SELECT user_id, stream_id, instance_name
+                SELECT user_id, device_id, stream_id, instance_name
                 FROM device_lists_stream
                 WHERE  ? < stream_id AND stream_id <= ? AND %s
             """
 
-            changes: set[str] = set()
+            changes: set[tuple[str, str]] = set()
 
             # Query device changes with a batch of users at a time
             for chunk in batch_iter(user_ids_to_check, 100):
@@ -1179,8 +1225,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                     [from_key.stream, to_key.get_max_stream_pos()] + args,
                 )
                 changes.update(
-                    user_id
-                    for (user_id, stream_id, instance_name) in txn
+                    (user_id, device_id)
+                    for (user_id, device_id, stream_id, instance_name) in txn
                     if MultiWriterStreamToken.is_stream_position_in_range(
                         low=from_key,
                         high=to_key,
@@ -1192,8 +1238,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             return changes
 
         return await self.db_pool.runInteraction(
-            "get_users_whose_devices_changed",
-            _get_users_whose_devices_changed_txn,
+            "get_device_changes_for_users",
+            get_device_changes_for_users_txn,
             from_key,
             to_key,
         )
@@ -1699,17 +1745,22 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         return devices
 
-    @cached()
-    async def _get_min_device_lists_changes_in_room(self) -> int:
-        """Returns the minimum stream ID that we have entries for
-        `device_lists_changes_in_room`
+    def _get_max_pruned_device_lists_changes_in_room_txn(
+        self, txn: LoggingTransaction
+    ) -> int:
+        """Returns the maximum stream ID that has been pruned from
+        `device_lists_changes_in_room`.
+
+        Any queries for stream IDs less than this value cannot be answered
+        completely, as the data has been deleted.
         """
 
-        return await self.db_pool.simple_select_one_onecol(
-            table="device_lists_changes_in_room",
+        return self.db_pool.simple_select_one_onecol_txn(
+            txn,
+            table="device_lists_changes_in_room_max_pruned_stream_id",
             keyvalues={},
-            retcol="COALESCE(MIN(stream_id), 0)",
-            desc="get_min_device_lists_changes_in_room",
+            retcol="stream_id",
+            allow_none=False,
         )
 
     @cancellable
@@ -1728,55 +1779,54 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         if not room_ids:
             return set()
 
-        min_stream_id = await self._get_min_device_lists_changes_in_room()
-
-        # Return early if there are no rows to process in device_lists_changes_in_room
-        if min_stream_id > from_token.stream:
-            return None
-
         changed_room_ids = self._device_list_room_stream_cache.get_entities_changed(
             room_ids, from_token.stream
         )
         if not changed_room_ids:
             return set()
 
-        sql = """
-            SELECT user_id, stream_id, instance_name
-            FROM device_lists_changes_in_room
-            WHERE {clause} AND stream_id > ? AND stream_id <= ?
-        """
-
         def _get_device_list_changes_in_rooms_txn(
             txn: LoggingTransaction,
-            chunk: list[str],
-        ) -> set[str]:
-            clause, args = make_in_list_sql_clause(
-                self.database_engine, "room_id", chunk
+        ) -> set[str] | None:
+            # Check if the from_token is too old (i.e. data has been pruned).
+            max_pruned_stream_id = (
+                self._get_max_pruned_device_lists_changes_in_room_txn(txn)
             )
-            args.append(from_token.stream)
-            args.append(to_token.get_max_stream_pos())
+            if max_pruned_stream_id > from_token.stream:
+                return None
 
-            txn.execute(sql.format(clause=clause), args)
-            return {
-                user_id
-                for (user_id, stream_id, instance_name) in txn
-                if MultiWriterStreamToken.is_stream_position_in_range(
-                    low=from_token,
-                    high=to_token,
-                    instance_name=instance_name,
-                    pos=stream_id,
+            changes: set[str] = set()
+
+            for chunk in batch_iter(changed_room_ids, 1000):
+                clause, args = make_in_list_sql_clause(
+                    self.database_engine, "room_id", chunk
                 )
-            }
+                args.append(from_token.stream)
+                args.append(to_token.get_max_stream_pos())
 
-        changes = set()
-        for chunk in batch_iter(changed_room_ids, 1000):
-            changes |= await self.db_pool.runInteraction(
-                "get_device_list_changes_in_rooms",
-                _get_device_list_changes_in_rooms_txn,
-                chunk,
-            )
+                sql = f"""
+                    SELECT user_id, stream_id, instance_name
+                    FROM device_lists_changes_in_room
+                    WHERE {clause} AND stream_id > ? AND stream_id <= ?
+                """
+                txn.execute(sql, args)
+                changes.update(
+                    user_id
+                    for (user_id, stream_id, instance_name) in txn
+                    if MultiWriterStreamToken.is_stream_position_in_range(
+                        low=from_token,
+                        high=to_token,
+                        instance_name=instance_name,
+                        pos=stream_id,
+                    )
+                )
 
-        return changes
+            return changes
+
+        return await self.db_pool.runInteraction(
+            "get_device_list_changes_in_rooms",
+            _get_device_list_changes_in_rooms_txn,
+        )
 
     async def get_all_device_list_changes(self, from_id: int, to_id: int) -> set[str]:
         """Return the set of rooms where devices have changed since the given
@@ -1785,46 +1835,66 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         Will raise an exception if the given stream ID is too old.
         """
 
-        min_stream_id = await self._get_min_device_lists_changes_in_room()
-
-        if min_stream_id > from_id:
-            raise Exception("stream ID is too old")
-
-        sql = """
-            SELECT DISTINCT room_id FROM device_lists_changes_in_room
-            WHERE stream_id > ? AND stream_id <= ?
-        """
-
         def _get_all_device_list_changes_txn(
             txn: LoggingTransaction,
-        ) -> set[str]:
+        ) -> set[str] | None:
+            # Check if the from_token is too old (i.e. data has been pruned).
+            max_pruned_stream_id = (
+                self._get_max_pruned_device_lists_changes_in_room_txn(txn)
+            )
+            if max_pruned_stream_id > from_id:
+                logger.warning(
+                    "Given stream ID is too old %d < %d",
+                    from_id,
+                    max_pruned_stream_id,
+                )
+                return None
+
+            sql = """
+                SELECT DISTINCT room_id FROM device_lists_changes_in_room
+                WHERE stream_id > ? AND stream_id <= ?
+            """
+
             txn.execute(sql, (from_id, to_id))
             return {room_id for (room_id,) in txn}
 
-        return await self.db_pool.runInteraction(
+        room_ids = await self.db_pool.runInteraction(
             "get_all_device_list_changes",
             _get_all_device_list_changes_txn,
         )
 
+        if room_ids is None:
+            raise Exception(f"Given stream ID is too old {from_id}")
+
+        return room_ids
+
     async def get_device_list_changes_in_room(
         self, room_id: str, min_stream_id: int
-    ) -> Collection[tuple[str, str]]:
+    ) -> Collection[tuple[str, str]] | None:
         """Get all device list changes that happened in the room since the given
         stream ID.
 
         Returns:
             Collection of user ID/device ID tuples of all devices that have
-            changed
-        """
-
-        sql = """
-            SELECT DISTINCT user_id, device_id FROM device_lists_changes_in_room
-            WHERE room_id = ? AND stream_id > ?
+            changed, or None if the given stream ID is too old and so a complete
+            list cannot be calculated.
         """
 
         def get_device_list_changes_in_room_txn(
             txn: LoggingTransaction,
-        ) -> Collection[tuple[str, str]]:
+        ) -> Collection[tuple[str, str]] | None:
+            # Check if the from_token is too old (i.e. data has been pruned).
+            max_pruned_stream_id = (
+                self._get_max_pruned_device_lists_changes_in_room_txn(txn)
+            )
+            if max_pruned_stream_id > min_stream_id:
+                return None
+
+            sql = """
+                SELECT DISTINCT user_id, device_id FROM device_lists_changes_in_room
+                WHERE room_id = ? AND stream_id > ?
+            """
+
             txn.execute(sql, (room_id, min_stream_id))
             return cast(Collection[tuple[str, str]], txn.fetchall())
 
@@ -2160,6 +2230,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         encoded_context = json_encoder.encode(context)
 
+        now = self.clock.time_msec()
+
         # The `device_lists_changes_in_room.stream_id` column matches the
         # corresponding `stream_id` of the update in the `device_lists_stream`
         # table, i.e. all rows persisted for the same device update will have
@@ -2175,6 +2247,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 "instance_name",
                 "converted_to_destinations",
                 "opentracing_context",
+                "inserted_ts",
             ),
             values=[
                 (
@@ -2186,6 +2259,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                     # We only need to calculate outbound pokes for local users
                     not self.hs.is_mine_id(user_id),
                     encoded_context,
+                    now,
                 )
                 for room_id in room_ids
                 for device_id, stream_id in zip(device_ids, stream_ids)
@@ -2401,6 +2475,154 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             desc="set_device_change_last_converted_pos",
         )
 
+    @wrap_as_background_process("prune_device_lists_changes_in_room")
+    async def _prune_device_lists_changes_in_room(self) -> None:
+        """Delete old entries out of the `device_lists_changes_in_room`, so that
+        the table doesn't grow indefinitely.
+        """
+
+        # Let's only do this pruning if the index on inserted_ts has been
+        # created, otherwise this query will be very inefficient.
+        has_index_been_created = (
+            await self.db_pool.updates.has_completed_background_update(
+                BG_UPDATE_ADD_INSERTED_TS_INDEX
+            )
+        )
+        if not has_index_been_created:
+            return
+
+        prune_before_ts = (
+            self.clock.time_msec() - PRUNE_DEVICE_LISTS_CHANGES_IN_ROOM_AGE.as_millis()
+        )
+
+        # Get stream ID corresponding to the prune_before_ts timestamp. We can
+        # delete all rows with a stream ID less than or equal to this, as they
+        # will be older than the cutoff.
+        #
+        # Some rows will have a NULL inserted_ts (due to being inserted before
+        # the column was added), but we can assume that the timestamp will
+        # monotonically increase with stream ID, so we can safely ignore those
+        # rows when calculating the cutoff stream ID. This means that we may end
+        # up keeping some rows with a non-NULL inserted_ts that are older than
+        # the cutoff, but that's better than accidentally deleting rows that are
+        # newer than the cutoff.
+        cutoff_sql = """
+            SELECT stream_id FROM device_lists_changes_in_room
+            WHERE inserted_ts <= ? AND inserted_ts IS NOT NULL
+            ORDER BY inserted_ts DESC
+            LIMIT 1
+        """
+
+        def get_prune_before_stream_id_txn(txn: LoggingTransaction) -> int | None:
+            txn.execute(cutoff_sql, (prune_before_ts,))
+            row = txn.fetchone()
+            return row[0] if row else None
+
+        prune_before_stream_id = await self.db_pool.runInteraction(
+            "prune_device_lists_changes_in_room_get_stream_id",
+            get_prune_before_stream_id_txn,
+        )
+
+        if prune_before_stream_id is None:
+            return
+
+        # Get the max stream ID in the table so we avoid deleting it. We need
+        # to keep the latest row so that we can calculate the maximum stream ID
+        # used.
+        max_stream_id = await self.db_pool.simple_select_one_onecol(
+            table="device_lists_changes_in_room",
+            keyvalues={},
+            retcol="MAX(stream_id)",
+            desc="prune_device_lists_changes_in_room_get_max_stream_id",
+        )
+        if prune_before_stream_id >= max_stream_id:
+            prune_before_stream_id = max_stream_id - 1
+
+        logger.debug(
+            "Pruning device_lists_changes_in_room before stream ID %d (timestamp %d)",
+            prune_before_stream_id,
+            prune_before_ts,
+        )
+
+        # Now delete all rows with stream_id less than the
+        # prune_before_stream_id.
+        #
+        # We also delete in batches to avoid massive churn when initially
+        # clearing out all the old entries.
+        #
+        # We set a minimum stream ID so that when we delete in batches the
+        # database doesn't have to scan through all the (dead) tuples that were just
+        # deleted to find the next batch to delete.
+
+        # The minimum stream ID to delete in the next batch, c.f. comment above.
+        # We default to 0 here as that is less than all possible stream IDs.
+        min_stream_id = 0
+
+        def prune_device_lists_changes_in_room_txn(txn: LoggingTransaction) -> int:
+            nonlocal min_stream_id
+
+            delete_sql = """
+                DELETE FROM device_lists_changes_in_room
+                WHERE stream_id IN (
+                    SELECT stream_id FROM device_lists_changes_in_room
+                    WHERE ? < stream_id AND stream_id <= ?
+                    ORDER BY stream_id ASC
+                    LIMIT ?
+                )
+                RETURNING stream_id
+            """
+            txn.execute(
+                delete_sql,
+                (min_stream_id, prune_before_stream_id, PRUNE_DEVICE_LISTS_BATCH_SIZE),
+            )
+
+            # We can't use rowcount as that is incorrect on SQLite when using
+            # RETURNING.
+            num_deleted = 0
+            for row in txn:
+                num_deleted += 1
+                min_stream_id = max(min_stream_id, row[0])
+
+            if num_deleted:
+                # Update the max pruned stream ID tracking table so that the
+                # safety check knows data up to this point has been deleted.
+                self.db_pool.simple_update_one_txn(
+                    txn,
+                    table="device_lists_changes_in_room_max_pruned_stream_id",
+                    keyvalues={},
+                    updatevalues={"stream_id": min_stream_id},
+                )
+
+            return num_deleted
+
+        progress_num_rows_deleted = 0
+        while True:
+            batch_deleted = await self.db_pool.runInteraction(
+                "prune_device_lists_changes_in_room",
+                prune_device_lists_changes_in_room_txn,
+            )
+
+            finished = batch_deleted < PRUNE_DEVICE_LISTS_BATCH_SIZE
+
+            progress_num_rows_deleted += batch_deleted
+
+            # Periodically report progress in the logs. We do this either when
+            # we've deleted a significant number of rows or when we've finished
+            # deleting all rows in this round.
+            if finished or progress_num_rows_deleted > 10000:
+                logger.info(
+                    "Pruned %d rows from device_lists_changes_in_room",
+                    progress_num_rows_deleted,
+                )
+                progress_num_rows_deleted = 0
+
+            if finished:
+                break
+
+            # Sleep for a short time to avoid hammering the database too much if
+            # there are a lot of rows to delete.
+            await self.clock.sleep(Duration(milliseconds=100))
+
 
 class DeviceBackgroundUpdateStore(SQLBaseStore):
     _instance_name: str
@@ -2457,6 +2679,15 @@ class DeviceBackgroundUpdateStore(SQLBaseStore):
             index_name="device_lists_changes_in_room_by_room_idx",
             table="device_lists_changes_in_room",
             columns=["room_id", "stream_id"],
+        )
+
+        # Add indexes to speed up pruning of device_lists_changes_in_room
+        self.db_pool.updates.register_background_index_update(
+            BG_UPDATE_ADD_INSERTED_TS_INDEX,
+            index_name="device_lists_changes_in_room_inserted_ts_idx",
+            table="device_lists_changes_in_room",
+            columns=["inserted_ts"],
+            where_clause="inserted_ts IS NOT NULL",
         )
 
     async def _drop_device_list_streams_non_unique_indexes(

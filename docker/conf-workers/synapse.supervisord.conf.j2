@@ -5,10 +5,16 @@ command=/usr/local/bin/python -m synapse.app.complement_fork_starter
   {{ main_config_path }}
   synapse.app.homeserver
   --config-path="{{ main_config_path }}"
+  {%- if extra_config_dir %}
+    --config-path="{{ extra_config_dir }}"
+  {%- endif %}
   --config-path=/conf/workers/shared.yaml
   {%- for worker in workers %}
     -- {{ worker.app }}
     --config-path="{{ main_config_path }}"
+    {%- if extra_config_dir %}
+      --config-path="{{ extra_config_dir }}"
+    {%- endif %}
     --config-path=/conf/workers/shared.yaml
     --config-path=/conf/workers/{{ worker.name }}.yaml
   {%- endfor %}
@@ -24,6 +30,9 @@ exitcodes=0
 environment=http_proxy="%(ENV_SYNAPSE_HTTP_PROXY)s",https_proxy="%(ENV_SYNAPSE_HTTPS_PROXY)s",no_proxy="%(ENV_SYNAPSE_NO_PROXY)s"
 command=/usr/local/bin/prefix-log /usr/local/bin/python -m synapse.app.homeserver
   --config-path="{{ main_config_path }}"
+  {%- if extra_config_dir %}
+    --config-path="{{ extra_config_dir }}"
+  {%- endif %}
   --config-path=/conf/workers/shared.yaml
 priority=10
 # Log startup failures to supervisord's stdout/err
