@@ -1314,16 +1314,18 @@ class EventFederationWorkerStore(
             "LIMIT ?"
         )
         while front_queue and len(event_id_results) < limit:
-            event_id = front_queue.pop(0)
-            txn.execute(query, (room_id, event_id, limit - len(event_id_results)))
+            front_event_id = front_queue.pop(0)
+            txn.execute(query, (room_id, front_event_id, limit - len(event_id_results)))
             # None check because the m.room.create event has NULL prev_state_events
-            new_event_id_results = [
+            prev_state_event_ids_for_front_event = [
                 t[0] for t in txn if t[0] is not None and t[0] not in seen_event_ids
             ]
-            for next in new_event_id_results:
+            for next in (
+                prev_state_event_ids_for_front_event
+            ):  # Sort lexicographically for determinism
                 front_queue.append(next)
-            seen_event_ids |= set(new_event_id_results)
-            event_id_results.extend(new_event_id_results)
+            seen_event_ids |= set(prev_state_event_ids_for_front_event)
+            event_id_results.extend(prev_state_event_ids_for_front_event)
 
         return event_id_results
 
