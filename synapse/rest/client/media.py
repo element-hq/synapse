@@ -23,7 +23,7 @@
 import logging
 import re
 
-from synapse.api.errors import Codes, SynapseError, cs_error
+from synapse.api.errors import Codes, NotFoundError, SynapseError, cs_error
 from synapse.http.server import (
     HttpServer,
     respond_with_json,
@@ -80,12 +80,16 @@ class PreviewURLServlet(RestServlet):
         self.media_repo = media_repo
         self.media_storage = media_storage
         self.url_previewer = self.media_repo.url_previewer
+        self.can_respond_403 = hs.config.experimental.msc4452_enabled
 
     async def on_GET(self, request: SynapseRequest) -> None:
         requester = await self.auth.get_user_by_req(request)
         if self.url_previewer is None:
             # If we have no url_previewer then it has been disabled by the server.
-            raise SynapseError(403, "URL Previews are disabled", Codes.FORBIDDEN)
+            if self.can_respond_403:
+                raise SynapseError(403, "URL Previews are disabled", Codes.FORBIDDEN)
+            else:
+                raise NotFoundError()
         url = parse_string(request, "url", required=True)
         ts = parse_integer(request, "ts")
         if ts is None:

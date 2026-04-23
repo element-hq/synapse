@@ -285,6 +285,7 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
     @override_config(
         {
             "url_preview_enabled": False,
+            "experimental_features": {"msc4452_enabled": True},
         }
     )
     def test_url_previews_disabled(self) -> None:
@@ -300,7 +301,11 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
     @skip_unless(lxml is not None, "Requires lxml")
     @override_config(
-        {"url_preview_enabled": True, "url_preview_ip_range_blacklist": ["127.0.0.1"]}
+        {
+            "url_preview_enabled": True,
+            "url_preview_ip_range_blacklist": ["127.0.0.1"],
+            "experimental_features": {"msc4452_enabled": True},
+        },
     )
     def test_url_previews_enabled(self) -> None:
         access_token = self.get_success(
