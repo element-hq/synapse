@@ -1232,12 +1232,12 @@ class EventFederationWorkerStore(
         # Filter the returned state events to only include ones on the paths back from the forward
         # extremities.
         result: dict[str, FrozenEventVMSC4242] = {}
-        next = forward_extrems
+        next_ids = forward_extrems
         seen: set[str] = set()
-        while len(next) > 0:
+        while len(next_ids) > 0:
             # Pull the event and add the prev_state_events.
             # We must have the event.
-            event_id = next.pop()
+            event_id = next_ids.pop()
             if event_id in seen:
                 continue
             seen.add(event_id)
@@ -1245,7 +1245,19 @@ class EventFederationWorkerStore(
             assert isinstance(ev, FrozenEventVMSC4242)
             result[event_id] = ev
             for prev_state_event_id in ev.prev_state_events:
-                next.add(prev_state_event_id)
+                next_ids.add(prev_state_event_id)
+
+        # Validate the result has a create event.
+        if len(result) > 0:
+            # Assert that the create event was returned. Pick the first event (any will do) to verify
+            # that this room version supports room IDs as hashes.
+            first_event: FrozenEventVMSC4242 = next(iter(result.values()))
+            if first_event.room_version.msc4291_room_ids_as_hashes:
+                create_event_id = f"${room_id[1:]}"
+                # If we're walking back, ensure that the create event was included.
+                if create_event_id not in forward_extrems:
+                    assert create_event_id in result
+
         return result
 
     # 22/04/2026: Unused currently, but will be used in future MSC4242 PRs.
@@ -1254,16 +1266,26 @@ class EventFederationWorkerStore(
         self,
         *,
         room_id: str,
-        earliest_events: list[str],
-        latest_events: list[str],
+        earliest_event_ids: list[str],
+        latest_event_ids: list[str],
         limit: int,
     ) -> list[EventBase]:
+        """Get parts of the state DAG in response to a /get_missing_events query.
+
+        Args:
+            room_id: The state DAG to look at
+            earliest_event_ids: Which events the caller has seen. These events will not be returned.
+            latest_event_ids: Which events to start walking back from via prev_state_events.
+            limit: The max number of events to return.
+        Returns:
+            A list of events, deterministically ordered according to MSC4242.
+        """
         ids = await self.db_pool.runInteraction(
             "get_missing_events_state_dag",
             self._get_missing_events_state_dag_txn,
             room_id,
-            earliest_events,
-            latest_events,
+            earliest_event_ids,
+            latest_event_ids,
             limit,
         )
         return await self.get_events_as_list(ids)
@@ -1274,14 +1296,14 @@ class EventFederationWorkerStore(
         self,
         txn: LoggingTransaction,
         room_id: str,
-        earliest_events: list[str],
-        latest_events: list[str],
+        earliest_event_ids: list[str],
+        latest_event_ids: list[str],
         limit: int,
     ) -> list[str]:
-        seen_events = set(earliest_events)
-        # lexicographical sort
-        front_queue = sorted(set(latest_events) - seen_events)
-        event_results: list[str] = []
+        seen_event_ids = set(earliest_event_ids)
+        # lexicographical sort to ensure that responses are deterministic (for caching/tests)
+        front_queue = sorted(set(latest_event_ids) - seen_event_ids)
+        event_id_results: list[str] = []
         # TODO(kegan): use a recursive CTE?
         # The limit is usually pretty low, so it's cheaper to select the events we need via querying
         # rather than selecting all events and filtering python-side.
@@ -1291,19 +1313,19 @@ class EventFederationWorkerStore(
             "ORDER BY prev_state_event_id ASC "
             "LIMIT ?"
         )
-        while front_queue and len(event_results) < limit:
+        while front_queue and len(event_id_results) < limit:
             event_id = front_queue.pop(0)
-            txn.execute(query, (room_id, event_id, limit - len(event_results)))
+            txn.execute(query, (room_id, event_id, limit - len(event_id_results)))
             # None check because the m.room.create event has NULL prev_state_events
-            new_results = [
-                t[0] for t in txn if t[0] is not None and t[0] not in seen_events
+            new_event_id_results = [
+                t[0] for t in txn if t[0] is not None and t[0] not in seen_event_ids
             ]
-            for next in new_results:
+            for next in new_event_id_results:
                 front_queue.append(next)
-            seen_events |= set(new_results)
-            event_results.extend(new_results)
+            seen_event_ids |= set(new_event_id_results)
+            event_id_results.extend(new_event_id_results)
 
-        return event_results
+        return event_id_results
 
     @trace
     @tag_args
