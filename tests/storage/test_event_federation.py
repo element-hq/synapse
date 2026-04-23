@@ -1453,13 +1453,27 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             EventTypes.RoomHistoryVisibility,
             EventTypes.JoinRules,
         ]
+        got_types = []
+        create_event_id = None
         curr = {latest}
         while len(curr) > 0:
             event_id = curr.pop()
             ev = state_dag[event_id]
-            want_type = want_types.pop()
-            self.assertEqual(ev.type, want_type)
+            got_types.append(ev.type)
             curr.update(ev.prev_state_events)
+            if ev.type == EventTypes.Create:
+                create_event_id = ev.event_id
+        got_types.reverse()  # we walked up the graph but want_types is walking down
+        self.assertEqual(got_types, want_types)
+
+        # Check that getting the state DAG from the create event returns nothing as there are
+        # no earlier events.
+        assert create_event_id is not None
+        state_dag = self.get_success(
+            self.store.get_state_dag(room_id, {create_event_id}),
+        )
+        self.assertEquals(len(state_dag), 1)
+        assert create_event_id in state_dag
 
     @tests.unittest.override_config(
         {"experimental_features": {"msc4242_enabled": True}}
