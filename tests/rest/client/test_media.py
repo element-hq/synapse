@@ -1573,6 +1573,8 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, channel.result)
 
 
+# We test this here because this endpoint must still work
+# even if lxml is not installed.
 class URLPreviewDisabledTests(unittest.HomeserverTestCase):
     servlets = [
         admin.register_servlets,
