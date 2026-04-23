@@ -1247,16 +1247,13 @@ class EventFederationWorkerStore(
             for prev_state_event_id in ev.prev_state_events:
                 next_ids.add(prev_state_event_id)
 
-        # Validate the result has a create event.
-        if len(result) > 0:
-            # Assert that the create event was returned. Pick the first event (any will do) to verify
-            # that this room version supports room IDs as hashes.
-            first_event: FrozenEventVMSC4242 = next(iter(result.values()))
-            if first_event.room_version.msc4291_room_ids_as_hashes:
-                create_event_id = f"${room_id[1:]}"
-                # If we're walking back, ensure that the create event was included.
-                if create_event_id not in forward_extrems:
-                    assert create_event_id in result
+        assert len(result) > 0  # we always return the forward extremities
+        # Assert that the create event was returned. Pick the first event (any will do) to verify
+        # that this room version supports room IDs as hashes.
+        first_event: FrozenEventVMSC4242 = next(iter(result.values()))
+        if first_event.room_version.msc4291_room_ids_as_hashes:
+            create_event_id = f"${room_id[1:]}"
+            assert create_event_id in result
 
         return result
 
@@ -1290,8 +1287,6 @@ class EventFederationWorkerStore(
         )
         return await self.get_events_as_list(ids)
 
-    # FIXME(2026-04-22): Remove comment when used. Unused currently, but will be used in
-    # future MSC4242 PRs.
     def _get_missing_events_state_dag_txn(
         self,
         txn: LoggingTransaction,
