@@ -28,6 +28,7 @@ from typing import (
     TypeVar,
     cast,
 )
+from unittest import mock
 
 import attr
 from parameterized import parameterized
@@ -41,6 +42,7 @@ from synapse.api.room_versions import (
     RoomVersion,
 )
 from synapse.events import EventBase, FrozenEventVMSC4242
+from synapse.events.snapshot import EventContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -1469,7 +1471,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         # A <- B             E
         #       `- R -- W --`
         #           `-- T -`
-        graph = {
+        graph: dict[str, list[str]] = {
             "A": [],
             "B": ["A"],
             "C": ["B"],
@@ -1479,64 +1481,18 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             "T": ["R"],
             "E": ["W", "D", "T"],
         }
-        room_id = "@state_dag:local"
-        events = [
-            cast(
-                FrozenEventVMSC4242,
-                StateDAGFakeEvent(
-                    event_id,
-                    room_id,
-                    EventTypes.Create if len(graph[event_id]) == 0 else "foo",
-                    graph[event_id],
-                ),
-            )
-            for event_id in graph
-        ]
+        creator = "@test_get_missing_events_state_dag:localhost"
+        (room_id, graph_events) = build_state_dag(creator, graph)
 
         def insert(txn: LoggingTransaction) -> None:
-            # store these to satisfy fk constraints
-            self.persist_events.db_pool.simple_insert_many_txn(
-                txn,
-                table="events",
-                keys=(
-                    "instance_name",
-                    "stream_ordering",
-                    "topological_ordering",
-                    "depth",
-                    "event_id",
-                    "room_id",
-                    "type",
-                    "processed",
-                    "outlier",
-                    "origin_server_ts",
-                    "received_ts",
-                    "sender",
-                    "contains_url",
-                    "state_key",
-                    "rejection_reason",
-                ),
-                values=[
-                    (
-                        "test",
-                        event.internal_metadata.stream_ordering,
-                        event.depth,  # topological_ordering
-                        event.depth,  # depth
-                        event.event_id,
-                        event.room_id,
-                        event.type,
-                        True,  # processed
-                        False,  # outlier
-                        1337,
-                        1741622420,
-                        event.sender,
-                        False,  # contains url
-                        event.state_key,
-                        False,  # rejected
-                    )
-                    for event in events
-                ],
-            )
-            for ev in events:
+            mock_context = mock.Mock(spec=EventContext)
+            mock_context.rejected = False
+            for ev in graph_events.values():
+                # store the event first to satisfy fk constraints
+                self.persist_events._store_event_txn(
+                    txn,
+                    [(ev, mock_context)],
+                )
                 self.persist_events._store_state_dag_edges(
                     txn,
                     ev,
@@ -1544,7 +1500,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
 
         # satisfy fk constraints
         self.get_success(
-            self.store.store_room(room_id, "foo", False, RoomVersions.MSC4242v12)
+            self.store.store_room(room_id, creator, False, RoomVersions.MSC4242v12)
         )
         self.get_success(
             self.store.db_pool.runInteraction(
@@ -1559,6 +1515,8 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         TestCase = namedtuple("TestCase", "latest want limit")
         test_cases = [
             TestCase(latest=["E"], want=["D", "T", "W"], limit=3),
+            TestCase(latest=["E"], want=["D"], limit=1),
+            TestCase(latest=["E"], want=["D", "T"], limit=2),
             TestCase(latest=["W", "T", "D"], want=["C", "R"], limit=2),
             # breadth first and new entries are added to the end, sorted lexicographically
             TestCase(latest=["E"], want=["D", "T", "W", "C", "R", "B", "A"], limit=100),
@@ -1573,19 +1531,23 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             TestCase(latest=["W", "E"], want=["D", "T", "W", "R"], limit=4),
         ]
         for test_case in test_cases:
-
-            def do_test(txn: LoggingTransaction) -> None:
-                got = self.store._get_missing_events_state_dag_txn(
-                    txn,
-                    room_id,
-                    [],
-                    test_case.latest,
-                    test_case.limit,
-                )
-                self.assertEquals(got, test_case.want)
-
-            self.get_success(
-                self.store.db_pool.runInteraction("test_case", do_test),
+            got = self.get_success(
+                self.store.get_missing_events_state_dag(
+                    room_id=room_id,
+                    earliest_event_ids=[],
+                    latest_event_ids=[
+                        graph_events[graph_event_id].event_id
+                        for graph_event_id in test_case.latest
+                    ],
+                    limit=test_case.limit,
+                ),
+            )
+            self.assertEquals(
+                [ev.event_id for ev in got],
+                [
+                    graph_events[graph_event_id].event_id
+                    for graph_event_id in test_case.want
+                ],
             )
 
 
@@ -1607,17 +1569,64 @@ class FakeEvent:
         return True
 
 
-@attr.s(auto_attribs=True)
-class StateDAGFakeEvent:
-    event_id: str
-    room_id: str
-    type: str
-    prev_state_events: list[str]
-    state_key = "foo"
-    depth = 1
-    sender = "foo"
+def build_state_dag(
+    creator: str, graph: dict[str, list[str]]
+) -> tuple[str, dict[str, FrozenEventVMSC4242]]:
+    """Build an MSC4242 state DAG.
 
-    internal_metadata = EventInternalMetadata({})
-
-    def is_state(self) -> bool:
-        return True
+    Args:
+        creator: The user ID creating the graph. Should be unique per-test to ensure room IDs change between tests.
+        graph: A map of fake event ID e.g. "B" to a list of prev_state_events e.g. ["A"]. Graphs must
+        be created in causal order (earliest events first).
+    Returns:
+        A tuple of the room ID and a map from fake event ID e.g. "B" to real event which you can use .event_id
+        to extract the real event ID. Guarantees that the real event IDs start with the fake event ID e.g.
+        the real event for "B" is guarantees to start "$B...." which makes sorting tests much easier to reason about.
+    """
+    graph_events: dict[str, FrozenEventVMSC4242] = {}  # graph ID => built event
+    create_event = FrozenEventVMSC4242(
+        {
+            "type": EventTypes.Create,
+            "state_key": "",
+            "content": {
+                "room_version": RoomVersions.MSC4242v12.identifier,
+            },
+            "sender": creator,
+            "origin_server_ts": 1,
+            "prev_state_events": [],
+            "prev_events": [],
+            "depth": 1,
+        },
+        RoomVersions.MSC4242v12,
+    )
+    room_id = create_event.room_id
+    entropy = 1
+    for graph_event_id in graph:
+        if len(graph[graph_event_id]) == 0:  # create event
+            graph_events[graph_event_id] = create_event
+            continue
+        # Map previous event IDs to real event IDs. Requires us to build events in causal order.
+        prev_state_event_ids = [
+            graph_events[prev_graph_event_id].event_id
+            for prev_graph_event_id in graph[graph_event_id]
+        ]
+        while graph_event_id not in graph_events:
+            graph_event = FrozenEventVMSC4242(
+                {
+                    "type": "foo",
+                    "state_key": graph_event_id,  # modify state_key as that forms part of the event hash
+                    "content": {},
+                    "sender": creator,
+                    "origin_server_ts": 1 + entropy,
+                    "prev_state_events": prev_state_event_ids,
+                    "prev_events": [],  # nothing should be looking at this field so keep it empty
+                    "room_id": room_id,
+                    "depth": 1,
+                },
+                RoomVersions.MSC4242v12,
+            )
+            if not graph_event.event_id[1:].startswith(graph_event_id):
+                entropy += 1
+                continue
+            graph_events[graph_event_id] = graph_event
+    return (room_id, graph_events)
