@@ -1252,6 +1252,7 @@ class EventFederationWorkerStore(
     # Remove comment when used.
     async def get_missing_events_state_dag(
         self,
+        *,
         room_id: str,
         earliest_events: list[str],
         latest_events: list[str],
@@ -1267,8 +1268,8 @@ class EventFederationWorkerStore(
         )
         return await self.get_events_as_list(ids)
 
-    # 22/04/2026: Unused currently, but will be used in future MSC4242 PRs.
-    # Remove comment when used.
+    # FIXME(2026-04-22): Remove comment when used. Unused currently, but will be used in
+    # future MSC4242 PRs.
     def _get_missing_events_state_dag_txn(
         self,
         txn: LoggingTransaction,
