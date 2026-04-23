@@ -147,6 +147,7 @@ class ContentRepositoryConfig(Config):
         ):
             self.can_load_media_repo = False
             self.url_preview_enabled = False
+            return
         else:
             self.can_load_media_repo = True
 
