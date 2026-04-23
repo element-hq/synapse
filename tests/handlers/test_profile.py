@@ -317,7 +317,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     @override_config({"enable_set_displayname": False})
     def test_set_my_name_if_disabled(self) -> None:
-
         # Setting displayname for the first time is allowed
         self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
 
