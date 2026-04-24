@@ -1542,7 +1542,9 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
                 latest=["E", "E", "C", "C", "C"], want=["B", "D", "T", "W"], limit=4
             ),
             # include latest events in response. W included because reachable from E.
-            TestCase(latest=["W", "E"], want=["D", "T", "W", "R"], limit=4),
+            # sort order is based on # hops not processing order of parents
+            # (which would produce D,T,W,R as E is processed first, then W).
+            TestCase(latest=["W", "E"], want=["D", "R", "T", "W"], limit=4),
         ]
         for test_case in test_cases:
             got = self.get_success(
