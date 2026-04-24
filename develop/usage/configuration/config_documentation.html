@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-59452d55.js";
+            window.path_to_searchindex_js = "../../searchindex-a092acf7.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-4dc10a98.js"></script>
@@ -347,7 +347,11 @@ shown.</p>
 </code></pre>
 <hr>
 <h3 id="use_frozen_dicts"><a class="header" href="#use_frozen_dicts"><code>use_frozen_dicts</code></a></h3>
-<p><em>(boolean)</em> Determines whether we should freeze the internal dict object in <code>FrozenEvent</code>. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive. Defaults to <code>false</code>.</p>
+<p><em>(boolean)</em> Determines whether we should freeze the internal dict object in <code>FrozenEvent</code>. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive.</p>
+<blockquote>
+<p>⚠️ <strong>Warning</strong> – This option is known to introduce a new class of <a href="https://github.com/element-hq/synapse/issues/18117">comparison bugs</a> in Synapse.</p>
+</blockquote>
+<p>Defaults to <code>false</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">use_frozen_dicts: true
 </code></pre>

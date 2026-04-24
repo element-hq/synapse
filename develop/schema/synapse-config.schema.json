@@ -83,7 +83,7 @@
     },
     "use_frozen_dicts": {
       "type": "boolean",
-      "description": "Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive.",
+      "description": "Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive.\n\n> ⚠️ **Warning** – This option is known to introduce a new class of [comparison bugs](https://github.com/element-hq/synapse/issues/18117) in Synapse.",
       "default": false,
       "examples": [
         true
