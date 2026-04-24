@@ -418,9 +418,7 @@ class SyncCreateEventInPrejoinStateTestCase(unittest.HomeserverTestCase):
         invitee_tok = self.login("invitee", "pass")
 
         room_id = self.helper.create_room_as(inviter, tok=inviter_tok)
-        self.helper.invite(
-            room=room_id, src=inviter, targ="@invitee:test", tok=inviter_tok
-        )
+        self.helper.invite(room=room_id, src=inviter, targ=invitee, tok=inviter_tok)
 
         channel = self.make_request("GET", "/sync", access_token=invitee_tok)
         self.assertEqual(channel.code, 200, channel.json_body)
@@ -428,7 +426,7 @@ class SyncCreateEventInPrejoinStateTestCase(unittest.HomeserverTestCase):
         invite_state_events = channel.json_body["rooms"]["invite"][room_id][
             "invite_state"
         ]["events"]
-        event_types = {e["type"] for e in invite_state_events}
+        event_types = {stripped_event["type"] for stripped_event in invite_state_events}
         self.assertIn(EventTypes.Create, event_types)
 
     def test_create_event_present_in_knock_state(self) -> None:
@@ -448,27 +446,15 @@ class SyncCreateEventInPrejoinStateTestCase(unittest.HomeserverTestCase):
             tok=host_tok,
         )
 
+        self.helper.knock(room_id, knocker, tok=knocker_tok)
+
         channel = self.make_request("GET", "/sync", access_token=knocker_tok)
-        self.assertEqual(channel.code, 200, channel.json_body)
-        next_batch = channel.json_body["next_batch"]
-
-        channel = self.make_request(
-            "POST",
-            f"/_matrix/client/r0/knock/{room_id}",
-            b"{}",
-            knocker_tok,
-        )
-        self.assertEqual(200, channel.code, channel.result)
-
-        channel = self.make_request(
-            "GET", f"/sync?since={next_batch}", access_token=knocker_tok
-        )
         self.assertEqual(channel.code, 200, channel.json_body)
 
         knock_state_events = channel.json_body["rooms"]["knock"][room_id][
             "knock_state"
         ]["events"]
-        event_types = {e["type"] for e in knock_state_events}
+        event_types = {stripped_event["type"] for stripped_event in knock_state_events}
         self.assertIn(EventTypes.Create, event_types)
 
 

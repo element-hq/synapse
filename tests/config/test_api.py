@@ -5,7 +5,6 @@ import yaml
 from synapse.config import ConfigError
 from synapse.config._base import RootConfig
 from synapse.config.api import ApiConfig
-from synapse.types.state import StateFilter
 
 DEFAULT_PREJOIN_STATE_PAIRS = {
     ("m.room.join_rules", ""),
