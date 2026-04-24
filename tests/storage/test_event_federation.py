@@ -1475,10 +1475,20 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         self.assertEquals(len(state_dag), 1)
         assert create_event_id in state_dag
 
-    @tests.unittest.override_config(
-        {"experimental_features": {"msc4242_enabled": True}}
-    )
-    def test_get_missing_events_state_dag(self) -> None:
+
+class EventFederationGetMissingEventsStateDAGTestCase(tests.unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        persist_events = hs.get_datastores().persist_events
+        assert persist_events is not None
+        self.persist_events = persist_events
+
         # Primarily testing to make sure that we sort events
         # correctly when there are multiple prev_state_events
         #       .- C -- D ---.
@@ -1522,50 +1532,55 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
                 insert,
             )
         )
+        self.room_id = room_id
+        self.graph_events = graph_events
+    
+    @parameterized.expand([
+        (["E"], ["D","T","W"], 3),
+        (["E"], ["D","T"], 2),
+        (["E"], ["D"], 1),
+        (["W", "T", "D"], ["C", "R"], 2),
+        # breadth first and new entries are added to the end, sorted lexicographically
+        (["E"], ["D", "T", "W", "C", "R", "B", "A"], 100),
+        # we should sort the latest values initially
+        (["E", "C"], ["B", "D", "T", "W"], 4),
+        (["C", "E"], ["B", "D", "T", "W"], 4),
+        # dupes are ignored
+        (["E", "E", "C", "C", "C"], ["B", "D", "T", "W"], 4),
+        # include latest events in response. W included because reachable from E.
+        # sort order is based on # hops not processing order of parents
+        # (which would produce D,T,W,R as E is processed first, then W).
+        (["W", "E"], ["D", "R", "T", "W"], 4),
+    ])
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_missing_events_state_dag(self, latest: list[str], want: list[str], limit: int) -> None:
         #       .- C -- D ---.
         # A <- B             E
         #       `- R -- W --`
         #           `-- T -`
-        TestCase = namedtuple("TestCase", "latest want limit")
-        test_cases = [
-            TestCase(latest=["E"], want=["D", "T", "W"], limit=3),
-            TestCase(latest=["E"], want=["D"], limit=1),
-            TestCase(latest=["E"], want=["D", "T"], limit=2),
-            TestCase(latest=["W", "T", "D"], want=["C", "R"], limit=2),
-            # breadth first and new entries are added to the end, sorted lexicographically
-            TestCase(latest=["E"], want=["D", "T", "W", "C", "R", "B", "A"], limit=100),
-            # we should sort the latest values initially
-            TestCase(latest=["E", "C"], want=["B", "D", "T", "W"], limit=4),
-            TestCase(latest=["C", "E"], want=["B", "D", "T", "W"], limit=4),
-            # dupes are ignored
-            TestCase(
-                latest=["E", "E", "C", "C", "C"], want=["B", "D", "T", "W"], limit=4
-            ),
-            # include latest events in response. W included because reachable from E.
-            # sort order is based on # hops not processing order of parents
-            # (which would produce D,T,W,R as E is processed first, then W).
-            TestCase(latest=["W", "E"], want=["D", "R", "T", "W"], limit=4),
-        ]
-        for test_case in test_cases:
-            got = self.get_success(
-                self.store.get_missing_events_state_dag(
-                    room_id=room_id,
-                    earliest_event_ids=[],
-                    latest_event_ids=[
-                        graph_events[graph_event_id].event_id
-                        for graph_event_id in test_case.latest
-                    ],
-                    limit=test_case.limit,
-                ),
-            )
-            self.assertEquals(
-                [ev.event_id for ev in got],
-                [
-                    graph_events[graph_event_id].event_id
-                    for graph_event_id in test_case.want
+        got = self.get_success(
+            self.store.get_missing_events_state_dag(
+                room_id=self.room_id,
+                earliest_event_ids=[],
+                latest_event_ids=[
+                    self.graph_events[graph_event_id].event_id
+                    for graph_event_id in latest
                 ],
-            )
+                limit=limit,
+            ),
+        )
+        self.assertEquals(
+            [ev.event_id for ev in got],
+            [
+                self.graph_events[graph_event_id].event_id
+                for graph_event_id in want
+            ],
+            f"latest={latest} want={want} limit={limit}"
+        )
 
+    
 
 @attr.s(auto_attribs=True)
 class FakeEvent:
