@@ -19,7 +19,6 @@
 #
 
 import datetime
-from collections import namedtuple
 from typing import (
     Collection,
     Iterable,
@@ -1476,7 +1475,9 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         assert create_event_id in state_dag
 
 
-class EventFederationGetMissingEventsStateDAGTestCase(tests.unittest.HomeserverTestCase):
+class EventFederationGetMissingEventsStateDAGTestCase(
+    tests.unittest.HomeserverTestCase
+):
     servlets = [
         admin.register_servlets,
         room.register_servlets,
@@ -1534,28 +1535,32 @@ class EventFederationGetMissingEventsStateDAGTestCase(tests.unittest.HomeserverT
         )
         self.room_id = room_id
         self.graph_events = graph_events
-    
-    @parameterized.expand([
-        (["E"], ["D","T","W"], 3),
-        (["E"], ["D","T"], 2),
-        (["E"], ["D"], 1),
-        (["W", "T", "D"], ["C", "R"], 2),
-        # breadth first and new entries are added to the end, sorted lexicographically
-        (["E"], ["D", "T", "W", "C", "R", "B", "A"], 100),
-        # we should sort the latest values initially
-        (["E", "C"], ["B", "D", "T", "W"], 4),
-        (["C", "E"], ["B", "D", "T", "W"], 4),
-        # dupes are ignored
-        (["E", "E", "C", "C", "C"], ["B", "D", "T", "W"], 4),
-        # include latest events in response. W included because reachable from E.
-        # sort order is based on # hops not processing order of parents
-        # (which would produce D,T,W,R as E is processed first, then W).
-        (["W", "E"], ["D", "R", "T", "W"], 4),
-    ])
+
+    @parameterized.expand(
+        [
+            (["E"], ["D", "T", "W"], 3),
+            (["E"], ["D", "T"], 2),
+            (["E"], ["D"], 1),
+            (["W", "T", "D"], ["C", "R"], 2),
+            # breadth first and new entries are added to the end, sorted lexicographically
+            (["E"], ["D", "T", "W", "C", "R", "B", "A"], 100),
+            # we should sort the latest values initially
+            (["E", "C"], ["B", "D", "T", "W"], 4),
+            (["C", "E"], ["B", "D", "T", "W"], 4),
+            # dupes are ignored
+            (["E", "E", "C", "C", "C"], ["B", "D", "T", "W"], 4),
+            # include latest events in response. W included because reachable from E.
+            # sort order is based on # hops not processing order of parents
+            # (which would produce D,T,W,R as E is processed first, then W).
+            (["W", "E"], ["D", "R", "T", "W"], 4),
+        ]
+    )
     @tests.unittest.override_config(
         {"experimental_features": {"msc4242_enabled": True}}
     )
-    def test_get_missing_events_state_dag(self, latest: list[str], want: list[str], limit: int) -> None:
+    def test_get_missing_events_state_dag(
+        self, latest: list[str], want: list[str], limit: int
+    ) -> None:
         #       .- C -- D ---.
         # A <- B             E
         #       `- R -- W --`
@@ -1573,14 +1578,10 @@ class EventFederationGetMissingEventsStateDAGTestCase(tests.unittest.HomeserverT
         )
         self.assertEquals(
             [ev.event_id for ev in got],
-            [
-                self.graph_events[graph_event_id].event_id
-                for graph_event_id in want
-            ],
-            f"latest={latest} want={want} limit={limit}"
+            [self.graph_events[graph_event_id].event_id for graph_event_id in want],
+            f"latest={latest} want={want} limit={limit}",
         )
 
-    
 
 @attr.s(auto_attribs=True)
 class FakeEvent:
