@@ -277,7 +277,14 @@ class EventBase(metaclass=abc.ABCMeta):
 
     def get_dict(self) -> JsonDict:
         """Convert the event to a dictionary suitable for serialisation."""
+
         d = dict(self._dict)
+        if "content" in d:
+            # Convert the content (which is a JsonObject) back to a dict. Json
+            # serialization should handle JsonObjects fine, but for sanities
+            # sake we want `get_dict()` and `get_pdu_json()` to return plain
+            # dicts.
+            d["content"] = dict(self.content)
         d.update(
             {
                 "signatures": self.signatures.as_dict(),

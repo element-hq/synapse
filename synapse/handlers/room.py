@@ -706,12 +706,12 @@ class RoomCreationHandler:
         spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
             user_id,
             {
-                "creation_content": creation_content,
+                "creation_content": dict(creation_content),
                 "initial_state": [
                     {
                         "type": state_key[0],
                         "state_key": state_key[1],
-                        "content": event_content,
+                        "content": dict(event_content),
                     }
                     for state_key, event_content in initial_state.items()
                 ],

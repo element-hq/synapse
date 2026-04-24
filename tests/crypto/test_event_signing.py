@@ -62,6 +62,7 @@ class EventSigningTestCase(unittest.TestCase):
             "origin_server_ts": 1000000,
             "signatures": {},
             "type": "X",
+            "content": {},
             "unsigned": {"age_ts": 1000000},
         }
 
@@ -74,7 +75,7 @@ class EventSigningTestCase(unittest.TestCase):
         self.assertTrue(hasattr(event, "hashes"))
         self.assertIn("sha256", event.hashes)
         self.assertEqual(
-            event.hashes["sha256"], "A6Nco6sqoy18PPfPDVdYvoowfc0PVBk9g9OiyT3ncRM"
+            event.hashes["sha256"], "mq4QfPPpC+QsBd6eqfVsmJIEz8uvMSVK0+AU67PLESk"
         )
 
         self.assertTrue(hasattr(event, "signatures"))
@@ -82,8 +83,8 @@ class EventSigningTestCase(unittest.TestCase):
         self.assertIn(KEY_NAME, event.signatures["domain"])
         self.assertEqual(
             event.signatures[HOSTNAME][KEY_NAME],
-            "PBc48yDVszWB9TRaB/+CZC1B+pDAC10F8zll006j+NN"
-            "fe4PEMWcVuLaG63LFTK9e4rwJE8iLZMPtCKhDTXhpAQ",
+            "18rGIkd4JJXxw9m+1j3BtN+TmqmLip4VHvFbyXLngpB"
+            "LXOqbxlQViQABRzep2cODQ2aa5FnFgz+Llt2P03WiAw",
         )
 
     def test_sign_message(self) -> None:
