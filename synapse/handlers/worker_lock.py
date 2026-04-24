@@ -47,6 +47,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+_LOCK_RETRY_CAP_SECS = Duration(minutes=10).as_secs()
 
 # This lock is used to avoid creating an event while we are purging the room.
 # We take a read lock when creating an event, and a write one when purging a room.
@@ -274,11 +275,11 @@ class WaitingLock:
         return r
 
     def _get_next_retry_interval(self) -> float:
-        next = self._retry_interval
-        self._retry_interval = max(5, next * 2)
-        if self._retry_interval > Duration(minutes=10).as_secs():  # >7 iterations
+        prev = self._retry_interval
+        self._retry_interval = min(_LOCK_RETRY_CAP_SECS, max(5, prev * 2))
+        if self._retry_interval == _LOCK_RETRY_CAP_SECS and prev < _LOCK_RETRY_CAP_SECS:
             logger.warning(
-                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                "Lock timeout hit cap of %ss. There may be a deadlock.",
                 self._retry_interval,
             )
         return next * random.uniform(0.9, 1.1)
@@ -361,11 +362,11 @@ class WaitingMultiLock:
         return r
 
     def _get_next_retry_interval(self) -> float:
-        next = self._retry_interval
-        self._retry_interval = max(5, next * 2)
-        if self._retry_interval > Duration(minutes=10).as_secs():  # >7 iterations
+        prev = self._retry_interval
+        self._retry_interval = min(_LOCK_RETRY_CAP_SECS, max(5, prev * 2))
+        if self._retry_interval == _LOCK_RETRY_CAP_SECS and prev < _LOCK_RETRY_CAP_SECS:
             logger.warning(
-                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                "Lock timeout hit cap of %ss. There may be a deadlock.",
                 self._retry_interval,
             )
         return next * random.uniform(0.9, 1.1)
