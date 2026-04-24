@@ -23,12 +23,13 @@ from unittest.mock import Mock
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
+from synapse.events.utils import FilteredEvent
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 from tests import unittest
 from tests.unittest import override_config
@@ -163,7 +164,7 @@ class RetentionTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(2, len(events), "events retrieved from database")
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 storage_controllers,
                 self.user_id,
                 events,
@@ -173,7 +174,9 @@ class RetentionTestCase(unittest.HomeserverTestCase):
         # We should only get one event back.
         self.assertEqual(len(filtered_events), 1, filtered_events)
         # That event should be the second, not outdated event.
-        self.assertEqual(filtered_events[0].event_id, valid_event_id, filtered_events)
+        self.assertEqual(
+            filtered_events[0].event.event_id, valid_event_id, filtered_events
+        )
 
     def _test_retention_event_purged(self, room_id: str, increment: float) -> None:
         """Run the following test scenario to test the message retention policy support:
@@ -253,7 +256,11 @@ class RetentionTestCase(unittest.HomeserverTestCase):
         assert event is not None
 
         time_now = self.clock.time_msec()
-        serialized = self.get_success(self.serializer.serialize_event(event, time_now))
+        serialized = self.get_success(
+            self.serializer.serialize_event(
+                FilteredEvent(event=event, membership=None), time_now
+            )
+        )
 
         return serialized
 

@@ -909,7 +909,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
                 test_case.conflicted,
                 test_case.additional_backwards_reachable,
             )
-            self.assertEquals(
+            self.assertEqual(
                 result.conflicted_subgraph,
                 test_case.want_conflicted_subgraph,
                 f"{test_case.name} : conflicted subgraph mismatch",

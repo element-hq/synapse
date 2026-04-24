@@ -54,7 +54,9 @@ def check_bind_error(
     """
     if address == "0.0.0.0" and "::" in bind_addresses:
         logger.warning(
-            "Failed to listen on 0.0.0.0, continuing because listening on [::]"
+            "Failed to listen on 0.0.0.0, continuing because listening on [::]. Original exception: %s: %s",
+            type(e).__name__,
+            str(e),
         )
     else:
         raise e

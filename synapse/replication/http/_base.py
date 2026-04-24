@@ -130,7 +130,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                 clock=hs.get_clock(),
                 name="repl." + self.NAME,
                 server_name=self.server_name,
-                timeout_ms=30 * 60 * 1000,
+                timeout=Duration(minutes=30),
             )
 
         # We reserve `instance_name` as a parameter to sending requests, so we

@@ -889,11 +889,11 @@ class MasAuthDelegation(HomeserverTestCase):
             )
         )
 
-        self.assertEquals(requester.user.to_string(), USER_ID)
-        self.assertEquals(requester.device_id, DEVICE)
+        self.assertEqual(requester.user.to_string(), USER_ID)
+        self.assertEqual(requester.device_id, DEVICE)
         self.assertFalse(self.get_success(self._auth.is_server_admin(requester)))
 
-        self.assertEquals(
+        self.assertEqual(
             self.server.last_token_seen,
             "some_token",
         )
@@ -912,11 +912,11 @@ class MasAuthDelegation(HomeserverTestCase):
             )
         )
 
-        self.assertEquals(requester.user.to_string(), USER_ID)
-        self.assertEquals(requester.device_id, DEVICE)
+        self.assertEqual(requester.user.to_string(), USER_ID)
+        self.assertEqual(requester.device_id, DEVICE)
         self.assertFalse(self.get_success(self._auth.is_server_admin(requester)))
 
-        self.assertEquals(
+        self.assertEqual(
             self.server.last_token_seen,
             "some_token",
         )

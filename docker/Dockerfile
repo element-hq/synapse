@@ -22,7 +22,7 @@
 
 ARG DEBIAN_VERSION=trixie
 ARG PYTHON_VERSION=3.13
-ARG POETRY_VERSION=2.1.1
+ARG POETRY_VERSION=2.2.1
 
 ###
 ### Stage 0: generate requirements.txt
@@ -171,6 +171,14 @@ FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
 
 ARG TARGETARCH
 
+# If specified, Synapse will use this as the version string in the app.
+#
+# This can be useful to capture the git info of the build as `.git/` won't be
+# available in the Docker image for Synapse to generate from.
+ARG SYNAPSE_VERSION_STRING
+# Pass it through to Synapse as an environment variable.
+ENV SYNAPSE_VERSION_STRING=${SYNAPSE_VERSION_STRING}
+
 LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
 LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'
 LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
@@ -188,7 +196,12 @@ COPY --from=builder  --exclude=.lock /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 
-EXPOSE 8008/tcp 8009/tcp 8448/tcp
+# 8008: CS Matrix API port from Synapse
+# 8448: SS Matrix API port from Synapse
+EXPOSE 8008/tcp 8448/tcp
+# 19090: Metrics listener port for the main process (metrics must be enabled with
+# SYNAPSE_ENABLE_METRICS=1).
+EXPOSE 19090/tcp
 
 ENTRYPOINT ["/start.py"]
 

@@ -21,20 +21,42 @@
 #
 
 from unittest import mock
+from unittest.mock import AsyncMock, Mock, patch
 
+import signedjson.key
+from parameterized import parameterized
+from signedjson.types import SigningKey
+
+from twisted.internet import defer
 from twisted.internet.defer import ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import RoomEncryptionAlgorithms
+from synapse.api.constants import EventTypes, JoinRules, RoomEncryptionAlgorithms
 from synapse.api.errors import NotFoundError, SynapseError
+from synapse.api.room_versions import RoomVersions
 from synapse.appservice import ApplicationService
+from synapse.crypto.event_signing import add_hashes_and_signatures
+from synapse.events import EventBase, FrozenEventV3
+from synapse.federation.federation_client import SendJoinResult
+from synapse.federation.transport.client import (
+    StateRequestResponse,
+    TransportLayerClient,
+)
+from synapse.federation.units import Transaction
 from synapse.handlers.device import MAX_DEVICE_DISPLAY_NAME_LEN, DeviceWriterHandler
 from synapse.rest import admin
 from synapse.rest.client import devices, login, register
 from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import (
+    JsonDict,
+    StateMap,
+    UserID,
+    create_requester,
+    get_domain_from_id,
+)
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests import unittest
@@ -497,90 +519,7 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
         self.store = hs.get_datastores().main
         return hs
 
-    def test_dehydrate_and_rehydrate_device(self) -> None:
-        user_id = "@boris:dehydration"
-
-        self.get_success(self.store.register_user(user_id, "foobar"))
-
-        # First check if we can store and fetch a dehydrated device
-        stored_dehydrated_device_id = self.get_success(
-            self.handler.store_dehydrated_device(
-                user_id=user_id,
-                device_id=None,
-                device_data={"device_data": {"foo": "bar"}},
-                initial_device_display_name="dehydrated device",
-            )
-        )
-
-        result = self.get_success(self.handler.get_dehydrated_device(user_id=user_id))
-        assert result is not None
-        retrieved_device_id, device_data = result
-
-        self.assertEqual(retrieved_device_id, stored_dehydrated_device_id)
-        self.assertEqual(device_data, {"device_data": {"foo": "bar"}})
-
-        # Create a new login for the user and dehydrated the device
-        device_id, access_token, _expiration_time, refresh_token = self.get_success(
-            self.registration.register_device(
-                user_id=user_id,
-                device_id=None,
-                initial_display_name="new device",
-                should_issue_refresh_token=True,
-            )
-        )
-
-        # Trying to claim a nonexistent device should throw an error
-        self.get_failure(
-            self.handler.rehydrate_device(
-                user_id=user_id,
-                access_token=access_token,
-                device_id="not the right device ID",
-            ),
-            NotFoundError,
-        )
-
-        # dehydrating the right devices should succeed and change our device ID
-        # to the dehydrated device's ID
-        res = self.get_success(
-            self.handler.rehydrate_device(
-                user_id=user_id,
-                access_token=access_token,
-                device_id=retrieved_device_id,
-            )
-        )
-
-        self.assertEqual(res, {"success": True})
-
-        # make sure that our device ID has changed
-        user_info = self.get_success(self.auth.get_user_by_access_token(access_token))
-
-        self.assertEqual(user_info.device_id, retrieved_device_id)
-
-        # make sure the user device has the refresh token
-        assert refresh_token is not None
-        self.get_success(
-            self.auth_handler.refresh_token(refresh_token, 5 * 60 * 1000, 5 * 60 * 1000)
-        )
-
-        # make sure the device has the display name that was set from the login
-        res = self.get_success(self.handler.get_device(user_id, retrieved_device_id))
-
-        self.assertEqual(res["display_name"], "new device")
-
-        # make sure that the device ID that we were initially assigned no longer exists
-        self.get_failure(
-            self.handler.get_device(user_id, device_id),
-            NotFoundError,
-        )
-
-        # make sure that there's no device available for dehydrating now
-        ret = self.get_success(self.handler.get_dehydrated_device(user_id=user_id))
-
-        self.assertIsNone(ret)
-
-    @unittest.override_config(
-        {"experimental_features": {"msc2697_enabled": False, "msc3814_enabled": True}}
-    )
+    @unittest.override_config({"experimental_features": {"msc3814_enabled": True}})
     def test_dehydrate_v2_and_fetch_events(self) -> None:
         user_id = "@boris:server"
 
@@ -593,6 +532,7 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
                 device_id=None,
                 device_data={"device_data": {"foo": "bar"}},
                 initial_device_display_name="dehydrated device",
+                keys_for_device={},
             )
         )
 
@@ -663,3 +603,334 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
         self.assertTrue(len(res["next_batch"]) > 1)
         self.assertEqual(len(res["events"]), 1)
         self.assertEqual(res["events"][0]["content"]["body"], "foo")
+
+
+@patch("synapse.crypto.keyring.Keyring.process_request", AsyncMock(return_value=None))
+class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
+    """Tests that local device list changes during partial state are sent to
+    remote servers when the room un-partials."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+    ]
+
+    # The two remote servers to fake
+    REMOTE1_SERVER_NAME = "remote1"
+    REMOTE1_SERVER_SIGNATURE_KEY = signedjson.key.generate_signing_key("test")
+    REMOTE1_USER = f"@user:{REMOTE1_SERVER_NAME}"
+
+    REMOTE2_SERVER_NAME = "remote2"
+    REMOTE2_SERVER_SIGNATURE_KEY = signedjson.key.generate_signing_key("test")
+    REMOTE2_USER = f"@user:{REMOTE2_SERVER_NAME}"
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable federation so that get_device_updates_by_remote works.
+        config["federation_sender_instances"] = ["master"]
+        return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        # Mock the federation transport client to prevent actual network calls.
+        self.federation_transport_client = AsyncMock(TransportLayerClient)
+
+        self.federation_transport_client.send_transaction.return_value = {}
+
+        hs = self.setup_test_homeserver(
+            federation_transport_client=self.federation_transport_client,
+        )
+        handler = hs.get_device_handler()
+        assert isinstance(handler, DeviceWriterHandler)
+        self.device_handler = handler
+        self.store = hs.get_datastores().main
+
+        return hs
+
+    def _build_public_room(self) -> StateMap[EventBase]:
+        """Build a public room DAG that has REMOTE1 in it"""
+
+        room_id = f"!room:{self.REMOTE1_SERVER_NAME}"
+        room_version = RoomVersions.V10
+
+        events: list[EventBase] = []
+
+        # First we make the create event
+        create_event_dict: JsonDict = {
+            "auth_events": [],
+            "content": {
+                "creator": self.REMOTE1_USER,
+                "room_version": room_version.identifier,
+            },
+            "depth": 0,
+            "origin_server_ts": 0,
+            "prev_events": [],
+            "room_id": room_id,
+            "sender": self.REMOTE1_USER,
+            "state_key": "",
+            "type": EventTypes.Create,
+        }
+
+        add_hashes_and_signatures(
+            room_version,
+            create_event_dict,
+            self.REMOTE1_SERVER_NAME,
+            self.REMOTE1_SERVER_SIGNATURE_KEY,
+        )
+
+        create_event = FrozenEventV3(create_event_dict, room_version, {}, None)
+        events.append(create_event)
+
+        room_version = self.hs.config.server.default_room_version
+        join_event_dict: JsonDict = {
+            "auth_events": [
+                create_event.event_id,
+            ],
+            "content": {"membership": "join"},
+            "depth": 1,
+            "origin_server_ts": 100,
+            "prev_events": [create_event.event_id],
+            "sender": self.REMOTE1_USER,
+            "state_key": self.REMOTE1_USER,
+            "room_id": room_id,
+            "type": EventTypes.Member,
+        }
+        add_hashes_and_signatures(
+            room_version,
+            join_event_dict,
+            self.hs.hostname,
+            self.hs.signing_key,
+        )
+        join_event = FrozenEventV3(join_event_dict, room_version, {}, None)
+        events.append(join_event)
+
+        # Then set the join rules to public
+        join_rules_event_dict: JsonDict = {
+            "auth_events": [create_event.event_id, join_event.event_id],
+            "content": {"join_rule": JoinRules.PUBLIC},
+            "depth": 2,
+            "origin_server_ts": 200,
+            "prev_events": [join_event.event_id],
+            "room_id": room_id,
+            "sender": self.REMOTE1_USER,
+            "state_key": "",
+            "type": EventTypes.JoinRules,
+        }
+
+        add_hashes_and_signatures(
+            room_version,
+            join_rules_event_dict,
+            self.REMOTE1_SERVER_NAME,
+            self.REMOTE1_SERVER_SIGNATURE_KEY,
+        )
+        join_rules_event = FrozenEventV3(join_rules_event_dict, room_version, {}, None)
+        events.append(join_rules_event)
+
+        return {(event.type, event.state_key): event for event in events}
+
+    def _build_signed_join_event(
+        self,
+        room_id: str,
+        user: str,
+        signing_key: SigningKey,
+        state: StateMap[EventBase],
+    ) -> FrozenEventV3:
+        """Build a join event for the local user, signed by the local server."""
+
+        latest_event = max(state.values(), key=lambda e: e.depth)
+
+        room_version = self.hs.config.server.default_room_version
+        join_event_dict: JsonDict = {
+            "auth_events": [
+                state[(EventTypes.Create, "")].event_id,
+                state[(EventTypes.JoinRules, "")].event_id,
+            ],
+            "content": {"membership": "join"},
+            "depth": latest_event.depth + 1,
+            "origin_server_ts": latest_event.origin_server_ts + 100,
+            "prev_events": [latest_event.event_id],
+            "sender": user,
+            "state_key": user,
+            "room_id": room_id,
+            "type": EventTypes.Member,
+        }
+        add_hashes_and_signatures(
+            room_version,
+            join_event_dict,
+            get_domain_from_id(user),
+            signing_key,
+        )
+        return FrozenEventV3(join_event_dict, room_version, {}, None)
+
+    @parameterized.expand([("not_pruned", False), ("pruned", True)])
+    @patch(
+        "synapse.storage.databases.main.devices.PRUNE_DEVICE_LISTS_CHANGES_IN_ROOM_AGE",
+        Duration(minutes=1),
+    )
+    def test_local_device_changes_sent_to_new_servers_on_un_partial_state(
+        self, _test_suffix: str, prune_device_lists_change_in_room: bool
+    ) -> None:
+        """When a room un-partials, local device list changes made during the
+        partial state period should be sent to remote servers that were NOT
+        known at the time of the partial join.
+
+        We do this by creating a room with one remote server, partialling
+        joining it, then receiving a join event from a second remote server. The
+        second remote server should receive a device list update EDU for any
+        local device changes that happened during the partial state period.
+
+        We parameterize this test over whether during the unpartial process we
+        prune the `device_list_changes_in_room` table, to check that the
+        unpartial process correctly handles the case.
+        """
+
+        local_user = self.register_user("alice", "password")
+        self.login("alice", "password")
+
+        # Build the remote room's state events.
+        room_state = self._build_public_room()
+
+        # Before joining, we mock out the federation endpoints that are used
+        # during the unpartial process, so that we can control when the
+        # unpartial process completes.
+        get_room_state_ids_deferred: defer.Deferred[JsonDict] = defer.Deferred()
+        get_room_state_deferred: defer.Deferred[StateRequestResponse] = defer.Deferred()
+        self.federation_transport_client.get_room_state_ids = Mock(
+            side_effect=[get_room_state_ids_deferred]
+        )
+        self.federation_transport_client.get_room_state = Mock(
+            side_effect=[get_room_state_deferred]
+        )
+
+        # Now make the local server partially join the room.
+        room_id = room_state[(EventTypes.Create, "")].room_id
+        room_version = room_state[(EventTypes.Create, "")].room_version
+
+        local_join_event = self._build_signed_join_event(
+            room_id, local_user, self.hs.signing_key, room_state
+        )
+
+        # Mock the federation client endpoints for the partial join.
+        mock_make_membership_event = AsyncMock(
+            return_value=(self.REMOTE1_SERVER_NAME, local_join_event, room_version)
+        )
+        mock_send_join = AsyncMock(
+            return_value=SendJoinResult(
+                local_join_event,
+                self.REMOTE1_SERVER_NAME,
+                state=list(room_state.values()),
+                auth_chain=list(room_state.values()),
+                partial_state=True,
+                # Only REMOTE1_SERVER_NAME is known at join time.
+                servers_in_room={self.REMOTE1_SERVER_NAME},
+            )
+        )
+
+        fed_handler = self.hs.get_federation_handler()
+        fed_client = self.hs.get_federation_client()
+        with (
+            patch.object(
+                fed_client, "make_membership_event", mock_make_membership_event
+            ),
+            patch.object(fed_client, "send_join", mock_send_join),
+        ):
+            self.get_success(
+                fed_handler.do_invite_join(
+                    [self.REMOTE1_SERVER_NAME], room_id, local_user, {}
+                )
+            )
+
+        # The room should now be in partial state.
+        self.assertTrue(self.get_success(self.store.is_partial_state_room(room_id)))
+
+        # A local device change happens while the room is in partial state.
+        self.get_success(
+            self.store.add_device_change_to_streams(
+                local_user, ["NEW_DEVICE"], [room_id]
+            )
+        )
+
+        if prune_device_lists_change_in_room:
+            # Add a device change for another room, as we won't prune the most
+            # recent change.
+            self.get_success(
+                self.store.add_device_change_to_streams(
+                    "@other:user", ["device1"], ["!some:room"]
+                )
+            )
+
+            # Now prune the device list changes for the room. This simulates the
+            # case where the unpartial process prunes the
+            # `device_list_changes_in_room` table before processing the device
+            # list changes.
+            self.reactor.advance(120)  # Advance past the pruning threshold
+            self.get_success(self.store._prune_device_lists_changes_in_room())
+
+            # Assert we actually pruned the device list changes for the room.
+            room_ids = self.get_success(
+                self.store.db_pool.simple_select_onecol(
+                    table="device_lists_changes_in_room",
+                    keyvalues={},
+                    retcol="room_id",
+                )
+            )
+            self.assertCountEqual(room_ids, ["!some:room"])
+
+        # Join the second server
+        new_state = dict(room_state)
+        new_state[(EventTypes.Member, local_user)] = local_join_event
+        join_event_2 = self._build_signed_join_event(
+            room_id,
+            self.REMOTE2_USER,
+            self.REMOTE2_SERVER_SIGNATURE_KEY,
+            new_state,
+        )
+
+        self.get_success(
+            self.hs.get_federation_event_handler().on_receive_pdu(
+                self.REMOTE2_SERVER_NAME, join_event_2
+            )
+        )
+
+        # Some EDUs may get sent out immediately, such as presence updates.
+        # However, we only care about the device list update EDU sent by the
+        # unpartialling process. Let's wait a few seconds and reset the mock.
+        self.reactor.advance(5)
+        self.federation_transport_client.send_transaction.reset_mock()
+
+        # We now unblock the unpartial processs by returning the room state and
+        # state ids. This should trigger the device list update to be sent to
+        # REMOTE2_SERVER_NAME.
+        self.federation_transport_client.get_room_state_ids.assert_called_once_with(
+            self.REMOTE1_SERVER_NAME,
+            room_id,
+            event_id=local_join_event.prev_event_ids()[0],
+        )
+
+        get_room_state_ids_deferred.callback(
+            {
+                "pdu_ids": [event.event_id for event in room_state.values()],
+                "auth_event_ids": [],
+            }
+        )
+        get_room_state_deferred.callback(
+            StateRequestResponse(
+                state=list(room_state.values()),
+                auth_events=[],
+            )
+        )
+
+        # The device list EDU isn't necessarily sent out immediately
+        self.reactor.advance(30)
+
+        # Check that only one transaction was sent, and that it contains the
+        # device list update EDU for the new device to REMOTE2_SERVER_NAME.
+        self.federation_transport_client.send_transaction.assert_called_once()
+        args, _ = self.federation_transport_client.send_transaction.call_args
+        transaction: Transaction = args[0]
+
+        self.assertEqual(transaction.destination, self.REMOTE2_SERVER_NAME)
+        self.assertEqual(len(transaction.edus), 1)
+
+        edu = transaction.edus[0]
+        self.assertEqual(edu["edu_type"], "m.device_list_update")
+        self.assertEqual(edu["content"]["device_id"], "NEW_DEVICE")

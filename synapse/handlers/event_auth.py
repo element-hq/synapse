@@ -172,7 +172,7 @@ class EventAuthHandler:
             if len(local_creators) > 0:
                 chosen_user = local_creators.pop()  # random creator
                 user_power_level = CREATOR_POWER_LEVEL
-        else:
+        if chosen_user is None:
             chosen_user = max(
                 local_users_in_room,
                 key=lambda user: users.get(user, users_default_level),

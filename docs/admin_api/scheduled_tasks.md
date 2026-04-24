@@ -36,9 +36,10 @@ It returns a JSON body like the following:
     - "scheduled" - Task is scheduled but not active
     - "active" - Task is active and probably running, and if not will be run on next scheduler loop run
     - "complete" - Task has completed successfully
+    - "cancelled" - Task has been cancelled
     - "failed" - Task is over and either returned a failed status, or had an exception
 
-* `max_timestamp`: int - Is optional. Returns only the scheduled tasks with a timestamp inferior to the specified one.
+* `max_timestamp`: int - Is optional. Returns only the scheduled tasks with a timestamp (in milliseconds since the unix epoch) inferior to the specified one.
 
 **Response**
 

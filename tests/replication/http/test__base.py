@@ -33,7 +33,7 @@ from synapse.util.cancellation import cancellable
 from synapse.util.duration import Duration
 
 from tests import unittest
-from tests.http.server._base import test_disconnect
+from tests.http.server._base import disconnect_and_assert
 
 
 class CancellableReplicationEndpoint(ReplicationEndpoint):
@@ -94,7 +94,7 @@ class ReplicationEndpointCancellationTestCase(unittest.HomeserverTestCase):
         """Test that handlers with the `@cancellable` flag can be cancelled."""
         path = f"{REPLICATION_PREFIX}/{CancellableReplicationEndpoint.NAME}/"
         channel = self.make_request("POST", path, await_result=False, content={})
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=True,
@@ -105,7 +105,7 @@ class ReplicationEndpointCancellationTestCase(unittest.HomeserverTestCase):
         """Test that handlers without the `@cancellable` flag cannot be cancelled."""
         path = f"{REPLICATION_PREFIX}/{UncancellableReplicationEndpoint.NAME}/"
         channel = self.make_request("POST", path, await_result=False, content={})
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=False,
