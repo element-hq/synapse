@@ -569,6 +569,7 @@ class FederationServer(FederationBase):
                 origin=origin,
                 destination=self.server_name,
                 edu_type=edu_dict["edu_type"],
+                # Make a deep-copy as we mutate the content down below
                 content=copy.deepcopy(edu_dict["content"]),
             )
 
