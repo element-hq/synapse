@@ -254,7 +254,11 @@ class WaitingLock:
                             clock=self.clock,
                         )
                 except defer.TimeoutError:
-                    # Only increment the timeout interval if this was an actual timeout
+                    # Actual timeouts are raised with a TimeoutError. Not to be confused
+                    # with another lock being released and broadcasting its notification
+                    # for other locks to retry. This is the circumstance that the retry
+                    # interval should increase, otherwise a series of progressively
+                    # larger timeout interval warnings occur
                     self._increment_timeout_interval()
                 except Exception as e:
                     logger.warning(
@@ -288,7 +292,9 @@ class WaitingLock:
         _next = min(WORKER_LOCK_MAX_RETRY_INTERVAL, _next * 2)
         if _next > WORKER_LOCK_WARN_RETRY_INTERVAL:  # >12 iterations
             logger.warning(
-                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                "(WaitingLock (%s, %s) Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                self.lock_name,
+                self.lock_key,
                 next,
             )
         # The jitter value is maintained for the timeout, to help avoid a "thundering
@@ -348,7 +354,11 @@ class WaitingMultiLock:
                             clock=self.clock,
                         )
                 except defer.TimeoutError:
-                    # Only increment the timeout interval if this was an actual timeout
+                    # Actual timeouts are raised with a TimeoutError. Not to be confused
+                    # with another lock being released and broadcasting its notification
+                    # for other locks to retry. This is the circumstance that the retry
+                    # interval should increase, otherwise a series of progressively
+                    # larger timeout interval warnings occur
                     self._increment_timeout_interval()
                 except Exception as e:
                     logger.warning(
@@ -384,8 +394,9 @@ class WaitingMultiLock:
         _next = min(WORKER_LOCK_MAX_RETRY_INTERVAL, _next * 2)
         if _next > WORKER_LOCK_WARN_RETRY_INTERVAL:  # >12 iterations
             logger.warning(
-                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
-                next,
+                "(WaitingMultiLock (%r) Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                self.lock_names,
+                _next,
             )
         # The jitter value is maintained for the timeout, to help avoid a "thundering
         # herd" situation when all locks may time out at the same time.
