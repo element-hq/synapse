@@ -30,12 +30,11 @@ jobs:
         include:
           - arrangement: monolith
             database: SQLite
+            # No MAS - for now
 
           - arrangement: monolith
             database: Postgres
-
-          - arrangement: workers
-            database: Postgres
+            mas: true
 
           - arrangement: workers
             database: Postgres
