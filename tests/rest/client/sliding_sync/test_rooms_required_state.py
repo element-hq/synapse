@@ -2245,3 +2245,69 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             response_body["rooms"][room_id]["required_state"][0]["event_id"],
             first_event_id,
         )
+
+    def test_changing_required_state_returns_immediately(self) -> None:
+        """Test that if we change the required state, then we return immediately
+        with the new required state."""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Make an initial sync request with no required state
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # We should see no required state
+        self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
+
+        # Get the state_map before we change the state as this is the final state we
+        # expect to see when we update the required state.
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # There is no new data, and so making another sync request will block.
+        channel = self.make_sync_request(
+            sync_body,
+            since=from_token,
+            tok=user1_tok,
+            timeout_ms=10_000,
+            await_result=False,
+        )
+        self.reactor.advance(0.1)  # Allow the request to start processing
+        self.reactor.advance(9.5)
+        self.assertFalse(channel.is_finished())
+
+        # Advance past the timeout to make sure the request finishes. (We do this
+        # to ensure log contexts don't leak between tests).
+        self.reactor.advance(1)
+        self.assertTrue(channel.is_finished())
+
+        # Now update the sliding sync requests to include a required state
+        # event, and make another sync request.
+        sync_body["lists"]["foo-list"]["required_state"] = [
+            [EventTypes.Create, ""],
+        ]
+
+        response_body, _ = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok, timeout_ms=10_000
+        )
+
+        # We should see the new required state immediately without waiting.
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+            },
+            exact=True,
+        )
