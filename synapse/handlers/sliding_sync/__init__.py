@@ -196,6 +196,12 @@ class SlidingSyncHandler:
             sync_config.user.to_string(),
             timeout_ms,
             current_sync_callback,
+            # We *wait* from `now_token` as we have already computed the sync
+            # response up to `now_token` above, so we want to wait for something
+            # new to arrive after `now_token`.
+            #
+            # We still generate the sync response using `from_token` in the
+            # callback above though.
             from_token=now_token,
         )
         did_wait = True
