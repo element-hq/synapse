@@ -6,7 +6,7 @@ set -e
 
 echo "Complement Synapse launcher"
 echo "  Args: $*"
-echo "  Env: SYNAPSE_COMPLEMENT_DATABASE=$SYNAPSE_COMPLEMENT_DATABASE SYNAPSE_COMPLEMENT_USE_WORKERS=$SYNAPSE_COMPLEMENT_USE_WORKERS SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR=$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR"
+echo "  Env: SYNAPSE_COMPLEMENT_DATABASE=$SYNAPSE_COMPLEMENT_DATABASE SYNAPSE_COMPLEMENT_USE_WORKERS=$SYNAPSE_COMPLEMENT_USE_WORKERS SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR=$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR SYNAPSE_COMPLEMENT_USE_MAS=$SYNAPSE_COMPLEMENT_USE_MAS"
 
 function log {
     d=$(printf '%(%Y-%m-%d %H:%M:%S)T,%.3s\n' ${EPOCHREALTIME/./ })
@@ -131,6 +131,145 @@ export SYNAPSE_TLS_KEY=/conf/server.tls.key
 # Add a directory for tests to add config overrides if they want
 mkdir --parents /conf/homeserver.d
 export _SYNAPSE_COMPLEMENT_EXTRA_CONFIG_DIR=/conf/homeserver.d
+
+# ─── MAS setup ────────────────────────────────────────────────────────
+if [[ "$SYNAPSE_COMPLEMENT_USE_MAS" == "true" ]]; then
+  log "MAS integration enabled"
+
+  # MAS requires postgres
+  export START_POSTGRES=true
+  export START_MAS=true
+
+  # Generate secret for MAS <-> Synapse communication
+  MAS_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+
+  # Hardcoded admin OAuth2 client credentials (test-only, ULID-compliant client_id)
+  MAS_ADMIN_CLIENT_ID="01HGGCG3PCYWRNJSFQH1RQWQ4N"
+  MAS_ADMIN_CLIENT_SECRET="complement-mas-shim-secret"
+
+  # Start postgres temporarily to create the MAS database and run migrations
+  log "Creating MAS database..."
+  gosu postgres postgres -k /var/run/postgresql -D /var/lib/postgresql/data &
+  PG_PID=$!
+  # Wait for postgres to be ready
+  for i in $(seq 1 30); do
+    if gosu postgres pg_isready -q 2>/dev/null; then
+      break
+    fi
+    sleep 0.5
+  done
+  gosu postgres psql -c "CREATE DATABASE mas" 2>/dev/null || true
+
+  # Generate MAS config with proper keys using mas-cli
+  log "Generating MAS config..."
+  /mas/mas-cli config generate -o /mas/config.yaml
+
+  # Patch the generated config with our settings using Python
+  python3 <<PYEOF
+import yaml
+
+with open("/mas/config.yaml") as f:
+    config = yaml.safe_load(f)
+
+# HTTP settings
+config["http"] = {
+    "public_base": "http://localhost:8081/",
+    "listeners": [{
+        "name": "all",
+        "resources": [
+            {"name": "discovery"},
+            {"name": "human"},
+            {"name": "oauth"},
+            {"name": "compat"},
+            {"name": "graphql"},
+            {"name": "assets"},
+            {"name": "adminapi"},
+        ],
+        "binds": [{"address": "0.0.0.0:8081"}],
+        "proxy_protocol": False,
+    }],
+}
+
+# Database
+config["database"] = {
+    "uri": "postgresql://postgres:somesecret@localhost/mas",
+}
+
+# Matrix connection
+config["matrix"] = {
+    "kind": "synapse",
+    "homeserver": "${SERVER_NAME}",
+    "endpoint": "http://localhost:8008",
+    "secret": "${MAS_SECRET}",
+}
+
+# Enable passwords
+config["passwords"] = {
+    "enabled": True,
+    "minimum_complexity": 0,
+}
+
+# Enable password registration
+config["account"] = {
+    "password_registration_enabled": True,
+}
+
+# Add admin client
+config["clients"] = config.get("clients", [])
+config["clients"].append({
+    "client_id": "${MAS_ADMIN_CLIENT_ID}",
+    "client_secret": "${MAS_ADMIN_CLIENT_SECRET}",
+    "client_auth_method": "client_secret_basic",
+    "redirect_uris": [],
+    "grant_types": ["client_credentials"],
+    "response_types": [],
+    "scope": "urn:mas:admin",
+})
+
+# Allow the admin client to use client_credentials with urn:mas:admin scope
+config["policy"] = config.get("policy", {})
+config["policy"]["data"] = {
+    "admin_clients": ["${MAS_ADMIN_CLIENT_ID}"],
+}
+
+# Disable rate limiting for tests
+config["rate_limiting"] = {
+    "login": {
+        "per_ip": {"burst": 1000, "per_second": 100.0},
+        "per_account": {"burst": 1000, "per_second": 100.0},
+    },
+    "registration": {"burst": 1000, "per_second": 100.0},
+}
+
+with open("/mas/config.yaml", "w") as f:
+    yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+
+print("MAS config patched successfully")
+PYEOF
+
+  # Run MAS database migrations (postgres is still running)
+  log "Running MAS database migrations..."
+  /mas/mas-cli database migrate --config /mas/config.yaml
+
+  # Sync MAS config (registers clients)
+  log "Syncing MAS config..."
+  /mas/mas-cli config sync --config /mas/config.yaml
+
+  # Stop postgres — supervisord will start it again properly
+  kill $PG_PID 2>/dev/null
+  wait $PG_PID 2>/dev/null || true
+
+  # Write Synapse MAS integration config
+  cat > /conf/homeserver.d/mas.yaml <<EOF
+matrix_authentication_service:
+  enabled: true
+  endpoint: http://localhost:8081/
+  secret: ${MAS_SECRET}
+EOF
+
+  log "MAS setup complete"
+fi
+# ─── End MAS setup ────────────────────────────────────────────────────
 
 # Run the script that writes the necessary config files and starts supervisord, which in turn
 # starts everything else
