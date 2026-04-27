@@ -337,7 +337,9 @@ A response body like the following is returned:
   "history_visibility": "shared",
   "state_events": 93534,
   "room_type": "m.space",
-  "forgotten": false
+  "forgotten": false,
+  "tombstoned": false,
+  "replacement_room": null
 }
 ```
 

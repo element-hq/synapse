@@ -367,6 +367,7 @@ class RoomRestServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.room_shutdown_handler = hs.get_room_shutdown_handler()
         self.pagination_handler = hs.get_pagination_handler()
+        self._storage_controllers = hs.get_storage_controllers()
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
@@ -383,6 +384,15 @@ class RoomRestServlet(RestServlet):
             members
         )
         result["forgotten"] = await self.store.is_locally_forgotten_room(room_id)
+        tombstone_event = await self._storage_controllers.state.get_current_state_event(
+            room_id,
+            EventTypes.Tombstone,
+            "",
+        )
+        result["tombstoned"] = tombstone_event is not None
+        result["replacement_room"] = (
+            tombstone_event.content.get("replacement_room") if tombstone_event else None
+        )
 
         return HTTPStatus.OK, result
 
