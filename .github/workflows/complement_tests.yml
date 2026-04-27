@@ -30,15 +30,16 @@ jobs:
         include:
           - arrangement: monolith
             database: SQLite
+            auth: legacy
             # No MAS - for now
 
           - arrangement: monolith
             database: Postgres
-            mas: true
+            auth: mas
 
           - arrangement: workers
             database: Postgres
-            mas: true
+            auth: mas
 
     steps:
       - name: Checkout synapse codebase
@@ -106,7 +107,7 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-          MAS: ${{ (matrix.mas == true) && 1 || '' }}
+          MAS: ${{ (matrix.auth == 'mas') && 1 || '' }}
 
       - name: Formatted sanity check Complement test logs
         # Always run this step if we attempted to run the Complement tests.
@@ -136,7 +137,7 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-          MAS: ${{ (matrix.mas == true) && 1 || '' }}
+          MAS: ${{ (matrix.auth == 'mas') && 1 || '' }}
           TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
           TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
 
@@ -167,7 +168,7 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-          MAS: ${{ (matrix.mas == true) && 1 || '' }}
+          MAS: ${{ (matrix.auth == 'mas') && 1 || '' }}
           TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
           TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
 
