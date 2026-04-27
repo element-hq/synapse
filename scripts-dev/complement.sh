@@ -362,6 +362,13 @@ main() {
     export PASS_SYNAPSE_USE_UNIX_SOCKET=1
   fi
 
+  if [[ -n "$MAS" ]]; then
+    # Enable Matrix Authentication Service (MAS) integration.
+    # MAS requires postgres for its own database.
+    export PASS_SYNAPSE_COMPLEMENT_USE_MAS=true
+    export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
+  fi
+
   if [[ -n "$SYNAPSE_TEST_LOG_LEVEL" ]]; then
     # Set the log level to what is desired
     export PASS_SYNAPSE_LOG_LEVEL="$SYNAPSE_TEST_LOG_LEVEL"
