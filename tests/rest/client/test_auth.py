@@ -36,9 +36,7 @@ from synapse.rest.client import (
     devices,
     login,
     logout,
-    read_marker,
     register,
-    room,
 )
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.server import HomeServer
@@ -637,9 +635,7 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
         devices.register_servlets,
         login.register_servlets,
         logout.register_servlets,
-        read_marker.register_servlets,
         register.register_servlets,
-        room.register_servlets,
         synapse.rest.admin.register_servlets_for_client_rest_resource,
     ]
     hijack_auth = False
