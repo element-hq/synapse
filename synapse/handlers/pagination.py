@@ -29,6 +29,7 @@ from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.api.filtering import Filter
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.opentracing import trace
@@ -79,7 +80,7 @@ class GetMessagesResult:
     Everything needed to serialize a `/messages` response.
     """
 
-    messages_chunk: list[EventBase]
+    messages_chunk: list[FilteredEvent]
     """
     A list of room events.
 
@@ -684,16 +685,18 @@ class PaginationHandler:
             events = await event_filter.filter(events)
 
         if not use_admin_priviledge:
-            events = await filter_and_transform_events_for_client(
+            filtered_events = await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user_id,
                 events,
                 is_peeking=(member_event_id is None),
             )
+        else:
+            filtered_events = [FilteredEvent.admin_override(e) for e in events]
 
         # if after the filter applied there are no more events
         # return immediately - but there might be more in next_token batch
-        if not events:
+        if not filtered_events:
             return GetMessagesResult(
                 messages_chunk=[],
                 bundled_aggregations={},
@@ -703,16 +706,16 @@ class PaginationHandler:
             )
 
         state = None
-        if event_filter and event_filter.lazy_load_members and len(events) > 0:
+        if event_filter and event_filter.lazy_load_members and len(filtered_events) > 0:
             # TODO: remove redundant members
 
             # FIXME: we also care about invite targets etc.
             state_filter = StateFilter.from_types(
-                (EventTypes.Member, event.sender) for event in events
+                (EventTypes.Member, event.event.sender) for event in filtered_events
             )
 
             state_ids = await self._state_storage_controller.get_state_ids_for_event(
-                events[0].event_id, state_filter=state_filter
+                filtered_events[0].event.event_id, state_filter=state_filter
             )
 
             if state_ids:
@@ -720,11 +723,11 @@ class PaginationHandler:
                 state = list(state_dict.values())
 
         aggregations = await self._relations_handler.get_bundled_aggregations(
-            events, user_id
+            filtered_events, user_id
         )
 
         return GetMessagesResult(
-            messages_chunk=events,
+            messages_chunk=filtered_events,
             bundled_aggregations=aggregations,
             state=state,
             start_token=from_token,
