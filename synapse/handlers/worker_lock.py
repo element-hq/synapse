@@ -259,7 +259,9 @@ class WaitingLock:
                 except Exception as e:
                     logger.warning(
                         "Caught an exception while waiting on WaitingLock(lock_name=%s, lock_key=%s): %r",
-                        self.lock_name, self.lock_key, e
+                        self.lock_name,
+                        self.lock_key,
+                        e,
                     )
 
         return await self._inner_lock.__aenter__()
@@ -351,7 +353,8 @@ class WaitingMultiLock:
                 except Exception as e:
                     logger.warning(
                         "Caught an exception while waiting on WaitingMultiLock(lock_names=%r): %r",
-                        self.lock_names, e
+                        self.lock_names,
+                        e,
                     )
 
         assert self._inner_lock_cm
