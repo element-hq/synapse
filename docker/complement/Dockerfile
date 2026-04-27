@@ -48,6 +48,11 @@ WORKDIR /data
 
 COPY conf/postgres.supervisord.conf /etc/supervisor/conf.d/postgres.conf
 
+# Copy MAS supervisord configs and registration shim (used when MAS=1)
+COPY conf/mas.supervisord.conf /etc/supervisor/conf.d/mas.conf
+COPY conf/mas_registration_shim.supervisord.conf /etc/supervisor/conf.d/mas_registration_shim.conf
+COPY conf/mas_registration_shim.py /mas/mas_registration_shim.py
+
 # Copy the entrypoint
 COPY conf/start_for_complement.sh /
 

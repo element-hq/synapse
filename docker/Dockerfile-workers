@@ -48,6 +48,15 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS deps_base
 
     RUN mkdir -p /uv/etc/supervisor/conf.d
 
+# Download MAS CLI binary
+FROM docker.io/library/debian:trixie AS mas_cli
+RUN apt-get update -qq && apt-get install -yqq --no-install-recommends ca-certificates curl
+ARG TARGETARCH
+RUN mkdir -p /mas && \
+    if [ "$TARGETARCH" = "amd64" ]; then arch="x86_64"; elif [ "$TARGETARCH" = "arm64" ]; then arch="aarch64"; else arch="$TARGETARCH"; fi && \
+    curl -sL "https://github.com/element-hq/matrix-authentication-service/releases/latest/download/mas-cli-${arch}-linux.tar.gz" \
+    | tar xzC /mas
+
 # now build the final image, based on the the regular Synapse docker image
 FROM $FROM
 
@@ -62,6 +71,10 @@ FROM $FROM
     COPY --from=deps_base /var/log/nginx /var/log/nginx
     # chown to allow non-root user to write to http-*-temp-path dirs
     COPY --from=deps_base --chown=www-data:root /var/lib/nginx /var/lib/nginx
+
+    # Copy MAS CLI (used when MAS=1 in Complement)
+    COPY --from=mas_cli /mas /mas
+    RUN chmod +x /mas/mas-cli
 
     # Copy Synapse worker, nginx and supervisord configuration template files
     COPY ./docker/conf-workers/* /conf/
