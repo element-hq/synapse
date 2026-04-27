@@ -1061,6 +1061,40 @@ def generate_worker_files(
 
     # Build the nginx location config blocks
     nginx_location_config = ""
+
+    # When MAS is enabled, prepend location blocks that route login/register
+    # traffic to MAS and the registration shim respectively. These regex blocks
+    # must come before the catch-all worker locations.
+    mas_enabled = os.environ.get("SYNAPSE_COMPLEMENT_USE_MAS") == "true"
+    if mas_enabled:
+        mas_port = 8081
+        shim_port = 8082
+        nginx_location_config += f"""
+    # MAS compat layer: login, logout, refresh
+    location ~ ^/_matrix/client/(.*)/(login|logout|refresh) {{
+        proxy_pass http://localhost:{mas_port};
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $host;
+    }}
+
+    # Registration shim: legacy register API
+    location ~ ^/_matrix/client/(.*)/register$ {{
+        proxy_pass http://localhost:{shim_port};
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $host;
+    }}
+
+    # Registration shim: shared-secret admin registration
+    location ~ ^/_synapse/admin/v1/register {{
+        proxy_pass http://localhost:{shim_port};
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $host;
+    }}
+"""
+
     for endpoint, upstream in nginx_locations.items():
         nginx_location_config += NGINX_LOCATION_REGEX_CONFIG_BLOCK.format(
             endpoint=endpoint,
@@ -1231,6 +1265,7 @@ def generate_worker_files(
         enable_redis=workers_in_use,
         workers_in_use=workers_in_use,
         using_unix_sockets=using_unix_sockets,
+        mas_enabled=mas_enabled,
     )
 
     # Nginx config
