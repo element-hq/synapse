@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-55462916.js";
+            window.path_to_searchindex_js = "searchindex-e00ca3de.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -241,9 +241,9 @@ a response of <code>+PONG</code>.</p>
 virtualenv, these can be installed with:</p>
 <pre><code class="language-sh">pip install "matrix-synapse[redis]"
 </code></pre>
-<p>Note that these dependencies are included when synapse is installed with <code>pip install matrix-synapse[all]</code>. They are also included in the debian packages from
-<code>packages.matrix.org</code> and in the docker images at
-https://hub.docker.com/r/ectorim/synapse/.</p>
+<p>Note that these dependencies are included when Synapse is installed with <code>pip install matrix-synapse[all]</code>. They are also included in the <a href="setup/installation.html#debianubuntu">Debian
+packages</a> and in the <a href="setup/installation.html#docker-images-and-ansible-playbooks">Docker
+images</a>.</p>
 <p>To make effective use of the workers, you will need to configure an HTTP
 reverse-proxy such as nginx or haproxy, which will direct incoming requests to
 the correct worker, or to the main synapse instance. See
@@ -717,6 +717,12 @@ configured as stream writer for the <code>device_lists</code> stream:</p>
 ^/_matrix/client/(r0|v3|unstable)/keys/upload
 ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
 ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
+</code></pre>
+<h5 id="the-quarantined_media_changes-stream"><a class="header" href="#the-quarantined_media_changes-stream">The <code>quarantined_media_changes</code> stream</a></h5>
+<p>The <code>quarantined_media_changes</code> stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly to one of the workers
+configured as stream writer for the <code>quarantined_media_changes</code> stream:</p>
+<pre><code>^/_synapse/admin/v1/quarantine_media/.*$
 </code></pre>
 <h4 id="restrict-outbound-federation-traffic-to-a-specific-set-of-workers"><a class="header" href="#restrict-outbound-federation-traffic-to-a-specific-set-of-workers">Restrict outbound federation traffic to a specific set of workers</a></h4>
 <p>The

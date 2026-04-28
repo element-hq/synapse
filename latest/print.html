@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-55462916.js";
+            window.path_to_searchindex_js = "searchindex-e00ca3de.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -2012,7 +2012,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.151.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.152.0</td><td>v1.100.0</td></tr>
 </tbody>
 </table>
 </div>
@@ -2032,6 +2032,15 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11520"><a class="header" href="#upgrading-to-v11520">Upgrading to v1.152.0</a></h1>
+<h2 id="workers-which-quarantine-media-must-be-stream-writers"><a class="header" href="#workers-which-quarantine-media-must-be-stream-writers">Workers which quarantine media must be stream writers</a></h2>
+<p>A new <a href="#the-quarantined_media_changes-stream"><code>quarantined_media_changes</code> stream writer</a> is
+introduced. Existing deployments which route the <code>/quarantine_media</code> endpoints to a
+worker (instead of the main process) <em>must</em> also add those workers to the
+<code>quarantined_media_changes</code> stream writer list. Quarantining media will not work without
+this.</p>
+<p>If your deployment does not use workers, or instead uses the main process for
+quarantining media, you do not need to make any changes to your configuration.</p>
 <h1 id="upgrading-to-v11500"><a class="header" href="#upgrading-to-v11500">Upgrading to v1.150.0</a></h1>
 <h2 id="removal-of-the-systemd-pip-extra"><a class="header" href="#removal-of-the-systemd-pip-extra">Removal of the <code>systemd</code> pip extra</a></h2>
 <p>The <code>matrix-synapse[systemd]</code> pip extra has been removed.
@@ -12191,9 +12200,9 @@ a response of <code>+PONG</code>.</p>
 virtualenv, these can be installed with:</p>
 <pre><code class="language-sh">pip install "matrix-synapse[redis]"
 </code></pre>
-<p>Note that these dependencies are included when synapse is installed with <code>pip install matrix-synapse[all]</code>. They are also included in the debian packages from
-<code>packages.matrix.org</code> and in the docker images at
-https://hub.docker.com/r/ectorim/synapse/.</p>
+<p>Note that these dependencies are included when Synapse is installed with <code>pip install matrix-synapse[all]</code>. They are also included in the <a href="#debianubuntu">Debian
+packages</a> and in the <a href="#docker-images-and-ansible-playbooks">Docker
+images</a>.</p>
 <p>To make effective use of the workers, you will need to configure an HTTP
 reverse-proxy such as nginx or haproxy, which will direct incoming requests to
 the correct worker, or to the main synapse instance. See
@@ -12667,6 +12676,12 @@ configured as stream writer for the <code>device_lists</code> stream:</p>
 ^/_matrix/client/(r0|v3|unstable)/keys/upload
 ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
 ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
+</code></pre>
+<h5 id="the-quarantined_media_changes-stream"><a class="header" href="#the-quarantined_media_changes-stream">The <code>quarantined_media_changes</code> stream</a></h5>
+<p>The <code>quarantined_media_changes</code> stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly to one of the workers
+configured as stream writer for the <code>quarantined_media_changes</code> stream:</p>
+<pre><code>^/_synapse/admin/v1/quarantine_media/.*$
 </code></pre>
 <h4 id="restrict-outbound-federation-traffic-to-a-specific-set-of-workers"><a class="header" href="#restrict-outbound-federation-traffic-to-a-specific-set-of-workers">Restrict outbound federation traffic to a specific set of workers</a></h4>
 <p>The
@@ -13283,6 +13298,12 @@ background updates which won’t be cancelled once started.</p>
 <ul>
 <li><code>populate_stats_process_rooms</code> - Recalculate the stats for all rooms.</li>
 <li><code>regenerate_directory</code> - Recalculate the <a href="#user-directory-api-implementation">user directory</a> if it is stale or out of sync.</li>
+<li><code>event_resign</code> - Re-sign all locally-sent events with the current signing key. This is useful after rotating the server’s signing key to ensure all historical events are signed with the new key. Optional additional parameters:
+<ul>
+<li><code>old_key</code> - Only re-sign events whose signature verifies against this key. Format: <code>"ed25519:key_id base64_public_key"</code> (e.g. <code>"ed25519:my_old_key XGX0JRS2Af3be3knz2fBiRbApjm2Dh61gXDJA8kcJNI"</code>).</li>
+<li><code>before_ts</code> - Only re-sign events with a <code>received_ts</code> less than this value (milliseconds since the epoch).</li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -13703,6 +13724,31 @@ not want to get quarantined, especially when
 <p>Where <code>media_id</code> is in the  form of <code>abcdefg12345...</code>.</p>
 <p>Response:</p>
 <pre><code class="language-json">{}
+</code></pre>
+<h2 id="listing-quarantined-media-changes"><a class="header" href="#listing-quarantined-media-changes">Listing quarantined media changes</a></h2>
+<p>When media is quarantined or unquarantined, a change record is created in the
+database. This API returns those change records in the order they were created.</p>
+<p><strong>Note</strong>: This API should be considered <em>best-effort</em> and expected to have missing or
+duplicate records. Currently, this only captures any media explicitly (un)quarantined by
+the media quarantine admin API, and the other cases are tracked by
+https://github.com/element-hq/synapse/issues/19672. Historical media uploaded before
+Synapse 1.152.0 is backfilled in a background update on a best-effort basis.</p>
+<p>Each page has a maximum of 100 records. The first page has the oldest records,
+paginating forwards with each <code>next_batch</code> value.</p>
+<p>Request:</p>
+<pre><code>GET /_synapse/admin/v1/media/quarantine_changes?from=2
+</code></pre>
+<p>Where <code>from</code> is the <code>next_batch</code> value from a previous request. It is optional
+and defaults to the first page (the value <code>0</code>).</p>
+<p>Response:</p>
+<pre><code class="language-json">{
+  "next_batch": 4,
+  "changes": [
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": true },
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": false },
+    { "origin": "another.example.org", "media_id": "abcdefg12345...", "quarantined": true }
+  ]
+}
 </code></pre>
 <h1 id="delete-local-media"><a class="header" href="#delete-local-media">Delete local media</a></h1>
 <p>This API deletes the <em>local</em> media from the disk of your own server.
@@ -20256,6 +20302,8 @@ Readers must also advance their record of the writer’s current position for th
 necessary registration and event handling.</p>
 <p><strong>Create your stream:</strong></p>
 <ul>
+<li>Create a Postgres-specific database delta file to <a href="https://github.com/element-hq/synapse/blob/35b55e962aa0bed3b2da5a3c12e3783ddf7604ca/synapse/storage/schema/main/delta/93/01_sticky_events_seq.sql.postgres#L14-L18">add a new <code>SEQUENCE</code></a> (this will be referenced by the <code>MultiWriterIdGenerator</code> below).</li>
+<li>Update <code>synapse/_scripts/synapse_port_db.py</code> so it knows about your new <code>SEQUENCE</code>: <a href="https://github.com/element-hq/synapse/blob/35b55e962aa0bed3b2da5a3c12e3783ddf7604ca/synapse/_scripts/synapse_port_db.py#L883C24-L888">add a new <code>_setup_sequence(...)</code></a></li>
 <li><a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/replication/tcp/streams/_base.py#L728">create a stream class and stream row class</a>
 <ul>
 <li>will need an <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L75">ID generator</a>
@@ -20292,6 +20340,14 @@ necessary registration and event handling.</p>
 </ul>
 </li>
 <li>add local-only <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L201">invalidations to your writer transactions</a></li>
+</ul>
+<p><strong>Update docs:</strong></p>
+<ul>
+<li>Update the <a href="https://github.com/element-hq/synapse/blob/develop/docs/workers.md#stream-writers"><em>Stream
+writers</em></a>
+section in the worker docs with a new section for the stream</li>
+<li>If this stream can only be handled by specific workers, add a new section to the
+<a href="https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md">upgrade notes</a>.</li>
 </ul>
 <p><strong>For streams to be used in sync:</strong></p>
 <ul>
