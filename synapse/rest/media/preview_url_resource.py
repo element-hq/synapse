@@ -70,7 +70,6 @@ class PreviewUrlResource(RestServlet):
         self.can_respond_403 = hs.config.experimental.msc4452_enabled
 
     async def on_GET(self, request: SynapseRequest) -> None:
-        # XXX: if get_user_by_req fails, what should we do in an async render?
         requester = await self.auth.get_user_by_req(request)
         if self.url_previewer is None:
             # If we have no url_previewer then it has been disabled by the server.
