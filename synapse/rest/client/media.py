@@ -23,7 +23,12 @@
 import logging
 import re
 
-from synapse.api.errors import Codes, NotFoundError, SynapseError, cs_error
+from synapse.api.errors import (
+    Codes,
+    SynapseError,
+    UnrecognizedRequestError,
+    cs_error,
+)
 from synapse.http.server import (
     HttpServer,
     respond_with_json,
@@ -89,7 +94,7 @@ class PreviewURLServlet(RestServlet):
             if self.can_respond_403:
                 raise SynapseError(403, "URL Previews are disabled", Codes.FORBIDDEN)
             else:
-                raise NotFoundError()
+                raise UnrecognizedRequestError()
         url = parse_string(request, "url", required=True)
         ts = parse_integer(request, "ts")
         if ts is None:

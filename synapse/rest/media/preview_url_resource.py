@@ -23,7 +23,7 @@
 import re
 from typing import TYPE_CHECKING
 
-from synapse.api.errors import Codes, NotFoundError, SynapseError
+from synapse.api.errors import Codes, SynapseError, UnrecognizedRequestError
 from synapse.http.server import respond_with_json_bytes
 from synapse.http.servlet import RestServlet, parse_integer, parse_string
 from synapse.http.site import SynapseRequest
@@ -77,7 +77,7 @@ class PreviewUrlResource(RestServlet):
             if self.can_respond_403:
                 raise SynapseError(403, "URL Previews are disabled", Codes.FORBIDDEN)
             else:
-                raise NotFoundError()
+                raise UnrecognizedRequestError()
         url = parse_string(request, "url", required=True)
         ts = parse_integer(request, "ts", default=self.clock.time_msec())
         og = await self.url_previewer.preview(url, requester.user, ts)
