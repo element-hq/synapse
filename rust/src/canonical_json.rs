@@ -502,9 +502,12 @@ where
         T: serde::Serialize + ?Sized,
     {
         if self.last_key.is_some() {
-            // `serde` should ensure that for every `serialize_key` there is a
-            // `serialize_field` call, so `last_key` should always be None here.
-            unreachable!()
+            // This can only happen if `serialize_key` is called multiple times
+            // in a row without a `serialize_value` call in between. This
+            // violates the contract of `SerializeMap`.
+            return Err(Self::Error::custom(
+                "serialize_key called multiple times in a row without serialize_value",
+            ));
         }
 
         // Parse the `key` into a string.
