@@ -48,7 +48,12 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.state import StateFilter
 from synapse.storage.databases.main.state_deltas import StateDeltasStore
-from synapse.storage.engines import PostgresEngine, Sqlite3Engine
+from synapse.storage.engines import (
+    PostgresEngine,
+    Psycopg2Engine,
+    PsycopgEngine,
+    Sqlite3Engine,
+)
 from synapse.types import (
     JsonDict,
     UserID,
@@ -693,37 +698,69 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
         if isinstance(self.database_engine, PostgresEngine):
             # We weight the localpart most highly, then display name and finally
             # server name
-            template = """
-                (
-                    %s,
-                    setweight(to_tsvector('simple', %s), 'A')
-                    || setweight(to_tsvector('simple', %s), 'D')
-                    || setweight(to_tsvector('simple', COALESCE(%s, '')), 'B')
-                )
-            """
 
-            sql = """
-                    INSERT INTO user_directory_search(user_id, vector)
-                    VALUES ? ON CONFLICT (user_id) DO UPDATE SET vector=EXCLUDED.vector
-                """
-            txn.execute_values(
-                sql,
-                [
+            if isinstance(self.database_engine, Psycopg2Engine):
+                template = """
                     (
-                        p.user_id,
-                        get_localpart_from_id(p.user_id),
-                        get_domain_from_id(p.user_id),
-                        (
-                            _filter_text_for_index(p.display_name)
-                            if p.display_name
-                            else None
-                        ),
+                        %s,
+                        setweight(to_tsvector('simple', %s), 'A')
+                        || setweight(to_tsvector('simple', %s), 'D')
+                        || setweight(to_tsvector('simple', COALESCE(%s, '')), 'B')
                     )
-                    for p in profiles
-                ],
-                template=template,
-                fetch=False,
-            )
+                """
+
+                sql = """
+                        INSERT INTO user_directory_search(user_id, vector)
+                        VALUES ? ON CONFLICT (user_id) DO UPDATE SET vector=EXCLUDED.vector
+                    """
+
+                txn.execute_values(
+                    sql,
+                    [
+                        (
+                            p.user_id,
+                            get_localpart_from_id(p.user_id),
+                            get_domain_from_id(p.user_id),
+                            (
+                                _filter_text_for_index(p.display_name)
+                                if p.display_name
+                                else None
+                            ),
+                        )
+                        for p in profiles
+                    ],
+                    template=template,
+                    fetch=False,
+                )
+            elif isinstance(self.database_engine, PsycopgEngine):
+                sql = """
+                    INSERT INTO user_directory_search(user_id, vector)
+                    VALUES
+                    (
+                        ?,
+                        setweight(to_tsvector('simple', ?), 'A')
+                        || setweight(to_tsvector('simple', ?), 'D')
+                        || setweight(to_tsvector('simple', COALESCE(?, '')), 'B')
+                    )
+                    ON CONFLICT (user_id) DO UPDATE SET vector=EXCLUDED.vector
+                """
+
+                txn.executemany(
+                    sql,
+                    [
+                        (
+                            p.user_id,
+                            get_localpart_from_id(p.user_id),
+                            get_domain_from_id(p.user_id),
+                            (
+                                _filter_text_for_index(p.display_name)
+                                if p.display_name
+                                else None
+                            ),
+                        )
+                        for p in profiles
+                    ],
+                )
         elif isinstance(self.database_engine, Sqlite3Engine):
             values = []
             for p in profiles:

@@ -37,6 +37,12 @@ jobs:
           - arrangement: workers
             database: Postgres
 
+          - arrangement: monolith
+            database: Psycopg
+
+          - arrangement: workers
+            database: Psycopg
+
     steps:
       - name: Checkout synapse codebase
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -101,7 +107,7 @@ jobs:
           COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 | tee /tmp/gotest-sanity-check-complement.log
         shell: bash
         env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          POSTGRES: ${{ (matrix.database == 'Postgres' || matrix.database == 'Psycopg') && matrix.database || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
 
       - name: Formatted sanity check Complement test logs
@@ -130,7 +136,7 @@ jobs:
           COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log
         shell: bash
         env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          POSTGRES: ${{ (matrix.database == 'Postgres' || matrix.database == 'Psycopg') && matrix.database || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
           TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
           TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
@@ -160,7 +166,7 @@ jobs:
           COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 | tee /tmp/gotest-in-repo-complement.log
         shell: bash
         env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          POSTGRES: ${{ (matrix.database == 'Postgres' || matrix.database == 'Psycopg') && matrix.database || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
           TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
           TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}

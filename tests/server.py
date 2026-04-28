@@ -1123,8 +1123,13 @@ def setup_test_homeserver(
     if USE_POSTGRES_FOR_TESTS:
         test_db = "synapse_test_%s" % uuid.uuid4().hex
 
+        if USE_POSTGRES_FOR_TESTS == "psycopg":
+            db_type = "psycopg"
+        else:
+            db_type = "psycopg2"
+
         database_config: JsonDict = {
-            "name": "psycopg2",
+            "name": db_type,
             "args": {
                 "dbname": test_db,
                 "host": POSTGRES_HOST,
@@ -1202,8 +1207,6 @@ def setup_test_homeserver(
         db_conn.close()
 
         def cleanup() -> None:
-            import psycopg2
-
             dropped = False
 
             # Drop the test database
@@ -1226,7 +1229,7 @@ def setup_test_homeserver(
                     cur.execute("DROP DATABASE IF EXISTS %s;" % (test_db,))
                     db_conn.commit()
                     dropped = True
-                except psycopg2.OperationalError as e:
+                except db_engine.module.OperationalError as e:
                     warnings.warn(
                         "Couldn't drop old db: " + str(e),
                         category=UserWarning,

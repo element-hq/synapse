@@ -28,7 +28,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
-from synapse.storage.engines import PostgresEngine
+from synapse.storage.engines import Psycopg2Engine
 from synapse.types import MultiWriterStreamToken, RoomStreamToken
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoom,
@@ -713,7 +713,7 @@ class SlidingSyncStore(SQLBaseStore):
                 for room_id, user_id in to_update
             ]
 
-            if isinstance(self.database_engine, PostgresEngine):
+            if isinstance(self.database_engine, Psycopg2Engine):
                 sql = sql.format(value_placeholder="?")
                 txn.execute_values(sql, args, fetch=False)
             else:
