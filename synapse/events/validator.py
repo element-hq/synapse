@@ -63,14 +63,17 @@ class EventValidator:
         if event.format_version == EventFormatVersions.ROOM_V1_V2:
             EventID.from_string(event.event_id)
 
-        required = [
+        required = {
             "auth_events",
             "content",
             "hashes",
             "prev_events",
             "sender",
             "type",
-        ]
+        }
+        if event.room_version.msc4242_state_dags:
+            required.remove("auth_events")
+            required.add("prev_state_events")
 
         for k in required:
             if k not in event:

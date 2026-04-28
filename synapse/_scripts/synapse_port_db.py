@@ -136,6 +136,7 @@ BOOLEAN_COLUMNS = {
     "users": ["shadow_banned", "approved", "locked", "suspended"],
     "un_partial_stated_event_stream": ["rejection_status_changed"],
     "users_who_share_rooms": ["share_private"],
+    "quarantined_media_changes": ["quarantined"],
 }
 
 
@@ -911,6 +912,10 @@ class Porter:
             )
             await self._setup_autoincrement_sequence(
                 "state_groups_pending_deletion", "sequence_number"
+            )
+            await self._setup_sequence(
+                "quarantined_media_id_seq",
+                [("quarantined_media_changes", "stream_id")],
             )
 
             # Step 3. Get tables.

@@ -33,7 +33,7 @@ import attr
 from synapse.api.constants import Direction, EventTypes, RelationTypes
 from synapse.api.errors import SynapseError
 from synapse.events import EventBase, relation_from_event
-from synapse.events.utils import SerializeEventConfig
+from synapse.events.utils import FilteredEvent, SerializeEventConfig
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.relations import ThreadsNextBatch, _RelatedEvent
@@ -139,7 +139,7 @@ class RelationsHandler:
         # not passing them in here we should get a better cache hit rate).
         related_events, next_token = await self._main_store.get_relations_for_event(
             event_id=event_id,
-            event=event,
+            event=event.event,
             room_id=room_id,
             relation_type=relation_type,
             event_type=event_type,
@@ -154,7 +154,9 @@ class RelationsHandler:
             [e.event_id for e in related_events]
         )
 
-        events = await filter_and_transform_events_for_client(
+        filtered_events: list[
+            FilteredEvent
+        ] = await filter_and_transform_events_for_client(
             self._storage_controllers,
             user_id,
             events,
@@ -164,14 +166,14 @@ class RelationsHandler:
         # The relations returned for the requested event do include their
         # bundled aggregations.
         aggregations = await self.get_bundled_aggregations(
-            events, requester.user.to_string()
+            filtered_events, requester.user.to_string()
         )
 
         now = self._clock.time_msec()
         serialize_options = SerializeEventConfig(requester=requester)
         return_value: JsonDict = {
             "chunk": await self._event_serializer.serialize_events(
-                events,
+                filtered_events,
                 now,
                 bundle_aggregations=aggregations,
                 config=serialize_options,
@@ -389,7 +391,7 @@ class RelationsHandler:
                 potential_events, _ = await self._main_store.get_relations_for_event(
                     room_id,
                     event_id,
-                    event,
+                    event.event,
                     RelationTypes.THREAD,
                     direction=Direction.FORWARDS,
                 )
@@ -417,7 +419,7 @@ class RelationsHandler:
                         potential_events[-1].event_id,
                     )
                     continue
-                latest_thread_event = event
+                latest_thread_event = event.event
 
             results[event_id] = _ThreadAggregation(
                 latest_event=latest_thread_event,
@@ -432,12 +434,12 @@ class RelationsHandler:
 
     @trace
     async def get_bundled_aggregations(
-        self, events: Iterable[EventBase], user_id: str
+        self, filtered_events: Iterable[FilteredEvent], user_id: str
     ) -> dict[str, BundledAggregations]:
         """Generate bundled aggregations for events.
 
         Args:
-            events: The iterable of events to calculate bundled aggregations for.
+            filtered_events: The iterable of filtered events to calculate bundled aggregations for.
             user_id: The user requesting the bundled aggregations.
 
         Returns:
@@ -453,7 +455,9 @@ class RelationsHandler:
         events_by_id = {}
         # A map of event ID to the relation in that event, if there is one.
         relations_by_id: dict[str, str] = {}
-        for event in events:
+        for filtered_event in filtered_events:
+            event = filtered_event.event
+
             # State events do not get bundled aggregations.
             if event.is_state():
                 continue
@@ -599,7 +603,9 @@ class RelationsHandler:
             # Limit the returned threads to those the user has participated in.
             events = [event for event in events if participated[event.event_id]]
 
-        events = await filter_and_transform_events_for_client(
+        filtered_events: list[
+            FilteredEvent
+        ] = await filter_and_transform_events_for_client(
             self._storage_controllers,
             user_id,
             events,
@@ -607,12 +613,12 @@ class RelationsHandler:
         )
 
         aggregations = await self.get_bundled_aggregations(
-            events, requester.user.to_string()
+            filtered_events, requester.user.to_string()
         )
 
         now = self._clock.time_msec()
         serialized_events = await self._event_serializer.serialize_events(
-            events, now, bundle_aggregations=aggregations
+            filtered_events, now, bundle_aggregations=aggregations
         )
 
         return_value: JsonDict = {"chunk": serialized_events}
