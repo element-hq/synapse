@@ -146,7 +146,6 @@ class ContentRepositoryConfig(Config):
             and config.get("worker_app") != "synapse.app.media_repository"
         ):
             self.can_load_media_repo = False
-            self.url_preview_enabled = False
             return
         else:
             self.can_load_media_repo = True
@@ -243,10 +242,9 @@ class ContentRepositoryConfig(Config):
         self.thumbnail_requirements = parse_thumbnail_requirements(
             config.get("thumbnail_sizes", DEFAULT_THUMBNAIL_SIZES)
         )
+        self.url_preview_enabled = bool(config.get("url_preview_enabled", False))
 
-        url_preview_enabled = config.get("url_preview_enabled", False)
-        if url_preview_enabled:
-            self.url_preview_enabled = True
+        if self.url_preview_enabled:
             check_requirements("url-preview")
 
             proxy_config = parse_proxy_config(config)
@@ -287,8 +285,6 @@ class ContentRepositoryConfig(Config):
             self.url_preview_accept_language = config.get(
                 "url_preview_accept_language"
             ) or ["en"]
-        else:
-            self.url_preview_enabled = False
 
         media_retention = config.get("media_retention") or {}
 
