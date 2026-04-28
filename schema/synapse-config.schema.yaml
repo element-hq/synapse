@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.151/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.152/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -94,6 +94,10 @@ properties:
       Determines whether we should freeze the internal dict object in
       `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g.
       signature dicts. However, freezing a dict is expensive.
+
+
+      > ⚠️ **Warning** – This option is known to introduce a new class of [comparison
+      bugs](https://github.com/element-hq/synapse/issues/18117) in Synapse.
     default: false
     examples:
       - true

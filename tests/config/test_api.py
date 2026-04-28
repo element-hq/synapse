@@ -5,7 +5,6 @@ import yaml
 from synapse.config import ConfigError
 from synapse.config._base import RootConfig
 from synapse.config.api import ApiConfig
-from synapse.types.state import StateFilter
 
 DEFAULT_PREJOIN_STATE_PAIRS = {
     ("m.room.join_rules", ""),
@@ -38,7 +37,11 @@ room_prejoin_state:
     disable_default_event_types: true
         """
         )
-        self.assertEqual(config.room_prejoin_state, StateFilter.none())
+        # MSC4311: m.room.create is always included even when defaults are disabled
+        self.assertEqual(
+            set(config.room_prejoin_state.concrete_types()),
+            {("m.room.create", "")},
+        )
 
     def test_event_without_state_key(self) -> None:
         config = self.read_config(
@@ -50,7 +53,11 @@ room_prejoin_state:
         """
         )
         self.assertEqual(config.room_prejoin_state.wildcard_types(), ["foo"])
-        self.assertEqual(config.room_prejoin_state.concrete_types(), [])
+        # MSC4311: m.room.create is always included
+        self.assertEqual(
+            set(config.room_prejoin_state.concrete_types()),
+            {("m.room.create", "")},
+        )
 
     def test_event_with_specific_state_key(self) -> None:
         config = self.read_config(
@@ -62,9 +69,10 @@ room_prejoin_state:
         """
         )
         self.assertFalse(config.room_prejoin_state.has_wildcards())
+        # MSC4311: m.room.create is always included
         self.assertEqual(
             set(config.room_prejoin_state.concrete_types()),
-            {("foo", "bar")},
+            {("foo", "bar"), ("m.room.create", "")},
         )
 
     def test_repeated_event_with_specific_state_key(self) -> None:
@@ -78,9 +86,10 @@ room_prejoin_state:
         """
         )
         self.assertFalse(config.room_prejoin_state.has_wildcards())
+        # MSC4311: m.room.create is always included
         self.assertEqual(
             set(config.room_prejoin_state.concrete_types()),
-            {("foo", "bar"), ("foo", "baz")},
+            {("foo", "bar"), ("foo", "baz"), ("m.room.create", "")},
         )
 
     def test_no_specific_state_key_overrides_specific_state_key(self) -> None:
@@ -94,7 +103,11 @@ room_prejoin_state:
         """
         )
         self.assertEqual(config.room_prejoin_state.wildcard_types(), ["foo"])
-        self.assertEqual(config.room_prejoin_state.concrete_types(), [])
+        # MSC4311: m.room.create is always included
+        self.assertEqual(
+            set(config.room_prejoin_state.concrete_types()),
+            {("m.room.create", "")},
+        )
 
         config = self.read_config(
             """
@@ -106,7 +119,11 @@ room_prejoin_state:
         """
         )
         self.assertEqual(config.room_prejoin_state.wildcard_types(), ["foo"])
-        self.assertEqual(config.room_prejoin_state.concrete_types(), [])
+        # MSC4311: m.room.create is always included
+        self.assertEqual(
+            set(config.room_prejoin_state.concrete_types()),
+            {("m.room.create", "")},
+        )
 
     def test_bad_event_type_entry_raises(self) -> None:
         with self.assertRaises(ConfigError):

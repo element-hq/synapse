@@ -568,8 +568,8 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
             # notify us because the interesting user is joined to the room where the
             # message was sent.
             self.assertEqual(service, interested_appservice)
-            self.assertEqual(events[0]["type"], "m.room.message")
-            self.assertEqual(events[0]["sender"], alice)
+            self.assertEqual(events[0].type, "m.room.message")
+            self.assertEqual(events[0].sender, alice)
         else:
             self.send_mock.assert_not_called()
 
@@ -628,8 +628,8 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         # Events sent from an interesting local user should also be picked up as
         # interesting to the appservice.
         self.assertEqual(service, interested_appservice)
-        self.assertEqual(events[0]["type"], "m.room.message")
-        self.assertEqual(events[0]["sender"], alice)
+        self.assertEqual(events[0].type, "m.room.message")
+        self.assertEqual(events[0].sender, alice)
 
     def test_sending_read_receipt_batches_to_application_services(self) -> None:
         """Tests that a large batch of read receipts are sent correctly to

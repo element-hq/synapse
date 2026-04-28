@@ -1,1 +1,0 @@
-Report the Rust compiler version used in the Prometheus metrics. Contributed by Noah Markert.

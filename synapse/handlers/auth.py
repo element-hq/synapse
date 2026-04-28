@@ -1738,13 +1738,17 @@ class AuthHandler:
         else:
             return False
 
-    async def start_sso_ui_auth(self, request: SynapseRequest, session_id: str) -> str:
+    async def start_sso_ui_auth(
+        self, request: SynapseRequest, session_id: str, preferred_idp_id: str | None
+    ) -> str:
         """
         Get the HTML for the SSO redirect confirmation page.
 
         Args:
             request: The incoming HTTP request
             session_id: The user interactive authentication session ID.
+            preferred_idp_id: The ID of the identity provider to use. If `None` one will
+                be picked unpredictably from those the user has already signed in with.
 
         Returns:
             The HTML to render.
@@ -1768,15 +1772,26 @@ class AuthHandler:
             # it not being offered.
             raise SynapseError(400, "User has no SSO identities")
 
-        # for now, just pick one
-        idp_id, sso_auth_provider = next(iter(idps.items()))
-        if len(idps) > 0:
-            logger.warning(
-                "User %r has previously logged in with multiple SSO IdPs; arbitrarily "
-                "picking %r",
-                user_id_to_verify,
-                idp_id,
-            )
+        if preferred_idp_id is not None:
+            # Use the idp specified by the client.
+            sso_auth_provider = idps.get(preferred_idp_id)
+            if sso_auth_provider is None:
+                raise SynapseError(
+                    400,
+                    f"Unknown preferred Identity Provider: '{preferred_idp_id}'",
+                    errcode=Codes.INVALID_PARAM,
+                )
+        else:
+            idp_id, sso_auth_provider = next(iter(idps.items()))
+            if len(idps) > 0:
+                # We arbitrarily picked an IdP from multiple potential
+                # candidates. This may be undesirable for the user.
+                logger.warning(
+                    "User %r has previously logged in with multiple SSO IdPs; arbitrarily "
+                    "picking %r",
+                    user_id_to_verify,
+                    idp_id,
+                )
 
         redirect_url = await sso_auth_provider.handle_redirect_request(
             request, None, session_id
