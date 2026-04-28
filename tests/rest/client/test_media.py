@@ -1604,7 +1604,7 @@ class URLPreviewDisabledTests(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400, channel.result)
         self.assertEqual(
             channel.json_body,
-            {"errcode": "M_UNRECOGNIZED", "error": "Not found"},
+            {"errcode": "M_UNRECOGNIZED", "error": "Unrecognized request"},
         )
 
     @override_config(
