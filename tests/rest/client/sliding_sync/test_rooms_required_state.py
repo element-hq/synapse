@@ -2247,8 +2247,8 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         )
 
     def test_changing_required_state_returns_immediately(self) -> None:
-        """Test that if we change the required state, then we return immediately
-        with the new required state."""
+        """Test that if we change the `required_state`, then we return immediately
+        with the new `required_state`."""
 
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -2281,7 +2281,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             sync_body,
             since=from_token,
             tok=user1_tok,
-            timeout_ms=10_000,
+            timeout_ms=Duration(seconds=10).as_millis(),
             await_result=False,
         )
         self.reactor.advance(0.1)  # Allow the request to start processing
@@ -2293,7 +2293,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         self.reactor.advance(1)
         self.assertTrue(channel.is_finished())
 
-        # Now update the sliding sync requests to include a required state
+        # Now update the Sliding Sync requests to include a `required_state`
         # event, and make another sync request.
         sync_body["lists"]["foo-list"]["required_state"] = [
             [EventTypes.Create, ""],
@@ -2303,7 +2303,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             sync_body, since=from_token, tok=user1_tok, timeout_ms=10_000
         )
 
-        # We should see the new required state immediately without waiting.
+        # We should see the new `required_state` immediately without waiting.
         self._assertRequiredStateIncludes(
             response_body["rooms"][room_id1]["required_state"],
             {
