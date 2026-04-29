@@ -128,7 +128,7 @@ func TestMessagesOverFederation(t *testing.T) {
 		contextRes := bob.MustDo(
 			t,
 			"GET",
-			[]string{"_matrix", "client", "r0", "rooms", roomID, "context", bobJoinEventID},
+			[]string{"_matrix", "client", "v3", "rooms", roomID, "context", bobJoinEventID},
 			client.WithContentType("application/json"),
 			client.WithQueries(url.Values{
 				"limit": []string{"0"},
@@ -143,7 +143,7 @@ func TestMessagesOverFederation(t *testing.T) {
 		messagesRes := bob.MustDo(
 			t,
 			"GET",
-			[]string{"_matrix", "client", "r0", "rooms", roomID, "messages"},
+			[]string{"_matrix", "client", "v3", "rooms", roomID, "messages"},
 			client.WithContentType("application/json"),
 			client.WithQueries(url.Values{
 				"dir":   []string{"b"},
