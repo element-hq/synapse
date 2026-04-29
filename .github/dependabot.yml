@@ -7,6 +7,7 @@ updates:
     package-ecosystem: "pip"
     directory: "/"
     open-pull-requests-limit: 10
+    versioning-strategy: "lockfile-only"
     schedule:
       interval: "weekly"
     # Group patch updates to packages together into a single PR, as they rarely
