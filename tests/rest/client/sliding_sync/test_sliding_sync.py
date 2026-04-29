@@ -44,6 +44,7 @@ from synapse.types import (
     StreamToken,
 )
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 from tests import unittest
@@ -87,7 +88,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         *,
         since: str | None = None,
         tok: str,
-        timeout_ms: int | None = None,
+        timeout: Duration | None = None,
         await_result: bool = True,
     ) -> FakeChannel:
         """Make a sliding sync request with given body.
@@ -107,8 +108,8 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         query_params: dict[str, Any] = {}
         if since:
             query_params["pos"] = since
-        if timeout_ms is not None:
-            query_params["timeout"] = timeout_ms
+        if timeout is not None:
+            query_params["timeout"] = timeout.as_millis()
 
         if query_params:
             query_str = urllib.parse.urlencode(query_params)
@@ -129,7 +130,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         *,
         since: str | None = None,
         tok: str,
-        timeout_ms: int | None = None,
+        timeout: Duration | None = None,
     ) -> tuple[JsonDict, str]:
         """Do a sliding sync request with given body.
 
@@ -139,13 +140,13 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
             sync_body: The full request body to use
             since: Optional since token
             tok: Access token to use
-            timeout_ms: Optional timeout in milliseconds to use for the request.
+            timeout: Optional timeout to use for the request.
 
         Returns:
             A tuple of the response body and the `pos` field.
         """
         channel = self.make_sync_request(
-            sync_body, since=since, tok=tok, timeout_ms=timeout_ms
+            sync_body, since=since, tok=tok, timeout=timeout
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 

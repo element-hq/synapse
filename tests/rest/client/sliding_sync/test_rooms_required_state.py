@@ -25,6 +25,7 @@ from synapse.rest.client import knock, login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events import DeltaState, SlidingSyncTableChanges
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.test_utils.event_injection import mark_event_as_partial_state
@@ -2281,7 +2282,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             sync_body,
             since=from_token,
             tok=user1_tok,
-            timeout_ms=Duration(seconds=10).as_millis(),
+            timeout=Duration(seconds=10),
             await_result=False,
         )
         self.reactor.advance(0.1)  # Allow the request to start processing
@@ -2300,7 +2301,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         ]
 
         response_body, _ = self.do_sync(
-            sync_body, since=from_token, tok=user1_tok, timeout_ms=10_000
+            sync_body, since=from_token, tok=user1_tok, timeout=Duration(seconds=10)
         )
 
         # We should see the new `required_state` immediately without waiting.
