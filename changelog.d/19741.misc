@@ -1,0 +1,1 @@
+Limit the allowed link schemes to `["http", "https", "mailto"]` from messages contained in e-mail push notifications. Contributed by Noah Markert.
