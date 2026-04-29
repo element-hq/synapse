@@ -1,0 +1,1 @@
+Fix a bug where when upgrading a room to v12 the power level event in the old room got mutated to remove the user upgrading the room's power.

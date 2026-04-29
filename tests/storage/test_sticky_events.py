@@ -30,6 +30,7 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests import unittest
+from tests.test_utils.event_injection import inject_event
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
@@ -276,3 +277,154 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0].event_id, event_non_outlier.event_id)
+
+    def test_soft_failed_events_are_tracked(self) -> None:
+        """
+        Tests that sticky events marked as soft_failed ARE inserted
+        into the sticky_events table, as their soft-failed status can be re-evaluated later,
+        as per MSC4354.
+        """
+        user_id = self.register_user("testuser", "pass")
+        token = self.login(user_id, "pass")
+        room_id = self.helper.create_room_as(user_id, tok=token)
+
+        start_id = self.store.get_max_sticky_events_stream_id()
+
+        # Create and persist a sticky event that is soft-failed
+        soft_failed_sticky_event = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=room_id,
+                sender=user_id,
+                type=EventTypes.Message,
+                content={"body": "spam checker spammy message", "msgtype": "m.text"},
+                internal_metadata={"soft_failed": True},
+                # Corresponds to StickyEvent.EVENT_FIELD_NAME
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=1).as_millis()
+                ),
+            )
+        )
+
+        end_id = self.store.get_max_sticky_events_stream_id()
+
+        updates = self.get_success(
+            self.store.get_updated_sticky_events(
+                from_id=start_id, to_id=end_id, limit=10
+            )
+        )
+
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].event_id, soft_failed_sticky_event.event_id)
+
+    def test_policy_server_spammy_events_are_not_tracked(self) -> None:
+        """
+        Tests that sticky events marked as policy_server_spammy are NOT inserted
+        into the sticky_events table, as they are exempt from the soft-failed
+        re-evaluation logic.
+        """
+        user_id = self.register_user("testuser", "pass")
+        token = self.login(user_id, "pass")
+        room_id = self.helper.create_room_as(user_id, tok=token)
+
+        start_id = self.store.get_max_sticky_events_stream_id()
+
+        # Create and persist a sticky event that is marked policy_server_spammy
+        # N.B. policy_server_spammy events are always soft-failed too
+        _spammy_sticky_event = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=room_id,
+                sender=user_id,
+                type=EventTypes.Message,
+                content={"body": "spam checker spammy message", "msgtype": "m.text"},
+                internal_metadata={"soft_failed": True, "policy_server_spammy": True},
+                # Corresponds to StickyEvent.EVENT_FIELD_NAME
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=1).as_millis()
+                ),
+            )
+        )
+
+        # Also insert a valid sticky event as a canary for the test setup
+        valid_sticky_event = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=room_id,
+                sender=user_id,
+                type=EventTypes.Message,
+                content={"body": "normal sticky", "msgtype": "m.text"},
+                # Corresponds to StickyEvent.EVENT_FIELD_NAME
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=1).as_millis()
+                ),
+            )
+        )
+
+        end_id = self.store.get_max_sticky_events_stream_id()
+
+        # Verify only the regular event was inserted
+        updates = self.get_success(
+            self.store.get_updated_sticky_events(
+                from_id=start_id, to_id=end_id, limit=10
+            )
+        )
+
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].event_id, valid_sticky_event.event_id)
+
+    def test_spam_checker_spammy_events_are_not_tracked(self) -> None:
+        """
+        Tests that sticky events marked as spam_checker_spammy are NOT inserted
+        into the sticky_events table, as they are exempt from the soft-failed
+        re-evaluation logic.
+        """
+        user_id = self.register_user("testuser", "pass")
+        token = self.login(user_id, "pass")
+        room_id = self.helper.create_room_as(user_id, tok=token)
+
+        start_id = self.store.get_max_sticky_events_stream_id()
+
+        # Create and persist a sticky event that is marked spam_checker_spammy
+        # N.B. spam_checker_spammy events are always soft-failed too
+        _spammy_sticky_event = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=room_id,
+                sender=user_id,
+                type=EventTypes.Message,
+                content={"body": "spam checker spammy message", "msgtype": "m.text"},
+                internal_metadata={"soft_failed": True, "spam_checker_spammy": True},
+                # Corresponds to StickyEvent.EVENT_FIELD_NAME
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=1).as_millis()
+                ),
+            )
+        )
+
+        # Also insert a valid sticky event as a canary for the test setup
+        valid_sticky_event = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=room_id,
+                sender=user_id,
+                type=EventTypes.Message,
+                content={"body": "normal sticky", "msgtype": "m.text"},
+                # Corresponds to StickyEvent.EVENT_FIELD_NAME
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=1).as_millis()
+                ),
+            )
+        )
+
+        end_id = self.store.get_max_sticky_events_stream_id()
+
+        # Verify only the valid sticky event was inserted
+        updates = self.get_success(
+            self.store.get_updated_sticky_events(
+                from_id=start_id, to_id=end_id, limit=10
+            )
+        )
+
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].event_id, valid_sticky_event.event_id)

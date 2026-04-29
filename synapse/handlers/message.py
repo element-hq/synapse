@@ -53,7 +53,7 @@ from synapse.api.errors import (
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.api.urls import ConsentURIBuilder
 from synapse.event_auth import validate_event_for_room_version
-from synapse.events import EventBase, relation_from_event
+from synapse.events import EventBase, FrozenEventVMSC4242, relation_from_event
 from synapse.events.builder import EventBuilder
 from synapse.events.snapshot import (
     EventContext,
@@ -61,7 +61,11 @@ from synapse.events.snapshot import (
     UnpersistedEventContext,
     UnpersistedEventContextBase,
 )
-from synapse.events.utils import SerializeEventConfig, maybe_upsert_event_field
+from synapse.events.utils import (
+    FilteredEvent,
+    SerializeEventConfig,
+    maybe_upsert_event_field,
+)
 from synapse.events.validator import EventValidator
 from synapse.handlers.directory import DirectoryHandler
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
@@ -261,7 +265,7 @@ class MessageHandler:
                 room_state = room_state_events[membership_event_id]
 
         events = await self._event_serializer.serialize_events(
-            room_state.values(),
+            [FilteredEvent.state(e) for e in room_state.values()],
             self.clock.time_msec(),
             config=SerializeEventConfig(requester=requester),
         )
@@ -585,6 +589,7 @@ class EventCreationHandler:
         state_map: StateMap[str] | None = None,
         for_batch: bool = False,
         current_state_group: int | None = None,
+        prev_state_events: list[str] | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """
@@ -639,6 +644,10 @@ class EventCreationHandler:
 
             current_state_group: the current state group, used only for creating events for
                 batch persisting
+
+            prev_state_events:
+                The state event IDs which represent the current forward extremities of the state DAG.
+                Only applicable on room versions which use a state DAG (MSC4242).
 
             delay_id: The delay ID of this event, if it was a delayed event.
 
@@ -744,6 +753,7 @@ class EventCreationHandler:
             state_map=state_map,
             for_batch=for_batch,
             current_state_group=current_state_group,
+            prev_state_events=prev_state_events,
         )
 
         # In an ideal world we wouldn't need the second part of this condition. However,
@@ -895,7 +905,7 @@ class EventCreationHandler:
         if not prev_event:
             return None
 
-        if prev_event and event.user_id == prev_event.user_id:
+        if prev_event and event.sender == prev_event.sender:
             prev_content = encode_canonical_json(prev_event.content)
             next_content = encode_canonical_json(event.content)
             if prev_content == next_content:
@@ -972,6 +982,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: int | None = None,
+        prev_state_events: list[str] | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         """
@@ -1001,6 +1012,9 @@ class EventCreationHandler:
             depth: Override the depth used to order the event in the DAG.
                 Should normally be set to None, which will cause the depth to be calculated
                 based on the prev_events.
+            prev_state_events:
+                The state event IDs which represent the current forward extremities of the state DAG.
+                Only applicable on room versions which use a state DAG (MSC4242).
             delay_id: The delay ID of this event, if it was a delayed event.
 
         Returns:
@@ -1098,6 +1112,7 @@ class EventCreationHandler:
                 ignore_shadow_ban=ignore_shadow_ban,
                 outlier=outlier,
                 depth=depth,
+                prev_state_events=prev_state_events,
                 delay_id=delay_id,
             )
 
@@ -1112,6 +1127,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: int | None = None,
+        prev_state_events: list[str] | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         room_id = event_dict["room_id"]
@@ -1141,6 +1157,7 @@ class EventCreationHandler:
                     state_event_ids=state_event_ids,
                     outlier=outlier,
                     depth=depth,
+                    prev_state_events=prev_state_events,
                     delay_id=delay_id,
                 )
                 context = await unpersisted_context.persist(event)
@@ -1236,6 +1253,7 @@ class EventCreationHandler:
         state_map: StateMap[str] | None = None,
         for_batch: bool = False,
         current_state_group: int | None = None,
+        prev_state_events: list[str] | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """Create a new event for a local client. If bool for_batch is true, will
         create an event using the prev_event_ids, and will create an event context for
@@ -1277,9 +1295,30 @@ class EventCreationHandler:
             current_state_group: the current state group, used only for creating events for
                 batch persisting
 
+            prev_state_events:
+                The state event IDs which represent the current forward extremities of the state DAG.
+                Only applicable on room versions which use a state DAG (MSC4242).
+                If unset, populates them from the current state dag forward extremities.
+
         Returns:
             Tuple of created event, UnpersistedEventContext
         """
+        if builder.room_version.msc4242_state_dags:
+            assert auth_event_ids is None
+            # (kegan) I can't find any call-site which uses this. We can't risk letting in
+            # untrusted input, so for now assert that we aren't told about any state.
+            assert state_event_ids is None
+
+            if builder.room_id:
+                if prev_state_events is None:
+                    prev_state_events = list(
+                        await self.store.get_state_dag_extremities(builder.room_id)
+                    )
+            else:
+                # create event doesn't need prev_state_events to be fetched, but it must be non-None.
+                assert builder.type == EventTypes.Create and builder.state_key == ""
+                prev_state_events = []
+
         # Strip down the state_event_ids to only what we need to auth the event.
         # For example, we don't need extra m.room.member that don't match event.sender
         if state_event_ids is not None:
@@ -1353,7 +1392,10 @@ class EventCreationHandler:
             assert state_map is not None
             auth_ids = self._event_auth_handler.compute_auth_events(builder, state_map)
             event = await builder.build(
-                prev_event_ids=prev_event_ids, auth_event_ids=auth_ids, depth=depth
+                prev_event_ids=prev_event_ids,
+                auth_event_ids=auth_ids,
+                depth=depth,
+                prev_state_events=prev_state_events,
             )
 
             context: UnpersistedEventContextBase = (
@@ -1370,6 +1412,7 @@ class EventCreationHandler:
                 prev_event_ids=prev_event_ids,
                 auth_event_ids=auth_event_ids,
                 depth=depth,
+                prev_state_events=prev_state_events,
             )
 
             # Pass on the outlier property from the builder to the event
@@ -1541,7 +1584,7 @@ class EventCreationHandler:
                 EventTypes.Message,
                 EventTypes.Encrypted,
             ]:
-                await self.store.set_room_participation(event.user_id, event.room_id)
+                await self.store.set_room_participation(event.sender, event.room_id)
 
             if event.internal_metadata.is_out_of_band_membership():
                 # the only sort of out-of-band-membership events we expect to see here are
@@ -1559,6 +1602,20 @@ class EventCreationHandler:
                         auth_event = event_id_to_event.get(event_id)
                         if auth_event:
                             batched_auth_events[event_id] = auth_event
+                    if event.room_version.msc4242_state_dags:
+                        assert isinstance(event, FrozenEventVMSC4242)
+                        # State DAG rooms will check that the prev_state_events are not rejected.
+                        # To do that, we need to make sure we pass in the prev_state_events as
+                        # batched_auth_events, else we will fail the event due to the
+                        # prev_state_events not existing in the database.
+                        for prev_state_event_id in event.prev_state_events:
+                            prev_state_event = event_id_to_event.get(
+                                prev_state_event_id
+                            )
+                            if prev_state_event:
+                                batched_auth_events[prev_state_event_id] = (
+                                    prev_state_event
+                                )
                     await self._event_auth_handler.check_auth_rules_from_context(
                         event, batched_auth_events
                     )
@@ -1813,7 +1870,10 @@ class EventCreationHandler:
             # set for a while, so that the expiry time is reset.
 
             state_entry = await self.state.resolve_state_groups_for_events(
-                event.room_id, event_ids=event.prev_event_ids()
+                event.room_id,
+                event_ids=event.prev_state_events
+                if isinstance(event, FrozenEventVMSC4242)
+                else event.prev_event_ids(),
             )
 
             if state_entry.state_group:
@@ -2098,7 +2158,7 @@ class EventCreationHandler:
                             "Could not find event %s" % (event.redacts,)
                         )
 
-                    if event.user_id != original_event.user_id:
+                    if event.sender != original_event.sender:
                         raise AuthError(
                             403, "You don't have permission to redact events"
                         )
@@ -2356,9 +2416,16 @@ class EventCreationHandler:
         # case.
         prev_event_ids = await self.store.get_prev_events_for_room(builder.room_id)
 
+        prev_state_events = None
+        if original_event.room_version.msc4242_state_dags:
+            prev_state_events = list(
+                await self.store.get_state_dag_extremities(builder.room_id)
+            )
+
         event = await builder.build(
             prev_event_ids=prev_event_ids,
             auth_event_ids=None,
+            prev_state_events=prev_state_events,
         )
 
         # we rebuild the event context, to be on the safe side. If nothing else,
