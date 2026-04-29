@@ -308,6 +308,9 @@ The following fields are possible in the JSON response body:
   If the room does not define a type, the value will be `null`.
 * `forgotten` - Whether all local users have
   [forgotten](https://spec.matrix.org/latest/client-server-api/#leaving-rooms) the room.
+* `tombstoned` - Whether the room has been tombstoned (permanently closed).
+* `replacement_room` - The room ID of the new room that users should join instead, if this room was tombstoned. Will be 
+  `null` if the room has not been tombstoned, or if it was tombstoned without designating a successor room.
 
 The API is:
 
