@@ -52,7 +52,7 @@ func TestMessagesOverFederation(t *testing.T) {
 	// reveal more history in the window the user is currently paginating in.
 	//
 	// This could be a near miss as this test is specifically stressing or a more deep miss
-	// as a the backward extremity could reveal an entire fork of history that stretches
+	// as the backward extremity could reveal an entire fork of history that stretches
 	// back far enough to be visible.
 	//
 	// In Synapse, we consider "nearby" as anything within range of the `limit` specified
@@ -61,7 +61,7 @@ func TestMessagesOverFederation(t *testing.T) {
 	// This test lives in our in-repo Complement tests for Synapse because the Matrix spec
 	// doesn't have any rules for how a homeserver should backfill. Practically speaking,
 	// homeservers that don't do anything for this problem will just hide messages from
-	// clients. This underscores the fact why it's necessary for homeservers indicate that
+	// clients. This underscores the fact why it's necessary for homeservers to indicate that
 	// there is a gap (using MSC3871) at the very least.
 	//
 	// --------------------------------------------------
@@ -77,10 +77,10 @@ func TestMessagesOverFederation(t *testing.T) {
 	//
 	// When Bob calls `/messages?dir=b&backfill=false`, he sees a gap (`{ event_id: "bob
 	// join 4", prev_pagination_token: "t3", next_pagination_token: "t4" }`) and tries to
-	// fill it in with `/messages?dir=b&from=t3limit=10&backfill=true`. To find backfill
+	// fill it in with `/messages?dir=b&from=t3&limit=10&backfill=true`. To find backfill
 	// points, Synapse will compare `t3` with the backward extremity at an approximate
 	// depth of 4. Which is why we take `t3`, add the `limit=10` and then do the
-	// comparison (find any backfill points with an aproximate depth <= 13).
+	// comparison (find any backfill points with an approximate depth <= 13).
 	t.Run("Backfill from nearby backward extremities past token", func(t *testing.T) {
 		// Alice creates the room
 		roomID := alice.MustCreateRoom(t, map[string]interface{}{
