@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.152.0rc1"
+version = "1.152.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -137,7 +137,7 @@ saml2 = [
     "defusedxml>=0.7.1", # via pysaml2
     "pytz>=2018.3",  # via pysaml2
 ]
-oidc = ["authlib>=1.6.11"]
+oidc = ["authlib>=0.15.1"]
 url-preview = ["lxml>=4.6.3"]
 sentry = ["sentry-sdk>=0.7.2"]
 opentracing = [
@@ -179,7 +179,7 @@ all = [
     # saml2
     "pysaml2>=4.5.0",
     # oidc and jwt
-    "authlib>=1.6.11",
+    "authlib>=0.15.1",
     # url-preview
     "lxml>=4.6.3",
     # sentry
