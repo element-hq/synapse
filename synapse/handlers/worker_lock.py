@@ -254,11 +254,7 @@ class WaitingLock:
                             clock=self.clock,
                         )
                 except defer.TimeoutError:
-                    # Actual timeouts are raised with a TimeoutError. Not to be confused
-                    # with another lock being released and broadcasting its notification
-                    # for other locks to retry. This is the circumstance that the retry
-                    # interval should increase, otherwise a series of progressively
-                    # larger timeout interval warnings occur
+                    # Only increment the timeout value if this was an actual timeout
                     self._increment_timeout_interval()
                 except Exception as e:
                     logger.warning(
@@ -354,11 +350,7 @@ class WaitingMultiLock:
                             clock=self.clock,
                         )
                 except defer.TimeoutError:
-                    # Actual timeouts are raised with a TimeoutError. Not to be confused
-                    # with another lock being released and broadcasting its notification
-                    # for other locks to retry. This is the circumstance that the retry
-                    # interval should increase, otherwise a series of progressively
-                    # larger timeout interval warnings occur
+                    # Only increment the timeout value if this was an actual timeout
                     self._increment_timeout_interval()
                 except Exception as e:
                     logger.warning(
