@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 # will not disappear under our feet as long as we don't delete the room.
 NEW_EVENT_DURING_PURGE_LOCK_NAME = "new_event_during_purge_lock"
 
-WORKER_LOCK_MAX_RETRY_INTERVAL = Duration(minutes=15).as_secs()
+WORKER_LOCK_MAX_RETRY_INTERVAL = Duration(seconds=60).as_secs()
 WORKER_LOCK_WARN_RETRY_INTERVAL = Duration(minutes=10).as_millis()
 
 
