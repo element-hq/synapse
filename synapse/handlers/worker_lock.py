@@ -295,7 +295,7 @@ class WaitingLock:
                 "(WaitingLock (%s, %s) Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 self.lock_name,
                 self.lock_key,
-                next,
+                next_interval,
             )
         # The jitter value is maintained for the timeout, to help avoid a "thundering
         # herd" situation when all locks may time out at the same time.
