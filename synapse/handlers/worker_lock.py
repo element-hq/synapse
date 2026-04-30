@@ -288,9 +288,9 @@ class WaitingLock:
         return r
 
     def _increment_timeout_interval(self) -> float:
-        _next = self._timeout_interval
-        _next = min(WORKER_LOCK_MAX_RETRY_INTERVAL, _next * 2)
-        if _next > WORKER_LOCK_WARN_RETRY_INTERVAL:  # >12 iterations
+        next_interval = self._timeout_interval
+        next_interval = min(WORKER_LOCK_MAX_RETRY_INTERVAL, next_interval * 2)
+        if next_interval > WORKER_LOCK_WARN_RETRY_INTERVAL:  # >12 iterations
             logger.warning(
                 "(WaitingLock (%s, %s) Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 self.lock_name,
@@ -299,7 +299,7 @@ class WaitingLock:
             )
         # The jitter value is maintained for the timeout, to help avoid a "thundering
         # herd" situation when all locks may time out at the same time.
-        self._timeout_interval = _next * random.uniform(0.9, 1.1)
+        self._timeout_interval = next_interval * random.uniform(0.9, 1.1)
         return self._timeout_interval
 
 
@@ -390,15 +390,15 @@ class WaitingMultiLock:
         return r
 
     def _increment_timeout_interval(self) -> float:
-        _next = self._timeout_interval
-        _next = min(WORKER_LOCK_MAX_RETRY_INTERVAL, _next * 2)
-        if _next > WORKER_LOCK_WARN_RETRY_INTERVAL:  # >12 iterations
+        next_interval = self._timeout_interval
+        next_interval = min(WORKER_LOCK_MAX_RETRY_INTERVAL, next_interval * 2)
+        if next_interval > WORKER_LOCK_WARN_RETRY_INTERVAL:  # >12 iterations
             logger.warning(
                 "(WaitingMultiLock (%r) Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 self.lock_names,
-                _next,
+                next_interval,
             )
         # The jitter value is maintained for the timeout, to help avoid a "thundering
         # herd" situation when all locks may time out at the same time.
-        self._timeout_interval = _next * random.uniform(0.9, 1.1)
+        self._timeout_interval = next_interval * random.uniform(0.9, 1.1)
         return self._timeout_interval
