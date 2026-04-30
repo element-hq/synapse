@@ -28,6 +28,7 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
+from tests.server import TimedOutException
 from tests.test_utils.event_injection import mark_event_as_partial_state
 
 logger = logging.getLogger(__name__)
@@ -2285,14 +2286,14 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             timeout=Duration(seconds=10),
             await_result=False,
         )
-        self.reactor.advance(0.1)  # Allow the request to start processing
-        self.reactor.advance(9.5)
-        self.assertFalse(channel.is_finished())
 
-        # Advance past the timeout to make sure the request finishes. (We do this
-        # to ensure log contexts don't leak between tests).
-        self.reactor.advance(1)
-        self.assertTrue(channel.is_finished())
+        # Request will block for 10 seconds as there no updates.
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=9500)
+
+        # Wait for the request to actually finish. (We do this to ensure log
+        # contexts don't leak between tests).
+        channel.await_result(timeout_ms=1000)
 
         # Now update the Sliding Sync requests to include a `required_state`
         # event, and make another sync request.
