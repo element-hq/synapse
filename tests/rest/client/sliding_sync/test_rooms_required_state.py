@@ -2301,11 +2301,18 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             [EventTypes.Create, ""],
         ]
 
-        response_body, _ = self.do_sync(
-            sync_body, since=from_token, tok=user1_tok, timeout=Duration(seconds=10)
+        channel = self.make_sync_request(
+            sync_body,
+            since=from_token,
+            tok=user1_tok,
+            timeout=Duration(seconds=10),
+            await_result=False,
         )
 
-        # We should see the new `required_state` immediately without waiting.
+        # We should see the new `required_state` immediately without waiting
+        # (for the full timeout, we may need to wait briefly).
+        channel.await_result(timeout_ms=100)
+        response_body = channel.json_body
         self._assertRequiredStateIncludes(
             response_body["rooms"][room_id1]["required_state"],
             {
