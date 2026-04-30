@@ -25,8 +25,7 @@ from typing import TYPE_CHECKING, Iterable
 
 from synapse.api.constants import EduTypes, EventTypes, Membership, PresenceState
 from synapse.api.errors import AuthError, SynapseError
-from synapse.events import EventBase
-from synapse.events.utils import SerializeEventConfig
+from synapse.events.utils import FilteredEvent, SerializeEventConfig
 from synapse.handlers.presence import format_user_presence_state
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.streams.config import PaginationConfig
@@ -102,19 +101,19 @@ class EventStreamHandler:
             # joined room, we need to send down presence for those users.
             to_add: list[JsonDict] = []
             for event in events:
-                if not isinstance(event, EventBase):
+                if not isinstance(event, FilteredEvent):
                     continue
-                if event.type == EventTypes.Member:
-                    if event.membership != Membership.JOIN:
+                if event.event.type == EventTypes.Member:
+                    if event.event.membership != Membership.JOIN:
                         continue
                     # Send down presence.
-                    if event.state_key == requester.user.to_string():
+                    if event.event.state_key == requester.user.to_string():
                         # Send down presence for everyone in the room.
                         users: Iterable[str] = await self.store.get_users_in_room(
-                            event.room_id
+                            event.event.room_id
                         )
                     else:
-                        users = [event.state_key]
+                        users = [event.event.state_key]
 
                     states = await presence_handler.get_states(users)
                     to_add.extend(
@@ -155,7 +154,7 @@ class EventHandler:
         room_id: str | None,
         event_id: str,
         show_redacted: bool = False,
-    ) -> EventBase | None:
+    ) -> FilteredEvent | None:
         """Retrieve a single specified event on behalf of a user.
         The event will be transformed in a user-specific and time-specific way,
         e.g. having unsigned metadata added or being erased depending on who is accessing.

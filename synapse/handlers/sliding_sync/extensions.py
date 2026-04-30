@@ -761,7 +761,7 @@ class SlidingSyncExtensionHandler:
                 # in the timeline to avoid bloating and blowing up the sync response
                 # as the number of users in the room increases. (this behavior is part of the spec)
                 initial_rooms_and_event_ids = [
-                    (room_id, event.event_id)
+                    (room_id, event.event.event_id)
                     for room_id in initial_rooms
                     if room_id in actual_room_response_map
                     for event in actual_room_response_map[room_id].timeline_events

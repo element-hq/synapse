@@ -194,7 +194,11 @@ user_agent_suffix: ' (I''m a teapot; Linux x86_64)'
 ---
 ### `use_frozen_dicts`
 
-*(boolean)* Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive. Defaults to `false`.
+*(boolean)* Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive.
+
+> ⚠️ **Warning** – This option is known to introduce a new class of [comparison bugs](https://github.com/element-hq/synapse/issues/18117) in Synapse.
+
+Defaults to `false`.
 
 Example configuration:
 ```yaml

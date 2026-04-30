@@ -1121,7 +1121,9 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                 return {"pdus": [missing_event.get_pdu_json()]}
 
             async def get_room_state_ids(
-                destination: str, room_id: str, event_id: str
+                destination: str,
+                room_id: str,
+                event_id: str,
             ) -> JsonDict:
                 self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 self.assertEqual(event_id, missing_event.event_id)
@@ -1131,7 +1133,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                 }
 
             async def get_room_state(
-                room_version: RoomVersion, destination: str, room_id: str, event_id: str
+                room_version: RoomVersion,
+                destination: str,
+                room_id: str,
+                event_id: str,
             ) -> StateRequestResponse:
                 self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 self.assertEqual(event_id, missing_event.event_id)

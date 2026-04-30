@@ -1493,6 +1493,15 @@ class EventFederationWorkerStore(
         )
         return frozenset(event_ids)
 
+    async def get_state_dag_extremities(self, room_id: str) -> frozenset[str]:
+        event_ids = await self.db_pool.simple_select_onecol(
+            table="msc4242_state_dag_forward_extremities",
+            keyvalues={"room_id": room_id},
+            retcol="event_id",
+            desc="get_state_dag_extremities",
+        )
+        return frozenset(event_ids)
+
     async def get_min_depth(self, room_id: str) -> int | None:
         """For the given room, get the minimum depth we have seen for it."""
         return await self.db_pool.runInteraction(

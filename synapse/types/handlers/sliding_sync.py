@@ -34,6 +34,7 @@ from pydantic import ConfigDict
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -185,7 +186,7 @@ class SlidingSyncResult:
         # Should be empty for invite/knock rooms with `stripped_state`
         required_state: list[EventBase]
         # Should be empty for invite/knock rooms with `stripped_state`
-        timeline_events: list[EventBase]
+        timeline_events: list[FilteredEvent]
         bundled_aggregations: dict[str, "BundledAggregations"] | None
         # Optional because it's only relevant to invite/knock rooms
         stripped_state: list[JsonDict]

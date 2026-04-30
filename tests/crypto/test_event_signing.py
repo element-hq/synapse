@@ -19,12 +19,23 @@
 #
 #
 
-from signedjson.key import decode_signing_key_base64
+from typing import TypedDict
+
+from signedjson.key import (
+    decode_signing_key_base64,
+    generate_signing_key,
+    get_verify_key,
+)
 from signedjson.types import SigningKey
 
 from synapse.api.room_versions import RoomVersions
-from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import make_event_from_dict
+from synapse.crypto.event_signing import (
+    add_hashes_and_signatures,
+    event_needs_resigning,
+    resign_event,
+)
+from synapse.events import EventBase, make_event_from_dict
+from synapse.types import JsonDict
 
 from tests import unittest
 
@@ -107,3 +118,121 @@ class EventSigningTestCase(unittest.TestCase):
             "Ay4aj2b5oJ1k8INYZ9n3KnszCflM0emwcmQQ7vxpbdc"
             "Sv9bkJxIZdWX1IJllcZLq89+D3sSabE+vqPtZs9akDw",
         )
+
+
+class EventResigningTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.signing_key: SigningKey = decode_signing_key_base64(
+            KEY_ALG, KEY_VER, SIGNING_KEY_SEED
+        )
+
+    def test_resign(self) -> None:
+        event_dict: JsonDict = {
+            "content": {"body": "Here is the message content"},
+            "event_id": "$fffff:" + HOSTNAME,
+            "origin_server_ts": 1000000,
+            "type": "m.room.message",
+            "room_id": "!r:" + HOSTNAME,
+            "sender": "@u:" + HOSTNAME,
+            "signatures": {},
+            "unsigned": {"age_ts": 1000000},
+        }
+        add_hashes_and_signatures(
+            RoomVersions.V1, event_dict, HOSTNAME, self.signing_key
+        )
+        event = make_event_from_dict(event_dict)
+        self.assertIn(HOSTNAME, event.signatures)
+        self.assertIn(KEY_NAME, event.signatures[HOSTNAME])
+        signature = event.signatures[HOSTNAME][KEY_NAME]
+
+        # Re-sign with a different key
+        signing_key_2: SigningKey = generate_signing_key("2")
+        key_name_2 = "ed25519:2"
+
+        resigned_event = resign_event(event, HOSTNAME, signing_key_2)
+        self.assertIn(HOSTNAME, resigned_event["signatures"])
+        self.assertIn(key_name_2, resigned_event["signatures"][HOSTNAME])
+        self.assertEqual(
+            len(resigned_event["signatures"][HOSTNAME]), 1
+        )  # the previous signature was removed.
+        self.assertNotEqual(
+            signature, resigned_event["signatures"][HOSTNAME][key_name_2]
+        )  # different signatures
+
+        # Repeat but with an event without any signatures.
+        event_dict = {
+            "content": {"body": "Here is the message content"},
+            "event_id": "$fffff:" + HOSTNAME,
+            "origin_server_ts": 1000000,
+            "type": "m.room.message",
+            "room_id": "!r:" + HOSTNAME,
+            "sender": "@u:" + HOSTNAME,
+            "signatures": {},
+            "unsigned": {"age_ts": 1000000},
+        }
+        event = make_event_from_dict(event_dict)
+        resigned_event = resign_event(event, HOSTNAME, signing_key_2)
+        self.assertIn(HOSTNAME, resigned_event["signatures"])
+        self.assertIn(key_name_2, resigned_event["signatures"][HOSTNAME])
+        self.assertEqual(len(resigned_event["signatures"][HOSTNAME]), 1)
+
+    def test_event_needs_resigning(self) -> None:
+        event_that_needs_resigning_dict: JsonDict = {
+            "content": {"body": "Here is the message content"},
+            "event_id": "$fffff:" + HOSTNAME,
+            "origin_server_ts": 1000000,
+            "type": "m.room.message",
+            "room_id": "!r:" + HOSTNAME,
+            "sender": "@u:" + HOSTNAME,
+            "unsigned": {"age_ts": 1000000},
+        }
+        internal_metadata: JsonDict = {}
+        event_that_needs_resigning = make_event_from_dict(
+            event_that_needs_resigning_dict,
+            RoomVersions.V1,
+            internal_metadata,
+        )
+        self.assertEqual(
+            event_needs_resigning(
+                event_that_needs_resigning, HOSTNAME, get_verify_key(self.signing_key)
+            ),
+            True,
+        )
+
+        class TestCase(TypedDict):
+            name: str
+            event: EventBase
+
+        events_that_dont_need_resigning: list[TestCase] = [
+            {
+                "name": "sender domain isn't ours",
+                "event": make_event_from_dict(
+                    {**event_that_needs_resigning_dict, "sender": "@u:somewhereelse"},
+                    RoomVersions.V1,
+                    internal_metadata,
+                ),
+            },
+            {
+                "name": "already signed with this key",
+                "event": make_event_from_dict(
+                    {
+                        **event_that_needs_resigning_dict,
+                        "signatures": {
+                            HOSTNAME: {
+                                KEY_NAME: "thisisntchecked",
+                            },
+                        },
+                    },
+                    RoomVersions.V1,
+                    internal_metadata,
+                ),
+            },
+        ]
+        for test_case in events_that_dont_need_resigning:
+            self.assertEqual(
+                event_needs_resigning(
+                    test_case["event"], HOSTNAME, get_verify_key(self.signing_key)
+                ),
+                False,
+                test_case["name"],
+            )
