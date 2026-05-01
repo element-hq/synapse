@@ -174,7 +174,7 @@ jobs:
       # Cribbed from
       # https://github.com/AustinScola/mypy-cache-github-action/blob/85ea4f2972abed39b33bd02c36e341b28ca59213/src/restore.ts#L10-L17
       - name: Restore/persist mypy's cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .mypy_cache
@@ -561,7 +561,7 @@ jobs:
         if: ${{ always() }}
         run: /sytest/scripts/tap_to_gha.pl /logs/results.tap
       - name: Upload SyTest logs
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ always() }}
         with:
           name: Sytest Logs - ${{ job.status }} - (${{ join(matrix.job.*, ', ') }})
@@ -658,7 +658,7 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: postgres
       - name: "Upload schema differences"
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() && !cancelled() && steps.run_tester_script.outcome == 'failure' }}
         with:
           name: Schema dumps
