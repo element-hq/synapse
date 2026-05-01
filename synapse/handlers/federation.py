@@ -287,7 +287,9 @@ class FederationHandler:
                 # as they're more likely to reveal history that we can return (something
                 # absolutely in the past is better than something can potentially extend
                 # into the past).
-                1 if current_depth >= e.depth else 0,
+                #
+                # This sorts ascending so 0 sorts before 1
+                0 if current_depth >= e.depth else 1,
             ),
         )
 
