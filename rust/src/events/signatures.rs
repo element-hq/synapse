@@ -128,18 +128,13 @@ impl Signatures {
             .write()
             .map_err(|_| PyRuntimeError::new_err("Failed to acquire lock"))?;
 
-        for key in other.keys()? {
-            let value = other.get_item(&key)?;
-            let server_name = key.extract::<String>()?;
-            let server_sigs = value.cast::<PyMapping>()?;
+        for list_entry in other.items()? {
+            let (server_name, server_sigs) = list_entry.extract::<(String, Bound<PyMapping>)>()?;
 
             let mut entry = HashMap::new();
-            for key in server_sigs.keys()? {
-                let value = server_sigs.get_item(&key)?;
-                let key_id = key.extract::<String>()?;
-                let signature = value.extract::<String>()?;
-
-                entry.insert(key_id, signature);
+            for list_entry in server_sigs.items()? {
+                let (key, value) = list_entry.extract::<(String, String)>()?;
+                entry.insert(key, value);
             }
 
             // Only insert the entry if it has at least one signature.
