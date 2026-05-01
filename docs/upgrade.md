@@ -117,7 +117,7 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
-# Upgrading to v1.151.0
+# Upgrading to v1.152.0
 
 ## Profile Updates Stream Writer Workers
 
@@ -144,6 +144,17 @@ stream_writers:
 as well as included in the
 [`instance_map`](https://element-hq.github.io/synapse/v1.151/usage/configuration/config_documentation.html#instance_map)
 config option.
+
+## Workers which quarantine media must be stream writers
+
+A new [`quarantined_media_changes` stream writer](./workers.md#the-quarantined_media_changes-stream) is
+introduced. Existing deployments which route the `/quarantine_media` endpoints to a
+worker (instead of the main process) *must* also add those workers to the
+`quarantined_media_changes` stream writer list. Quarantining media will not work without
+this.
+
+If your deployment does not use workers, or instead uses the main process for
+quarantining media, you do not need to make any changes to your configuration.
 
 # Upgrading to v1.150.0
 
@@ -173,6 +184,14 @@ No immediate change is necessary, however once the parameter is removed, modules
 
 From this version, when the parameter is passed, an error such as
 ``Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: False). This will break in 2027.`` will be logged. The method will otherwise continue to work.
+
+## Updated request log format (`Processed request: ...`)
+
+The [request log format](usage/administration/request_log.md) has slightly changed to
+include `ru=(...)` and `db=(...)` labels to better disambiguate the number groupings.
+Previously, these values appeared without labels.
+
+This only matters if you have third-party tooling that parses the Synapse logs.
 
 # Upgrading to v1.146.0
 

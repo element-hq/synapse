@@ -29,7 +29,7 @@ which is under the Unlicense licence.
     {{- with .TestCases -}}
         {{- /* Passing tests are first */ -}}
         {{- range . -}}
-            {{- if eq .Result "PASS" -}}
+            {{- if and (eq .Result "PASS") (not $settings.HideSuccessfulTests) -}}
                 ::group::{{ "\033" }}[0;32m✅{{ " " }}{{- .Name -}}
                 {{- "\033" -}}[0;37m ({{if $settings.ShowTestStatus}}{{.Result}}; {{end}}{{ .Duration -}}
                 {{- with .Coverage -}}
@@ -49,7 +49,8 @@ which is under the Unlicense licence.
 
         {{- /* Then skipped tests are second */ -}}
         {{- range . -}}
-            {{- if eq .Result "SKIP" -}}
+            {{- /* Skipped tests are also purposefully hidden if "HideSuccessfulTests" is enabled */ -}}
+            {{- if and (eq .Result "SKIP") (not $settings.HideSuccessfulTests) -}}
                 ::group::{{ "\033" }}[0;33m🚧{{ " " }}{{- .Name -}}
                 {{- "\033" -}}[0;37m ({{if $settings.ShowTestStatus}}{{.Result}}; {{end}}{{ .Duration -}}
                 {{- with .Coverage -}}

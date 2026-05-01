@@ -128,7 +128,6 @@ class RoomSummaryHandler:
             name="get_room_hierarchy",
             server_name=self.server_name,
         )
-        self._msc3266_enabled = hs.config.experimental.msc3266_enabled
 
     async def get_room_hierarchy(
         self,
@@ -791,6 +790,7 @@ class RoomSummaryHandler:
 
         entry: JsonDict = {
             "room_id": stats.room_id,
+            "room_version": stats.version,
             "name": stats.name,
             "topic": stats.topic,
             "canonical_alias": stats.canonical_alias,
@@ -802,11 +802,8 @@ class RoomSummaryHandler:
             ),
             "guest_can_join": stats.guest_access == "can_join",
             "room_type": stats.room_type,
+            "encryption": stats.encryption,
         }
-
-        if self._msc3266_enabled:
-            entry["im.nheko.summary.version"] = stats.version
-            entry["im.nheko.summary.encryption"] = stats.encryption
 
         # Federation requests need to provide additional information so the
         # requested server is able to filter the response appropriately.

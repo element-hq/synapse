@@ -145,6 +145,8 @@ class WriterLocations:
         thread_subscriptions: The instances that write to the thread subscriptions
             stream.
         profile_updates: The instances that write to the profile updates stream.
+        quarantined_media_changes: The instances that write to the quarantined media
+             changes stream.
     """
 
     events: list[str] = attr.ib(
@@ -184,6 +186,10 @@ class WriterLocations:
         converter=_instance_to_list_converter,
     )
     profile_updates: list[str] = attr.ib(
+        default=[MAIN_PROCESS_INSTANCE_NAME],
+        converter=_instance_to_list_converter,
+    )
+    quarantined_media_changes: list[str] = attr.ib(
         default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )

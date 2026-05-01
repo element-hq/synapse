@@ -638,10 +638,12 @@ class SynapseRequest(Request):
         if authenticated_entity:
             requester = f"{authenticated_entity}|{requester}"
 
+        # Updates to this log line should also be reflected in our docs,
+        # `docs/usage/administration/request_log.md`
         self.synapse_site.access_logger.log(
             log_level,
             "%s - %s - {%s}"
-            " Processed request: %.3fsec/%.3fsec (%.3fsec, %.3fsec) (%.3fsec/%.3fsec/%d)"
+            " Processed request: %.3fsec/%.3fsec ru=(%.3fsec, %.3fsec) db=(%.3fsec/%.3fsec/%d)"
             ' %sB %s "%s %s %s" "%s" [%d dbevts]',
             self.get_client_ip_if_available(),
             self.synapse_site.site_tag,

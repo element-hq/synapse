@@ -1,7 +1,7 @@
 --
 -- This file is licensed under the Affero General Public License (AGPL) version 3.
 --
--- Copyright (C) 2026 Element Creations Ltd.
+-- Copyright (C) 2026 Element Creations, Ltd
 --
 -- This program is free software: you can redistribute it and/or modify
 -- it under the terms of the GNU Affero General Public License as
@@ -11,8 +11,5 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-CREATE SEQUENCE profile_updates_sequence;
--- Synapse streams start at 2, because the default position is 1
--- so any item inserted at position 1 is ignored.
--- We have to use nextval not START WITH 2, see https://github.com/element-hq/synapse/issues/18712
-SELECT nextval('profile_updates_sequence');
+INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
+  (9402, 'redactions_recheck', '{}');

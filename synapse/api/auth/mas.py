@@ -111,6 +111,7 @@ class MasDelegatedAuth(BaseAuth):
         self._rust_http_client = HttpClient(
             reactor=hs.get_reactor(),
             user_agent=self._http_client.user_agent.decode("utf8"),
+            http2_only=self._config.force_http2,
         )
         self._server_metadata = RetryOnExceptionCachedCall[ServerMetadata](
             self._load_metadata

@@ -119,7 +119,7 @@ WORKERS_CONFIG: dict[str, dict[str, Any]] = {
     },
     "media_repository": {
         "app": "synapse.app.generic_worker",
-        "listener_resources": ["media", "client"],
+        "listener_resources": ["media", "client", "replication"],
         "endpoint_patterns": [
             "^/_matrix/media/",
             "^/_synapse/admin/v1/purge_media_cache$",
@@ -869,6 +869,7 @@ def parse_worker_types(
 def generate_worker_files(
     environ: Mapping[str, str],
     config_path: str,
+    extra_config_dir: str | None,
     data_dir: str,
     requested_workers: list[Worker],
 ) -> None:
@@ -878,6 +879,7 @@ def generate_worker_files(
     Args:
         environ: os.environ instance.
         config_path: The location of the generated Synapse main worker config file.
+        extra_config_dir: A directory in which extra Synapse configuration files will be loaded.
         data_dir: The location of the synapse data directory. Where log and
             user-facing config files live.
         requested_workers: A list of requested workers
@@ -1271,6 +1273,7 @@ def generate_worker_files(
         "/etc/supervisor/conf.d/synapse.conf",
         workers=worker_descriptors,
         main_config_path=config_path,
+        extra_config_dir=extra_config_dir,
         use_forking_launcher=environ.get("SYNAPSE_USE_EXPERIMENTAL_FORKING_LAUNCHER"),
     )
 
@@ -1331,6 +1334,9 @@ def main(args: list[str], environ: MutableMapping[str, str]) -> None:
 
     config_dir = environ.get("SYNAPSE_CONFIG_DIR", "/data")
     config_path = environ.get("SYNAPSE_CONFIG_PATH", config_dir + "/homeserver.yaml")
+    # All files in this directory will be loaded as `homeserver.yaml` snippets
+    # Currently only intended for use by Complement
+    extra_config_dir = environ.get("_SYNAPSE_COMPLEMENT_EXTRA_CONFIG_DIR", None)
     data_dir = environ.get("SYNAPSE_DATA_DIR", "/data")
 
     # override SYNAPSE_NO_TLS, we don't support TLS in worker mode,
@@ -1365,6 +1371,7 @@ def main(args: list[str], environ: MutableMapping[str, str]) -> None:
         generate_worker_files(
             environ=environ,
             config_path=config_path,
+            extra_config_dir=extra_config_dir,
             data_dir=data_dir,
             requested_workers=requested_workers,
         )

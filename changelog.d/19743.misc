@@ -1,0 +1,1 @@
+Configure Dependabot to only update Python dependencies in the lockfile, unless widening upper bounds.

@@ -1358,6 +1358,16 @@ def start_test_homeserver(
 
     hs.get_media_sender_thread_pool = thread_pool  # type: ignore[method-assign]
 
+    # Load the OIDC provider metadatas, if OIDC is enabled.
+    # This matches `start` in synapse/app/_base.py
+    #
+    # TODO: Extract common startup logic somewhere cleaner
+    if hs.config.oidc.oidc_enabled:
+        oidc = hs.get_oidc_handler()
+        # Preload the provider metadata.
+        # This will spawn fire-and-forget background processes.
+        oidc.preload_metadata()
+
     # Load any configured modules into the homeserver
     module_api = hs.get_module_api()
     for module, module_config in hs.config.modules.loaded_modules:
