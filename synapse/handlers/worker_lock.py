@@ -334,7 +334,7 @@ class WaitingMultiLock:
                 self.deferred.callback(None)
 
     async def __aenter__(self) -> None:
-        self.first_attempt_at_acquiring_lock_ts_ms = self.clock.time_msec()
+        self.start_ts_ms = self.clock.time_msec()
         self._lock_span.__enter__()
 
         with start_active_span("WaitingLock.waiting_for_lock"):
