@@ -209,7 +209,7 @@ class WaitingLock:
     lock_name: str
     lock_key: str
     write: bool | None
-    first_attempt_at_acquiring_lock_ts_ms: int = 0
+    start_ts_ms: int = 0
     deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
     _inner_lock: Lock | None = None
     _timeout_interval: float = 0.1
@@ -224,7 +224,7 @@ class WaitingLock:
                 self.deferred.callback(None)
 
     async def __aenter__(self) -> None:
-        self.first_attempt_at_acquiring_lock_ts_ms = self.clock.time_msec()
+        self.start_ts_ms = self.clock.time_msec()
         self._lock_span.__enter__()
 
         with start_active_span("WaitingLock.waiting_for_lock"):
@@ -268,7 +268,7 @@ class WaitingLock:
                 finally:
                     now_ms = self.clock.time_msec()
                     time_spent_trying_to_lock = (
-                        now_ms - self.first_attempt_at_acquiring_lock_ts_ms
+                        now_ms - self.start_ts_ms
                     )
                     if time_spent_trying_to_lock > WORKER_LOCK_WARN_RETRY_INTERVAL:
                         logger.warning(
@@ -318,7 +318,7 @@ class WaitingMultiLock:
     store: LockStore
     handler: WorkerLocksHandler
 
-    first_attempt_at_acquiring_lock_ts_ms: int = 0
+    start_ts_ms: int = 0
     deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
 
     _inner_lock_cm: AsyncContextManager | None = None
@@ -372,7 +372,7 @@ class WaitingMultiLock:
                 finally:
                     now_ms = self.clock.time_msec()
                     time_spent_trying_to_lock = (
-                        now_ms - self.first_attempt_at_acquiring_lock_ts_ms
+                        now_ms - self.start_ts_ms
                     )
                     if time_spent_trying_to_lock > WORKER_LOCK_WARN_RETRY_INTERVAL:
                         logger.warning(
