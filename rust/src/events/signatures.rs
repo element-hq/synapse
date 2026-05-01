@@ -86,7 +86,7 @@ impl Signatures {
     }
 
     /// Get the signatures for the given server name.
-    fn __getitem__(&self, key: Bound<'_, PyAny>) -> PyResult<Option<HashMap<String, String>>> {
+    fn __getitem__(&self, key: Bound<'_, PyAny>) -> PyResult<HashMap<String, String>> {
         let Some(server_name) = key.extract::<&str>().ok() else {
             return Err(PyKeyError::new_err(key.to_string()));
         };
@@ -96,7 +96,11 @@ impl Signatures {
             .read()
             .map_err(|_| PyRuntimeError::new_err("Failed to acquire lock"))?;
 
-        Ok(signatures.get(server_name).cloned())
+        if let Some(server_sigs) = signatures.get(server_name) {
+            Ok(server_sigs.clone())
+        } else {
+            Err(PyKeyError::new_err(server_name.to_string()))
+        }
     }
 
     /// Add a signature for the given server name and key ID.
