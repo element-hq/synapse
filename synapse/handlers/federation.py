@@ -275,11 +275,20 @@ class FederationHandler:
             )
         ]
 
-        # we now have a list of potential places to backpaginate from. We prefer to
-        # start with the most recent (ie, max depth), so let's sort the list.
+        # we now have a list of potential places to backpaginate from. Figure out which
+        # ones we should prefer, so let's sort the list.
         sorted_backfill_points: list[_BackfillPoint] = sorted(
             backwards_extremities,
-            key=lambda e: -int(e.depth),
+            key=lambda e: (
+                # Prefer backfill points that are closer to the `current_depth`
+                # (absolute distance)
+                abs(current_depth - e.depth),
+                # For the tie-break, we care about events that are actually in the past
+                # as they're more likely to reveal history that we can return (something
+                # absolutely in the past is better than something can potentially extend
+                # into the past).
+                1 if current_depth >= e.depth else 0,
+            ),
         )
 
         logger.debug(
@@ -300,7 +309,7 @@ class FederationHandler:
             str(len(sorted_backfill_points)),
         )
 
-        # If we have no backfill points lower than the `current_depth` then either we
+        # If we have no backfill points lower than the `nearby_depth` then either we
         # can a) bail or b) still attempt to backfill. We opt to try backfilling anyway
         # just in case we do get relevant events. This is good for eventual consistency
         # sake but we don't need to block the client for something that is just as
