@@ -122,7 +122,7 @@ impl Signatures {
     /// Update the signatures with the given signatures.
     ///
     /// Will overwrite all existing signatures for the server names provided.
-    fn update(&self, other: Bound<'_, PyMapping>) -> PyResult<()> {
+    fn update(&self, other: &Bound<'_, PyMapping>) -> PyResult<()> {
         let mut signatures = self
             .inner
             .write()
@@ -133,7 +133,7 @@ impl Signatures {
             let server_name = key.extract::<String>()?;
             let server_sigs = value.cast::<PyMapping>()?;
 
-            let entry = signatures.entry(server_name.clone()).or_default();
+            let mut entry = HashMap::new();
             for key in server_sigs.keys()? {
                 let value = server_sigs.get_item(&key)?;
                 let key_id = key.extract::<String>()?;
@@ -142,7 +142,10 @@ impl Signatures {
                 entry.insert(key_id, signature);
             }
 
-            if entry.is_empty() {
+            // Only insert the entry if it has at least one signature.
+            if !entry.is_empty() {
+                signatures.insert(server_name, entry);
+            } else {
                 signatures.remove(&server_name);
             }
         }
@@ -172,6 +175,8 @@ impl Signatures {
 
 #[cfg(test)]
 mod tests {
+    use pythonize::pythonize;
+
     use super::*;
 
     /// Helper that reads the inner map directly.
@@ -273,6 +278,34 @@ mod tests {
             inner.get("example.com").and_then(|m| m.get("ed25519:key2")),
             Some(&"sig2".to_string())
         );
+    }
+
+    #[test]
+    fn test_update_signatures_clobbers_existing() {
+        let sigs = create_signatures(&[("example.com", "ed25519:key1", "sig1")]);
+
+        // Create a new signatures map with a different signature for the same
+        // server.
+        let mut other = HashMap::new();
+        other.insert(
+            "example.com".to_string(),
+            make_server_sigs(&[("ed25519:key2", "sig2")]),
+        );
+
+        // Update the signatures with the new map.
+        Python::initialize();
+        Python::attach(|py| {
+            let value = pythonize(py, &other).unwrap();
+            let value = value.cast::<PyMapping>().unwrap();
+
+            sigs.update(value).unwrap();
+        });
+
+        // Check that the old signature has been replaced with the new one.
+        let inner = read_inner(&sigs);
+        assert_eq!(inner.len(), 1);
+        assert_eq!(inner["example.com"].len(), 1);
+        assert_eq!(inner["example.com"]["ed25519:key2"], "sig2");
     }
 
     #[test]
