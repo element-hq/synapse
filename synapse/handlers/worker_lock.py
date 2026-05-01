@@ -54,8 +54,8 @@ logger = logging.getLogger(__name__)
 # will not disappear under our feet as long as we don't delete the room.
 NEW_EVENT_DURING_PURGE_LOCK_NAME = "new_event_during_purge_lock"
 
-WORKER_LOCK_MAX_RETRY_INTERVAL = Duration(seconds=60).as_secs()
-WORKER_LOCK_WARN_RETRY_INTERVAL = Duration(minutes=10).as_millis()
+WORKER_LOCK_MAX_RETRY_INTERVAL = Duration(seconds=60)
+WORKER_LOCK_WARN_RETRY_INTERVAL = Duration(minutes=10)
 
 
 class WorkerLocksHandler:
@@ -270,7 +270,7 @@ class WaitingLock:
                     time_spent_trying_to_lock = (
                         now_ms - self.start_ts_ms
                     )
-                    if time_spent_trying_to_lock > WORKER_LOCK_WARN_RETRY_INTERVAL:
+                    if time_spent_trying_to_lock > WORKER_LOCK_WARN_RETRY_INTERVAL.as_millis():
                         logger.warning(
                             "(WaitingLock (%s, %s)) Time spent waiting to acquire lock "
                             "is getting excessive: %ss. There may be a deadlock.",
@@ -300,7 +300,7 @@ class WaitingLock:
 
     def _increment_timeout_interval(self) -> float:
         next_interval = self._timeout_interval
-        next_interval = min(WORKER_LOCK_MAX_RETRY_INTERVAL, next_interval * 2)
+        next_interval = min(WORKER_LOCK_MAX_RETRY_INTERVAL.as_secs(), next_interval * 2)
 
         # The jitter value is maintained for the timeout, to help avoid a "thundering
         # herd" situation when all locks may time out at the same time.
@@ -374,7 +374,7 @@ class WaitingMultiLock:
                     time_spent_trying_to_lock = (
                         now_ms - self.start_ts_ms
                     )
-                    if time_spent_trying_to_lock > WORKER_LOCK_WARN_RETRY_INTERVAL:
+                    if time_spent_trying_to_lock > WORKER_LOCK_WARN_RETRY_INTERVAL.as_millis():
                         logger.warning(
                             "(WaitingMultiLock (%r)) Time spent waiting to acquire lock "
                             "is getting excessive: %ss. There may be a deadlock.",
@@ -406,7 +406,7 @@ class WaitingMultiLock:
 
     def _increment_timeout_interval(self) -> float:
         next_interval = self._timeout_interval
-        next_interval = min(WORKER_LOCK_MAX_RETRY_INTERVAL, next_interval * 2)
+        next_interval = min(WORKER_LOCK_MAX_RETRY_INTERVAL.as_secs(), next_interval * 2)
 
         # The jitter value is maintained for the timeout, to help avoid a "thundering
         # herd" situation when all locks may time out at the same time.
