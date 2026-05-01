@@ -1718,16 +1718,18 @@ class RoomHierarchyRestServlet(RestServlet):
 
 class RoomSummaryRestServlet(ResolveRoomIdMixin, RestServlet):
     PATTERNS = (
-        # deprecated endpoint, to be removed
+        # deprecated unstable endpoint, to be removed
         re.compile(
             "^/_matrix/client/unstable/im.nheko.summary"
             "/rooms/(?P<room_identifier>[^/]*)/summary$"
         ),
-        # recommended endpoint
+        # recommended unstable endpoint
         re.compile(
             "^/_matrix/client/unstable/im.nheko.summary"
             "/summary/(?P<room_identifier>[^/]*)$"
         ),
+        # stable endpoint
+        re.compile("^/_matrix/client/v1/room_summary/(?P<room_identifier>[^/]*)$"),
     )
     CATEGORY = "Client API requests"
 
@@ -1775,8 +1777,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RoomTypingRestServlet(hs).register(http_server)
     RoomEventContextServlet(hs).register(http_server)
     RoomHierarchyRestServlet(hs).register(http_server)
-    if hs.config.experimental.msc3266_enabled:
-        RoomSummaryRestServlet(hs).register(http_server)
+    RoomSummaryRestServlet(hs).register(http_server)
     RoomEventServlet(hs).register(http_server)
     JoinedRoomsRestServlet(hs).register(http_server)
     RoomAliasListServlet(hs).register(http_server)

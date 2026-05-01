@@ -253,6 +253,7 @@ class DownloadResource(RestServlet):
                     ),
                     send_cors=True,
                 )
+                return
 
         set_cors_headers(request)
         set_corp_headers(request)

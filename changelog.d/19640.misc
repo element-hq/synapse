@@ -1,1 +1,0 @@
-Add a `FilteredEvent` class that saves us copying events.

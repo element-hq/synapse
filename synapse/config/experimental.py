@@ -386,9 +386,6 @@ class ExperimentalConfig(Config):
         # MSC3814 (dehydrated devices with SSSS)
         self.msc3814_enabled: bool = experimental.get("msc3814_enabled", False)
 
-        # MSC3266 (room summary api)
-        self.msc3266_enabled: bool = experimental.get("msc3266_enabled", False)
-
         # MSC2409 (this setting only relates to optionally sending to-device messages).
         # Presence, typing and read receipt EDUs are already sent to application services that
         # have opted in to receive them. If enabled, this adds to-device messages to that list.
