@@ -94,6 +94,10 @@ properties:
       Determines whether we should freeze the internal dict object in
       `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g.
       signature dicts. However, freezing a dict is expensive.
+
+
+      > ⚠️ **Warning** – This option is known to introduce a new class of [comparison
+      bugs](https://github.com/element-hq/synapse/issues/18117) in Synapse.
     default: false
     examples:
       - true

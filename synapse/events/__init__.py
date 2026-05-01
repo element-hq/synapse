@@ -63,6 +63,10 @@ dict to frozen_dicts is expensive.
 NOTE: This is overridden by the configuration by the Synapse worker apps, but
 for the sake of tests, it is set here because it cannot be configured on the
 homeserver object itself.
+
+FIXME: Because of how this option works (changing the underlying types), it causes
+subtle downstream bugs that makes type comparisons brittle, tracked by
+https://github.com/element-hq/synapse/issues/18117
 """
 
 T = TypeVar("T")

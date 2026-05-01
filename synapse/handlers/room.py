@@ -27,6 +27,7 @@ import math
 import random
 import string
 from collections import OrderedDict
+from collections.abc import Mapping
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -67,7 +68,11 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase, event_exists_in_state_dag
 from synapse.events.snapshot import UnpersistedEventContext
-from synapse.events.utils import FilteredEvent, copy_and_fixup_power_levels_contents
+from synapse.events.utils import (
+    FilteredEvent,
+    PowerLevelsContent,
+    copy_and_fixup_power_levels_contents,
+)
 from synapse.handlers.relations import BundledAggregations
 from synapse.rest.admin._base import assert_user_is_admin
 from synapse.streams import EventSource
@@ -500,10 +505,12 @@ class RoomCreationHandler:
             except AuthError as e:
                 logger.warning("Unable to update PLs in old room: %s", e)
 
+        power_levels_content: JsonMapping = old_room_pl_state.content
+
         new_room_version = await self.store.get_room_version(new_room_id)
         if new_room_version.msc4289_creator_power_enabled:
-            self._remove_creators_from_pl_users_map(
-                old_room_pl_state.content.get("users", {}),
+            power_levels_content = self._copy_and_remove_creators_from_pl_users_map(
+                power_levels_content,
                 requester.user.to_string(),
                 additional_creators,
             )
@@ -515,9 +522,7 @@ class RoomCreationHandler:
                 "state_key": "",
                 "room_id": new_room_id,
                 "sender": requester.user.to_string(),
-                "content": copy_and_fixup_power_levels_contents(
-                    old_room_pl_state.content
-                ),
+                "content": copy_and_fixup_power_levels_contents(power_levels_content),
             },
             ratelimit=False,
         )
@@ -686,11 +691,12 @@ class RoomCreationHandler:
 
         if new_room_version.msc4289_creator_power_enabled:
             # the creator(s) cannot be in the users map
-            self._remove_creators_from_pl_users_map(
-                user_power_levels,
+            fixed_power_levels = self._copy_and_remove_creators_from_pl_users_map(
+                power_levels,
                 user_id,
                 additional_creators,
             )
+            initial_state[(EventTypes.PowerLevels, "")] = fixed_power_levels
 
         # We construct a subset of what the body of a call to /createRoom would look like
         # for passing to the spam checker. We don't include a preset here, as we expect the
@@ -1829,18 +1835,28 @@ class RoomCreationHandler:
             )
         return preset_name, preset_config
 
-    def _remove_creators_from_pl_users_map(
+    def _copy_and_remove_creators_from_pl_users_map(
         self,
-        users_map: dict[str, int],
+        power_levels_content: PowerLevelsContent,
         creator: str,
         additional_creators: list[str] | None,
-    ) -> None:
+    ) -> PowerLevelsContent:
+        users_map = power_levels_content.get("users", {})
+        if not users_map:
+            return power_levels_content
+
+        assert isinstance(users_map, Mapping)
+        users_map = dict(users_map)
+
         creators = [creator]
         if additional_creators:
             creators.extend(additional_creators)
         for creator in creators:
             # the creator(s) cannot be in the users map
             users_map.pop(creator, None)
+
+        power_levels_content = {**power_levels_content, "users": users_map}
+        return power_levels_content
 
     def _generate_room_id(self) -> str:
         """Generates a random room ID.
