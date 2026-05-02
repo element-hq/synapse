@@ -60,6 +60,7 @@ from synapse.api.room_versions import (
     RoomVersions,
 )
 from synapse.events import EventBase, builder, make_event_from_dict
+from synapse.events.utils import parse_stripped_state_event
 from synapse.federation.federation_base import (
     FederationBase,
     InvalidEventSignatureError,
@@ -71,7 +72,16 @@ from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.types import (
+    JsonDict,
+    PersistedEventPosition,
+    StrCollection,
+    StreamKeyType,
+    StreamToken,
+    UserID,
+    get_domain_from_id,
+)
+from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
@@ -135,6 +145,7 @@ class FederationClient(FederationBase):
         self._clock.looping_call(self._clear_tried_cache, Duration(minutes=1))
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
+        self.storage_controllers = hs.get_storage_controllers()
 
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
@@ -1350,6 +1361,52 @@ class FederationClient(FederationBase):
         """
         time_now = self._clock.time_msec()
 
+        # MSC4311: For the federation API, format events in `invite_room_state` as full
+        # PDU's
+        #
+        # First get all of the expected stripped state events that should be included.
+        # We will derive these from the `unsigned` part of the PDU but this doesn't
+        # include any event ID information so we need to look it up based on the state
+        # at the time of the invite.
+        stripped_state_types = []
+        for raw_stripped_event in pdu.unsigned.get("invite_room_state", []):
+            stripped_state_event = parse_stripped_state_event(raw_stripped_event)
+            # Since this is our own invite, it should always be well-formed
+            assert stripped_state_event is not None, (
+                "Unable to parse one of the evnts from the `invite_room_state` as a stripped state event"
+            )
+            stripped_state_types.append(
+                (stripped_state_event.type, stripped_state_event.state_key)
+            )
+
+        assert (
+            pdu.internal_metadata.stream_ordering is not None
+            and pdu.internal_metadata.instance_name is not None
+        ), "Invite should be persisted by this point"
+
+        # Find the full events based on the state at the time of the invite
+        state_filter = StateFilter.from_types(stripped_state_types)
+        state_ids = await self.storage_controllers.state.get_state_ids_at(
+            pdu.room_id,
+            stream_position=StreamToken.START.copy_and_replace(
+                StreamKeyType.ROOM,
+                PersistedEventPosition(
+                    instance_name=pdu.internal_metadata.instance_name,
+                    stream=pdu.internal_metadata.stream_ordering,
+                ).to_room_stream_token(),
+            ),
+            state_filter=state_filter,
+            # Partially-stated rooms should have all state events except for remote
+            # membership events. Since an invite will only possibly include the
+            # `m.room.membership` of the local sender, we're good to use partial state
+            # here.
+            await_full_state=False,
+        )
+        state_events = await self.store.get_events(list(state_ids.values()))
+        assert set(state_ids.values()) == set(state_events.keys()), (
+            "We should have all events available that were set as stripped state."
+        )
+
         try:
             return await self.transport_layer.send_invite_v2(
                 destination=destination,
@@ -1358,7 +1415,10 @@ class FederationClient(FederationBase):
                 content={
                     "event": pdu.get_pdu_json(time_now),
                     "room_version": room_version.identifier,
-                    "invite_room_state": pdu.unsigned.get("invite_room_state", []),
+                    "invite_room_state": [
+                        state_event.get_pdu_json(time_now)
+                        for state_event in state_events.values()
+                    ],
                 },
             )
         except HttpResponseException as e:
