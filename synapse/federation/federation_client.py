@@ -1361,6 +1361,8 @@ class FederationClient(FederationBase):
         """
         time_now = self._clock.time_msec()
 
+        # TODO: Adapt and use `get_stripped_room_state_from_event_context` instead
+
         # MSC4311: For the federation API, format events in `invite_room_state` as full
         # PDU's
         #
@@ -1379,22 +1381,17 @@ class FederationClient(FederationBase):
                 (stripped_state_event.type, stripped_state_event.state_key)
             )
 
-        assert (
-            pdu.internal_metadata.stream_ordering is not None
-            and pdu.internal_metadata.instance_name is not None
-        ), "Invite should be persisted by this point"
+        # assert (
+        #     pdu.internal_metadata.stream_ordering is not None
+        #     and pdu.internal_metadata.instance_name is not None
+        # ), "Invite should be persisted by this point"
 
         # Find the full events based on the state at the time of the invite
         state_filter = StateFilter.from_types(stripped_state_types)
-        state_ids = await self.storage_controllers.state.get_state_ids_at(
+        # XXX: Ideally, we'd use `get_state_ids_at(...)` but the invite event isn't
+        # persisted yet so there is no persisted position to look at specfically.
+        state_ids = await self.storage_controllers.state.get_current_state_ids(
             pdu.room_id,
-            stream_position=StreamToken.START.copy_and_replace(
-                StreamKeyType.ROOM,
-                PersistedEventPosition(
-                    instance_name=pdu.internal_metadata.instance_name,
-                    stream=pdu.internal_metadata.stream_ordering,
-                ).to_room_stream_token(),
-            ),
             state_filter=state_filter,
             # Partially-stated rooms should have all state events except for remote
             # membership events. Since an invite will only possibly include the
