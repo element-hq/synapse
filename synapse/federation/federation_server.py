@@ -965,6 +965,7 @@ class FederationServer(FederationBase):
         # server. This will allow the remote server's clients to display information
         # related to the room while the knock request is pending.
         stripped_room_state = (
+            # TODO: Implement MSC4311 and use full PDUs here
             await self.store.get_stripped_room_state_from_event_context(
                 context, self._room_prejoin_state_types
             )

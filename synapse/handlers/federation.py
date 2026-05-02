@@ -554,7 +554,9 @@ class FederationHandler:
 
         return False
 
-    async def send_invite(self, target_host: str, event: EventBase) -> EventBase:
+    async def send_invite(
+        self, target_host: str, event: EventBase, context: EventContext
+    ) -> EventBase:
         """Sends the invite to the remote server for signing.
 
         Invites must be signed by the invitee's server before distribution.
@@ -563,8 +565,8 @@ class FederationHandler:
             pdu = await self.federation_client.send_invite(
                 destination=target_host,
                 room_id=event.room_id,
-                event_id=event.event_id,
                 pdu=event,
+                context=context,
             )
         except RequestSendFailed:
             raise SynapseError(502, f"Can't connect to server {target_host}")
