@@ -258,19 +258,13 @@ class WaitingLock:
                 except defer.TimeoutError:
                     # Only increment the timeout value if this was an actual timeout
                     self._increment_timeout_interval()
-                except Exception as e:
-                    logger.warning(
-                        "Caught an exception while waiting on WaitingLock(lock_name=%s, lock_key=%s): %r",
-                        self.lock_name,
-                        self.lock_key,
-                        e,
-                    )
-                finally:
+
                     now_ms = self.clock.time_msec()
-                    time_spent_trying_to_lock = (
-                        now_ms - self.start_ts_ms
-                    )
-                    if time_spent_trying_to_lock > WORKER_LOCK_WARN_RETRY_INTERVAL.as_millis():
+                    time_spent_trying_to_lock = now_ms - self.start_ts_ms
+                    if (
+                        time_spent_trying_to_lock
+                        > WORKER_LOCK_WARN_RETRY_INTERVAL.as_millis()
+                    ):
                         logger.warning(
                             "(WaitingLock (%s, %s)) Time spent waiting to acquire lock "
                             "is getting excessive: %ss. There may be a deadlock.",
@@ -278,6 +272,14 @@ class WaitingLock:
                             self.lock_key,
                             time_spent_trying_to_lock,
                         )
+
+                except Exception as e:
+                    logger.warning(
+                        "Caught an exception while waiting on WaitingLock(lock_name=%s, lock_key=%s): %r",
+                        self.lock_name,
+                        self.lock_key,
+                        e,
+                    )
 
         return await self._inner_lock.__aenter__()
 
@@ -363,24 +365,26 @@ class WaitingMultiLock:
                 except defer.TimeoutError:
                     # Only increment the timeout value if this was an actual timeout
                     self._increment_timeout_interval()
-                except Exception as e:
-                    logger.warning(
-                        "Caught an exception while waiting on WaitingMultiLock(lock_names=%r): %r",
-                        self.lock_names,
-                        e,
-                    )
-                finally:
+
                     now_ms = self.clock.time_msec()
-                    time_spent_trying_to_lock = (
-                        now_ms - self.start_ts_ms
-                    )
-                    if time_spent_trying_to_lock > WORKER_LOCK_WARN_RETRY_INTERVAL.as_millis():
+                    time_spent_trying_to_lock = now_ms - self.start_ts_ms
+                    if (
+                        time_spent_trying_to_lock
+                        > WORKER_LOCK_WARN_RETRY_INTERVAL.as_millis()
+                    ):
                         logger.warning(
                             "(WaitingMultiLock (%r)) Time spent waiting to acquire lock "
                             "is getting excessive: %ss. There may be a deadlock.",
                             self.lock_names,
                             time_spent_trying_to_lock,
                         )
+
+                except Exception as e:
+                    logger.warning(
+                        "Caught an exception while waiting on WaitingMultiLock(lock_names=%r): %r",
+                        self.lock_names,
+                        e,
+                    )
 
         assert self._inner_lock_cm
         await self._inner_lock_cm.__aenter__()
