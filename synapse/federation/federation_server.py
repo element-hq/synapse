@@ -772,8 +772,22 @@ class FederationServer(FederationBase):
         return {"event": pdu.get_templated_pdu_json(), "room_version": room_version}
 
     async def on_invite_request(
-        self, origin: str, content: JsonDict, room_version_id: str
+        self,
+        *,
+        origin: str,
+        expected_room_id: str,
+        expected_event_id: str,
+        event_json: JsonDict,
+        room_version_id: str,
     ) -> dict[str, Any]:
+        """
+        Args:
+            origin:
+            expected_room_id: The room ID specified in the
+                `/_matrix/federation/v1/invite/{roomId}/{eventId}` request that we expect to
+                match in the actual event itself.
+        """
+
         room_version = KNOWN_ROOM_VERSIONS.get(room_version_id)
         if not room_version:
             raise SynapseError(
@@ -782,9 +796,21 @@ class FederationServer(FederationBase):
                 Codes.UNSUPPORTED_ROOM_VERSION,
             )
 
-        pdu = event_from_pdu_json(content, room_version)
+        pdu = event_from_pdu_json(event_json, room_version)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, pdu.room_id)
+        if pdu.event_id != expected_event_id:
+            raise SynapseError(
+                400,
+                Codes.INVALID_PARAM,
+                "Invite event ID must match event ID specified in the federation `/invite` request",
+            )
+        if pdu.room_id != expected_room_id:
+            raise SynapseError(
+                400,
+                Codes.INVALID_PARAM,
+                "The room_id specified in the invite event must match room ID specified in the federation `/invite` request",
+            )
         if await self._spam_checker_module_callbacks.should_drop_federated_event(pdu):
             logger.info(
                 "Federated event contains spam, dropping %s",
@@ -797,7 +823,11 @@ class FederationServer(FederationBase):
             errmsg = f"event id {pdu.event_id}: {e}"
             logger.warning("%s", errmsg)
             raise SynapseError(403, errmsg, Codes.FORBIDDEN)
-        ret_pdu = await self.handler.on_invite_request(origin, pdu, room_version)
+        ret_pdu = await self.handler.on_invite_request(
+            origin=origin,
+            event=pdu,
+            room_version=room_version,
+        )
         time_now = self._clock.time_msec()
         return {"event": ret_pdu.get_pdu_json(time_now)}
 

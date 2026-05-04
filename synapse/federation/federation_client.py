@@ -1405,6 +1405,11 @@ class FederationClient(FederationBase):
                 },
             )
         except HttpResponseException as e:
+            # TODO: MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
+            # error by the sending server over the Client-Server API. This is done
+            # because there's nothing the client can materially do differently to make
+            # the request succeed.
+
             # If an error is received that is due to an unrecognised endpoint,
             # fallback to the v1 endpoint if the room uses old-style event IDs.
             # Otherwise, consider it a legitimate error and raise.
@@ -1428,6 +1433,10 @@ class FederationClient(FederationBase):
             event_id=pdu.event_id,
             content=pdu.get_pdu_json(time_now),
         )
+        # TODO: MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
+        # error by the sending server over the Client-Server API. This is done
+        # because there's nothing the client can materially do differently to make
+        # the request succeed.
         return content
 
     async def send_leave(self, destinations: Iterable[str], pdu: EventBase) -> None:

@@ -123,6 +123,16 @@ class RoomVersion:
     to the create event every time we insert an event would be prohibitively expensive.
     This is similar to how doubly-linked lists can potentially not refer to previous items correctly
     without verifying the list's integrity, but doing it on every insert is too expensive."""
+    msc4311_stripped_state: bool
+    """
+    Whether the `m.room.create` event is required in the
+    `invite_state`/`knock_state` and `invite_room_state`/`knock_room_state` in the
+    client and federation API's.
+    ///
+    Also determines whether full PDU's are returned in the
+    `invite_room_state`/`knock_room_state` in the federation API. The client API
+    still uses stripped state.
+    """
 
 class RoomVersions:
     V1: RoomVersion

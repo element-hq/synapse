@@ -59,7 +59,15 @@ from synapse.crypto.event_signing import compute_event_signature
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
+from synapse.events.utils import (
+    parse_stripped_state_event,
+    serialize_stripped_state_event,
+)
 from synapse.events.validator import EventValidator
+from synapse.federation.federation_base import (
+    InvalidEventSignatureError,
+    event_from_pdu_json,
+)
 from synapse.federation.federation_client import InvalidResponseError
 from synapse.handlers.pagination import PURGE_PAGINATION_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
@@ -1053,7 +1061,11 @@ class FederationHandler:
         return event
 
     async def on_invite_request(
-        self, origin: str, event: EventBase, room_version: RoomVersion
+        self,
+        *,
+        origin: str,
+        event: EventBase,
+        room_version: RoomVersion,
     ) -> EventBase:
         """We've got an invite event. Process and persist it. Sign it.
 
@@ -1125,6 +1137,98 @@ class FederationHandler:
         await self.store.maybe_store_room_on_outlier_membership(
             room_id=event.room_id, room_version=room_version
         )
+
+        # Validate `invite_room_state` according to MSC4311:
+        # > If any of the events are not a PDU, not for the room ID specified, or fail
+        # > signature checks, or the `m.room.create` event is missing, the receiving
+        # > server MAY respond to invites with a `400 M_MISSING_PARAM` standard Matrix
+        # > error (new to the endpoint). For invites to room version 12+ rooms, servers
+        # > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
+        invite_room_state = event.unsigned.get("invite_room_state")
+        if invite_room_state is not None and room_version.msc4311_stripped_state:
+            try:
+                # Scrutinize JSON values
+                assert isinstance(invite_room_state, list), (
+                    "`invite_room_state` must be a list of PDU's"
+                )
+                includes_create_event = False
+                for raw_stripped_event in invite_room_state:
+                    # Validate PDU
+                    try:
+                        pdu = event_from_pdu_json(raw_stripped_event, room_version)
+                    except Exception as exc:
+                        raise AssertionError(
+                            "Unable to parse one of the `invite_room_state` event's as a PDU"
+                        ) from exc
+
+                    if pdu.type == EventTypes.Create:
+                        includes_create_event = True
+
+                    # Validate that it's from the same room
+                    assert pdu.room_id == event.room_id, (
+                        "PDU must be from the room ID specified in the `/invite` request"
+                    )
+                    # Validate signature/hashes
+                    try:
+                        pdu = await self.federation_client._check_sigs_and_hash(
+                            room_version, pdu
+                        )
+                    except InvalidEventSignatureError as exc:
+                        raise AssertionError(
+                            "PDU must pass signature/hash checks"
+                        ) from exc
+
+                # Validate `m.room.create` event is included
+                assert includes_create_event, (
+                    "`invite_room_state` must include `m.room.create` event"
+                )
+            except Exception as exc:
+                # FIXME: Reject with 400 `M_MISSING_PARAM` after 2027-01-01. Given Synapse
+                # claimed to support room version 12 but didn't adhere to this behavior until
+                # 2026-05-04, we will only warn for now.
+                logger.warning(
+                    "Continuing anyway but failed to validate `invite_room_state` on invite %s: %s",
+                    event,
+                    exc,
+                )
+
+        # With MSC4311: `invite_room_state` over federation can use full PDUs so we need
+        # to convert them into "stripped state events" so they don't end up being sent
+        # down to the client.
+        #
+        # We do this separate from the validation above as sending full PDU's can happen
+        # in any room version.
+        if invite_room_state is not None:
+            try:
+                # Scrutinize JSON values
+                assert isinstance(invite_room_state, list), (
+                    "`invite_room_state` must be a list"
+                )
+
+                new_invite_room_state = []
+                for raw_stripped_event in invite_room_state:
+                    # Parse and serialize to strip the events down to only the necessary fields
+                    parsed_stripped_event = parse_stripped_state_event(
+                        raw_stripped_event
+                    )
+                    if parsed_stripped_event is None:
+                        raise AssertionError("Unable to parse as stripped event")
+                    serialized_stripped_event = serialize_stripped_state_event(
+                        parsed_stripped_event
+                    )
+                    new_invite_room_state.append(serialized_stripped_event)
+
+                # Replace with our sanitized `invite_room_state`
+                event.unsigned["invite_room_state"] = new_invite_room_state
+            except AssertionError as exc:
+                # We did our best to sanitize but ultimately failed. Leave it as-is for
+                # the client to interpret. Another valid decision would be to strip it
+                # from `unsigned` but this is more forwards compatible.
+                logger.warning(
+                    "Continuing anyway but failed to sanitize `invite_room_state` on invite %s: %s",
+                    event,
+                    exc,
+                )
 
         event.internal_metadata.outlier = True
         event.internal_metadata.out_of_band_membership = True

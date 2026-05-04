@@ -157,6 +157,21 @@ pub struct RoomVersion {
     /// This is similar to how doubly-linked lists can potentially not refer to previous items correctly
     /// without verifying the list's integrity, but doing it on every insert is too expensive.
     pub msc4242_state_dags: bool,
+    /// Whether the `m.room.create` event is required in the
+    /// `invite_state`/`knock_state` and `invite_room_state`/`knock_room_state` in the
+    /// client and federation API's.
+    ///
+    /// Also determines whether full PDU's are returned in the
+    /// `invite_room_state`/`knock_room_state` in the federation API. The client API
+    /// still uses stripped state.
+    ///
+    /// According to MSC4311:
+    /// > If any of the events are not a PDU, not for the room ID specified, or fail
+    /// > signature checks, or the `m.room.create` event is missing, the receiving
+    /// > server MAY respond to invites with a `400 M_MISSING_PARAM` standard Matrix
+    /// > error (new to the endpoint). For invites to room version 12+ rooms, servers
+    /// > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
+    pub msc4311_stripped_state: bool,
 }
 
 const ROOM_VERSION_V1: RoomVersion = RoomVersion {
@@ -182,6 +197,7 @@ const ROOM_VERSION_V1: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V2: RoomVersion = RoomVersion {
@@ -207,6 +223,7 @@ const ROOM_VERSION_V2: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V3: RoomVersion = RoomVersion {
@@ -232,6 +249,7 @@ const ROOM_VERSION_V3: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V4: RoomVersion = RoomVersion {
@@ -257,6 +275,7 @@ const ROOM_VERSION_V4: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V5: RoomVersion = RoomVersion {
@@ -282,6 +301,7 @@ const ROOM_VERSION_V5: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V6: RoomVersion = RoomVersion {
@@ -307,6 +327,7 @@ const ROOM_VERSION_V6: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V7: RoomVersion = RoomVersion {
@@ -332,6 +353,7 @@ const ROOM_VERSION_V7: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V8: RoomVersion = RoomVersion {
@@ -357,6 +379,7 @@ const ROOM_VERSION_V8: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V9: RoomVersion = RoomVersion {
@@ -382,6 +405,7 @@ const ROOM_VERSION_V9: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V10: RoomVersion = RoomVersion {
@@ -407,6 +431,7 @@ const ROOM_VERSION_V10: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 /// MSC3389 (Redaction changes for events with a relation) based on room version "10".
@@ -433,6 +458,7 @@ const ROOM_VERSION_MSC3389V10: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: true,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 /// MSC1767 (Extensible Events) based on room version "10".
@@ -459,6 +485,7 @@ const ROOM_VERSION_MSC1767V10: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 /// MSC3757 (Restricting who can overwrite a state event) based on room version "10".
@@ -485,6 +512,7 @@ const ROOM_VERSION_MSC3757V10: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V11: RoomVersion = RoomVersion {
@@ -510,6 +538,7 @@ const ROOM_VERSION_V11: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: true, // Changed from v10
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 /// MSC3757 (Restricting who can overwrite a state event) based on room version "11".
@@ -536,6 +565,7 @@ const ROOM_VERSION_MSC3757V11: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: true,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_HYDRA_V11: RoomVersion = RoomVersion {
@@ -561,6 +591,7 @@ const ROOM_VERSION_HYDRA_V11: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: true,    // Changed from v11
     strict_event_byte_limits_room_versions: true,
     msc4242_state_dags: false,
+    msc4311_stripped_state: false,
 };
 
 const ROOM_VERSION_V12: RoomVersion = RoomVersion {
@@ -586,6 +617,7 @@ const ROOM_VERSION_V12: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: true,    // Changed from v11
     strict_event_byte_limits_room_versions: true,
     msc4242_state_dags: false,
+    msc4311_stripped_state: true,
 };
 
 const ROOM_VERSION_MSC4242V12: RoomVersion = RoomVersion {
@@ -611,6 +643,7 @@ const ROOM_VERSION_MSC4242V12: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: true,
     strict_event_byte_limits_room_versions: true,
     msc4242_state_dags: true,
+    msc4311_stripped_state: true,
 };
 
 /// Helper class for managing the known room versions, and providing dict-like

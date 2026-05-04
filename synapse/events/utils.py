@@ -1052,3 +1052,12 @@ def parse_stripped_state_event(raw_stripped_event: Any) -> StrippedStateEvent | 
             )
 
     return None
+
+
+def serialize_stripped_state_event(stripped_event: StrippedStateEvent) -> JsonDict:
+    return {
+        "type": stripped_event.type,
+        "state_key": stripped_event.state_key,
+        "sender": stripped_event.sender,
+        "content": stripped_event.content,
+    }
