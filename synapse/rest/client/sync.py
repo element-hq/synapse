@@ -34,6 +34,7 @@ from synapse.events.utils import (
     SerializeEventConfig,
     format_event_for_client_v2_without_room_id,
     format_event_raw,
+    strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
@@ -460,7 +461,10 @@ class SyncRestServlet(RestServlet):
                 invited_state = []
 
             invited_state = list(invited_state)
-            invited_state.append(invite)
+            # Add the invite itself
+            #
+            # FIXME: Doesn't seem to be in the spec
+            invited_state.append(strip_event(room.invite))
             invited[room.room_id] = {"invite_state": {"events": invited_state}}
 
         return invited
