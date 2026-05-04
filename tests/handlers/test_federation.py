@@ -343,18 +343,18 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
             event = create_invite()
             self.get_success(
                 self.handler.on_invite_request(
-                    other_server,
-                    event,
-                    event.room_version,
+                    origin=other_server,
+                    event=event,
+                    room_version=event.room_version,
                 )
             )
 
         event = create_invite()
         self.get_failure(
             self.handler.on_invite_request(
-                other_server,
-                event,
-                event.room_version,
+                origin=other_server,
+                event=event,
+                room_version=event.room_version,
             ),
             exc=LimitExceededError,
             by=0.5,

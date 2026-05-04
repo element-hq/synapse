@@ -608,9 +608,11 @@ class FilterEventsOutOfBandEventsForClientTestCase(
 
         self.get_success(
             self.hs.get_federation_server().on_invite_request(
-                self.OTHER_SERVER_NAME,
-                invite_pdu,
-                "9",
+                origin=self.OTHER_SERVER_NAME,
+                expected_event_id=invite_event_id,
+                expected_room_id="!room:id",
+                event_json=invite_pdu,
+                room_version_id="9",
             )
         )
 
