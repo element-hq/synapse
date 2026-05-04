@@ -125,13 +125,24 @@ class RoomVersion:
     without verifying the list's integrity, but doing it on every insert is too expensive."""
     msc4311_stripped_state: bool
     """
-    Whether the `m.room.create` event is required in the
-    `invite_state`/`knock_state` and `invite_room_state`/`knock_room_state` in the
-    client and federation API's.
-    ///
-    Also determines whether full PDU's are returned in the
+    Whether the `m.room.create` event is required in
+    `invite_room_state`/`knock_room_state` when receiving invites/knocks over the
+    federation API's.
+
+    Also determines whether we expect full PDU's in the
     `invite_room_state`/`knock_room_state` in the federation API. The client API
     still uses stripped state.
+
+    According to MSC4311:
+    > If any of the events are not a PDU, not for the room ID specified, or fail
+    > signature checks, or the `m.room.create` event is missing, the receiving
+    > server MAY respond to invites with a `400 M_MISSING_PARAM` standard Matrix
+    > error (new to the endpoint). For invites to room version 12+ rooms, servers
+    > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
+
+    This does *not* determine whether we should include the `m.room.create` event in
+    stripped state or use full PDU's in stripped state over federation. We should
+    always do this.
     """
 
 class RoomVersions:

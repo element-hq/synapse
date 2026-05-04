@@ -157,11 +157,11 @@ pub struct RoomVersion {
     /// This is similar to how doubly-linked lists can potentially not refer to previous items correctly
     /// without verifying the list's integrity, but doing it on every insert is too expensive.
     pub msc4242_state_dags: bool,
-    /// Whether the `m.room.create` event is required in the
-    /// `invite_state`/`knock_state` and `invite_room_state`/`knock_room_state` in the
-    /// client and federation API's.
+    /// Whether the `m.room.create` event is required in
+    /// `invite_room_state`/`knock_room_state` when receiving invites/knocks over the
+    /// federation API's.
     ///
-    /// Also determines whether full PDU's are returned in the
+    /// Also determines whether we expect full PDU's in the
     /// `invite_room_state`/`knock_room_state` in the federation API. The client API
     /// still uses stripped state.
     ///
@@ -171,6 +171,10 @@ pub struct RoomVersion {
     /// > server MAY respond to invites with a `400 M_MISSING_PARAM` standard Matrix
     /// > error (new to the endpoint). For invites to room version 12+ rooms, servers
     /// > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
+    ///
+    /// This does *not* determine whether we should include the `m.room.create` event in
+    /// stripped state or use full PDU's in stripped state over federation. We should
+    /// always do this.
     pub msc4311_stripped_state: bool,
 }
 
